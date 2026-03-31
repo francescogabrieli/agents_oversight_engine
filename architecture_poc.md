@@ -541,7 +541,7 @@ Task JSON, stato aggiornato del runtime, risultati dei tool, decisioni dell'over
 
 ### 6.2 Operazioni Interne
 Salva in modo strutturato tutto ciò che serve per ricostruire l'esecuzione del task.
-Per il PoC abbiamo quattro aree semplici.
+Per il PoC sono previste quattro aree semplici.
 
 #### Aree Principali
 - **working state** -> stato corrente del task
