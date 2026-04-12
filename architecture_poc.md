@@ -18,33 +18,41 @@ Soglia di confidenza e budget non vengono inferiti dal task, ma impostati come c
 #### Esempio
 ```json
 {
-  "task_spec": {
-    "goal": "...",
-    "context": "...",
-    "constraints": [],
-    "domain": "generic_research",
-    "sensitivity": "medium",
-    "success_criteria": [
-      "use at least 2 relevant sources",
-      "produce a concise final answer"
-    ]
-  },
-  "execution_policy": {
-    "confidence_threshold": 0.65,
-    "budget": {
-      "max_steps": 5
+  "structured_task": {
+    "task_spec": {
+      "goal": "...",
+      "context": "...",
+      "constraints": [],
+      "domain_type": "research",
+      "domain_label": "generic_research",
+      "sensitivity": "medium",
+      "success_criteria": [
+        "use at least 2 relevant sources",
+        "produce a concise final answer"
+      ]
+    },
+    "execution_policy": {
+      "confidence_threshold": 0.65,
+      "budget": {
+        "max_steps": 5
+      }
     }
+  },
+  "metadata": {
+    "parse_status": "complete",
+    "warnings": [],
+    "missing_information": []
   }
 }
 ```
 
 ### 1.3 Output
-Task JSON strutturato, con separazione tra specifica del task e policy di esecuzione.
+Output canonico del layer 1: task JSON strutturato, con separazione tra specifica del task e policy di esecuzione, più metadata di tracciabilità e qualità del parsing.
 
 ### 1.4 Framework / Librerie
 Prompt + LLM API, parser Python, Pydantic.
 
-## 2. AGENT RUNTIME / ORCHESTRATOR
+## 2. AGENT RUNTIME / ORCHESTRATOR -> Implementazione con **Langgraph**
 
 ### 2.1 Input
 JSON strutturato del task.
@@ -243,7 +251,7 @@ Lo snapshot può includere:
 }
 ```
 
-### 4.2 Policy Engine
+### 4.2 Policy Engine -> **USARE TOOL ESTERNI TIPO:** https://www.openpolicyagent.org/ || https://docs.openhands.dev/sdk/guides/security#security-analyzer
 #### Operazioni Interne
 Applica regole statiche e deterministiche.
 Questo layer deve essere il controllo più forte e prevedibile dell'architettura.
@@ -267,9 +275,6 @@ Per il PoC, la decisione non dipende solo dal fatto che il tool sia `read` o `wr
 - se le evidenze minime richieste non sono presenti -> `ask_clarification` oppure `deny`
 - se il dominio è sensibile ma l'azione proposta è solo `read` -> `allow_read_only`
 - se i dati coinvolti sono sensibili -> `require_human_review`
-
-> [!NOTE]
-> Simili alle policy di **LangChain**, ma qui pensate in forma semplice da PoC.
 
 #### Esempio di Output
 ```json
@@ -512,7 +517,7 @@ Decisione umana strutturata, che viene rimandata al runtime.
 Per il PoC basta Python semplice, terminal input oppure mini interfaccia web leggera.
 Se il runtime è LangGraph, questo blocco può essere collegato a pause/resume e human approval flow.
 
-## 6. MEMORY & EVIDENCE STORE
+## 6. MEMORY & EVIDENCE STORE -> Studiare come integrare il **Graph State di Langgraph** con il nostro Memory and Evidence Layer
 
 ### 6.1 Input
 Task JSON, stato aggiornato del runtime, risultati dei tool, decisioni dell'oversight core, decisioni umane dell'HITL Gateway.

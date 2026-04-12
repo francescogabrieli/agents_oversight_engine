@@ -1,0 +1,87 @@
+{
+  "default_policy": {
+    "confidence_threshold": 0.65,
+    "budget": {
+      "max_steps": 5,
+      "max_tool_calls": 10
+    },
+    "allowed_tools": [],
+    "disallowed_tools": [],
+    "read_only_mode": false
+  },
+  "named_profiles": {
+    "default": {
+      "confidence_threshold": 0.65,
+      "budget": {
+        "max_steps": 5,
+        "max_tool_calls": 10
+      },
+      "allowed_tools": [],
+      "disallowed_tools": [],
+      "read_only_mode": false
+    },
+    "high_sensitivity_default": {
+      "confidence_threshold": 0.8,
+      "budget": {
+        "max_steps": 4,
+        "max_tool_calls": 6
+      },
+      "allowed_tools": [],
+      "disallowed_tools": [],
+      "read_only_mode": true
+    }
+  },
+  "domain_overrides": {
+    "external_communication": {
+      "read_only_mode": true,
+      "disallowed_tools": [
+        "send_email",
+        "post_message"
+      ]
+    },
+    "software_engineering": {
+      "budget": {
+        "max_steps": 6,
+        "max_tool_calls": 12
+      }
+    }
+  },
+  "sensitivity_overrides": {
+    "high": {
+      "confidence_threshold": 0.75,
+      "budget": {
+        "max_steps": 4,
+        "max_tool_calls": 8
+      },
+      "read_only_mode": true
+    },
+    "critical": {
+      "confidence_threshold": 0.85,
+      "budget": {
+        "max_steps": 3,
+        "max_tool_calls": 5
+      },
+      "read_only_mode": true
+    }
+  },
+  "domain_sensitivity_overrides": {
+    "external_communication": {
+      "high": {
+        "confidence_threshold": 0.85,
+        "budget": {
+          "max_steps": 3,
+          "max_tool_calls": 5
+        },
+        "read_only_mode": true
+      },
+      "critical": {
+        "confidence_threshold": 0.9,
+        "budget": {
+          "max_steps": 2,
+          "max_tool_calls": 3
+        },
+        "read_only_mode": true
+      }
+    }
+  }
+}
