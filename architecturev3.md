@@ -47,10 +47,10 @@ L'architettura viene compressa in cinque macro-blocchi:
 
 - `Task Intake`: codice esterno al grafo. Prepara il payload iniziale prima dell'avvio del runtime.
 - `Runtime & Governance`: implementato principalmente come nodi e subgraph LangGraph.
-- `Policy Engine`: nodo del grafo che invoca un componente esterno OPA.
-- `HITL Gateway`: nodo LangGraph con `interrupt()` più interfaccia di review. Nel PoC viene usato `LangGraph Studio / LangSmith Studio` per visualizzare thread, stato e history del workflow e per gestire operativamente le pause del grafo.
+- `Policy Engine`: nodo del grafo che invoca un componente esterno OPA (Open Policy Agent).
+- `HITL Gateway`: nodo LangGraph con `interrupt()` più interfaccia di review. Viene usato `LangGraph Studio / LangSmith Studio` per visualizzare thread, stato e history del workflow e per gestire operativamente le pause del grafo.
 - `Tool Bus / External Capabilities`: componente esterno al grafo, invocato dal nodo `tool_gateway`.
-- `State, Evidence & Observability`: componente ibrido tra memoria nativa LangGraph e persistenza custom esterna.
+- `State, Evidence & Observability`: componente ibrido che fonde gli artefatti nativi prodotti da LangGraph, come stato runtime, checkpoint, thread history, task metadata e interrupt, con il tracciamento custom dell'architettura, come evidenze semantiche, output di governance, rationale, score e audit trail.
 - `Evaluation & Continuous Improvement`: codice esterno, eseguito fuori dal ciclo live del task.
 
 ---
@@ -74,7 +74,7 @@ Responsabilità principali:
 - produrre metadata di parsing e tracciabilità
 
 Scelte di progettazione:
-- il parsing può essere realizzato con un LLM leggero
+- il parsing può essere realizzato con un LLM 
 - soglia di confidenza e budget non vengono inferiti dal task
 - soglia di confidenza e budget vengono impostati dalla configurazione del sistema
 
@@ -170,6 +170,39 @@ Informazioni minime del `TaskState`:
 - output di governance
 - eventuale decisione umana
 
+#### Bootstrap Contract: Layer 1 -> Layer 2
+
+Il nodo `bootstrap_from_intake` riceve come input l'intero `IntakeResult` prodotto dal `Task Intake`.
+
+Questo payload viene usato per inizializzare il `TaskState` operativo del runtime.
+
+Campi iniziali minimi:
+- `intake_payload = IntakeResult`
+- `task_spec = intake_payload.structured_task.task_spec`
+- `execution_policy = intake_payload.structured_task.execution_policy`
+- `intake_metadata = intake_payload.metadata`
+- `step_index = 0`
+- `step_history = []`
+- `collected_evidence = []`
+- `last_tool_result = null`
+- `proposed_action = null`
+- `governance_output = null`
+- `human_decision = null`
+- `final_output = null`
+
+Regole iniziali di bootstrap:
+- `parse_status = complete` -> `current_state = planning`
+- `parse_status = partial` -> `current_state = planning` con flag `incomplete_intake`
+- `parse_status = needs_clarification` -> `current_state = waiting_human_review` con flag `clarification_required`
+
+Ruolo del bootstrap:
+- validare il payload iniziale
+- costruire il `TaskState`
+- impostare i campi runtime iniziali
+- determinare il primo stato del workflow
+
+Il bootstrap non esegue ancora planning avanzato, policy enforcement completo o tool calling. Queste responsabilità appartengono ai nodi successivi del runtime e della governance.
+
 #### Governance Core
 
 Implementazione: **subgraph LangGraph**.
@@ -231,7 +264,7 @@ Ruolo:
 
 Implementazione: **nodo LangGraph + interfaccia esterna**.
 
-Per il PoC, l'interfaccia adottata è `LangGraph Studio / LangSmith Studio`, usata per:
+L'interfaccia adottata è `LangGraph Studio / LangSmith Studio`, usata per:
 - visualizzare thread e stato corrente del workflow
 - ispezionare la history della run
 - gestire la pausa del grafo e la successiva ripresa operativa
@@ -315,7 +348,7 @@ Output strutturato del tool:
 
 ### 3.4 Framework / Librerie
 
-Wrapper Python, registry custom, Pydantic, SDK dei servizi esterni.
+Wrapper Python, Pydantic, SDK dei servizi esterni.
 
 ---
 
@@ -393,7 +426,7 @@ Output disponibili:
 
 ### 4.4 Framework / Librerie
 
-Checkpointer LangGraph, eventuale store LangGraph, SQLite, JSON locali, Pydantic per serializzazione.
+Checkpointer LangGraph, eventuale store LangGraph, SQLite, JSON locali, Pydantic.
 
 ---
 
@@ -445,7 +478,7 @@ Output possibili:
 
 ### 5.4 Framework / Librerie
 
-OpenAI Evals, DeepEval, LangSmith, Langfuse oppure valutazione custom in Python.
+Da definire.
 
 
 
@@ -453,3 +486,5 @@ OpenAI Evals, DeepEval, LangSmith, Langfuse oppure valutazione custom in Python.
 # USE CASE 
 
 Si definiscono tre tasks diverse che serviranno per testare e verificare la buona riuscita dell'architettura.
+
+TODO!

@@ -151,12 +151,14 @@ class TaskSpec(BaseModel):
             raise TypeError("Expected a list of strings.")
 
         normalized: list[str] = []
+        seen: set[str] = set()
         for item in value:
             if not isinstance(item, str):
                 raise TypeError("Each item must be a string.")
             cleaned = " ".join(item.strip().split())
-            if cleaned:
+            if cleaned and cleaned not in seen:
                 normalized.append(cleaned)
+                seen.add(cleaned)
 
         return normalized
 
@@ -235,14 +237,16 @@ class IntakeMetadata(BaseModel):
             raise TypeError("Expected a list of strings.")
 
         normalized: list[str] = []
+        seen: set[str] = set()
         for item in value:
             if not isinstance(item, str):
                 raise TypeError("Each item must be a string.")
             cleaned = " ".join(item.strip().split())
-            if cleaned:
+            if cleaned and cleaned not in seen:
                 normalized.append(cleaned)
+                seen.add(cleaned)
 
-        return sorted(set(normalized))
+        return normalized
 
     @model_validator(mode="after")
     def validate_parse_status_consistency(self) -> "IntakeMetadata":

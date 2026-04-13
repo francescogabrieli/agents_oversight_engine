@@ -75,6 +75,16 @@ class IntakeCommand(BaseModel):
             raise ValueError("raw_task_text cannot be empty.")
         return cleaned
 
+    @field_validator("context_hint", "policy_profile", mode="before")
+    @classmethod
+    def normalize_optional_text_fields(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise TypeError("Optional text fields must be strings.")
+        cleaned = " ".join(value.strip().split())
+        return cleaned or None
+
 # Normalizes IntakeCommand's fields
 class InputNormalizer:
     def normalize(self, command: IntakeCommand) -> IntakeCommand:
@@ -125,7 +135,6 @@ class TaskSpecBuilder:
 
         if not task_spec.context:
             warnings.append("Task context is empty.")
-            missing_information.append("context")
 
         if not task_spec.success_criteria:
             warnings.append("No explicit success criteria were extracted.")
@@ -161,6 +170,12 @@ class TaskSpecBuilder:
             return ParseStatus.COMPLETE
 
         if task_spec.sensitivity == SensitivityLevel.CRITICAL:
+            return ParseStatus.NEEDS_CLARIFICATION
+
+        if (
+            "constraints" in missing_information
+            and task_spec.sensitivity == SensitivityLevel.HIGH
+        ):
             return ParseStatus.NEEDS_CLARIFICATION
 
         if len(missing_information) >= 2:

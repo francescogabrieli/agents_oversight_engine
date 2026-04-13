@@ -9,7 +9,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .models import (
     DomainType,
@@ -60,6 +60,39 @@ class OpenAIParserSettings:
         )
 
 
+class _PolicyBudgetPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    max_steps: int = Field(..., ge=1)
+    max_tool_calls: int | None = Field(default=None, ge=1)
+
+
+class _PolicyProfilePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confidence_threshold: float = Field(..., ge=0.0, le=1.0)
+    budget: _PolicyBudgetPayload
+    allowed_tools: list[str] = Field(default_factory=list)
+    disallowed_tools: list[str] = Field(default_factory=list)
+    read_only_mode: bool = False
+
+
+class _PolicyConfigPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    default_policy: _PolicyProfilePayload
+    named_profiles: dict[str, _PolicyProfilePayload] = Field(default_factory=dict)
+    domain_overrides: dict[str, _PolicyProfilePayload | dict[str, Any]] = Field(
+        default_factory=dict
+    )
+    sensitivity_overrides: dict[str, _PolicyProfilePayload | dict[str, Any]] = Field(
+        default_factory=dict
+    )
+    domain_sensitivity_overrides: dict[str, dict[str, _PolicyProfilePayload | dict[str, Any]]] = (
+        Field(default_factory=dict)
+    )
+
+
 def build_task_spec_system_prompt() -> str:
     allowed_domains = ", ".join(domain.value for domain in DomainType)
     allowed_sensitivity = ", ".join(level.value for level in SensitivityLevel)
@@ -83,11 +116,19 @@ Rules:
 - Keep context short and factual.
 - Extract only explicit or strongly implied constraints.
 - Use one domain_type from this exact list: {allowed_domains}.
+- Choose the closest operational category, not a generic one, when the request clearly implies it.
+- Use "research" for finding, gathering, or comparing sources and information.
+- Use "analysis" for evaluation, interpretation, or judgment over existing material.
+- Use "summarization" only when the main task is compressing already available content.
+- Use "data_extraction" only when the main task is extracting fields or structured data.
+- Use "external_communication" when the task drafts or sends messages to external recipients.
 - If no category fits well, use domain_type = "other".
 - domain_label can be more specific and free-form.
 - Use one sensitivity from this exact list: {allowed_sensitivity}.
 - If the task looks ordinary and non-sensitive, prefer "medium" or "low".
+- Use "high" or "critical" when the task concerns regulated, personal, contractual, financial, security, or externally impactful actions.
 - success_criteria should be practical completion conditions, not generic statements.
+- Do not invent missing business details as if they were certain.
 - Do not add fields outside the schema.
 - Do not explain your reasoning.
 """.strip()
@@ -222,7 +263,14 @@ class JsonExecutionPolicyRepository(ExecutionPolicyRepositoryPort):
         if not config_path.exists():
             raise FileNotFoundError(f"Policy config not found: {config_path}")
         with config_path.open("r", encoding="utf-8") as file:
-            return json.load(file)
+            raw_config = json.load(file)
+
+        try:
+            _PolicyConfigPayload.model_validate(raw_config)
+        except ValidationError as exc:
+            raise ValueError(f"Invalid policy config file '{config_path}': {exc}") from exc
+
+        return raw_config
 
     @staticmethod
     def _to_policy_profile(*, name: str, data: dict[str, Any]) -> PolicyProfile:
