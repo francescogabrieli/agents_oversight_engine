@@ -237,6 +237,7 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
         },
         "parser_output": {
             "goal": task_spec["goal"],
+            "context": task_spec["context"],
             "domain_type": task_spec["domain_type"],
             "domain_label": task_spec["domain_label"],
             "sensitivity": task_spec["sensitivity"],
