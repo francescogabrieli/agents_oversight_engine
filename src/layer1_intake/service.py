@@ -236,12 +236,6 @@ class IntakeResultValidator:
         ):
             missing_information.append("success_criteria")
 
-        if (
-            not structured_task.task_spec.context
-            and "context" not in missing_information
-        ):
-            missing_information.append("context")
-
         if parse_status == ParseStatus.COMPLETE and missing_information:
             parse_status = ParseStatus.PARTIAL
 

@@ -6,10 +6,9 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from uuid import uuid4
 
-from langgraph.types import Command
 from pydantic import BaseModel
 
 from layer1_intake import (
@@ -28,23 +27,29 @@ from layer1_intake.infrastructure import build_intake_service
 from layer2_runtime_governance import build_runtime_graph
 
 
+class IntakeExecutorPort(Protocol):
+    def execute(self, command: IntakeCommand) -> IntakeResult: ...
+
+
 def run_layer2_flow(
     *,
     raw_task_text: str,
     context_hint: str | None = None,
     policy_profile: str | None = None,
     thread_id: str | None = None,
-    auto_resume: bool = True,
-    human_decision: str = "approve",
-    human_comment: str | None = "Approved during local runtime demo.",
     demo_intake_profile: str | None = None,
+    intake_service: IntakeExecutorPort | None = None,
 ) -> dict[str, Any]:
     # This is the linear entrypoint for local demos and debugging.
-    # It runs Layer 1 intake, invokes the Layer 2 graph, and optionally
-    # auto-resumes the graph if it pauses for human review.
+    # It runs Layer 1 intake and invokes the current Layer 2 bootstrap graph.
     runtime_graph = build_runtime_graph()
     resolved_thread_id = thread_id or f"layer2-{uuid4()}"
     config = {"configurable": {"thread_id": resolved_thread_id}}
+
+    if demo_intake_profile is not None and intake_service is not None:
+        raise ValueError(
+            "demo_intake_profile and intake_service cannot be used together in run_layer2_flow."
+        )
 
     if demo_intake_profile is not None:
         intake_result = _build_demo_intake_result(
@@ -53,8 +58,8 @@ def run_layer2_flow(
             context_hint=context_hint,
         )
     else:
-        intake_service = build_intake_service()
-        intake_result = intake_service.execute(
+        resolved_intake_service = intake_service or build_intake_service()
+        intake_result = resolved_intake_service.execute(
             IntakeCommand(
                 raw_task_text=raw_task_text,
                 context_hint=context_hint,
@@ -62,51 +67,27 @@ def run_layer2_flow(
             )
         )
 
-    first_result = runtime_graph.invoke(
+    final_result = runtime_graph.invoke(
         {"intake_result": intake_result},
         config=config,
     )
 
-    trace: dict[str, Any] = {
+    return {
         "thread_id": resolved_thread_id,
         "intake_result": intake_result,
-        "first_result": first_result,
-        "interrupt_payload": None,
-        "resume_payload": None,
-        "final_result": first_result,
+        "final_result": final_result,
     }
-
-    interrupt_payload = _extract_interrupt_payload(first_result)
-    if interrupt_payload is not None:
-        trace["interrupt_payload"] = interrupt_payload
-
-        if auto_resume:
-            resume_payload = {
-                "decision": human_decision,
-                "comment": human_comment,
-            }
-            trace["resume_payload"] = resume_payload
-            trace["final_result"] = runtime_graph.invoke(
-                Command(resume=resume_payload),
-                config=config,
-            )
-
-    return trace
 
 
 def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
     # Convert the raw trace into a compact terminal-friendly summary.
     intake_result = trace["intake_result"]
-    first_result = trace["first_result"]
     final_result = trace["final_result"]
-    first_task_state = first_result.get("task_state")
     final_task_state = final_result.get("task_state")
 
     return {
         "runtime": {
             "thread_id": trace["thread_id"],
-            "auto_resume_enabled": trace["resume_payload"] is not None,
-            "interrupt_detected": trace["interrupt_payload"] is not None,
             "demo_intake_used": trace["intake_result"].metadata.parser_name == "demo_intake_builder",
         },
         "intake_summary": {
@@ -116,45 +97,21 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
             "parse_status": intake_result.metadata.parse_status.value,
             "read_only_mode": intake_result.structured_task.execution_policy.read_only_mode,
         },
-        "first_pass": {
-            "current_state": (
-                first_task_state.current_state.value if first_task_state is not None else None
-            ),
-            "step_count": len(first_task_state.step_history) if first_task_state else 0,
-            "governance_decision": (
-                first_task_state.governance_output.decision.value
-                if first_task_state and first_task_state.governance_output is not None
-                else None
-            ),
-        },
-        "human_review": {
-            "interrupt_payload": trace["interrupt_payload"],
-            "resume_payload": trace["resume_payload"],
-        },
-        "final_state": {
+        "bootstrap_state": {
             "current_state": (
                 final_task_state.current_state.value if final_task_state is not None else None
             ),
             "step_count": len(final_task_state.step_history) if final_task_state else 0,
-            "termination_reason": (
-                final_task_state.termination_reason if final_task_state is not None else None
+            "bootstrap_completed": (
+                final_task_state.bootstrap_completed if final_task_state is not None else None
             ),
-            "final_output": (
-                final_task_state.final_output if final_task_state is not None else None
+            "runtime_flags": (
+                [flag.value for flag in final_task_state.runtime_flags]
+                if final_task_state is not None
+                else []
             ),
         },
     }
-
-
-def _extract_interrupt_payload(result: dict[str, Any]) -> Any | None:
-    # LangGraph returns interrupts in a wrapper object.
-    # This helper extracts the actual review payload.
-    interrupts = result.get("__interrupt__")
-    if not interrupts:
-        return None
-
-    first_interrupt = interrupts[0]
-    return getattr(first_interrupt, "value", first_interrupt)
 
 
 def to_jsonable(value: Any) -> Any:
@@ -194,12 +151,7 @@ def print_layer2_summary(trace: dict[str, Any]) -> None:
     compact_trace = build_compact_trace(trace)
     _print_section("RUNTIME", compact_trace["runtime"])
     _print_section("INTAKE SUMMARY", compact_trace["intake_summary"])
-    _print_section("FIRST PASS", compact_trace["first_pass"])
-
-    if compact_trace["human_review"]["interrupt_payload"] is not None:
-        _print_section("HUMAN REVIEW", compact_trace["human_review"])
-
-    _print_section("FINAL STATE", compact_trace["final_state"])
+    _print_section("BOOTSTRAP STATE", compact_trace["bootstrap_state"])
 
 
 def print_layer2_trace(trace: dict[str, Any]) -> None:
@@ -208,18 +160,18 @@ def print_layer2_trace(trace: dict[str, Any]) -> None:
 
 
 def parse_cli_args() -> argparse.Namespace:
-    # CLI entrypoint used for local execution of the Layer 2 runtime.
-    parser = argparse.ArgumentParser(description="Run the compact Layer 2 runtime flow.")
+    # CLI entrypoint used for local execution of the Layer 2 bootstrap flow.
+    parser = argparse.ArgumentParser(description="Run the current Layer 2 bootstrap flow.")
     parser.add_argument(
         "--task",
         default=(
-            "Please draft and send a customer-facing email confirming the updated delivery date."
+            "Find official sources about the Digital Markets Act and produce a short summary."
         ),
-        help="Raw task text to parse through Layer 1 and execute in Layer 2.",
+        help="Raw task text to parse through Layer 1 and bootstrap into Layer 2.",
     )
     parser.add_argument(
         "--context",
-        default="Assume the message is externally visible and must be reviewed before sending.",
+        default="Prefer official EU sources.",
         help="Optional context hint for Layer 1.",
     )
     parser.add_argument(
@@ -233,28 +185,13 @@ def parse_cli_args() -> argparse.Namespace:
         help="Optional LangGraph thread identifier.",
     )
     parser.add_argument(
-        "--no-auto-resume",
-        action="store_true",
-        help="Stop after interrupt instead of auto-resuming with a demo human decision.",
-    )
-    parser.add_argument(
-        "--human-decision",
-        default="approve",
-        help="Decision used for auto-resume: approve, reject, edit, request_more_evidence, stop.",
-    )
-    parser.add_argument(
-        "--human-comment",
-        default="Approved during local runtime demo.",
-        help="Comment attached to the auto-resume decision.",
-    )
-    parser.add_argument(
         "--full-trace",
         action="store_true",
         help="Print the full trace instead of the compact summary.",
     )
     parser.add_argument(
         "--demo-intake-profile",
-        choices=["research", "external_communication", "clarification"],
+        choices=["research", "clarification"],
         default=None,
         help="Use a local deterministic intake payload instead of invoking Layer 1 via OpenAI.",
     )
@@ -272,18 +209,7 @@ def _build_demo_intake_result(
     normalized_goal = " ".join(raw_task_text.strip().split()) or "Demo runtime task."
     normalized_context = " ".join((context_hint or "").strip().split())
 
-    if profile == "external_communication":
-        task_spec = TaskSpec(
-            goal=normalized_goal,
-            context=normalized_context or "Externally visible customer communication.",
-            constraints=["Use a professional tone."],
-            domain_type=DomainType.EXTERNAL_COMMUNICATION,
-            domain_label="demo_external_communication",
-            sensitivity=SensitivityLevel.HIGH,
-            success_criteria=["Prepare the external communication."],
-        )
-        parse_status = ParseStatus.COMPLETE
-    elif profile == "clarification":
+    if profile == "clarification":
         task_spec = TaskSpec(
             goal=normalized_goal,
             context=normalized_context,
@@ -339,9 +265,6 @@ def main() -> None:
         context_hint=args.context,
         policy_profile=args.policy_profile,
         thread_id=args.thread_id,
-        auto_resume=not args.no_auto_resume,
-        human_decision=args.human_decision,
-        human_comment=args.human_comment,
         demo_intake_profile=args.demo_intake_profile,
     )
 

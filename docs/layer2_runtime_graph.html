@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Layer 2 Bootstrap Graph</title>
+  <style>
+    :root {
+      --bg: #f3f6fa;
+      --card: #ffffff;
+      --text: #162132;
+      --muted: #5f6d80;
+      --border: #d8dfe8;
+      --runtime-fill: #e8f0fb;
+      --runtime-stroke: #5079b3;
+      --terminal-fill: #eef4ea;
+      --terminal-stroke: #557c45;
+      --shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: linear-gradient(180deg, #f6f8fb 0%, #eef2f7 100%);
+      color: var(--text);
+      font-family: "Segoe UI", Calibri, Arial, sans-serif;
+    }
+    code {
+      padding: 0.08rem 0.36rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #f8fafc;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 0.95em;
+    }
+    .page {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 40px 28px 52px;
+    }
+    .hero,
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+    }
+    .hero {
+      padding: 28px 30px;
+      margin-bottom: 24px;
+    }
+    .eyebrow {
+      display: inline-block;
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3 {
+      font-family: Cambria, Georgia, "Times New Roman", serif;
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 38px;
+      line-height: 1.15;
+    }
+    .hero p,
+    .card p,
+    .card li {
+      color: var(--muted);
+      line-height: 1.68;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 22px;
+      margin-bottom: 24px;
+    }
+    .card {
+      padding: 22px 24px 24px;
+    }
+    .card h2 {
+      margin: 0 0 10px;
+      font-size: 28px;
+    }
+    .card h3 {
+      margin: 0 0 10px;
+      font-size: 18px;
+    }
+    .figure-box {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      background: #fafcff;
+      padding: 16px;
+    }
+    .diagram {
+      width: 100%;
+      min-width: 980px;
+      height: auto;
+      display: block;
+    }
+    .node {
+      stroke-width: 1.8;
+      rx: 18;
+      ry: 18;
+    }
+    .node-title {
+      font-size: 16px;
+      font-weight: 700;
+      text-anchor: middle;
+      fill: var(--text);
+    }
+    .node-subtitle {
+      font-size: 11.5px;
+      text-anchor: middle;
+      fill: var(--muted);
+    }
+    .edge {
+      fill: none;
+      stroke: #6b7a8c;
+      stroke-width: 2.7;
+      marker-end: url(#arrow);
+    }
+    .edge-label {
+      font-size: 11px;
+      fill: #4d5b6d;
+      text-anchor: middle;
+      paint-order: stroke;
+      stroke: #fafcff;
+      stroke-width: 5px;
+      stroke-linejoin: round;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+    }
+    th, td {
+      padding: 13px 14px;
+      border-bottom: 1px solid #e5eaf0;
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+    th {
+      background: #f8fafc;
+      color: #334155;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    tr:last-child td {
+      border-bottom: 0;
+    }
+    ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+    @media (max-width: 1100px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <span class="eyebrow">Current Implementation</span>
+      <h1>Layer 2 Bootstrap Handoff</h1>
+      <p>
+        The active Layer 2 implementation has been intentionally reduced to the bootstrap contract
+        between <code>Task Intake</code> and the first canonical <code>TaskState</code>. The graph
+        no longer contains planner, governance, HITL, or tool execution nodes. Its only purpose is
+        to receive <code>IntakeResult</code>, build <code>TaskState</code>, and stop after the
+        bootstrap handoff.
+      </p>
+    </header>
+
+    <section class="grid">
+      <article class="card">
+        <h2>Executable Graph</h2>
+        <p>
+          This figure reflects the current code in
+          <code>src/layer2_runtime_governance/graph.py</code>. The executable path is minimal by
+          design so the repository can stabilize the Layer 1 to Layer 2 handoff before reintroducing
+          agentic runtime nodes.
+        </p>
+        <div class="figure-box">
+          <svg class="diagram" viewBox="0 0 980 280" role="img" aria-label="Layer 2 bootstrap graph">
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#6b7a8c"></path>
+              </marker>
+            </defs>
+
+            <path class="edge" d="M 180 145 L 300 145"></path>
+            <text class="edge-label" x="240" y="128">always</text>
+
+            <path class="edge" d="M 610 145 L 740 145"></path>
+            <text class="edge-label" x="675" y="128">always</text>
+
+            <rect x="70" y="116" width="110" height="58" class="node" fill="#f2f5f9" stroke="#7b8898"></rect>
+            <text class="node-title" x="125" y="140">START</text>
+            <text class="node-subtitle" x="125" y="158">graph entry</text>
+
+            <rect x="300" y="96" width="310" height="98" class="node" fill="var(--runtime-fill)" stroke="var(--runtime-stroke)"></rect>
+            <text class="node-title" x="455" y="132">bootstrap_from_intake</text>
+            <text class="node-subtitle" x="455" y="152">build TaskState from IntakeResult</text>
+            <text class="node-subtitle" x="455" y="170">append initial StepRecord</text>
+
+            <rect x="740" y="107" width="160" height="76" class="node" fill="var(--terminal-fill)" stroke="var(--terminal-stroke)"></rect>
+            <text class="node-title" x="820" y="137">END</text>
+            <text class="node-subtitle" x="820" y="155">bootstrap boundary reached</text>
+          </svg>
+        </div>
+      </article>
+
+      <aside class="card">
+        <h3>What Bootstrap Does</h3>
+        <ul>
+          <li>copies the full <code>IntakeResult</code> into <code>TaskState.intake_payload</code></li>
+          <li>extracts <code>task_spec</code>, <code>execution_policy</code>, and <code>intake_metadata</code></li>
+          <li>maps <code>parse_status</code> into the initial <code>current_state</code></li>
+          <li>sets runtime flags such as clarification, incomplete intake, read-only mode, and high sensitivity</li>
+          <li>records the first audit entry in <code>step_history</code></li>
+        </ul>
+      </aside>
+    </section>
+
+    <section class="card">
+      <h2>Bootstrap Mapping Rules</h2>
+      <p>
+        The rules below summarize the current deterministic handoff implemented by
+        <code>TaskState.from_intake(...)</code> and <code>bootstrap_from_intake(...)</code>.
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Layer 1 Source</th>
+            <th>Layer 2 Target</th>
+            <th>Rule</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>structured_task.task_spec</code></td>
+            <td><code>TaskState.task_spec</code></td>
+            <td>Copied directly.</td>
+          </tr>
+          <tr>
+            <td><code>structured_task.execution_policy</code></td>
+            <td><code>TaskState.execution_policy</code></td>
+            <td>Copied directly.</td>
+          </tr>
+          <tr>
+            <td><code>metadata</code></td>
+            <td><code>TaskState.intake_metadata</code></td>
+            <td>Copied directly.</td>
+          </tr>
+          <tr>
+            <td><code>IntakeResult</code></td>
+            <td><code>TaskState.intake_payload</code></td>
+            <td>Preserved in full for auditability.</td>
+          </tr>
+          <tr>
+            <td><code>parse_status = complete</code></td>
+            <td><code>current_state = planning</code></td>
+            <td>Normal executable intake.</td>
+          </tr>
+          <tr>
+            <td><code>parse_status = partial</code></td>
+            <td><code>current_state = planning</code> + <code>incomplete_intake</code></td>
+            <td>Bootstrap preserves the need for downstream caution.</td>
+          </tr>
+          <tr>
+            <td><code>parse_status = needs_clarification</code></td>
+            <td><code>current_state = waiting_human_review</code> + <code>clarification_required</code></td>
+            <td>Bootstrap marks the task as not directly executable.</td>
+          </tr>
+          <tr>
+            <td><code>execution_policy.read_only_mode = true</code></td>
+            <td><code>read_only_execution</code></td>
+            <td>Captured as runtime flag.</td>
+          </tr>
+          <tr>
+            <td><code>sensitivity in {high, critical}</code></td>
+            <td><code>high_sensitivity</code></td>
+            <td>Captured as runtime hint immediately at bootstrap.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </div>
+</body>
+</html>

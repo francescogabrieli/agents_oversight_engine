@@ -129,6 +129,41 @@ class Layer1IntakeTests(unittest.TestCase):
         self.assertEqual(result.metadata.parser_name, "stub_parser")
         self.assertEqual(result.metadata.prompt_version, "test_v1")
 
+    def test_empty_context_remains_warning_and_not_partial(self) -> None:
+        parser = StubParser(
+            TaskSpec(
+                goal="Find official EU sources about the DMA and produce a short summary.",
+                context="",
+                constraints=["Prefer official EU sources."],
+                domain_type=DomainType.RESEARCH,
+                domain_label="dma_official_source_research",
+                sensitivity=SensitivityLevel.LOW,
+                success_criteria=[
+                    "List official sources.",
+                    "Produce a short grounded summary.",
+                ],
+            )
+        )
+
+        service = IntakeService(
+            normalizer=InputNormalizer(),
+            task_spec_builder=TaskSpecBuilder(parser=parser),
+            policy_resolver=PolicyResolver(repository=_StubPolicyRepository()),
+            validator=IntakeResultValidator(),
+            clock=FixedClock(),
+            fingerprint_service=FixedFingerprintService(),
+        )
+
+        result = service.execute(
+            IntakeCommand(
+                raw_task_text="find official EU sources on the DMA and summarize them",
+            )
+        )
+
+        self.assertEqual(result.metadata.parse_status, ParseStatus.COMPLETE)
+        self.assertIn("Task context is empty.", result.metadata.warnings)
+        self.assertNotIn("context", result.metadata.missing_information)
+
     def test_policy_repository_merges_domain_and_sensitivity_overrides(self) -> None:
         config = {
             "default_policy": {

@@ -4,8 +4,6 @@ import sys
 import unittest
 from pathlib import Path
 
-from langgraph.types import Command
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
@@ -25,53 +23,38 @@ from layer1_intake import (
     StructuredTask,
     TaskSpec,
 )
-from layer2_runtime_governance import RuntimeState, build_runtime_graph
+from layer2_runtime_governance import RuntimeFlag, RuntimeState, build_runtime_graph
 
 
 class Layer2RuntimeGraphTests(unittest.TestCase):
-    def test_read_path_completes_without_human_interrupt(self) -> None:
+    def test_complete_intake_bootstraps_to_planning(self) -> None:
         graph = build_runtime_graph()
         result = graph.invoke(
             {"intake_result": _build_research_intake_result()},
-            config={"configurable": {"thread_id": "layer2-read-path"}},
+            config={"configurable": {"thread_id": "layer2-bootstrap-complete"}},
         )
 
         task_state = result["task_state"]
-        self.assertEqual(task_state.current_state, RuntimeState.COMPLETED)
-        self.assertNotIn("__interrupt__", result)
-        self.assertEqual(task_state.final_output["last_governance_decision"], "continue")
-        self.assertEqual(task_state.final_output["evidence_count"], 1)
+        self.assertEqual(task_state.current_state, RuntimeState.PLANNING)
+        self.assertTrue(task_state.bootstrap_completed)
+        self.assertEqual(len(task_state.step_history), 2)
+        self.assertEqual(task_state.step_history[0].node_name, "bootstrap_from_intake")
+        self.assertEqual(task_state.step_history[1].node_name, "finalize_bootstrap")
+        self.assertEqual(task_state.runtime_flags, [])
 
-    def test_write_path_interrupts_and_completes_after_resume(self) -> None:
+    def test_needs_clarification_bootstraps_to_waiting_human_review(self) -> None:
         graph = build_runtime_graph()
-        initial_result = graph.invoke(
-            {"intake_result": _build_external_communication_intake_result()},
-            config={"configurable": {"thread_id": "layer2-write-path"}},
+        result = graph.invoke(
+            {"intake_result": _build_clarification_intake_result()},
+            config={"configurable": {"thread_id": "layer2-bootstrap-clarification"}},
         )
 
-        self.assertIn("__interrupt__", initial_result)
-        self.assertEqual(
-            initial_result["task_state"].current_state,
-            RuntimeState.WAITING_HUMAN_REVIEW,
-        )
-
-        resumed_result = graph.invoke(
-            Command(
-                resume={
-                    "decision": "approve",
-                    "comment": "Approved inside automated test.",
-                }
-            ),
-            config={"configurable": {"thread_id": "layer2-write-path"}},
-        )
-
-        task_state = resumed_result["task_state"]
-        self.assertEqual(task_state.current_state, RuntimeState.COMPLETED)
-        self.assertEqual(
-            task_state.final_output["last_governance_decision"],
-            "wait_human_review",
-        )
-        self.assertEqual(task_state.final_output["evidence_count"], 1)
+        task_state = result["task_state"]
+        self.assertEqual(task_state.current_state, RuntimeState.WAITING_HUMAN_REVIEW)
+        self.assertTrue(task_state.bootstrap_completed)
+        self.assertIn(RuntimeFlag.CLARIFICATION_REQUIRED, task_state.runtime_flags)
+        self.assertIn(RuntimeFlag.HIGH_SENSITIVITY, task_state.runtime_flags)
+        self.assertEqual(task_state.step_history[0].runtime_state, RuntimeState.WAITING_HUMAN_REVIEW)
 
 
 def _build_research_intake_result() -> IntakeResult:
@@ -100,17 +83,17 @@ def _build_research_intake_result() -> IntakeResult:
     )
 
 
-def _build_external_communication_intake_result() -> IntakeResult:
+def _build_clarification_intake_result() -> IntakeResult:
     return IntakeResult(
         structured_task=StructuredTask(
             task_spec=TaskSpec(
-                goal="Draft and send a delivery confirmation email to the customer.",
-                context="The communication is customer-facing and externally visible.",
-                constraints=["Use a professional tone."],
-                domain_type=DomainType.EXTERNAL_COMMUNICATION,
-                domain_label="customer_delivery_email",
+                goal="Review this contract and tell me whether I should sign it.",
+                context="Contract review request.",
+                constraints=[],
+                domain_type=DomainType.ANALYSIS,
+                domain_label="contract_review",
                 sensitivity=SensitivityLevel.HIGH,
-                success_criteria=["Produce the customer message."],
+                success_criteria=[],
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.8,
@@ -118,10 +101,11 @@ def _build_external_communication_intake_result() -> IntakeResult:
             ),
         ),
         metadata=IntakeMetadata(
-            parse_status=ParseStatus.COMPLETE,
+            parse_status=ParseStatus.NEEDS_CLARIFICATION,
             parser_name="stub_parser",
             prompt_version="test_v1",
             schema_version="1.0.0",
+            missing_information=["constraints", "success_criteria"],
         ),
     )
 

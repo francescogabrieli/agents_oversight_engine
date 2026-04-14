@@ -33,7 +33,6 @@
   },
   "domain_overrides": {
     "external_communication": {
-      "read_only_mode": true,
       "disallowed_tools": [
         "send_email",
         "post_message"
@@ -72,7 +71,7 @@
           "max_steps": 3,
           "max_tool_calls": 5
         },
-        "read_only_mode": true
+        "read_only_mode": false
       },
       "critical": {
         "confidence_threshold": 0.9,
@@ -80,7 +79,7 @@
           "max_steps": 2,
           "max_tool_calls": 3
         },
-        "read_only_mode": true
+        "read_only_mode": false
       }
     }
   }
