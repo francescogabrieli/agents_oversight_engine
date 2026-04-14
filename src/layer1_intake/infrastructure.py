@@ -43,6 +43,7 @@ class OpenAIParserSettings:
 
     @classmethod
     def from_env(cls) -> "OpenAIParserSettings":
+        # Merge process env and local .env files into one parser settings object.
         env_file_values = _load_env_file_values()
 
         return cls(
@@ -94,6 +95,7 @@ class _PolicyConfigPayload(BaseModel):
 
 
 def build_task_spec_system_prompt() -> str:
+    # Build the constrained system prompt used to parse raw requests into TaskSpec.
     allowed_domains = ", ".join(domain.value for domain in DomainType)
     allowed_sensitivity = ", ".join(level.value for level in SensitivityLevel)
 
@@ -139,6 +141,7 @@ def build_task_spec_user_prompt(
     raw_task_text: str,
     context_hint: str | None = None,
 ) -> str:
+    # Keep the user prompt compact and explicit so parsing behavior remains predictable.
     context_block = context_hint if context_hint else "None"
 
     return f"""
@@ -167,6 +170,7 @@ class OpenAITaskSpecParser(TaskSpecParserPort):
     prompt_version = "task_spec_v1"
 
     def __init__(self, settings: OpenAIParserSettings | None = None) -> None:
+        # Validate parser prerequisites once at construction time.
         self._settings = settings or OpenAIParserSettings.from_env()
 
         if OpenAI is None:
@@ -184,6 +188,7 @@ class OpenAITaskSpecParser(TaskSpecParserPort):
         )
 
     def parse(self, *, raw_task_text: str, context_hint: str | None = None) -> TaskSpec:
+        # Ask OpenAI for a typed extraction payload and convert it into the domain model.
         try:
             response = self._client.responses.parse(
                 model=self._settings.model,
@@ -218,6 +223,7 @@ class OpenAITaskSpecParser(TaskSpecParserPort):
 
 
 class JsonExecutionPolicyRepository(ExecutionPolicyRepositoryPort):
+    # This repository resolves policy data from the JSON configuration file.
     def __init__(self, config_path: str | Path) -> None:
         self._config_path = Path(config_path)
         self._config = self._load_config(self._config_path)
@@ -229,6 +235,7 @@ class JsonExecutionPolicyRepository(ExecutionPolicyRepositoryPort):
         domain_type: DomainType,
         sensitivity: SensitivityLevel,
     ) -> PolicyProfile:
+        # Merge default policy with progressively more specific overrides.
         if profile_name:
             named_profiles = self._config.get("named_profiles", {})
             profile_data = named_profiles.get(profile_name)
@@ -260,6 +267,7 @@ class JsonExecutionPolicyRepository(ExecutionPolicyRepositoryPort):
 
     @staticmethod
     def _load_config(config_path: Path) -> dict[str, Any]:
+        # Fail early if the configuration file is missing or structurally invalid.
         if not config_path.exists():
             raise FileNotFoundError(f"Policy config not found: {config_path}")
         with config_path.open("r", encoding="utf-8") as file:
@@ -274,6 +282,7 @@ class JsonExecutionPolicyRepository(ExecutionPolicyRepositoryPort):
 
     @staticmethod
     def _to_policy_profile(*, name: str, data: dict[str, Any]) -> PolicyProfile:
+        # Translate raw JSON data into the typed PolicyProfile used by the service layer.
         budget = data["budget"]
         return PolicyProfile(
             name=name,
@@ -287,6 +296,7 @@ class JsonExecutionPolicyRepository(ExecutionPolicyRepositoryPort):
 
     @staticmethod
     def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+        # Merge nested configuration sections without mutating the base dictionary.
         merged = deepcopy(base)
         for key, value in override.items():
             if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
@@ -297,11 +307,13 @@ class JsonExecutionPolicyRepository(ExecutionPolicyRepositoryPort):
 
 
 class SystemClock:
+    # Production clock implementation for Layer 1.
     def now(self) -> datetime:
         return datetime.now(timezone.utc)
 
 
 class Sha256FingerprintService(InputFingerprintPort):
+    # Production fingerprint implementation for stable raw input tracing.
     def fingerprint(self, raw_text: str) -> str:
         return sha256(raw_text.encode("utf-8")).hexdigest()
 
@@ -311,6 +323,7 @@ def build_intake_service(
     policy_config_path: str | Path | None = None,
     openai_settings: OpenAIParserSettings | None = None,
 ) -> IntakeService:
+    # Build the concrete production dependencies used by the Layer 1 entrypoints.
     resolved_policy_path = (
         Path(policy_config_path) if policy_config_path else get_default_policy_config_path()
     )
@@ -329,6 +342,7 @@ def build_intake_service(
 
 
 def _load_env_file_values() -> dict[str, str]:
+    # Load simple KEY=VALUE pairs from the supported .env file locations.
     env_values: dict[str, str] = {}
 
     for candidate in _candidate_env_paths():
@@ -354,6 +368,7 @@ def _load_env_file_values() -> dict[str, str]:
 
 
 def _candidate_env_paths() -> list[Path]:
+    # Search both repository root and src-level env files for local development.
     repo_root = Path(__file__).resolve().parents[2]
     return [
         repo_root / ".env",
@@ -362,6 +377,7 @@ def _candidate_env_paths() -> list[Path]:
 
 
 def get_default_policy_config_path() -> Path:
+    # Keep the default config path in one place so entrypoints stay aligned.
     return Path(__file__).resolve().parents[2] / "configs" / "layer1_execution_policies.json"
 
 

@@ -27,7 +27,9 @@ from layer2_runtime_governance import RuntimeFlag, RuntimeState, build_runtime_g
 
 
 class Layer2RuntimeGraphTests(unittest.TestCase):
+    # These tests verify the bootstrap-only Layer 2 graph behavior.
     def test_complete_intake_bootstraps_to_planning(self) -> None:
+        # A complete intake should bootstrap into the planning state with no extra flags.
         graph = build_runtime_graph()
         result = graph.invoke(
             {"intake_result": _build_research_intake_result()},
@@ -43,6 +45,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertEqual(task_state.runtime_flags, [])
 
     def test_needs_clarification_bootstraps_to_waiting_human_review(self) -> None:
+        # A clarification-required intake should bootstrap into waiting_human_review.
         graph = build_runtime_graph()
         result = graph.invoke(
             {"intake_result": _build_clarification_intake_result()},
@@ -58,6 +61,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
 
 
 def _build_research_intake_result() -> IntakeResult:
+    # Build a canonical complete intake payload for bootstrap tests.
     return IntakeResult(
         structured_task=StructuredTask(
             task_spec=TaskSpec(
@@ -84,6 +88,7 @@ def _build_research_intake_result() -> IntakeResult:
 
 
 def _build_clarification_intake_result() -> IntakeResult:
+    # Build a canonical clarification-required intake payload for bootstrap tests.
     return IntakeResult(
         structured_task=StructuredTask(
             task_spec=TaskSpec(

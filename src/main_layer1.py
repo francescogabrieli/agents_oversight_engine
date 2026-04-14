@@ -39,6 +39,7 @@ def build_layer1_components(
     policy_config_path: str | Path | None = None,
     openai_settings: OpenAIParserSettings | None = None,
 ) -> dict[str, Any]:
+    # Build the concrete Layer 1 dependency graph in a readable, inspectable form.
     """
     Build every concrete component used by layer 1.
 
@@ -91,6 +92,7 @@ def run_layer1_flow(
     policy_config_path: str | Path | None = None,
     openai_settings: OpenAIParserSettings | None = None,
 ) -> dict[str, Any]:
+    # Execute Layer 1 step by step and keep every intermediate payload for debugging.
     """
     Execute layer 1 step by step and return a full debug trace.
 
@@ -167,6 +169,7 @@ def run_layer1_flow(
 
 
 def to_jsonable(value: Any) -> Any:
+    # Convert Pydantic models, dataclasses, and enums into plain JSON-friendly structures.
     """
     Convert objects used by layer 1 into JSON-friendly structures.
 
@@ -198,6 +201,7 @@ def to_jsonable(value: Any) -> Any:
 
 
 def print_layer1_trace(trace: dict[str, Any]) -> None:
+    # Print the full debug trace without collapsing intermediate objects.
     """
     Pretty-print the debug trace in a readable JSON format.
     """
@@ -206,6 +210,7 @@ def print_layer1_trace(trace: dict[str, Any]) -> None:
 
 
 def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
+    # Build a reduced trace for terminal use when the full payload would be too noisy.
     """
     Build a compact, de-duplicated view of the full trace.
 
@@ -267,6 +272,7 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
 
 
 def _print_section(title: str, payload: Any) -> None:
+    # Print one titled JSON block so the terminal output remains scannable.
     """
     Print one trace section with a clear visual separator.
     """
@@ -276,6 +282,7 @@ def _print_section(title: str, payload: Any) -> None:
 
 
 def print_layer1_summary(trace: dict[str, Any]) -> None:
+    # Print the compact Layer 1 trace in the same order as the orchestration flow.
     """
     Print the layer 1 flow in a compact and linear way.
 
@@ -292,6 +299,7 @@ def print_layer1_summary(trace: dict[str, Any]) -> None:
 
 
 def parse_cli_args() -> argparse.Namespace:
+    # Parse the CLI inputs used for local Layer 1 inspection.
     """
     Parse optional CLI arguments for manual layer 1 runs.
     """
@@ -324,6 +332,7 @@ def parse_cli_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    # Run the local Layer 1 demo and choose between full trace and compact output.
     """
     Example manual run of layer 1.
 

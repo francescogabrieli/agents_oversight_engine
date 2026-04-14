@@ -32,6 +32,7 @@ from main_layer1 import run_layer1_flow, to_jsonable
 
 
 def parse_cli_args() -> argparse.Namespace:
+    # Parse the CLI options for the bootstrap inspection script.
     parser = argparse.ArgumentParser(
         description=(
             "Inspect the handoff from Layer 1 Task Intake to Layer 2 bootstrap "
@@ -73,6 +74,7 @@ def build_demo_intake_result(
     raw_task_text: str,
     context_hint: str | None,
 ) -> IntakeResult:
+    # Build a deterministic IntakeResult when Layer 1 should be skipped during debugging.
     normalized_goal = " ".join(raw_task_text.strip().split()) or "Demo runtime task."
     normalized_context = " ".join((context_hint or "").strip().split())
 
@@ -133,6 +135,7 @@ def build_trace(
     policy_profile: str | None,
     demo_intake_profile: str | None,
 ) -> dict[str, Any]:
+    # Run either real Layer 1 or demo intake, then stop at bootstrap and collect the trace.
     if demo_intake_profile is not None:
         intake_result = build_demo_intake_result(
             profile=demo_intake_profile,
@@ -176,6 +179,7 @@ def build_bootstrap_mapping(
     intake_result: IntakeResult,
     task_state: TaskState,
 ) -> dict[str, Any]:
+    # Explain in plain terms how IntakeResult fields become TaskState fields and flags.
     parse_status = intake_result.metadata.parse_status
     mapping_rules: list[str] = [
         "task_spec <- intake_result.structured_task.task_spec",
@@ -217,11 +221,13 @@ def build_bootstrap_mapping(
 
 
 def print_section(title: str, payload: Any) -> None:
+    # Print one labeled JSON block in a stable, readable format.
     print(f"\n=== {title} ===")
     print(json.dumps(to_jsonable(payload), indent=2, ensure_ascii=False))
 
 
 def print_trace(trace: dict[str, Any]) -> None:
+    # Print the full handoff trace from Layer 1 to bootstrap.
     print_section("LAYER 1 SOURCE", trace["layer1_source"])
 
     if trace["layer1_trace"] is not None:
@@ -237,6 +243,7 @@ def print_trace(trace: dict[str, Any]) -> None:
 
 
 def main() -> None:
+    # Run the bootstrap inspection script from the command line.
     args = parse_cli_args()
     trace = build_trace(
         raw_task_text=args.task,

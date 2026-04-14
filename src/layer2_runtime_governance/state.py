@@ -30,6 +30,7 @@ class RuntimeFlag(str, Enum):
 
 @dataclass
 class StepRecord:
+    # This is the minimal audit entry recorded while Layer 2 performs bootstrap.
     step_index: int
     runtime_state: RuntimeState
     node_name: str
@@ -53,9 +54,11 @@ class TaskState:
 
     @classmethod
     def from_intake(cls, intake_result: IntakeResult) -> "TaskState":
+        # Convert the Layer 1 payload into the first canonical Layer 2 state.
         parse_status = intake_result.metadata.parse_status
         runtime_flags: list[RuntimeFlag] = []
 
+        # Parse status decides the first runtime state and any initial caution flags.
         if parse_status == ParseStatus.NEEDS_CLARIFICATION:
             current_state = RuntimeState.WAITING_HUMAN_REVIEW
             runtime_flags.append(RuntimeFlag.CLARIFICATION_REQUIRED)
@@ -65,6 +68,7 @@ class TaskState:
         else:
             current_state = RuntimeState.PLANNING
 
+        # Policy and sensitivity are also captured immediately so the handoff is self-contained.
         if intake_result.structured_task.execution_policy.read_only_mode:
             runtime_flags.append(RuntimeFlag.READ_ONLY_EXECUTION)
 

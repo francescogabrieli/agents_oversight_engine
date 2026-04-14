@@ -83,6 +83,7 @@ class ExecutionPolicy(BaseModel):
     @field_validator("policy_profile_name", mode="before")
     @classmethod
     def normalize_policy_profile_name(cls, value: object) -> str:
+        # Normalize missing or noisy profile names into one canonical value.
         if value is None:
             return "default"
         if not isinstance(value, str):
@@ -93,6 +94,7 @@ class ExecutionPolicy(BaseModel):
     @field_validator("allowed_tools", "disallowed_tools", mode="before")
     @classmethod
     def normalize_tool_lists(cls, value: object) -> list[str]:
+        # Clean tool names once here so downstream code never handles duplicates or blanks.
         if value is None:
             return []
         if not isinstance(value, list):
@@ -110,6 +112,7 @@ class ExecutionPolicy(BaseModel):
 
     @model_validator(mode="after")
     def validate_tool_overlap(self) -> "ExecutionPolicy":
+        # The same tool cannot be both explicitly allowed and explicitly denied.
         overlap = set(self.allowed_tools) & set(self.disallowed_tools)
         if overlap:
             raise ValueError(
@@ -136,6 +139,7 @@ class TaskSpec(BaseModel):
     @field_validator("goal", "context", "domain_label", mode="before")
     @classmethod
     def normalize_text_fields(cls, value: object) -> str:
+        # Normalize free text early to keep the canonical payload stable.
         if value is None:
             return ""
         if not isinstance(value, str):
@@ -145,6 +149,7 @@ class TaskSpec(BaseModel):
     @field_validator("constraints", "success_criteria", mode="before")
     @classmethod
     def normalize_string_lists(cls, value: object) -> list[str]:
+        # Remove duplicates and empty items so these lists behave as stable contracts.
         if value is None:
             return []
         if not isinstance(value, list):
@@ -164,6 +169,7 @@ class TaskSpec(BaseModel):
 
     @model_validator(mode="after")
     def validate_task_spec(self) -> "TaskSpec":
+        # Keep the semantic core of the task always usable by downstream layers.
         if not self.goal:
             raise ValueError("TaskSpec.goal cannot be empty.")
 
@@ -209,6 +215,7 @@ class IntakeMetadata(BaseModel):
     )
     @classmethod
     def normalize_metadata_text_fields(cls, value: object) -> str:
+        # Metadata identifiers must be present and normalized because they drive tracing.
         if value is None:
             raise TypeError("Metadata text fields cannot be null.")
         if not isinstance(value, str):
@@ -221,6 +228,7 @@ class IntakeMetadata(BaseModel):
     @field_validator("raw_input_fingerprint", mode="before")
     @classmethod
     def normalize_optional_fingerprint(cls, value: object) -> Optional[str]:
+        # Empty fingerprints are treated as missing, not as meaningful identifiers.
         if value is None:
             return None
         if not isinstance(value, str):
@@ -231,6 +239,7 @@ class IntakeMetadata(BaseModel):
     @field_validator("warnings", "missing_information", mode="before")
     @classmethod
     def normalize_metadata_lists(cls, value: object) -> list[str]:
+        # Warnings and missing fields should be deterministic lists with no duplicates.
         if value is None:
             return []
         if not isinstance(value, list):
@@ -250,6 +259,7 @@ class IntakeMetadata(BaseModel):
 
     @model_validator(mode="after")
     def validate_parse_status_consistency(self) -> "IntakeMetadata":
+        # A fully complete parse cannot still report missing information.
         if self.parse_status == ParseStatus.COMPLETE and self.missing_information:
             raise ValueError(
                 "A COMPLETE parse_status cannot include missing_information."

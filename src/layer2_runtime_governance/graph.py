@@ -23,18 +23,22 @@ from .state import RuntimeFlag, RuntimeState, StepRecord, TaskState
 
 
 class Layer2GraphInput(TypedDict):
+    # LangGraph receives the full IntakeResult as the only external input to Layer 2.
     intake_result: IntakeResult
 
 
 class Layer2GraphState(Layer2GraphInput, total=False):
+    # During execution the graph extends the input wrapper with the evolving TaskState.
     task_state: TaskState
 
 
 class Layer2GraphOutput(TypedDict):
+    # The current graph returns the bootstrap state only.
     task_state: TaskState
 
 
 def build_runtime_graph(*, checkpointer: Any | None = None):
+    # Wire the minimal bootstrap graph and compile it into an executable LangGraph.
     # Build the current compact Layer 2 graph.
     # At this stage Layer 2 only performs the bootstrap handoff from IntakeResult to TaskState.
     builder = StateGraph(
@@ -54,18 +58,22 @@ def build_runtime_graph(*, checkpointer: Any | None = None):
 
 
 def _bootstrap_node(state: Layer2GraphInput) -> dict[str, TaskState]:
+    # Adapt the graph wrapper state to the domain-level bootstrap function.
     return {"task_state": bootstrap_from_intake(state["intake_result"])}
 
 
 def _finalize_bootstrap_node(state: Layer2GraphState) -> dict[str, TaskState]:
+    # Close the bootstrap phase using a copied TaskState so node updates stay explicit.
     return {"task_state": finalize_bootstrap(_copy_task_state(state["task_state"]))}
 
 
 def _copy_task_state(task_state: TaskState) -> TaskState:
+    # Keep graph-side transformations explicit by copying domain state before reuse.
     return deepcopy(task_state)
 
 
 def _build_default_checkpointer() -> MemorySaver:
+    # Register the custom runtime models so in-memory checkpointing can serialize them safely.
     serializer = JsonPlusSerializer(
         allowed_msgpack_modules=[
             ExecutionPolicy,

@@ -9,6 +9,7 @@ from .state import RuntimeState, StepRecord, TaskState
 # At this stage the runtime is intentionally limited to the intake handoff
 # and bootstrap into TaskState.
 def bootstrap_from_intake(intake_result: IntakeResult) -> TaskState:
+    # Build the first TaskState and record that the bootstrap node executed.
     # Convert the canonical Layer 1 payload into the first Layer 2 state.
     state = TaskState.from_intake(intake_result)
     state.step_history.append(
@@ -23,6 +24,7 @@ def bootstrap_from_intake(intake_result: IntakeResult) -> TaskState:
 
 
 def finalize_bootstrap(state: TaskState) -> TaskState:
+    # Mark the bootstrap handoff as complete without introducing any new runtime logic.
     # The current graph stops immediately after bootstrap, so this helper
     # simply marks the state as having completed the bootstrap handoff.
     next_state = TaskState(

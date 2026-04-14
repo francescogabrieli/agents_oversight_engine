@@ -31,6 +31,7 @@ class PolicyProfile:
 
 
 class TaskSpecParserPort(Protocol):
+    # This port isolates the intake service from the concrete parsing implementation.
     @property
     def parser_name(self) -> str: ...
 
@@ -41,6 +42,7 @@ class TaskSpecParserPort(Protocol):
 
 
 class ExecutionPolicyRepositoryPort(Protocol):
+    # This port isolates policy lookup from storage and configuration format details.
     def get_policy_profile(
         self,
         *,
@@ -51,10 +53,12 @@ class ExecutionPolicyRepositoryPort(Protocol):
 
 
 class ClockPort(Protocol):
+    # This port makes timestamps deterministic in tests.
     def now(self) -> datetime: ...
 
 
 class InputFingerprintPort(Protocol):
+    # This port keeps fingerprint generation replaceable and testable.
     def fingerprint(self, raw_text: str) -> str: ...
 
 # Input command for the intake service, representing the raw user input and optional hints for parsing and policy resolution.
@@ -68,6 +72,7 @@ class IntakeCommand(BaseModel):
     @field_validator("raw_task_text", mode="before")
     @classmethod
     def validate_raw_task_text(cls, value: object) -> str:
+        # The intake flow starts from raw_task_text, so it must always be non-empty.
         if not isinstance(value, str):
             raise TypeError("raw_task_text must be a string.")
         cleaned = " ".join(value.strip().split())
@@ -78,6 +83,7 @@ class IntakeCommand(BaseModel):
     @field_validator("context_hint", "policy_profile", mode="before")
     @classmethod
     def normalize_optional_text_fields(cls, value: object) -> str | None:
+        # Optional textual inputs are normalized so service logic can stay simple.
         if value is None:
             return None
         if not isinstance(value, str):
@@ -87,7 +93,9 @@ class IntakeCommand(BaseModel):
 
 # Normalizes IntakeCommand's fields
 class InputNormalizer:
+    # This helper centralizes command normalization before parsing and policy resolution.
     def normalize(self, command: IntakeCommand) -> IntakeCommand:
+        # Return a normalized copy so the original command remains untouched.
         return command.model_copy(
             update={
                 "raw_task_text": self._normalize_optional_text(command.raw_task_text) or "",
@@ -98,6 +106,7 @@ class InputNormalizer:
 
     @staticmethod
     def _normalize_optional_text(value: str | None) -> str | None:
+        # Collapse whitespace and convert empty strings into null-like values.
         if value is None:
             return None
         cleaned = " ".join(value.strip().split())
@@ -113,18 +122,22 @@ class TaskSpecBuildResult:
 
 # Calls the parser and collect warnings or missing information
 class TaskSpecBuilder:
+    # This component wraps the parser and turns parser output into a richer build result.
     def __init__(self, parser: TaskSpecParserPort) -> None:
         self._parser = parser
 
     @property
     def parser_name(self) -> str:
+        # Expose parser metadata so it can be copied into IntakeMetadata.
         return self._parser.parser_name
 
     @property
     def prompt_version(self) -> str:
+        # Expose parser prompt version for traceability.
         return self._parser.prompt_version
 
     def build(self, command: IntakeCommand) -> TaskSpecBuildResult:
+        # Parse the request and derive warnings plus missing information in one place.
         task_spec = self._parser.parse(
             raw_task_text=command.raw_task_text,
             context_hint=command.context_hint,
@@ -166,6 +179,7 @@ class TaskSpecBuilder:
         task_spec: TaskSpec,
         missing_information: list[str],
     ) -> ParseStatus:
+        # Sensitive or broadly incomplete tasks are escalated above a simple PARTIAL state.
         if not missing_information:
             return ParseStatus.COMPLETE
 
@@ -185,6 +199,7 @@ class TaskSpecBuilder:
 
 
 class PolicyResolver:
+    # This component converts repository policy data into the canonical ExecutionPolicy model.
     def __init__(self, repository: ExecutionPolicyRepositoryPort) -> None:
         self._repository = repository
 
@@ -194,6 +209,7 @@ class PolicyResolver:
         task_spec: TaskSpec,
         profile_name: str | None = None,
     ) -> ExecutionPolicy:
+        # Policy selection is system-controlled and based on task attributes plus optional profile.
         profile = self._repository.get_policy_profile(
             profile_name=profile_name,
             domain_type=task_spec.domain_type,
@@ -214,12 +230,14 @@ class PolicyResolver:
 
 # Checks for coherence between task and metadata
 class IntakeResultValidator:
+    # This validator enforces coherence after task parsing and policy attachment.
     def validate(
         self,
         *,
         structured_task: StructuredTask,
         metadata: IntakeMetadata,
     ) -> IntakeResult:
+        # Normalize derived warnings and parse status one last time before returning the payload.
         warnings = list(metadata.warnings)
         missing_information = list(metadata.missing_information)
         parse_status = metadata.parse_status
@@ -254,6 +272,7 @@ class IntakeResultValidator:
 
 # Intake service orchestrating the intake process, from normalization to parsing, policy resolution, and validation.
 class IntakeService:
+    # This service is the orchestration entrypoint of Layer 1.
     def __init__(
         self,
         *,
@@ -275,9 +294,11 @@ class IntakeService:
 
     @property
     def schema_version(self) -> str:
+        # Expose schema version so callers can reuse it when building traces.
         return self._schema_version
 
     def execute(self, command: IntakeCommand) -> IntakeResult:
+        # Run the full Layer 1 flow and return one canonical IntakeResult.
         normalized_command = self._normalizer.normalize(command)
         build_result = self._task_spec_builder.build(normalized_command)
         execution_policy = self._policy_resolver.resolve(
