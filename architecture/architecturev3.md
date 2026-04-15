@@ -149,6 +149,53 @@ Nodi principali:
 - `finalize`
 - `abort`
 
+Ruolo dei nodi principali:
+- `bootstrap_from_intake`: inizializza il `TaskState` a partire dall'`IntakeResult`
+- `planner`: componente deliberativa che decide il prossimo passo o il prossimo mini-piano
+- `actor`: componente esecutiva principale dell'agente, che trasforma un passo pianificato in un'azione concreta
+- `tool_gateway`: punto di accesso controllato verso il `Tool Bus` e le capacità esterne
+- `observe_tool_result`: osserva gli effetti dell'azione eseguita e li converte in evidenze
+- `replanner`: aggiorna il piano quando servono correzioni, nuove evidenze o adattamento della traiettoria
+- `finalize`: chiude il task in stato `completed`
+- `abort`: chiude il task in stato `aborted`
+
+#### Ruolo di `actor`
+
+`actor` è la principale componente esecutiva dell'`Agent Core` del Layer 2.
+
+In termini concettuali:
+- `planner` decide **cosa fare dopo**
+- `actor` esegue **ciò che è stato deciso**
+
+Responsabilità principali di `actor`:
+- prendere in input l'azione o il passo proposto dal `planner`
+- eseguire il reasoning operativo necessario per quel passo
+- effettuare eventuali `call_llm` necessarie alla produzione dell'output intermedio o finale
+- invocare strumenti esterni quando l'azione richiede accesso a tool o servizi
+- produrre un risultato operativo che possa poi essere osservato e trasformato in evidenza
+
+Relazione con gli altri nodi:
+- `actor` non decide in autonomia se un'azione è permessa: questa responsabilità rimane al blocco di governance
+- `actor` non accede direttamente ai tool in modo incontrollato: quando servono strumenti esterni passa attraverso `tool_gateway`
+- `actor` non chiude da solo il ciclo: il risultato della sua esecuzione viene passato a `observe_tool_result`, che aggiorna evidenze e stato
+
+In altre parole:
+- `planner` è la parte deliberativa dell'agente
+- `actor` è la parte esecutiva dell'agente
+- `governance` e `HITL` sono il sistema di controllo che supervisiona l'agente
+
+Questo significa che la principale entità agentica del Layer 2 non coincide con un singolo nodo isolato, ma con il loop operativo:
+
+`planner -> actor -> observe_tool_result -> replanner`
+
+All'interno di questo loop:
+- `planner` formula il passo successivo
+- `actor` lo realizza
+- `observe_tool_result` registra ciò che è successo
+- `replanner` adatta la traiettoria se necessario
+
+Il nodo `actor` è quindi il punto in cui l'intenzione del sistema diventa comportamento operativo reale.
+
 Stati minimi del task:
 - `planning`
 - `acting`
