@@ -89,9 +89,14 @@ Rules:
 - Do not emit executable tool calls.
 - Do not mention concrete tool names, URLs, function names, query strings, API inputs, shell commands, or payloads.
 - Describe what should be achieved next, not how to invoke external capabilities.
+- The plan must be aligned with the specific nature of the task, not with a generic research workflow.
+- Do not default to evidence collection, extraction, synthesis, and presentation unless that structure is actually appropriate for the task.
+- Adapt the plan to the task domain, constraints, success criteria, and intended output.
 - Produce all materially relevant semantic steps needed to complete the task.
 - Keep the plan concise, but complete.
 - Keep steps concise and operationally meaningful.
+- Prefer direct task steps over meta-steps about formatting, structuring, or validating the answer unless those are materially necessary to complete the task well.
+- Avoid over-decomposing the task into artificial sub-steps when one clear semantic step is enough.
 - For research or analysis tasks, prefer evidence collection before synthesis.
 - Respect read_only_mode when it is true.
 - Do not include human review as a normal plan step.

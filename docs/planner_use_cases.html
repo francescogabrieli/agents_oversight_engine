@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Use Case del Planner</title>
+  <style>
+    :root {
+      --bg: #f4f6f8;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #5b6472;
+      --border: #d9e1e8;
+      --accent: #1f5da8;
+      --accent-soft: #edf4fb;
+      --shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", Calibri, Arial, sans-serif;
+    }
+
+    .page {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 20px 44px;
+    }
+
+    .hero,
+    .panel,
+    .content {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      padding: 28px;
+      margin-bottom: 20px;
+    }
+
+    .eyebrow {
+      display: inline-block;
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      font-family: Cambria, Georgia, "Times New Roman", serif;
+    }
+
+    h1 {
+      margin-bottom: 12px;
+      font-size: 38px;
+      line-height: 1.15;
+    }
+
+    h2 {
+      margin-bottom: 12px;
+      font-size: 28px;
+    }
+
+    h3 {
+      margin-bottom: 10px;
+      font-size: 20px;
+    }
+
+    p,
+    li {
+      color: var(--muted);
+      line-height: 1.65;
+    }
+
+    .hero p {
+      max-width: 78ch;
+      margin: 0 0 12px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 20px;
+    }
+
+    .panel,
+    .content {
+      padding: 22px;
+    }
+
+    .panel p {
+      margin-top: 0;
+      margin-bottom: 14px;
+    }
+
+    .case-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .case-button {
+      width: 100%;
+      padding: 14px 15px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: #ffffff;
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+      transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+    }
+
+    .case-button:hover,
+    .case-button:focus-visible {
+      border-color: #9eb9d8;
+      background: #fafcff;
+      outline: none;
+      transform: translateY(-1px);
+    }
+
+    .case-button.active {
+      border-color: #8bb1d8;
+      background: var(--accent-soft);
+    }
+
+    .case-button strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 16px;
+      color: var(--text);
+    }
+
+    .case-button span {
+      display: block;
+      color: var(--muted);
+      line-height: 1.5;
+      font-size: 14px;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: #f8fafc;
+      color: #334155;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .sections {
+      display: grid;
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    .section-box {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px;
+      background: #fcfdff;
+    }
+
+    .section-box p {
+      margin: 0;
+    }
+
+    .steps {
+      display: grid;
+      gap: 12px;
+    }
+
+    .step {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 14px 16px;
+      background: #ffffff;
+    }
+
+    .step-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .step-number {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: var(--accent);
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 700;
+      flex: 0 0 auto;
+    }
+
+    .step-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.45;
+    }
+
+    .step p {
+      margin: 0 0 8px;
+    }
+
+    .step small {
+      color: #465364;
+      line-height: 1.55;
+    }
+
+    .summary {
+      padding: 16px 18px;
+      border-left: 4px solid #9ab9dd;
+      border-radius: 0 12px 12px 0;
+      background: #f7fbff;
+      color: #364152;
+      line-height: 1.65;
+    }
+
+    @media (max-width: 920px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      h1 {
+        font-size: 32px;
+      }
+
+      .page {
+        padding: 20px 14px 32px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="hero">
+      <span class="eyebrow">Layer 2 Planner</span>
+      <h1>Tre esempi semplici per mostrare come pianifica il sistema</h1>
+      <p>
+        Questa pagina riassume tre casi reali usati per provare il nuovo nodo
+        <code>planner</code> di Layer 2.
+      </p>
+      <p>
+        L'obiettivo è mostrare una cosa molto semplice: il sistema non costruisce sempre
+        lo stesso piano, ma adatta i passaggi al tipo di task richiesto.
+      </p>
+      <p>
+        Il planner non esegue ancora le azioni concrete. Per ora produce solo il piano di
+        lavoro, cioè la sequenza dei passi che il sistema dovrebbe seguire.
+      </p>
+    </header>
+
+    <section class="layout">
+      <aside class="panel">
+        <h2>Seleziona il caso</h2>
+        <p>
+          Ogni esempio mostra un task diverso e il relativo piano generato dal sistema.
+        </p>
+        <div class="case-list" id="case-list">
+          <button class="case-button active" type="button" data-case="research">
+            <strong>1. Ricerca</strong>
+            <span>Fonti ufficiali UE sul Digital Markets Act e breve sintesi.</span>
+          </button>
+          <button class="case-button" type="button" data-case="analysis">
+            <strong>2. Analisi</strong>
+            <span>Principali difficoltà di conformità per le piattaforme molto grandi.</span>
+          </button>
+          <button class="case-button" type="button" data-case="communication">
+            <strong>3. Comunicazione esterna</strong>
+            <span>Bozza di email professionale a un fornitore.</span>
+          </button>
+        </div>
+      </aside>
+
+      <main class="content" id="content" aria-live="polite">
+        <div class="meta" id="meta"></div>
+        <h2 id="title"></h2>
+        <p id="intro"></p>
+
+        <div class="sections">
+          <section class="section-box">
+            <h3>Perché questo caso è utile</h3>
+            <p id="why"></p>
+          </section>
+
+          <section class="section-box">
+            <h3>Piano generato</h3>
+            <p style="margin: 0 0 14px;">
+              I passaggi sono mostrati in ordine logico. In questa vista hanno tutti lo stesso peso visivo.
+            </p>
+            <div class="steps" id="steps"></div>
+          </section>
+
+          <section class="section-box">
+            <h3>Messaggio chiave</h3>
+            <div class="summary" id="summary"></div>
+          </section>
+        </div>
+      </main>
+    </section>
+  </div>
+
+  <script>
+    const cases = {
+      research: {
+        title: "Caso 1: ricerca su fonti ufficiali UE",
+        intro:
+          "Il task chiede di trovare fonti ufficiali sul Digital Markets Act e di produrre una sintesi breve. In questo caso è corretto che il piano parta dalle fonti.",
+        why:
+          "Questo esempio serve come caso base. Qui ci aspettiamo un piano orientato alla raccolta di informazioni, perché il task richiede esplicitamente fonti ufficiali e una sintesi finale.",
+        badges: ["Task: ricerca", "Output: fonti + sintesi", "Comportamento atteso: evidence-first"],
+        steps: [
+          {
+            current: true,
+            title: "Individuare le fonti ufficiali UE più autorevoli sul DMA.",
+            rationale:
+              "È il punto di partenza corretto, perché il task richiede fonti ufficiali e non contenuti secondari.",
+            outcome:
+              "Una piccola lista di fonti affidabili, come Commissione europea e testo normativo ufficiale."
+          },
+          {
+            current: false,
+            title: "Estrarre i fatti principali da ogni fonte.",
+            rationale:
+              "La sintesi deve basarsi su contenuti concreti e verificabili.",
+            outcome:
+              "Un insieme compatto di informazioni chiave sul DMA."
+          },
+          {
+            current: false,
+            title: "Mettere insieme le informazioni in una sintesi coerente.",
+            rationale:
+              "Le fonti ufficiali possono mettere l'accento su aspetti diversi; serve una sintesi unica.",
+            outcome:
+              "Una spiegazione breve, corretta e coerente."
+          },
+          {
+            current: false,
+            title: "Presentare le fonti e la sintesi finale.",
+            rationale:
+              "L'utente ha chiesto sia le fonti sia il riassunto finale.",
+            outcome:
+              "Una risposta breve, leggibile e subito utilizzabile."
+          }
+        ],
+        summary:
+          "In questo caso il piano segue una logica di ricerca classica, ed è giusto così. La cosa importante è che il sistema usa questo schema solo quando il task lo richiede davvero."
+      },
+      analysis: {
+        title: "Caso 2: analisi delle difficoltà di conformità",
+        intro:
+          "Il task non chiede semplicemente di trovare fonti, ma di ragionare sulle principali difficoltà di conformità per le piattaforme molto grandi.",
+        why:
+          "Questo esempio è utile perché mostra che il planner non si limita a ripetere il modello 'trova fonti, estrai fatti, sintetizza'. Qui costruisce un piano più interpretativo.",
+        badges: ["Task: analisi", "Output: valutazione ragionata", "Comportamento atteso: piano analitico"],
+        steps: [
+          {
+            current: true,
+            title: "Identificare le aree del DMA più rilevanti per l'onere di conformità.",
+            rationale:
+              "L'analisi deve concentrarsi sugli aspetti più importanti, non su un elenco completo di tutte le regole.",
+            outcome:
+              "Un piccolo gruppo di aree critiche su cui costruire il ragionamento."
+          },
+          {
+            current: false,
+            title: "Collegare ogni area ai problemi pratici che può generare.",
+            rationale:
+              "Il task riguarda le difficoltà di conformità, quindi bisogna trasformare le regole in problemi operativi concreti.",
+            outcome:
+              "Una lista chiara dei principali ostacoli pratici."
+          },
+          {
+            current: false,
+            title: "Mantenere l'analisi allineata al linguaggio e alla logica ufficiale UE.",
+            rationale:
+              "Questo rende l'analisi più corretta e più credibile.",
+            outcome:
+              "Un'analisi breve ma ben ancorata al quadro ufficiale."
+          },
+          {
+            current: false,
+            title: "Aggiungere le implicazioni pratiche più importanti.",
+            rationale:
+              "L'utente ha chiesto un'analisi utile e concreta, non solo teorica.",
+            outcome:
+              "Una lettura breve delle conseguenze operative principali."
+          },
+          {
+            current: false,
+            title: "Organizzare i risultati in una struttura finale breve e leggibile.",
+            rationale:
+              "Il risultato finale deve essere chiaro anche senza dettagli tecnici eccessivi.",
+            outcome:
+              "Un'analisi compatta e facile da leggere."
+          }
+        ],
+        summary:
+          "Qui il planner cambia comportamento: non parte dalla ricerca documentale come schema fisso, ma costruisce un percorso più adatto a un task di analisi."
+      },
+      communication: {
+        title: "Caso 3: bozza di email professionale",
+        intro:
+          "Il task chiede di scrivere una prima email a un fornitore per chiedere disponibilità a un incontro la settimana successiva.",
+        why:
+          "Questo esempio è importante perché mostra un caso molto diverso dai precedenti. Qui il risultato atteso è un testo da scrivere, non una ricerca o un'analisi.",
+        badges: ["Task: comunicazione esterna", "Output: bozza email", "Comportamento atteso: drafting diretto"],
+        steps: [
+          {
+            current: true,
+            title: "Scrivere una prima bozza dell'email.",
+            rationale:
+              "Il risultato centrale è l'email stessa, quindi è corretto partire subito dalla bozza.",
+            outcome:
+              "Un testo completo, professionale e orientato alla richiesta di disponibilità."
+          },
+          {
+            current: false,
+            title: "Rendere il testo più breve, chiaro e cortese.",
+            rationale:
+              "La mail deve essere adatta a un primo contatto, quindi tono e sintesi contano molto.",
+            outcome:
+              "Un messaggio più pulito e professionale."
+          },
+          {
+            current: false,
+            title: "Controllare che la bozza rispetti i vincoli del task.",
+            rationale:
+              "Serve verificare che l'email sia pronta, chiara e coerente con la richiesta iniziale.",
+            outcome:
+              "Una versione finale pronta da usare."
+          }
+        ],
+        summary:
+          "Questo caso conferma che il planner non tratta tutto come una ricerca. Va direttamente verso la produzione della bozza, che è il risultato giusto per questo tipo di task."
+      }
+    };
+
+    const listNode = document.getElementById("case-list");
+    const metaNode = document.getElementById("meta");
+    const titleNode = document.getElementById("title");
+    const introNode = document.getElementById("intro");
+    const whyNode = document.getElementById("why");
+    const stepsNode = document.getElementById("steps");
+    const summaryNode = document.getElementById("summary");
+
+    function renderCase(key) {
+      const data = cases[key];
+      if (!data) return;
+
+      document.querySelectorAll(".case-button").forEach((button) => {
+        button.classList.toggle("active", button.dataset.case === key);
+      });
+
+      metaNode.innerHTML = data.badges
+        .map((badge) => `<span class="badge">${badge}</span>`)
+        .join("");
+
+      titleNode.textContent = data.title;
+      introNode.textContent = data.intro;
+      whyNode.textContent = data.why;
+      summaryNode.textContent = data.summary;
+
+      stepsNode.innerHTML = data.steps
+        .map((step, index) => `
+          <article class="step">
+            <div class="step-head">
+              <div class="step-number">${index + 1}</div>
+              <div class="step-title">${step.title}</div>
+            </div>
+            <p><strong>Perché:</strong> ${step.rationale}</p>
+            <small><strong>Risultato atteso:</strong> ${step.outcome}</small>
+          </article>
+        `)
+        .join("");
+    }
+
+    listNode.addEventListener("click", (event) => {
+      const button = event.target.closest(".case-button");
+      if (!button) return;
+      renderCase(button.dataset.case);
+    });
+
+    renderCase("research");
+  </script>
+</body>
+</html>
