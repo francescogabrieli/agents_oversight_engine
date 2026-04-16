@@ -25,6 +25,8 @@ from layer1_intake import (
 )
 from layer1_intake.infrastructure import build_intake_service
 from layer2_runtime_governance import build_runtime_graph
+from layer2_runtime_governance.planning import PlannerPort
+
 
 
 class IntakeExecutorPort(Protocol):
@@ -40,11 +42,11 @@ def run_layer2_flow(
     thread_id: str | None = None,
     demo_intake_profile: str | None = None,
     intake_service: IntakeExecutorPort | None = None,
+    planner_service: PlannerPort | None = None,
 ) -> dict[str, Any]:
-    # Run Layer 1 plus the minimal Layer 2 bootstrap graph and return the resulting trace.
-    # This is the linear entrypoint for local demos and debugging.
-    # It runs Layer 1 intake and invokes the current Layer 2 bootstrap graph.
-    runtime_graph = build_runtime_graph()
+    # Run Layer 1 plus the current Layer 2 graph and return the resulting trace.
+    runtime_graph = build_runtime_graph(planner_service=planner_service)
+
     resolved_thread_id = thread_id or f"layer2-{uuid4()}"
     config = {"configurable": {"thread_id": resolved_thread_id}}
 
@@ -83,7 +85,6 @@ def run_layer2_flow(
 
 def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
     # Reduce the raw trace to the parts that matter for bootstrap inspection.
-    # Convert the raw trace into a compact terminal-friendly summary.
     intake_result = trace["intake_result"]
     final_result = trace["final_result"]
     final_task_state = final_result.get("task_state")
@@ -100,6 +101,34 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
             "parse_status": intake_result.metadata.parse_status.value,
             "read_only_mode": intake_result.structured_task.execution_policy.read_only_mode,
         },
+        "planning_snapshot": {
+            "plan_step_count": len(final_task_state.plan_steps) if final_task_state else 0,
+            "current_plan_step": (
+                final_task_state.current_plan_step.objective
+                if final_task_state is not None and final_task_state.current_plan_step is not None
+                else None
+            ),
+            "planner_name": (
+                final_task_state.planner_name if final_task_state is not None else None
+            ),
+            "planner_prompt_version": (
+                final_task_state.planner_prompt_version if final_task_state is not None else None
+            ),
+            "plan_steps": (
+                [
+                    {
+                        "step_id": step.step_id,
+                        "objective": step.objective,
+                        "rationale": step.rationale,
+                        "expected_outcome": step.expected_outcome,
+                        "status": step.status.value,
+                    }
+                    for step in final_task_state.plan_steps
+                ]
+                if final_task_state is not None
+                else []
+            ),
+        },
         "bootstrap_state": {
             "current_state": (
                 final_task_state.current_state.value if final_task_state is not None else None
@@ -115,6 +144,7 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
             ),
         },
     }
+
 
 
 def to_jsonable(value: Any) -> Any:
@@ -157,6 +187,7 @@ def print_layer2_summary(trace: dict[str, Any]) -> None:
     compact_trace = build_compact_trace(trace)
     _print_section("RUNTIME", compact_trace["runtime"])
     _print_section("INTAKE SUMMARY", compact_trace["intake_summary"])
+    _print_section("PLANNING SNAPSHOT", compact_trace["planning_snapshot"])
     _print_section("BOOTSTRAP STATE", compact_trace["bootstrap_state"])
 
 
@@ -167,9 +198,11 @@ def print_layer2_trace(trace: dict[str, Any]) -> None:
 
 
 def parse_cli_args() -> argparse.Namespace:
-    # Parse CLI arguments for the current bootstrap-only Layer 2 runner.
-    # CLI entrypoint used for local execution of the Layer 2 bootstrap flow.
-    parser = argparse.ArgumentParser(description="Run the current Layer 2 bootstrap flow.")
+    # Parse CLI arguments for the current bootstrap-plus-planner Layer 2 runner.
+    # CLI entrypoint used for local execution of the current Layer 2 slice.
+    parser = argparse.ArgumentParser(
+        description="Run the current Layer 2 bootstrap plus planner flow."
+    )
     parser.add_argument(
         "--task",
         default=(
@@ -267,7 +300,7 @@ def _build_demo_intake_result(
 
 
 def main() -> None:
-    # Run the bootstrap-only Layer 2 flow from the command line.
+    # Run the current Layer 2 slice from the command line.
     # Run the Layer 2 demo flow from the command line.
     args = parse_cli_args()
     trace = run_layer2_flow(

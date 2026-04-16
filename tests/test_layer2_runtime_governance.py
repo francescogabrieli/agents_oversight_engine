@@ -23,14 +23,48 @@ from layer1_intake import (
     StructuredTask,
     TaskSpec,
 )
-from layer2_runtime_governance import RuntimeFlag, RuntimeState, build_runtime_graph
+from layer2_runtime_governance import (
+    PlanStep,
+    PlanStepStatus,
+    PlannerDecision,
+    RuntimeFlag,
+    RuntimeState,
+    build_runtime_graph,
+)
+
+
+class StubPlanner:
+    planner_name = "stub_planner"
+    prompt_version = "stub_v1"
+
+    # Return a stable semantic mini-plan so tests never depend on network calls.
+    def plan(self, *, task_state):
+        return PlannerDecision(
+            plan_steps=[
+                PlanStep(
+                    step_id="step_1",
+                    objective="Collect the minimum official evidence needed for the task.",
+                    rationale="Research tasks should begin from documentary grounding.",
+                    expected_outcome="A compact evidence base relevant to the goal.",
+                ),
+                PlanStep(
+                    step_id="step_2",
+                    objective="Synthesize the grounded result.",
+                    rationale="The runtime should synthesize only after evidence collection.",
+                    expected_outcome="A concise grounded output.",
+                ),
+            ],
+            rationale="The stub planner selected a short evidence-first trajectory.",
+            planner_name=self.planner_name,
+            prompt_version=self.prompt_version,
+        )
 
 
 class Layer2RuntimeGraphTests(unittest.TestCase):
-    # These tests verify the bootstrap-only Layer 2 graph behavior.
+    # These tests verify the bootstrap-plus-planner Layer 2 graph behavior.
     def test_complete_intake_bootstraps_to_planning(self) -> None:
         # A complete intake should bootstrap into the planning state with no extra flags.
-        graph = build_runtime_graph()
+        graph = build_runtime_graph(planner_service=StubPlanner())
         result = graph.invoke(
             {"intake_result": _build_research_intake_result()},
             config={"configurable": {"thread_id": "layer2-bootstrap-complete"}},
@@ -39,14 +73,26 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         task_state = result["task_state"]
         self.assertEqual(task_state.current_state, RuntimeState.PLANNING)
         self.assertTrue(task_state.bootstrap_completed)
-        self.assertEqual(len(task_state.step_history), 2)
-        self.assertEqual(task_state.step_history[0].node_name, "bootstrap_from_intake")
-        self.assertEqual(task_state.step_history[1].node_name, "finalize_bootstrap")
+        self.assertEqual(len(task_state.step_history), 3)
+        self.assertEqual(
+            [step.node_name for step in task_state.step_history],
+            ["bootstrap_from_intake", "planner", "finalize_bootstrap"],
+        )
         self.assertEqual(task_state.runtime_flags, [])
+        self.assertEqual(len(task_state.plan_steps), 2)
+        self.assertEqual(task_state.current_plan_step_index, 0)
+        self.assertEqual(
+            task_state.current_plan_step.objective,
+            "Collect the minimum official evidence needed for the task.",
+        )
+        self.assertEqual(task_state.current_plan_step.status, PlanStepStatus.IN_PROGRESS)
+        self.assertEqual(task_state.planner_name, "stub_planner")
+        self.assertEqual(task_state.planner_prompt_version, "stub_v1")
+        self.assertIsNotNone(task_state.planner_rationale)
 
     def test_needs_clarification_bootstraps_to_waiting_human_review(self) -> None:
         # A clarification-required intake should bootstrap into waiting_human_review.
-        graph = build_runtime_graph()
+        graph = build_runtime_graph(planner_service=StubPlanner())
         result = graph.invoke(
             {"intake_result": _build_clarification_intake_result()},
             config={"configurable": {"thread_id": "layer2-bootstrap-clarification"}},
@@ -58,6 +104,13 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertIn(RuntimeFlag.CLARIFICATION_REQUIRED, task_state.runtime_flags)
         self.assertIn(RuntimeFlag.HIGH_SENSITIVITY, task_state.runtime_flags)
         self.assertEqual(task_state.step_history[0].runtime_state, RuntimeState.WAITING_HUMAN_REVIEW)
+        self.assertEqual(
+            [step.node_name for step in task_state.step_history],
+            ["bootstrap_from_intake", "planner", "finalize_bootstrap"],
+        )
+        self.assertEqual(task_state.plan_steps, [])
+        self.assertIsNone(task_state.current_plan_step_index)
+        self.assertIsNone(task_state.planner_rationale)
 
 
 def _build_research_intake_result() -> IntakeResult:

@@ -13,8 +13,8 @@ from layer1_intake import (
 )
 
 
-# Layer 2 currently starts and stops at bootstrap.
-# This file only keeps the state required to model the Layer 1 -> Layer 2 handoff.
+# Layer 2 currently covers bootstrap plus the first planner snapshot.
+# This file keeps the canonical runtime state shared by the graph nodes.
 class RuntimeState(str, Enum):
     PLANNING = "planning"
     WAITING_HUMAN_REVIEW = "waiting_human_review"
@@ -28,9 +28,16 @@ class RuntimeFlag(str, Enum):
     HIGH_SENSITIVITY = "high_sensitivity"
 
 
+class PlanStepStatus(str, Enum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    BLOCKED = "blocked"
+
+
 @dataclass
 class StepRecord:
-    # This is the minimal audit entry recorded while Layer 2 performs bootstrap.
+    # This is the minimal audit entry recorded while Layer 2 performs runtime transitions.
     step_index: int
     runtime_state: RuntimeState
     node_name: str
@@ -38,19 +45,56 @@ class StepRecord:
 
 
 @dataclass
+class PlanStep:
+    # Planner output stays semantic so actor can later choose the concrete action.
+    step_id: str
+    objective: str
+    rationale: str
+    expected_outcome: str
+    status: PlanStepStatus = PlanStepStatus.PENDING
+
+
+@dataclass
+class PlannerDecision:
+    # The planner returns a typed semantic planning snapshot plus traceability metadata.
+    plan_steps: list[PlanStep]
+    rationale: str
+    planner_name: str
+    prompt_version: str
+
+
+@dataclass
 class TaskState:
-    # Direct handoff from Layer 1
+    # Direct handoff from Layer 1.
     intake_payload: IntakeResult
     task_spec: TaskSpec
     execution_policy: ExecutionPolicy
     intake_metadata: IntakeMetadata
 
-    # Bootstrap outcome
+    # Bootstrap outcome.
     current_state: RuntimeState
     step_index: int = 0
     step_history: list[StepRecord] = field(default_factory=list)
     runtime_flags: list[RuntimeFlag] = field(default_factory=list)
     bootstrap_completed: bool = False
+
+    # Planner snapshot.
+    plan_steps: list[PlanStep] = field(default_factory=list)
+    current_plan_step_index: int | None = None
+    planner_rationale: str | None = None
+    planner_name: str | None = None
+    planner_prompt_version: str | None = None
+
+    @property
+    def current_plan_step(self) -> PlanStep | None:
+        # Expose the current semantic step without duplicating selection logic across nodes.
+        if self.current_plan_step_index is None:
+            return None
+
+        if 0 <= self.current_plan_step_index < len(self.plan_steps):
+            return self.plan_steps[self.current_plan_step_index]
+
+        return None
 
     @classmethod
     def from_intake(cls, intake_result: IntakeResult) -> "TaskState":
@@ -89,6 +133,9 @@ class TaskState:
 
 
 __all__ = [
+    "PlanStep",
+    "PlanStepStatus",
+    "PlannerDecision",
     "RuntimeFlag",
     "RuntimeState",
     "StepRecord",

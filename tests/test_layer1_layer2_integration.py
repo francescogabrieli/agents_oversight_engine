@@ -28,7 +28,12 @@ from layer1_intake.service import (
     PolicyResolver,
     TaskSpecBuilder,
 )
-from layer2_runtime_governance import RuntimeFlag, RuntimeState
+from layer2_runtime_governance import (
+    PlanStep,
+    PlannerDecision,
+    RuntimeFlag,
+    RuntimeState,
+)
 from main_layer2 import run_layer2_flow
 
 
@@ -58,6 +63,33 @@ class FixedFingerprintService:
         return f"fp::{raw_text}"
 
 
+class StubPlanner:
+    planner_name = "stub_planner"
+    prompt_version = "stub_v1"
+
+    # Return a stable semantic planning decision for integration tests.
+    def plan(self, *, task_state):
+        return PlannerDecision(
+            plan_steps=[
+                PlanStep(
+                    step_id="step_1",
+                    objective="Collect reliable evidence aligned with the intake goal.",
+                    rationale="The first step should ground the task before synthesis.",
+                    expected_outcome="A compact reliable evidence base.",
+                ),
+                PlanStep(
+                    step_id="step_2",
+                    objective="Synthesize a grounded answer.",
+                    rationale="A synthesis step should follow evidence gathering.",
+                    expected_outcome="A concise grounded answer aligned with the goal.",
+                ),
+            ],
+            rationale="The stub planner selected an evidence-first semantic mini-plan.",
+            planner_name=self.planner_name,
+            prompt_version=self.prompt_version,
+        )
+
+
 class Layer1Layer2IntegrationTests(unittest.TestCase):
     # These tests validate the full handoff from IntakeService into the Layer 2 bootstrap graph.
     def test_research_task_bootstraps_end_to_end(self) -> None:
@@ -77,6 +109,7 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
                     success_criteria=["Produce a grounded short summary."],
                 )
             ),
+            planner_service=StubPlanner(),
         )
 
         intake_result = trace["intake_result"]
@@ -92,6 +125,16 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
         self.assertEqual(task_state.task_spec.goal, intake_result.structured_task.task_spec.goal)
         self.assertEqual(task_state.execution_policy, intake_result.structured_task.execution_policy)
         self.assertEqual(task_state.intake_metadata, intake_result.metadata)
+        self.assertEqual(
+            [step.node_name for step in task_state.step_history],
+            ["bootstrap_from_intake", "planner", "finalize_bootstrap"],
+        )
+        self.assertEqual(task_state.current_plan_step_index, 0)
+        self.assertEqual(
+            task_state.current_plan_step.objective,
+            "Collect reliable evidence aligned with the intake goal.",
+        )
+        self.assertEqual(task_state.planner_name, "stub_planner")
 
     def test_clarification_task_bootstraps_end_to_end(self) -> None:
         # A clarification-required task should surface the correct initial runtime state and flags.
@@ -110,6 +153,7 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
                     success_criteria=[],
                 )
             ),
+            planner_service=StubPlanner(),
         )
 
         intake_result = trace["intake_result"]
@@ -122,8 +166,10 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
         self.assertIn(RuntimeFlag.HIGH_SENSITIVITY, task_state.runtime_flags)
         self.assertEqual(
             [step.node_name for step in task_state.step_history],
-            ["bootstrap_from_intake", "finalize_bootstrap"],
+            ["bootstrap_from_intake", "planner", "finalize_bootstrap"],
         )
+        self.assertEqual(task_state.plan_steps, [])
+        self.assertIsNone(task_state.current_plan_step_index)
 
 
 def _build_intake_service(task_spec: TaskSpec) -> IntakeService:

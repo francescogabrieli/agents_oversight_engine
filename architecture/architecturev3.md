@@ -127,10 +127,11 @@ Questo macro-block è implementato principalmente come **nodi e subgraph LangGra
 
 Responsabilità principali:
 - inizializzare il `TaskState`
-- pianificare il passo successivo
+- pianificare la traiettoria operativa completa del task
 - proporre azioni operative
+- eseguire il task in autonomia finché resta entro i vincoli di governance
 - decidere se eseguire, limitare, ripianificare o fermare
-- attivare human review quando necessario
+- attivare human review solo quando necessario
 - chiudere il task con stato `completed` o `aborted`
 
 Componenti interni principali:
@@ -151,26 +152,49 @@ Nodi principali:
 
 Ruolo dei nodi principali:
 - `bootstrap_from_intake`: inizializza il `TaskState` a partire dall'`IntakeResult`
-- `planner`: componente deliberativa che decide il prossimo passo o il prossimo mini-piano
-- `actor`: componente esecutiva principale dell'agente, che trasforma un passo pianificato in un'azione concreta
+- `planner`: componente deliberativa che produce il piano semantico completo del task a partire dallo stato corrente
+- `actor`: componente esecutiva principale dell'agente, che trasforma il passo pianificato corrente in un'azione concreta o in una proposta operativa
 - `tool_gateway`: punto di accesso controllato verso il `Tool Bus` e le capacità esterne
 - `observe_tool_result`: osserva gli effetti dell'azione eseguita e li converte in evidenze
 - `replanner`: aggiorna il piano quando servono correzioni, nuove evidenze o adattamento della traiettoria
 - `finalize`: chiude il task in stato `completed`
 - `abort`: chiude il task in stato `aborted`
 
-#### Ruolo di `actor`
+#### Ruolo di `planner` e `actor`
+
+`planner` e `actor` appartengono alla stessa entità agentica del Layer 2, ma rimangono separati come responsabilità architetturali per mantenere il sistema spiegabile, governabile e adatto alla trajectory analysis.
+
+In termini concettuali:
+- `planner` decide **cosa ottenere dopo**
+- `actor` decide **come realizzare operativamente ciò che è stato deciso**
+
+Responsabilità principali di `planner`:
+- leggere goal, contesto, vincoli, stato corrente ed evidenze raccolte
+- produrre il piano semantico completo della traiettoria prevista del task
+- identificare il passo corrente del piano
+- esprimere il razionale sintetico della traiettoria proposta
+- non emettere direttamente la `tool_call` esecutiva concreta
+
+Output atteso di `planner`:
+- step semantici orientati all'obiettivo
+- eventuale indicazione di `read_only`, raccolta evidenze, chiarimento o sintesi finale
+- nessun dettaglio operativo di basso livello come nome tool obbligatorio, parametri completi o payload già eseguibile
+
+Questo confine è intenzionale:
+- `planner` definisce la `intended trajectory`
+- `actor` definisce la `executed trajectory`
+- `observe_tool_result` registra la `observed trajectory`
+
+Questa separazione rende leggibile l'analisi della traiettoria, perché permette di confrontare piano, azione effettiva ed esito osservato.
 
 `actor` è la principale componente esecutiva dell'`Agent Core` del Layer 2.
 
-In termini concettuali:
-- `planner` decide **cosa fare dopo**
-- `actor` esegue **ciò che è stato deciso**
-
 Responsabilità principali di `actor`:
-- prendere in input l'azione o il passo proposto dal `planner`
+- prendere in input il passo corrente o l'azione ad alto livello proposta dal `planner`
+- trasformare il passo pianificato in una proposta operativa concreta
 - eseguire il reasoning operativo necessario per quel passo
 - effettuare eventuali `call_llm` necessarie alla produzione dell'output intermedio o finale
+- decidere se per realizzare il passo serva un tool, una risposta intermedia, una richiesta di chiarimento o un output finale
 - invocare strumenti esterni quando l'azione richiede accesso a tool o servizi
 - produrre un risultato operativo che possa poi essere osservato e trasformato in evidenza
 
@@ -189,12 +213,15 @@ Questo significa che la principale entità agentica del Layer 2 non coincide con
 `planner -> actor -> observe_tool_result -> replanner`
 
 All'interno di questo loop:
-- `planner` formula il passo successivo
-- `actor` lo realizza
+- `planner` formula la traiettoria semantica completa prevista del task
+- `actor` ne realizza il passo corrente in forma operativa
 - `observe_tool_result` registra ciò che è successo
 - `replanner` adatta la traiettoria se necessario
 
 Il nodo `actor` è quindi il punto in cui l'intenzione del sistema diventa comportamento operativo reale.
+
+Il loop opera agenticamente in autonomia finché resta entro l'envelope consentito dalla governance.
+L'intervento umano non è parte del percorso normale di ogni step, ma una escalation selettiva.
 
 Stati minimi del task:
 - `planning`
@@ -208,12 +235,13 @@ Stati minimi del task:
 Informazioni minime del `TaskState`:
 - `intake_payload`
 - stato corrente
-- step corrente
+- `plan_steps`
+- `current_plan_step`
 - step history
 - evidenze raccolte
 - ultimo tool result
 - azione proposta
-- motivazione sintetica
+- motivazione sintetica del piano o dell'azione
 - output di governance
 - eventuale decisione umana
 
@@ -261,7 +289,7 @@ Componenti principali:
 - `decision_combiner_node`
 
 Ruolo:
-- trasformare una proposta operativa in una decisione di controllo spiegabile e tracciabile
+- osservare il motore agentico durante l'esecuzione e trasformare una proposta operativa o un esito rilevante in una decisione di controllo spiegabile e tracciabile
 
 #### Policy Engine
 
@@ -296,7 +324,8 @@ Score distinti:
 Ruolo:
 - evitare un unico `confidence_score`
 - separare qualità delle evidenze, rischio operativo e salute della traiettoria
-- supportare decisioni come `continue`, `replan` o `request_more_evidence`
+- supportare decisioni come `continue`, `replan`, `request_more_evidence` o escalation
+- non ogni degrado della traiettoria richiede automaticamente HITL: in molti casi il primo esito corretto è `replan`
 
 #### Judge
 
@@ -306,6 +335,7 @@ Ruolo:
 - intercettare problemi semantici
 - misurare drift rispetto al goal
 - rilevare incoerenza tra evidenze e azione proposta
+- rilevare situazioni in cui la traiettoria pianificata non è più coerente con ciò che il runtime sta realmente facendo
 
 #### HITL Gateway
 
@@ -317,6 +347,15 @@ L'interfaccia adottata è `LangGraph Studio / LangSmith Studio`, usata per:
 - gestire la pausa del grafo e la successiva ripresa operativa
 
 Il meccanismo HITL rimane comunque basato su `interrupt / resume` del runtime LangGraph.
+
+HITL non è un passaggio obbligatorio tra `planner` e `actor`.
+Il runtime opera normalmente in autonomia e l'intervento umano entra solo quando viene attivato da un trigger di oversight significativo.
+
+Trigger tipici di ingresso in HITL:
+- decisione `require_human_review` dal `policy_engine`
+- rischio operativo troppo alto o traiettoria degradata non risolvibile con semplice `replan`
+- incoerenza semantica forte rilevata dal `judge`
+- azione write-like o esternamente impattante che richiede revisione prima dell'esecuzione
 
 Azioni umane possibili:
 - `approve`

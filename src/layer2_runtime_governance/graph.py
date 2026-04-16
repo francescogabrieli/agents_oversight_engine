@@ -18,8 +18,17 @@ from layer1_intake import (
     TaskSpec,
 )
 
-from .nodes import bootstrap_from_intake, finalize_bootstrap
-from .state import RuntimeFlag, RuntimeState, StepRecord, TaskState
+from .nodes import bootstrap_from_intake, finalize_bootstrap, planner
+from .planning import PlannerPort, build_default_planner
+from .state import (
+    PlanStep,
+    PlanStepStatus,
+    PlannerDecision,
+    RuntimeFlag,
+    RuntimeState,
+    StepRecord,
+    TaskState,
+)
 
 
 class Layer2GraphInput(TypedDict):
@@ -33,14 +42,18 @@ class Layer2GraphState(Layer2GraphInput, total=False):
 
 
 class Layer2GraphOutput(TypedDict):
-    # The current graph returns the bootstrap state only.
+    # The current graph returns the bootstrap state plus the first planner snapshot.
     task_state: TaskState
 
 
-def build_runtime_graph(*, checkpointer: Any | None = None):
-    # Wire the minimal bootstrap graph and compile it into an executable LangGraph.
-    # Build the current compact Layer 2 graph.
-    # At this stage Layer 2 only performs the bootstrap handoff from IntakeResult to TaskState.
+def build_runtime_graph(
+    *,
+    checkpointer: Any | None = None,
+    planner_service: PlannerPort | None = None,
+):
+    # Wire the current compact Layer 2 graph and compile it into an executable LangGraph.
+    resolved_planner = planner_service or build_default_planner()
+
     builder = StateGraph(
         Layer2GraphState,
         input_schema=Layer2GraphInput,
@@ -48,10 +61,12 @@ def build_runtime_graph(*, checkpointer: Any | None = None):
     )
 
     builder.add_node("bootstrap_from_intake", _bootstrap_node)
+    builder.add_node("planner", _build_planner_node(resolved_planner))
     builder.add_node("finalize_bootstrap", _finalize_bootstrap_node)
 
     builder.add_edge(START, "bootstrap_from_intake")
-    builder.add_edge("bootstrap_from_intake", "finalize_bootstrap")
+    builder.add_edge("bootstrap_from_intake", "planner")
+    builder.add_edge("planner", "finalize_bootstrap")
     builder.add_edge("finalize_bootstrap", END)
 
     return builder.compile(checkpointer=checkpointer or _build_default_checkpointer())
@@ -62,8 +77,21 @@ def _bootstrap_node(state: Layer2GraphInput) -> dict[str, TaskState]:
     return {"task_state": bootstrap_from_intake(state["intake_result"])}
 
 
+def _build_planner_node(planner_service: PlannerPort):
+    # Close over the resolved planner so the graph can remain deterministic in tests.
+    def _planner_node(state: Layer2GraphState) -> dict[str, TaskState]:
+        return {
+            "task_state": planner(
+                _copy_task_state(state["task_state"]),
+                planner_service=planner_service,
+            )
+        }
+
+    return _planner_node
+
+
 def _finalize_bootstrap_node(state: Layer2GraphState) -> dict[str, TaskState]:
-    # Close the bootstrap phase using a copied TaskState so node updates stay explicit.
+    # Close the current Layer 2 slice using a copied TaskState so node updates stay explicit.
     return {"task_state": finalize_bootstrap(_copy_task_state(state["task_state"]))}
 
 
@@ -80,6 +108,9 @@ def _build_default_checkpointer() -> MemorySaver:
             IntakeMetadata,
             IntakeResult,
             ParseStatus,
+            PlanStep,
+            PlanStepStatus,
+            PlannerDecision,
             RuntimeFlag,
             RuntimeState,
             SensitivityLevel,
