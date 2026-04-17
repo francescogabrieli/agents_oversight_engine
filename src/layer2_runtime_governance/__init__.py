@@ -1,3 +1,11 @@
+from .actor_contract import (
+    ActorPlanStep,
+    ActorPort,
+    ActorResult,
+    ActorResultType,
+    ActorTask,
+    build_actor_task,
+)
 from .graph import (
     Layer2GraphInput,
     Layer2GraphOutput,
@@ -27,6 +35,11 @@ from .state import (
 )
 
 __all__ = [
+    "ActorPlanStep",
+    "ActorPort",
+    "ActorResult",
+    "ActorResultType",
+    "ActorTask",
     "Layer2GraphInput",
     "Layer2GraphOutput",
     "Layer2GraphState",
@@ -42,6 +55,7 @@ __all__ = [
     "StepRecord",
     "TaskState",
     "bootstrap_from_intake",
+    "build_actor_task",
     "build_default_planner",
     "build_runtime_graph",
     "finalize_bootstrap",

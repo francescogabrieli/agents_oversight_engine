@@ -278,6 +278,52 @@ Ruolo del bootstrap:
 
 Il bootstrap non esegue ancora planning avanzato, policy enforcement completo o tool calling. Queste responsabilità appartengono ai nodi successivi del runtime e della governance.
 
+#### Intra-Node Contract: `planner` -> `actor`
+
+Il nodo `actor` riceve in input il `TaskState` aggiornato dal `planner`.
+
+Questo significa che l'input dell'`actor` non è un singolo step isolato, ma l'intero piano semantico corrente insieme allo stato runtime rilevante.
+
+Campi minimi richiesti in ingresso:
+- `task_spec`
+- `execution_policy`
+- `current_state = planning` oppure `acting`
+- `plan_steps`
+- `current_plan_step`
+- `current_plan_step_index`
+- `step_history`
+- `collected_evidence`
+- `last_tool_result`
+- `runtime_flags`
+- eventuale `governance_output` precedente rilevante
+
+Vincoli del contract:
+- `actor` riceve l'intero `plan_steps` come **contesto globale**
+- `actor` ha autorità operativa solo sul `current_plan_step`
+- `actor` non può riscrivere il piano
+- `actor` non può cambiare l'ordine dei `plan_steps`
+- `actor` non può aggiungere o rimuovere step
+- `actor` non può avanzare autonomamente il `current_plan_step_index`
+- se il piano non è più adeguato, `actor` non lo modifica: produce invece un esito che porta a `replanner` o a governance
+
+Ruolo del contract:
+- permettere all'`actor` di usare il piano completo come contesto
+- limitare il potere decisionale dell'`actor` al passo operativo corrente
+- preservare il `planner` come unica fonte autorizzata della `intended trajectory`
+- mantenere leggibile la distinzione tra piano previsto, azione eseguita ed esito osservato
+
+Output atteso di `actor` verso il resto del runtime:
+- una proposta operativa concreta coerente con il `current_plan_step`
+- oppure una richiesta di chiarimento
+- oppure un esito di blocco
+- oppure un output intermedio o finale
+
+Vincoli sull'output di `actor`:
+- l'output di `actor` può contenere dettagli operativi concreti
+- l'output di `actor` non equivale a una decisione di policy
+- l'output di `actor` non sostituisce il piano del `planner`
+- ogni deviazione di traiettoria deve restare esplicita e passare da `replanner`, governance o HITL
+
 #### Governance Core
 
 Implementazione: **subgraph LangGraph**.

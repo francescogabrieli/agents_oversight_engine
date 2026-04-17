@@ -24,14 +24,15 @@ from layer1_intake import (
     TaskSpec,
 )
 from layer2_runtime_governance import (
+    ActorTask,
     PlanStep,
     PlanStepStatus,
     PlannerDecision,
     RuntimeFlag,
     RuntimeState,
+    build_actor_task,
     build_runtime_graph,
 )
-
 
 class StubPlanner:
     planner_name = "stub_planner"
@@ -112,6 +113,47 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertIsNone(task_state.current_plan_step_index)
         self.assertIsNone(task_state.planner_rationale)
 
+    def test_build_actor_task_exposes_full_plan_and_current_step(self) -> None:
+        # The actor should receive the full plan as context but target only the current step.
+        graph = build_runtime_graph(planner_service=StubPlanner())
+        result = graph.invoke(
+            {"intake_result": _build_research_intake_result()},
+            config={"configurable": {"thread_id": "layer2-actor-contract-complete"}},
+        )
+
+        task_state = result["task_state"]
+        actor_task = build_actor_task(task_state=task_state)
+
+        self.assertIsInstance(actor_task, ActorTask)
+        self.assertEqual(actor_task.current_state, RuntimeState.PLANNING)
+        self.assertEqual(len(actor_task.plan_steps), 2)
+        self.assertIsInstance(actor_task.plan_steps, tuple)
+        self.assertEqual(actor_task.current_plan_step_index, 0)
+        self.assertEqual(
+            actor_task.current_plan_step.objective,
+            "Collect the minimum official evidence needed for the task.",
+        )
+        self.assertEqual(
+            actor_task.plan_steps[actor_task.current_plan_step_index].step_id,
+            actor_task.current_plan_step.step_id,
+        )
+        self.assertEqual(actor_task.current_plan_step.status, PlanStepStatus.IN_PROGRESS)
+        self.assertEqual(actor_task.plan_steps[1].status, PlanStepStatus.PENDING)
+        self.assertEqual(actor_task.planner_name, "stub_planner")
+        self.assertEqual(actor_task.planner_prompt_version, "stub_v1")
+
+    def test_build_actor_task_requires_current_plan_step(self) -> None:
+        # The actor contract should fail if there is no current executable plan step.
+        graph = build_runtime_graph(planner_service=StubPlanner())
+        result = graph.invoke(
+            {"intake_result": _build_clarification_intake_result()},
+            config={"configurable": {"thread_id": "layer2-actor-contract-clarification"}},
+        )
+
+        task_state = result["task_state"]
+
+        with self.assertRaises(ValueError):
+            build_actor_task(task_state=task_state)
 
 def _build_research_intake_result() -> IntakeResult:
     # Build a canonical complete intake payload for bootstrap tests.
