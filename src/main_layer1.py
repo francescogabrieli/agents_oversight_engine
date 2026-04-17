@@ -40,12 +40,6 @@ def build_layer1_components(
     openai_settings: OpenAIParserSettings | None = None,
 ) -> dict[str, Any]:
     # Build the concrete Layer 1 dependency graph in a readable, inspectable form.
-    """
-    Build every concrete component used by layer 1.
-
-    This function is useful for debugging because it makes the dependency graph
-    explicit instead of hiding it behind a single factory call.
-    """
 
     resolved_policy_path = (
         Path(policy_config_path) if policy_config_path else get_default_policy_config_path()
@@ -93,12 +87,6 @@ def run_layer1_flow(
     openai_settings: OpenAIParserSettings | None = None,
 ) -> dict[str, Any]:
     # Execute Layer 1 step by step and keep every intermediate payload for debugging.
-    """
-    Execute layer 1 step by step and return a full debug trace.
-
-    The returned dictionary contains every relevant payload generated during
-    the flow, so a developer can inspect the layer without jumping across files.
-    """
 
     components = build_layer1_components(
         policy_config_path=policy_config_path,
@@ -150,6 +138,7 @@ def run_layer1_flow(
         metadata=metadata,
     )
 
+    # Return intermediate artifacts as well so the CLI can explain every intake step.
     return {
         "component_summary": {
             "policy_config_path": str(components["policy_config_path"]),
@@ -170,11 +159,6 @@ def run_layer1_flow(
 
 def to_jsonable(value: Any) -> Any:
     # Convert Pydantic models, dataclasses, and enums into plain JSON-friendly structures.
-    """
-    Convert objects used by layer 1 into JSON-friendly structures.
-
-    This helper exists only for debugging and trace printing.
-    """
 
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
@@ -202,21 +186,12 @@ def to_jsonable(value: Any) -> Any:
 
 def print_layer1_trace(trace: dict[str, Any]) -> None:
     # Print the full debug trace without collapsing intermediate objects.
-    """
-    Pretty-print the debug trace in a readable JSON format.
-    """
 
     print(json.dumps(to_jsonable(trace), indent=2, ensure_ascii=False))
 
 
 def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
     # Build a reduced trace for terminal use when the full payload would be too noisy.
-    """
-    Build a compact, de-duplicated view of the full trace.
-
-    The full trace is useful for exhaustive inspection, but it repeats some
-    payloads by design. This compact view keeps the flow readable from a terminal.
-    """
 
     input_command = to_jsonable(trace["input_command"])
     normalized_command = to_jsonable(trace["normalized_command"])
@@ -241,6 +216,7 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
             "normalized_input_changed": input_command != normalized_command,
         },
         "parser_output": {
+            # Keep the parser section close to the TaskSpec contract rather than the raw model shape.
             "goal": task_spec["goal"],
             "context": task_spec["context"],
             "domain_type": task_spec["domain_type"],
@@ -273,9 +249,6 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
 
 def _print_section(title: str, payload: Any) -> None:
     # Print one titled JSON block so the terminal output remains scannable.
-    """
-    Print one trace section with a clear visual separator.
-    """
 
     print(f"\n=== {title} ===")
     print(json.dumps(to_jsonable(payload), indent=2, ensure_ascii=False))
@@ -283,12 +256,6 @@ def _print_section(title: str, payload: Any) -> None:
 
 def print_layer1_summary(trace: dict[str, Any]) -> None:
     # Print the compact Layer 1 trace in the same order as the orchestration flow.
-    """
-    Print the layer 1 flow in a compact and linear way.
-
-    This is the default terminal output because it is easier to scan than the
-    full raw trace.
-    """
 
     compact_trace = build_compact_trace(trace)
     _print_section("RUNTIME", compact_trace["runtime"])
@@ -300,9 +267,6 @@ def print_layer1_summary(trace: dict[str, Any]) -> None:
 
 def parse_cli_args() -> argparse.Namespace:
     # Parse the CLI inputs used for local Layer 1 inspection.
-    """
-    Parse optional CLI arguments for manual layer 1 runs.
-    """
 
     parser = argparse.ArgumentParser(description="Run the layer 1 intake flow.")
     parser.add_argument(
@@ -333,12 +297,6 @@ def parse_cli_args() -> argparse.Namespace:
 
 def main() -> None:
     # Run the local Layer 1 demo and choose between full trace and compact output.
-    """
-    Example manual run of layer 1.
-
-    Run from the repository root with:
-    `.\\.venv\\Scripts\\python.exe src\\main_layer1.py`
-    """
 
     args = parse_cli_args()
 

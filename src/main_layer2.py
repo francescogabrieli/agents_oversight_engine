@@ -27,8 +27,6 @@ from layer1_intake.infrastructure import build_intake_service
 from layer2_runtime_governance import build_runtime_graph
 from layer2_runtime_governance.planning import PlannerPort
 
-
-
 class IntakeExecutorPort(Protocol):
     # This port lets tests inject a deterministic intake service into the Layer 2 runner.
     def execute(self, command: IntakeCommand) -> IntakeResult: ...
@@ -76,6 +74,7 @@ def run_layer2_flow(
         config=config,
     )
 
+    # Return both layer boundaries so callers can inspect the handoff end to end.
     return {
         "thread_id": resolved_thread_id,
         "intake_result": intake_result,
@@ -115,6 +114,7 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
                 final_task_state.planner_prompt_version if final_task_state is not None else None
             ),
             "plan_steps": (
+                # Flatten dataclass steps into dictionaries for compact terminal output.
                 [
                     {
                         "step_id": step.step_id,
@@ -145,11 +145,8 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
         },
     }
 
-
-
 def to_jsonable(value: Any) -> Any:
     # Convert runtime objects into plain JSON so traces can be printed consistently.
-    # Convert runtime objects into plain JSON-serializable structures.
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
 
@@ -176,14 +173,12 @@ def to_jsonable(value: Any) -> Any:
 
 def _print_section(title: str, payload: Any) -> None:
     # Print one section of the Layer 2 trace with a stable visual format.
-    # Pretty-print one section of the runtime trace.
     print(f"\n=== {title} ===")
     print(json.dumps(to_jsonable(payload), indent=2, ensure_ascii=False))
 
 
 def print_layer2_summary(trace: dict[str, Any]) -> None:
     # Print the compact bootstrap trace used by the current Layer 2 CLI.
-    # Default compact output for terminal runs.
     compact_trace = build_compact_trace(trace)
     _print_section("RUNTIME", compact_trace["runtime"])
     _print_section("INTAKE SUMMARY", compact_trace["intake_summary"])
@@ -193,13 +188,11 @@ def print_layer2_summary(trace: dict[str, Any]) -> None:
 
 def print_layer2_trace(trace: dict[str, Any]) -> None:
     # Print the full raw trace when compact output hides too much detail.
-    # Full debug output when a compact summary is not enough.
     print(json.dumps(to_jsonable(trace), indent=2, ensure_ascii=False))
 
 
 def parse_cli_args() -> argparse.Namespace:
     # Parse CLI arguments for the current bootstrap-plus-planner Layer 2 runner.
-    # CLI entrypoint used for local execution of the current Layer 2 slice.
     parser = argparse.ArgumentParser(
         description="Run the current Layer 2 bootstrap plus planner flow."
     )
@@ -246,11 +239,10 @@ def _build_demo_intake_result(
     context_hint: str | None,
 ) -> IntakeResult:
     # Build deterministic intake payloads so bootstrap can be tested without Layer 1 parsing.
-    # Build deterministic intake payloads so Layer 2 can be tested without
-    # calling the real Layer 1 parser or the OpenAI API.
     normalized_goal = " ".join(raw_task_text.strip().split()) or "Demo runtime task."
     normalized_context = " ".join((context_hint or "").strip().split())
 
+    # Keep one profile that blocks into clarification and one that enters normal planning.
     if profile == "clarification":
         task_spec = TaskSpec(
             goal=normalized_goal,
@@ -301,7 +293,6 @@ def _build_demo_intake_result(
 
 def main() -> None:
     # Run the current Layer 2 slice from the command line.
-    # Run the Layer 2 demo flow from the command line.
     args = parse_cli_args()
     trace = run_layer2_flow(
         raw_task_text=args.task,

@@ -8,7 +8,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-# Domain models for layer 1 intake, including task specifications, execution policies, and intake results.
+# DomainType keeps the layer 1 taxonomy stable for policy resolution and tracing.
 class DomainType(str, Enum):
     RESEARCH = "research"
     ANALYSIS = "analysis"
@@ -21,21 +21,21 @@ class DomainType(str, Enum):
     SOFTWARE_ENGINEERING = "software_engineering"
     OTHER = "other"
 
-# Sensitivity levels for tasks, which can inform downstream handling and execution policies.
+# SensitivityLevel captures the coarse risk class used by downstream controls.
 class SensitivityLevel(str, Enum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
 
-# Parse status for the intake process, indicating whether the task specification was fully extracted, partially extracted, needs clarification, or failed to parse. This can be used for monitoring and feedback loops.
+# ParseStatus records how complete the intake output is before runtime starts.
 class ParseStatus(str, Enum):
     COMPLETE = "complete"
     PARTIAL = "partial"
     NEEDS_CLARIFICATION = "needs_clarification"
     FAILED = "failed"
 
-# Exceptions and domain models for task specifications, execution policies, and intake results. This separes python error from domain errors.
+# Keep domain validation failures separate from generic Python exceptions.
 class IntakeDomainError(Exception):
     """Base exception for layer 1 domain errors."""
 
@@ -51,7 +51,7 @@ class InvalidExecutionPolicyError(IntakeDomainError):
 class IntakeValidationError(IntakeDomainError):
     """Raised when the final intake result cannot be validated."""
 
-# Model for operative budget
+# BudgetConfig defines the execution envelope chosen by policy, not by the user task.
 class BudgetConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -62,7 +62,7 @@ class BudgetConfig(BaseModel):
         description="Optional upper bound for tool calls.",
     )
 
-# Allows to create coherent policy
+# ExecutionPolicy is the canonical policy object consumed by later layers.
 class ExecutionPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -120,7 +120,7 @@ class ExecutionPolicy(BaseModel):
             )
         return self
 
-# Task's semantic heart
+# TaskSpec is the semantic core extracted from the raw request.
 class TaskSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -178,14 +178,14 @@ class TaskSpec(BaseModel):
 
         return self
 
-# Unifies task specification with execution policy to obtain ready task
+# StructuredTask combines semantic intent with system-controlled execution limits.
 class StructuredTask(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     task_spec: TaskSpec
     execution_policy: ExecutionPolicy
 
-# Intake metadata
+# IntakeMetadata carries tracing data and parser-level quality signals.
 class IntakeMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -266,7 +266,7 @@ class IntakeMetadata(BaseModel):
             )
         return self
 
-# Final intake result combining structured task and metadata
+# IntakeResult is the canonical output contract of Layer 1.
 class IntakeResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

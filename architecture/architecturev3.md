@@ -324,6 +324,46 @@ Vincoli sull'output di `actor`:
 - l'output di `actor` non sostituisce il piano del `planner`
 - ogni deviazione di traiettoria deve restare esplicita e passare da `replanner`, governance o HITL
 
+#### Stream Contract: `Agent Core` -> `Governance Core`
+
+Durante l'esecuzione del `current_plan_step`, l'`actor` emette in modo continuo uno stream strutturato di informazioni operative verso il `Governance Core`.
+
+Questo stream non e:
+- una chain-of-thought grezza
+- una sequenza di checkpoint statici obbligatori
+- un singolo esito finale emesso solo a step concluso
+
+Questo stream e invece:
+- un flusso continuo di aggiornamenti compatti e leggibili
+- un canale di osservabilita per capire cosa l'agente sta facendo mentre opera
+- il punto di ingresso principale del `Governance Core`
+
+Informazioni minime che lo stream deve rendere visibili:
+- step corrente e riferimento al `plan_step_id`
+- intento operativo corrente dell'agente
+- eventuale richiesta di azione esterna o uso di capacita del `Tool Bus`
+- evidenze raccolte o aggiornate rilevanti per il passo
+- segnali di incertezza, rischio o degrado della traiettoria
+- eventuale draft o output prodotto durante l'esecuzione
+- stato runtime corrente e progressione sintetica dello step
+
+Proprieta del contract:
+- lo stream deve restare compatto, tipizzato e leggibile anche per review umana
+- lo stream deve descrivere il comportamento operativo osservabile dell'agente, non il suo ragionamento interno grezzo
+- il `Governance Core` osserva lo stream in modo continuo durante l'operativita dell'agente
+- l'agente non si ferma per checkpoint hardcoded: l'interruzione avviene solo quando il subgraph di governance produce una decisione di controllo o escalation
+
+Valutazioni attese all'interno del `Governance Core`:
+- il `policy_engine` legge lo stream e produce una decisione di policy come `allow`, `allow_read_only`, `ask_clarification`, `require_human_review` o `deny`
+- il blocco `confidence_risk_trajectory` usa lo stream per calcolare segnali continui su qualita delle evidenze, rischio operativo e salute della traiettoria
+- il `judge` opera in continuo o su snapshot periodici dello stream, senza dipendere da checkpoint statici, e produce una valutazione semantica del comportamento del runtime
+- il `decision_combiner` riceve questi esiti e produce la direttiva finale del blocco governance
+
+Ruolo architetturale del contract:
+- dare al `Governance Core` visibilita continua sul lavoro dell'agente
+- permettere valutazioni dinamiche di policy, rischio, incertezza e coerenza semantica
+- rendere possibile l'attivazione selettiva di `interrupt / resume` e HITL
+
 #### Governance Core
 
 Implementazione: **subgraph LangGraph**.
@@ -335,7 +375,9 @@ Componenti principali:
 - `decision_combiner_node`
 
 Ruolo:
-- osservare il motore agentico durante l'esecuzione e trasformare una proposta operativa o un esito rilevante in una decisione di controllo spiegabile e tracciabile
+- osservare in continuo lo stream operativo emesso dall'`Agent Core`
+- valutare policy, rischio, incertezza e coerenza semantica durante l'esecuzione
+- trasformare gli esiti dei sottosistemi in una decisione di controllo spiegabile e tracciabile
 
 #### Policy Engine
 
@@ -382,6 +424,16 @@ Ruolo:
 - misurare drift rispetto al goal
 - rilevare incoerenza tra evidenze e azione proposta
 - rilevare situazioni in cui la traiettoria pianificata non è più coerente con ciò che il runtime sta realmente facendo
+
+#### Decision Combiner
+
+Implementazione: **nodo del subgraph di governance**.
+
+Ruolo:
+- ricevere gli esiti di `policy_engine`, `confidence_risk_trajectory` e `judge`
+- produrre una sola direttiva di controllo per il runtime
+- decidere se lasciare proseguire, limitare, ripianificare, chiarire, fermare o attivare HITL
+- mantenere esplicita la ragione della decisione finale
 
 #### HITL Gateway
 

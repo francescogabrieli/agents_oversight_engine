@@ -35,6 +35,7 @@ except ImportError:  # pragma: no cover - handled at runtime if dependency is mi
     OpenAI = None
 
 
+# OpenAIParserSettings keeps the parser runtime configuration explicit and testable.
 @dataclass(frozen=True)
 class OpenAIParserSettings:
     model: str = "gpt-5.4-nano"
@@ -62,6 +63,7 @@ class OpenAIParserSettings:
 
 
 class _PolicyBudgetPayload(BaseModel):
+    # Validate the budget section of the JSON policy configuration.
     model_config = ConfigDict(extra="forbid")
 
     max_steps: int = Field(..., ge=1)
@@ -69,6 +71,7 @@ class _PolicyBudgetPayload(BaseModel):
 
 
 class _PolicyProfilePayload(BaseModel):
+    # Validate one policy profile before it is turned into runtime models.
     model_config = ConfigDict(extra="forbid")
 
     confidence_threshold: float = Field(..., ge=0.0, le=1.0)
@@ -79,6 +82,7 @@ class _PolicyProfilePayload(BaseModel):
 
 
 class _PolicyConfigPayload(BaseModel):
+    # Validate the whole policy file so repository errors fail early and clearly.
     model_config = ConfigDict(extra="forbid")
 
     default_policy: _PolicyProfilePayload
@@ -154,6 +158,7 @@ Additional context hint:
 
 
 class TaskSpecExtractionPayload(BaseModel):
+    # Mirror the exact structure expected back from the LLM parser call.
     model_config = ConfigDict(extra="forbid")
 
     goal: str
@@ -324,6 +329,7 @@ def build_intake_service(
     openai_settings: OpenAIParserSettings | None = None,
 ) -> IntakeService:
     # Build the concrete production dependencies used by the Layer 1 entrypoints.
+    # Resolve the config path once here so every entrypoint shares the same default behavior.
     resolved_policy_path = (
         Path(policy_config_path) if policy_config_path else get_default_policy_config_path()
     )
@@ -346,6 +352,7 @@ def _load_env_file_values() -> dict[str, str]:
     env_values: dict[str, str] = {}
 
     for candidate in _candidate_env_paths():
+        # Read every supported env file in order so later files can override earlier values.
         if not candidate.exists():
             continue
 

@@ -9,6 +9,7 @@ from layer1_intake import ExecutionPolicy, IntakeMetadata, TaskSpec
 from .state import PlanStepStatus, RuntimeFlag, RuntimeState, TaskState
 
 
+# ActorResultType keeps execution outcomes separate from governance decisions.
 class ActorResultType(str, Enum):
     PROPOSE_ACTION = "propose_action"
     INTERMEDIATE_OUTPUT = "intermediate_output"
@@ -65,6 +66,7 @@ class ActorPort(Protocol):
 
 # Build the immutable planner-to-actor handoff from the current runtime state.
 def build_actor_task(*, task_state: TaskState) -> ActorTask:
+    # The actor contract is valid only when the planner has selected one executable step.
     if task_state.current_plan_step_index is None:
         raise ValueError("Cannot build ActorTask without current_plan_step_index.")
 
@@ -75,7 +77,7 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
     if task_state.current_plan_step is None:
         raise ValueError("Cannot build ActorTask without a current plan step.")
 
-    # Copy plan steps into an immutable contract so actor cannot rewrite the plan.
+    # Freeze the semantic plan so the actor can inspect it without mutating runtime state.
     actor_plan_steps = tuple(
         ActorPlanStep(
             step_id=step.step_id,

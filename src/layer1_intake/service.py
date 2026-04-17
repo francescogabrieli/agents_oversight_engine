@@ -18,7 +18,7 @@ from .models import (
     TaskSpec,
 )
 
-# Policy data class for resolved execution policies, which can be used to inform the execution layer about constraints and allowances for task execution.
+# PolicyProfile is the repository-facing shape before conversion to ExecutionPolicy.
 @dataclass(frozen=True)
 class PolicyProfile:
     name: str
@@ -61,7 +61,7 @@ class InputFingerprintPort(Protocol):
     # This port keeps fingerprint generation replaceable and testable.
     def fingerprint(self, raw_text: str) -> str: ...
 
-# Input command for the intake service, representing the raw user input and optional hints for parsing and policy resolution.
+# IntakeCommand is the external input contract for the Layer 1 service.
 class IntakeCommand(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -91,7 +91,7 @@ class IntakeCommand(BaseModel):
         cleaned = " ".join(value.strip().split())
         return cleaned or None
 
-# Normalizes IntakeCommand's fields
+# InputNormalizer keeps command cleanup in one place before parsing starts.
 class InputNormalizer:
     # This helper centralizes command normalization before parsing and policy resolution.
     def normalize(self, command: IntakeCommand) -> IntakeCommand:
@@ -120,7 +120,7 @@ class TaskSpecBuildResult:
     warnings: list[str]
     missing_information: list[str]
 
-# Calls the parser and collect warnings or missing information
+# TaskSpecBuilder enriches parser output with warnings and completeness signals.
 class TaskSpecBuilder:
     # This component wraps the parser and turns parser output into a richer build result.
     def __init__(self, parser: TaskSpecParserPort) -> None:
@@ -228,7 +228,7 @@ class PolicyResolver:
             read_only_mode=profile.read_only_mode,
         )
 
-# Checks for coherence between task and metadata
+# IntakeResultValidator reconciles parser metadata with the final structured payload.
 class IntakeResultValidator:
     # This validator enforces coherence after task parsing and policy attachment.
     def validate(
@@ -270,7 +270,6 @@ class IntakeResultValidator:
             metadata=normalized_metadata,
         )
 
-# Intake service orchestrating the intake process, from normalization to parsing, policy resolution, and validation.
 class IntakeService:
     # This service is the orchestration entrypoint of Layer 1.
     def __init__(
