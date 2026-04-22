@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from layer1_intake import (
     ExecutionPolicy,
@@ -12,13 +13,20 @@ from layer1_intake import (
     TaskSpec,
 )
 
+if TYPE_CHECKING:
+    from .actor_contract import ActorResult, ActorResultType
 
-# Layer 2 currently covers bootstrap plus the first planner snapshot.
+
+# Layer 2 currently covers bootstrap, planning, and the first actor execution step.
 # This file keeps the canonical runtime state shared by the graph nodes.
 class RuntimeState(str, Enum):
     PLANNING = "planning"
+    ACTING = "acting"
+    READY_NEXT_STEP = "ready_next_step"
+    READY_TOOL_EXECUTION = "ready_tool_execution"
+    REPLANNING = "replanning"
     WAITING_HUMAN_REVIEW = "waiting_human_review"
-    BOOTSTRAPPED = "bootstrapped"
+    COMPLETED = "completed"
 
 
 class RuntimeFlag(str, Enum):
@@ -64,6 +72,16 @@ class PlannerDecision:
 
 
 @dataclass
+class ExecutedPlanStep:
+    # Keep a compact trace of each step the actor has already executed.
+    step_id: str
+    objective: str
+    result_type: ActorResultType
+    summary: str
+    output_text: str | None = None
+
+
+@dataclass
 class TaskState:
     # Direct handoff from Layer 1.
     intake_payload: IntakeResult
@@ -84,6 +102,13 @@ class TaskState:
     planner_rationale: str | None = None
     planner_name: str | None = None
     planner_prompt_version: str | None = None
+
+    # Actor execution snapshot.
+    actor_result: ActorResult | None = None
+    actor_name: str | None = None
+    actor_prompt_version: str | None = None
+    executed_steps: list[ExecutedPlanStep] = field(default_factory=list)
+    final_output_text: str | None = None
 
     @property
     def current_plan_step(self) -> PlanStep | None:
@@ -133,6 +158,7 @@ class TaskState:
 
 
 __all__ = [
+    "ExecutedPlanStep",
     "PlanStep",
     "PlanStepStatus",
     "PlannerDecision",

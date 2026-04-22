@@ -25,7 +25,9 @@ from layer1_intake import (
 )
 from layer1_intake.infrastructure import build_intake_service
 from layer2_runtime_governance import build_runtime_graph
+from layer2_runtime_governance.actor_contract import ActorPort
 from layer2_runtime_governance.planning import PlannerPort
+
 
 class IntakeExecutorPort(Protocol):
     # This port lets tests inject a deterministic intake service into the Layer 2 runner.
@@ -41,9 +43,13 @@ def run_layer2_flow(
     demo_intake_profile: str | None = None,
     intake_service: IntakeExecutorPort | None = None,
     planner_service: PlannerPort | None = None,
+    actor_service: ActorPort | None = None,
 ) -> dict[str, Any]:
     # Run Layer 1 plus the current Layer 2 graph and return the resulting trace.
-    runtime_graph = build_runtime_graph(planner_service=planner_service)
+    runtime_graph = build_runtime_graph(
+        planner_service=planner_service,
+        actor_service=actor_service,
+    )
 
     resolved_thread_id = thread_id or f"layer2-{uuid4()}"
     config = {"configurable": {"thread_id": resolved_thread_id}}
@@ -83,7 +89,7 @@ def run_layer2_flow(
 
 
 def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
-    # Reduce the raw trace to the parts that matter for bootstrap inspection.
+    # Reduce the raw trace to the parts that matter for the current Layer 2 slice.
     intake_result = trace["intake_result"]
     final_result = trace["final_result"]
     final_task_state = final_result.get("task_state")
@@ -102,6 +108,11 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
         },
         "planning_snapshot": {
             "plan_step_count": len(final_task_state.plan_steps) if final_task_state else 0,
+            "current_plan_step_index": (
+                final_task_state.current_plan_step_index
+                if final_task_state is not None
+                else None
+            ),
             "current_plan_step": (
                 final_task_state.current_plan_step.objective
                 if final_task_state is not None and final_task_state.current_plan_step is not None
@@ -129,6 +140,66 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
                 else []
             ),
         },
+        "actor_snapshot": {
+            "actor_name": (
+                final_task_state.actor_name if final_task_state is not None else None
+            ),
+            "actor_prompt_version": (
+                final_task_state.actor_prompt_version if final_task_state is not None else None
+            ),
+            "result_type": (
+                final_task_state.actor_result.result_type.value
+                if final_task_state is not None and final_task_state.actor_result is not None
+                else None
+            ),
+            "summary": (
+                final_task_state.actor_result.summary
+                if final_task_state is not None and final_task_state.actor_result is not None
+                else None
+            ),
+            "capability_mode": (
+                final_task_state.actor_result.capability_mode.value
+                if final_task_state is not None and final_task_state.actor_result is not None
+                else None
+            ),
+            "external_impact": (
+                final_task_state.actor_result.external_impact
+                if final_task_state is not None and final_task_state.actor_result is not None
+                else None
+            ),
+            "output_text": (
+                final_task_state.actor_result.output_text
+                if final_task_state is not None and final_task_state.actor_result is not None
+                else None
+            ),
+            "blocking_reason": (
+                final_task_state.actor_result.blocking_reason
+                if final_task_state is not None and final_task_state.actor_result is not None
+                else None
+            ),
+        },
+        "execution_snapshot": {
+            "executed_step_count": (
+                len(final_task_state.executed_steps) if final_task_state is not None else 0
+            ),
+            "executed_steps": (
+                [
+                    {
+                        "step_id": step.step_id,
+                        "objective": step.objective,
+                        "result_type": step.result_type.value,
+                        "summary": step.summary,
+                        "output_text": step.output_text,
+                    }
+                    for step in final_task_state.executed_steps
+                ]
+                if final_task_state is not None
+                else []
+            ),
+            "final_output_text": (
+                final_task_state.final_output_text if final_task_state is not None else None
+            ),
+        },
         "bootstrap_state": {
             "current_state": (
                 final_task_state.current_state.value if final_task_state is not None else None
@@ -144,6 +215,7 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
             ),
         },
     }
+
 
 def to_jsonable(value: Any) -> Any:
     # Convert runtime objects into plain JSON so traces can be printed consistently.
@@ -178,11 +250,13 @@ def _print_section(title: str, payload: Any) -> None:
 
 
 def print_layer2_summary(trace: dict[str, Any]) -> None:
-    # Print the compact bootstrap trace used by the current Layer 2 CLI.
+    # Print the compact runtime trace used by the current Layer 2 CLI.
     compact_trace = build_compact_trace(trace)
     _print_section("RUNTIME", compact_trace["runtime"])
     _print_section("INTAKE SUMMARY", compact_trace["intake_summary"])
     _print_section("PLANNING SNAPSHOT", compact_trace["planning_snapshot"])
+    _print_section("ACTOR SNAPSHOT", compact_trace["actor_snapshot"])
+    _print_section("EXECUTION SNAPSHOT", compact_trace["execution_snapshot"])
     _print_section("BOOTSTRAP STATE", compact_trace["bootstrap_state"])
 
 
@@ -192,9 +266,9 @@ def print_layer2_trace(trace: dict[str, Any]) -> None:
 
 
 def parse_cli_args() -> argparse.Namespace:
-    # Parse CLI arguments for the current bootstrap-plus-planner Layer 2 runner.
+    # Parse CLI arguments for the current Layer 2 runtime slice.
     parser = argparse.ArgumentParser(
-        description="Run the current Layer 2 bootstrap plus planner flow."
+        description="Run the current Layer 2 bootstrap, planner, and first actor execution step."
     )
     parser.add_argument(
         "--task",

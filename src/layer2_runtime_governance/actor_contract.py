@@ -6,10 +6,17 @@ from typing import Protocol
 
 from layer1_intake import ExecutionPolicy, IntakeMetadata, TaskSpec
 
-from .state import PlanStepStatus, RuntimeFlag, RuntimeState, TaskState
+from .state import ExecutedPlanStep, PlanStepStatus, RuntimeFlag, RuntimeState, TaskState
 
 
-# ActorResultType keeps execution outcomes separate from governance decisions.
+# CapabilityAccessMode keeps external-read and external-write intent explicit.
+class CapabilityAccessMode(str, Enum):
+    NONE = "none"
+    READ_ONLY = "read_only"
+    WRITE = "write"
+
+
+# ActorResultType names the possible outcomes of one actor step.
 class ActorResultType(str, Enum):
     PROPOSE_ACTION = "propose_action"
     INTERMEDIATE_OUTPUT = "intermediate_output"
@@ -29,16 +36,26 @@ class ActorPlanStep:
     status: PlanStepStatus
 
 
+@dataclass(frozen=True)
+class ActorPastStep:
+    # The actor receives a compact history of already executed plan steps.
+    step_id: str
+    objective: str
+    result_type: ActorResultType
+    summary: str
+    output_text: str | None = None
+
 
 @dataclass(frozen=True)
 class ActorTask:
-    # The actor sees the whole plan as context, but acts only on the current step.
+    # The actor sees the whole plan and executed history, but acts only on the current step.
     task_spec: TaskSpec
     execution_policy: ExecutionPolicy
     intake_metadata: IntakeMetadata
     current_state: RuntimeState
     runtime_flags: tuple[RuntimeFlag, ...]
     plan_steps: tuple[ActorPlanStep, ...]
+    past_steps: tuple[ActorPastStep, ...]
     current_plan_step_index: int
     current_plan_step: ActorPlanStep
     planner_rationale: str | None = None
@@ -48,10 +65,12 @@ class ActorTask:
 
 @dataclass(frozen=True)
 class ActorResult:
-    # The actor returns an operational outcome without rewriting the plan.
+    # The actor returns one concrete operational proposal for the current step.
     plan_step_id: str
     result_type: ActorResultType
     summary: str
+    capability_mode: CapabilityAccessMode = CapabilityAccessMode.NONE
+    external_impact: bool = False
     output_text: str | None = None
     blocking_reason: str | None = None
 
@@ -88,6 +107,16 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
         )
         for step in task_state.plan_steps
     )
+    actor_past_steps = tuple(
+        ActorPastStep(
+            step_id=step.step_id,
+            objective=step.objective,
+            result_type=step.result_type,
+            summary=step.summary,
+            output_text=step.output_text,
+        )
+        for step in task_state.executed_steps
+    )
 
     return ActorTask(
         task_spec=task_state.task_spec.model_copy(deep=True),
@@ -96,6 +125,7 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
         current_state=task_state.current_state,
         runtime_flags=tuple(task_state.runtime_flags),
         plan_steps=actor_plan_steps,
+        past_steps=actor_past_steps,
         current_plan_step_index=current_index,
         current_plan_step=actor_plan_steps[current_index],
         planner_rationale=task_state.planner_rationale,
@@ -105,10 +135,12 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
 
 
 __all__ = [
+    "ActorPastStep",
     "ActorPlanStep",
     "ActorPort",
     "ActorResult",
     "ActorResultType",
     "ActorTask",
+    "CapabilityAccessMode",
     "build_actor_task",
 ]

@@ -29,6 +29,11 @@ from layer1_intake.service import (
     TaskSpecBuilder,
 )
 from layer2_runtime_governance import (
+    ActorResultType,
+    CapabilityAccessMode,
+    ActorPort,
+    ActorResult,
+    ActorTask,
     PlanStep,
     PlannerDecision,
     RuntimeFlag,
@@ -38,27 +43,22 @@ from main_layer2 import run_layer2_flow
 
 
 class StubParser:
-    # This stub injects a deterministic TaskSpec into the full Layer 1 -> Layer 2 path.
     parser_name = "stub_parser"
     prompt_version = "integration_v1"
 
     def __init__(self, task_spec: TaskSpec) -> None:
-        # Store the parser output chosen by the integration test.
         self._task_spec = task_spec
 
     def parse(self, *, raw_task_text: str, context_hint: str | None = None) -> TaskSpec:
-        # Return the canned TaskSpec so integration assertions stay stable.
         return self._task_spec
 
 
 class FixedClock:
-    # This clock freezes timestamps for deterministic integration assertions.
     def now(self) -> datetime:
         return datetime(2026, 4, 14, 9, 0, 0, tzinfo=timezone.utc)
 
 
 class FixedFingerprintService:
-    # This fingerprint service makes raw input assertions easier to read.
     def fingerprint(self, raw_text: str) -> str:
         return f"fp::{raw_text}"
 
@@ -67,7 +67,6 @@ class StubPlanner:
     planner_name = "stub_planner"
     prompt_version = "stub_v1"
 
-    # Return a stable semantic planning decision for integration tests.
     def plan(self, *, task_state):
         return PlannerDecision(
             plan_steps=[
@@ -90,10 +89,22 @@ class StubPlanner:
         )
 
 
+class StubActor(ActorPort):
+    actor_name = "stub_actor"
+    prompt_version = "stub_actor_v1"
+
+    def act(self, *, actor_task: ActorTask) -> ActorResult:
+        return ActorResult(
+            plan_step_id=actor_task.current_plan_step.step_id,
+            result_type=ActorResultType.PROPOSE_ACTION,
+            summary="Propose a read-only documentary evidence collection action.",
+            capability_mode=CapabilityAccessMode.READ_ONLY,
+            external_impact=False,
+        )
+
+
 class Layer1Layer2IntegrationTests(unittest.TestCase):
-    # These tests validate the full handoff from IntakeService into the Layer 2 bootstrap graph.
     def test_research_task_bootstraps_end_to_end(self) -> None:
-        # A complete research task should survive the full intake-to-bootstrap path unchanged.
         trace = run_layer2_flow(
             raw_task_text="  Find official sources about the DMA and summarize them.  ",
             context_hint="  Prefer official EU sources.  ",
@@ -110,6 +121,7 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
                 )
             ),
             planner_service=StubPlanner(),
+            actor_service=StubActor(),
         )
 
         intake_result = trace["intake_result"]
@@ -120,14 +132,19 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
             intake_result.metadata.raw_input_fingerprint,
             "fp::Find official sources about the DMA and summarize them.",
         )
-        self.assertEqual(task_state.current_state, RuntimeState.PLANNING)
+        self.assertEqual(task_state.current_state, RuntimeState.READY_TOOL_EXECUTION)
         self.assertTrue(task_state.bootstrap_completed)
         self.assertEqual(task_state.task_spec.goal, intake_result.structured_task.task_spec.goal)
         self.assertEqual(task_state.execution_policy, intake_result.structured_task.execution_policy)
         self.assertEqual(task_state.intake_metadata, intake_result.metadata)
         self.assertEqual(
             [step.node_name for step in task_state.step_history],
-            ["bootstrap_from_intake", "planner", "finalize_bootstrap"],
+            [
+                "bootstrap_from_intake",
+                "planner",
+                "actor",
+                "finalize_bootstrap",
+            ],
         )
         self.assertEqual(task_state.current_plan_step_index, 0)
         self.assertEqual(
@@ -135,9 +152,12 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
             "Collect reliable evidence aligned with the intake goal.",
         )
         self.assertEqual(task_state.planner_name, "stub_planner")
+        self.assertIsNotNone(task_state.actor_result)
+        self.assertEqual(task_state.actor_result.result_type, ActorResultType.PROPOSE_ACTION)
+        self.assertEqual(task_state.actor_result.capability_mode, CapabilityAccessMode.READ_ONLY)
+        self.assertEqual(task_state.executed_steps, [])
 
     def test_clarification_task_bootstraps_end_to_end(self) -> None:
-        # A clarification-required task should surface the correct initial runtime state and flags.
         trace = run_layer2_flow(
             raw_task_text="Review this contract and tell me whether I should sign it.",
             context_hint="No additional context.",
@@ -154,6 +174,7 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
                 )
             ),
             planner_service=StubPlanner(),
+            actor_service=StubActor(),
         )
 
         intake_result = trace["intake_result"]
@@ -166,14 +187,19 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
         self.assertIn(RuntimeFlag.HIGH_SENSITIVITY, task_state.runtime_flags)
         self.assertEqual(
             [step.node_name for step in task_state.step_history],
-            ["bootstrap_from_intake", "planner", "finalize_bootstrap"],
+            [
+                "bootstrap_from_intake",
+                "planner",
+                "actor",
+                "finalize_bootstrap",
+            ],
         )
         self.assertEqual(task_state.plan_steps, [])
         self.assertIsNone(task_state.current_plan_step_index)
+        self.assertIsNone(task_state.actor_result)
 
 
 def _build_intake_service(task_spec: TaskSpec) -> IntakeService:
-    # Build a deterministic IntakeService so the integration tests avoid real OpenAI calls.
     return IntakeService(
         normalizer=InputNormalizer(),
         task_spec_builder=TaskSpecBuilder(parser=StubParser(task_spec)),

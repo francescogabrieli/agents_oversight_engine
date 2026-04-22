@@ -24,7 +24,11 @@ from layer1_intake import (
     TaskSpec,
 )
 from layer2_runtime_governance import (
+    ActorPort,
+    ActorResult,
+    ActorResultType,
     ActorTask,
+    CapabilityAccessMode,
     PlanStep,
     PlanStepStatus,
     PlannerDecision,
@@ -33,6 +37,7 @@ from layer2_runtime_governance import (
     build_actor_task,
     build_runtime_graph,
 )
+
 
 class StubPlanner:
     planner_name = "stub_planner"
@@ -61,23 +66,45 @@ class StubPlanner:
         )
 
 
+class StubActor(ActorPort):
+    actor_name = "stub_actor"
+    prompt_version = "stub_actor_v1"
+
+    # Return one stable read-only execution outcome for the current semantic step.
+    def act(self, *, actor_task: ActorTask) -> ActorResult:
+        return ActorResult(
+            plan_step_id=actor_task.current_plan_step.step_id,
+            result_type=ActorResultType.PROPOSE_ACTION,
+            summary="Propose a read-only documentary evidence collection action.",
+            capability_mode=CapabilityAccessMode.READ_ONLY,
+            external_impact=False,
+        )
+
+
 class Layer2RuntimeGraphTests(unittest.TestCase):
-    # These tests verify the bootstrap-plus-planner Layer 2 graph behavior.
-    def test_complete_intake_bootstraps_to_planning(self) -> None:
-        # A complete intake should bootstrap into the planning state with no extra flags.
-        graph = build_runtime_graph(planner_service=StubPlanner())
+    # These tests verify the bootstrap-plus-planner-plus-actor behavior.
+    def test_complete_intake_reaches_ready_tool_execution_state(self) -> None:
+        graph = build_runtime_graph(
+            planner_service=StubPlanner(),
+            actor_service=StubActor(),
+        )
         result = graph.invoke(
             {"intake_result": _build_research_intake_result()},
-            config={"configurable": {"thread_id": "layer2-bootstrap-complete"}},
+            config={"configurable": {"thread_id": "layer2-ready-to-execute-complete"}},
         )
 
         task_state = result["task_state"]
-        self.assertEqual(task_state.current_state, RuntimeState.PLANNING)
+        self.assertEqual(task_state.current_state, RuntimeState.READY_TOOL_EXECUTION)
         self.assertTrue(task_state.bootstrap_completed)
-        self.assertEqual(len(task_state.step_history), 3)
+        self.assertEqual(len(task_state.step_history), 4)
         self.assertEqual(
             [step.node_name for step in task_state.step_history],
-            ["bootstrap_from_intake", "planner", "finalize_bootstrap"],
+            [
+                "bootstrap_from_intake",
+                "planner",
+                "actor",
+                "finalize_bootstrap",
+            ],
         )
         self.assertEqual(task_state.runtime_flags, [])
         self.assertEqual(len(task_state.plan_steps), 2)
@@ -89,14 +116,21 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertEqual(task_state.current_plan_step.status, PlanStepStatus.IN_PROGRESS)
         self.assertEqual(task_state.planner_name, "stub_planner")
         self.assertEqual(task_state.planner_prompt_version, "stub_v1")
-        self.assertIsNotNone(task_state.planner_rationale)
+        self.assertEqual(task_state.actor_name, "stub_actor")
+        self.assertEqual(task_state.actor_prompt_version, "stub_actor_v1")
+        self.assertIsNotNone(task_state.actor_result)
+        self.assertEqual(task_state.actor_result.result_type, ActorResultType.PROPOSE_ACTION)
+        self.assertEqual(task_state.actor_result.capability_mode, CapabilityAccessMode.READ_ONLY)
+        self.assertEqual(task_state.executed_steps, [])
 
-    def test_needs_clarification_bootstraps_to_waiting_human_review(self) -> None:
-        # A clarification-required intake should bootstrap into waiting_human_review.
-        graph = build_runtime_graph(planner_service=StubPlanner())
+    def test_needs_clarification_skips_actor(self) -> None:
+        graph = build_runtime_graph(
+            planner_service=StubPlanner(),
+            actor_service=StubActor(),
+        )
         result = graph.invoke(
             {"intake_result": _build_clarification_intake_result()},
-            config={"configurable": {"thread_id": "layer2-bootstrap-clarification"}},
+            config={"configurable": {"thread_id": "layer2-ready-to-execute-clarification"}},
         )
 
         task_state = result["task_state"]
@@ -107,15 +141,23 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertEqual(task_state.step_history[0].runtime_state, RuntimeState.WAITING_HUMAN_REVIEW)
         self.assertEqual(
             [step.node_name for step in task_state.step_history],
-            ["bootstrap_from_intake", "planner", "finalize_bootstrap"],
+            [
+                "bootstrap_from_intake",
+                "planner",
+                "actor",
+                "finalize_bootstrap",
+            ],
         )
         self.assertEqual(task_state.plan_steps, [])
         self.assertIsNone(task_state.current_plan_step_index)
         self.assertIsNone(task_state.planner_rationale)
+        self.assertIsNone(task_state.actor_result)
 
     def test_build_actor_task_exposes_full_plan_and_current_step(self) -> None:
-        # The actor should receive the full plan as context but target only the current step.
-        graph = build_runtime_graph(planner_service=StubPlanner())
+        graph = build_runtime_graph(
+            planner_service=StubPlanner(),
+            actor_service=StubActor(),
+        )
         result = graph.invoke(
             {"intake_result": _build_research_intake_result()},
             config={"configurable": {"thread_id": "layer2-actor-contract-complete"}},
@@ -125,9 +167,10 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         actor_task = build_actor_task(task_state=task_state)
 
         self.assertIsInstance(actor_task, ActorTask)
-        self.assertEqual(actor_task.current_state, RuntimeState.PLANNING)
+        self.assertEqual(actor_task.current_state, RuntimeState.READY_TOOL_EXECUTION)
         self.assertEqual(len(actor_task.plan_steps), 2)
         self.assertIsInstance(actor_task.plan_steps, tuple)
+        self.assertEqual(actor_task.past_steps, ())
         self.assertEqual(actor_task.current_plan_step_index, 0)
         self.assertEqual(
             actor_task.current_plan_step.objective,
@@ -143,8 +186,10 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertEqual(actor_task.planner_prompt_version, "stub_v1")
 
     def test_build_actor_task_requires_current_plan_step(self) -> None:
-        # The actor contract should fail if there is no current executable plan step.
-        graph = build_runtime_graph(planner_service=StubPlanner())
+        graph = build_runtime_graph(
+            planner_service=StubPlanner(),
+            actor_service=StubActor(),
+        )
         result = graph.invoke(
             {"intake_result": _build_clarification_intake_result()},
             config={"configurable": {"thread_id": "layer2-actor-contract-clarification"}},
@@ -155,8 +200,8 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_actor_task(task_state=task_state)
 
+
 def _build_research_intake_result() -> IntakeResult:
-    # Build a canonical complete intake payload for bootstrap tests.
     return IntakeResult(
         structured_task=StructuredTask(
             task_spec=TaskSpec(
@@ -183,7 +228,6 @@ def _build_research_intake_result() -> IntakeResult:
 
 
 def _build_clarification_intake_result() -> IntakeResult:
-    # Build a canonical clarification-required intake payload for bootstrap tests.
     return IntakeResult(
         structured_task=StructuredTask(
             task_spec=TaskSpec(

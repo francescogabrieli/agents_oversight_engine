@@ -1,20 +1,18 @@
+from .acting import (
+    ActorExecutionError,
+    OpenAIActor,
+    OpenAIActorSettings,
+    build_default_actor,
+)
 from .actor_contract import (
     ActorPlanStep,
+    ActorPastStep,
     ActorPort,
     ActorResult,
     ActorResultType,
     ActorTask,
+    CapabilityAccessMode,
     build_actor_task,
-)
-from .governance_contract import (
-    GovernanceDirective,
-    GovernanceDirectiveType,
-    GovernanceEvent,
-    GovernanceEventType,
-    GovernancePort,
-    GovernanceSignalSource,
-    GovernanceStreamSnapshot,
-    build_governance_stream_snapshot,
 )
 from .graph import (
     Layer2GraphInput,
@@ -23,6 +21,7 @@ from .graph import (
     build_runtime_graph,
 )
 from .nodes import (
+    actor,
     bootstrap_from_intake,
     finalize_bootstrap,
     planner,
@@ -35,6 +34,7 @@ from .planning import (
     build_default_planner,
 )
 from .state import (
+    ExecutedPlanStep,
     PlanStep,
     PlanStepStatus,
     PlannerDecision,
@@ -45,21 +45,20 @@ from .state import (
 )
 
 __all__ = [
+    "ActorPastStep",
     "ActorPlanStep",
     "ActorPort",
+    "ActorExecutionError",
     "ActorResult",
     "ActorResultType",
     "ActorTask",
-    "GovernanceDirective",
-    "GovernanceDirectiveType",
-    "GovernanceEvent",
-    "GovernanceEventType",
-    "GovernancePort",
-    "GovernanceSignalSource",
-    "GovernanceStreamSnapshot",
+    "CapabilityAccessMode",
     "Layer2GraphInput",
     "Layer2GraphOutput",
     "Layer2GraphState",
+    "ExecutedPlanStep",
+    "OpenAIActor",
+    "OpenAIActorSettings",
     "OpenAIPlanner",
     "OpenAIPlannerSettings",
     "PlanStep",
@@ -71,10 +70,11 @@ __all__ = [
     "RuntimeState",
     "StepRecord",
     "TaskState",
+    "actor",
     "bootstrap_from_intake",
     "build_actor_task",
+    "build_default_actor",
     "build_default_planner",
-    "build_governance_stream_snapshot",
     "build_runtime_graph",
     "finalize_bootstrap",
     "planner",
