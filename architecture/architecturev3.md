@@ -36,8 +36,9 @@ L'architettura viene compressa in cinque macro-blocchi:
 - la richiesta entra nel `Task Intake`
 - il task viene convertito in `structured_task`
 - il `Runtime & Governance` inizializza il `TaskState` e avvia il ciclo operativo
+- il `Runtime Core` adotta un pattern **plan-and-execute**: il `planner` costruisce il piano semantico del task e l'`actor` esegue il passo corrente con una logica **ReAct-like** locale
 - il runtime propone azioni e, quando necessario, invoca il `Tool Bus`
-- il blocco di governance valuta policy, rischio, qualità delle evidenze e possibile escalation
+- il blocco di governance valuta policy, rischio, qualità delle evidenze, coerenza semantica e possibile escalation
 - se necessario, il sistema entra in `human review`
 - durante tutta la run, stato, evidenze ed eventi vengono persistiti
 - a fine run, i dati vengono letti dallo strato di evaluation e improvement
@@ -74,7 +75,7 @@ Responsabilità principali:
 - produrre metadata di parsing e tracciabilità
 
 Scelte di progettazione:
-- il parsing può essere realizzato con un LLM 
+- il parsing può essere realizzato con un LLM
 - soglia di confidenza e budget non vengono inferiti dal task
 - soglia di confidenza e budget vengono impostati dalla configurazione del sistema
 
@@ -125,6 +126,11 @@ Input strutturato proveniente dal `Task Intake`.
 
 Questo macro-block è implementato principalmente come **nodi e subgraph LangGraph**.
 
+Il `Runtime Core` adotta un pattern **plan-and-execute**.
+Il nodo `planner` costruisce e aggiorna il piano semantico del task, mentre il nodo `actor` esegue esclusivamente il passo corrente del piano.
+L'esecuzione del singolo passo avviene con una logica **ReAct-like** locale: l'`actor` ragiona sul passo corrente, propone un'azione operativa, osserva gli esiti disponibili e decide se il passo può proseguire, concludersi o richiedere `replan`, chiarimento o escalation.
+Questa logica ReAct non coincide con l'intera architettura, ma solo con il comportamento operativo locale dell'`actor` all'interno del pattern plan-and-execute.
+
 Responsabilità principali:
 - inizializzare il `TaskState`
 - pianificare la traiettoria operativa completa del task
@@ -162,41 +168,41 @@ Ruolo dei nodi principali:
 
 #### Ruolo di `planner` e `actor`
 
-`planner` e `actor` appartengono alla stessa entità agentica del Layer 2, ma rimangono separati come responsabilità architetturali per mantenere il sistema spiegabile, governabile e adatto alla trajectory analysis.
+`planner` e `actor` appartengono alla stessa entità agentica del Layer 2, ma restano separati per mantenere il sistema spiegabile, governabile e adatto alla trajectory analysis.
 
-In termini concettuali:
-- `planner` decide **cosa ottenere dopo**
-- `actor` decide **come realizzare operativamente ciò che è stato deciso**
+L'architettura adotta un pattern **plan-and-execute**:
+- `planner` decide **quale traiettoria semantica seguire**
+- `actor` decide **come realizzare operativamente il passo corrente della traiettoria**
 
 Responsabilità principali di `planner`:
 - leggere goal, contesto, vincoli, stato corrente ed evidenze raccolte
-- produrre il piano semantico completo della traiettoria prevista del task
-- identificare il passo corrente del piano
+- produrre o aggiornare il piano semantico del task
+- identificare il `current_plan_step`
 - esprimere il razionale sintetico della traiettoria proposta
-- non emettere direttamente la `tool_call` esecutiva concreta
+- non emettere direttamente una `tool_call` esecutiva completa
 
 Output atteso di `planner`:
-- step semantici orientati all'obiettivo
-- eventuale indicazione di `read_only`, raccolta evidenze, chiarimento o sintesi finale
-- nessun dettaglio operativo di basso livello come nome tool obbligatorio, parametri completi o payload già eseguibile
+- `plan_steps` ordinati e orientati all'obiettivo
+- identificazione del passo corrente
+- eventuali indicazioni di `read_only`, raccolta evidenze, chiarimento o sintesi finale
+- nessun payload operativo completo già pronto per l'esecuzione
+
+`actor` è la componente esecutiva del runtime.
+L'`actor` non pianifica l'intera traiettoria, ma realizza il `current_plan_step` con una logica **ReAct-like locale**.
+
+Responsabilità principali di `actor`:
+- prendere in input il `current_plan_step` e il contesto globale del piano
+- svolgere il reasoning operativo necessario per quel passo
+- proporre una singola azione operativa concreta oppure un output intermedio o finale
+- richiedere l'uso di tool quando necessario
+- usare gli esiti osservati per decidere se il passo corrente può dirsi completato oppure se servono ulteriori micro-azioni, chiarimento, `replan` o escalation
 
 Questo confine è intenzionale:
 - `planner` definisce la `intended trajectory`
-- `actor` definisce la `executed trajectory`
+- `actor` realizza la `executed trajectory`
 - `observe_tool_result` registra la `observed trajectory`
 
 Questa separazione rende leggibile l'analisi della traiettoria, perché permette di confrontare piano, azione effettiva ed esito osservato.
-
-`actor` è la principale componente esecutiva dell'`Agent Core` del Layer 2.
-
-Responsabilità principali di `actor`:
-- prendere in input il passo corrente o l'azione ad alto livello proposta dal `planner`
-- trasformare il passo pianificato in una proposta operativa concreta
-- eseguire il reasoning operativo necessario per quel passo
-- effettuare eventuali `call_llm` necessarie alla produzione dell'output intermedio o finale
-- decidere se per realizzare il passo serva un tool, una risposta intermedia, una richiesta di chiarimento o un output finale
-- invocare strumenti esterni quando l'azione richiede accesso a tool o servizi
-- produrre un risultato operativo che possa poi essere osservato e trasformato in evidenza
 
 Relazione con gli altri nodi:
 - `actor` non decide in autonomia se un'azione è permessa: questa responsabilità rimane al blocco di governance
@@ -324,43 +330,52 @@ Vincoli sull'output di `actor`:
 - l'output di `actor` non sostituisce il piano del `planner`
 - ogni deviazione di traiettoria deve restare esplicita e passare da `replanner`, governance o HITL
 
+Nota operativa:
+- il completamento di un `current_plan_step` non coincide necessariamente con una singola azione
+- uno stesso `current_plan_step` può richiedere più iterazioni locali `actor -> tool_gateway -> observe_tool_result`
+- il `replanner` viene coinvolto quando il passo è completato, quando le evidenze raccolte invalidano il piano corrente, oppure quando la governance richiede correzione, chiarimento o escalation
+
 #### Stream Contract: `Agent Core` -> `Governance Core`
 
-Durante l'esecuzione del `current_plan_step`, l'`actor` emette in modo continuo uno stream strutturato di informazioni operative verso il `Governance Core`.
+Durante l'esecuzione del `current_plan_step`, l'`Agent Core` emette uno stream strutturato di eventi operativi verso il `Governance Core`.
 
-Questo stream non e:
+In questo contesto, "stream continuo" non significa accesso continuo al ragionamento interno grezzo del modello, né monitoraggio onnisciente del runtime.
+Significa invece una sequenza ad alta frequenza di eventi operativi osservabili emessi dopo ogni transizione rilevante del passo corrente.
+
+Lo stream non è:
 - una chain-of-thought grezza
-- una sequenza di checkpoint statici obbligatori
-- un singolo esito finale emesso solo a step concluso
+- una sequenza di checkpoint statici business-specific
+- un unico esito finale emesso solo a step concluso
 
-Questo stream e invece:
-- un flusso continuo di aggiornamenti compatti e leggibili
-- un canale di osservabilita per capire cosa l'agente sta facendo mentre opera
-- il punto di ingresso principale del `Governance Core`
+Lo stream è invece:
+- un canale event-driven di osservabilità operativa
+- una sequenza di aggiornamenti compatti, tipizzati e leggibili
+- il principale input live del `Governance Core`
 
-Informazioni minime che lo stream deve rendere visibili:
-- step corrente e riferimento al `plan_step_id`
-- intento operativo corrente dell'agente
-- eventuale richiesta di azione esterna o uso di capacita del `Tool Bus`
-- evidenze raccolte o aggiornate rilevanti per il passo
+Eventi minimi attesi nello stream:
+- inizio del `current_plan_step`
+- proposta di azione operativa
+- richiesta di uso di un tool o capacità esterna
+- esito osservato del tool o della micro-azione eseguita
+- aggiornamento delle evidenze rilevanti
 - segnali di incertezza, rischio o degrado della traiettoria
-- eventuale draft o output prodotto durante l'esecuzione
-- stato runtime corrente e progressione sintetica dello step
+- produzione di draft, chiarimenti o output intermedi
+- completamento del passo oppure richiesta di `replan` / escalation
 
-Proprieta del contract:
+Proprietà del contract:
 - lo stream deve restare compatto, tipizzato e leggibile anche per review umana
-- lo stream deve descrivere il comportamento operativo osservabile dell'agente, non il suo ragionamento interno grezzo
-- il `Governance Core` osserva lo stream in modo continuo durante l'operativita dell'agente
-- l'agente non si ferma per checkpoint hardcoded: l'interruzione avviene solo quando il subgraph di governance produce una decisione di controllo o escalation
+- deve descrivere il comportamento osservabile del runtime, non il ragionamento interno grezzo
+- il `Governance Core` valuta lo stream in modalità event-driven durante l'operatività del runtime
+- l'agente non si ferma per checkpoint hardcoded: l'interruzione avviene solo quando il blocco di governance produce una direttiva di controllo o escalation
 
 Valutazioni attese all'interno del `Governance Core`:
 - il `policy_engine` legge lo stream e produce una decisione di policy come `allow`, `allow_read_only`, `ask_clarification`, `require_human_review` o `deny`
-- il blocco `confidence_risk_trajectory` usa lo stream per calcolare segnali continui su qualita delle evidenze, rischio operativo e salute della traiettoria
-- il `judge` opera in continuo o su snapshot periodici dello stream, senza dipendere da checkpoint statici, e produce una valutazione semantica del comportamento del runtime
+- il blocco `confidence_risk_trajectory` usa lo stream per calcolare segnali continui su qualità delle evidenze, rischio operativo e salute della traiettoria
+- il `judge` opera su eventi o snapshot periodici dello stream, senza dipendere da checkpoint statici, e produce una valutazione semantica del comportamento del runtime
 - il `decision_combiner` riceve questi esiti e produce la direttiva finale del blocco governance
 
 Ruolo architetturale del contract:
-- dare al `Governance Core` visibilita continua sul lavoro dell'agente
+- dare al `Governance Core` visibilità continua sul lavoro dell'agente tramite eventi operativi osservabili
 - permettere valutazioni dinamiche di policy, rischio, incertezza e coerenza semantica
 - rendere possibile l'attivazione selettiva di `interrupt / resume` e HITL
 
@@ -383,6 +398,11 @@ Ruolo:
 
 Implementazione: **nodo del grafo + componente esterno OPA (Open Policy Agent)**.
 
+Ruolo:
+- applicare il **deterministic policy envelope** del sistema
+- valutare vincoli non negoziabili prima dell'esecuzione di azioni operative o richieste di tool
+- stabilire ciò che è ammissibile, ciò che è consentito solo in `read_only` e ciò che richiede obbligatoriamente revisione umana
+
 Decisioni possibili:
 - `allow`
 - `allow_read_only`
@@ -400,6 +420,9 @@ Segnali usati dalle policy:
 - vincoli organizzativi
 - eventuali precedenti approvazioni umane
 
+Il `Policy Engine` definisce i confini hard del runtime.
+I livelli adattivi successivi non possono mai allargare ciò che il `Policy Engine` ha negato o ristretto.
+
 #### Confidence, Risk & Trajectory
 
 Implementazione: **nodo del subgraph di governance**.
@@ -410,20 +433,28 @@ Score distinti:
 - `trajectory_health_score`
 
 Ruolo:
-- evitare un unico `confidence_score`
+- operare come **adaptive oversight layer**
+- intervenire quando nessuna policy hard ha bloccato l'azione, ma il runtime non è sufficientemente robusto per proseguire in autonomia
+- evitare un unico `confidence_score` aggregato
 - separare qualità delle evidenze, rischio operativo e salute della traiettoria
 - supportare decisioni come `continue`, `replan`, `request_more_evidence` o escalation
-- non ogni degrado della traiettoria richiede automaticamente HITL: in molti casi il primo esito corretto è `replan`
+
+Questo blocco non stabilisce se un'azione è ammissibile in assoluto; valuta se un'azione già ammissibile è sufficientemente supportata, prudente e robusta da eseguire nel contesto corrente.
 
 #### Judge
 
 Implementazione: **nodo del subgraph di governance**.
 
 Ruolo:
-- intercettare problemi semantici
+- operare come sensore semantico live del runtime
+- intercettare problemi di coerenza non catturati dalle sole policy o dagli score quantitativi
 - misurare drift rispetto al goal
-- rilevare incoerenza tra evidenze e azione proposta
-- rilevare situazioni in cui la traiettoria pianificata non è più coerente con ciò che il runtime sta realmente facendo
+- rilevare incoerenza tra evidenze raccolte e azione proposta
+- rilevare incoerenza tra traiettoria pianificata e comportamento operativo effettivo
+
+Il `judge` non sostituisce né il `Policy Engine` né il motore di confidence/risk.
+Non decide da solo i vincoli hard del sistema.
+Produce invece una valutazione semantica che può contribuire a `continue`, `replan`, `request_more_evidence`, `wait_human_review` o `stop` attraverso il `decision_combiner`.
 
 #### Decision Combiner
 
@@ -432,8 +463,21 @@ Implementazione: **nodo del subgraph di governance**.
 Ruolo:
 - ricevere gli esiti di `policy_engine`, `confidence_risk_trajectory` e `judge`
 - produrre una sola direttiva di controllo per il runtime
-- decidere se lasciare proseguire, limitare, ripianificare, chiarire, fermare o attivare HITL
-- mantenere esplicita la ragione della decisione finale
+- applicare una gerarchia esplicita di decisione
+
+Gerarchia di combinazione:
+1. il `Policy Engine` ha priorità sui vincoli non negoziabili
+2. il layer `confidence_risk_trajectory` può rendere più prudente la decisione entro i confini ammessi dalla policy
+3. il `judge` contribuisce come segnale semantico ad alta priorità, ma non amplia mai ciò che la policy ha vietato
+
+Output possibili:
+- `continue`
+- `continue_read_only`
+- `request_more_evidence`
+- `replan`
+- `wait_human_review`
+- `ask_user_clarification`
+- `stop`
 
 #### HITL Gateway
 
@@ -448,6 +492,12 @@ Il meccanismo HITL rimane comunque basato su `interrupt / resume` del runtime La
 
 HITL non è un passaggio obbligatorio tra `planner` e `actor`.
 Il runtime opera normalmente in autonomia e l'intervento umano entra solo quando viene attivato da un trigger di oversight significativo.
+
+Il `HITL Gateway` non viene attivato direttamente da un singolo segnale isolato, ma dalla direttiva finale prodotta dal `decision_combiner`.
+
+In particolare:
+- una decisione di policy `require_human_review` può attivare direttamente HITL
+- segnali di confidence/risk o del `judge` possono portare a HITL solo quando il `decision_combiner` li valuta come non risolvibili con semplice `replan`, `request_more_evidence` o chiarimento
 
 Trigger tipici di ingresso in HITL:
 - decisione `require_human_review` dal `policy_engine`
@@ -664,10 +714,9 @@ Output possibili:
 
 Da definire.
 
+---
 
-
-
-# USE CASE 
+# USE CASE
 
 Si definiscono tre tasks diverse che serviranno per testare e verificare la buona riuscita dell'architettura.
 
