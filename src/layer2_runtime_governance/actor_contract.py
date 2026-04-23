@@ -7,6 +7,7 @@ from typing import Protocol
 from layer1_intake import ExecutionPolicy, IntakeMetadata, TaskSpec
 
 from .state import ExecutedPlanStep, PlanStepStatus, RuntimeFlag, RuntimeState, TaskState
+from .tool_contract import ObservedEvidence, ToolExecutionResult, ToolRequest
 
 
 # CapabilityAccessMode keeps external-read and external-write intent explicit.
@@ -48,7 +49,7 @@ class ActorPastStep:
 
 @dataclass(frozen=True)
 class ActorTask:
-    # The actor sees the whole plan and executed history, but acts only on the current step.
+    # The actor sees the whole plan, past executed steps, and observed evidence.
     task_spec: TaskSpec
     execution_policy: ExecutionPolicy
     intake_metadata: IntakeMetadata
@@ -56,6 +57,10 @@ class ActorTask:
     runtime_flags: tuple[RuntimeFlag, ...]
     plan_steps: tuple[ActorPlanStep, ...]
     past_steps: tuple[ActorPastStep, ...]
+    observed_evidence: tuple[ObservedEvidence, ...]
+    last_tool_result: ToolExecutionResult | None
+    tool_call_count: int
+    remaining_tool_calls: int | None
     current_plan_step_index: int
     current_plan_step: ActorPlanStep
     planner_rationale: str | None = None
@@ -65,7 +70,7 @@ class ActorTask:
 
 @dataclass(frozen=True)
 class ActorResult:
-    # The actor returns one concrete operational proposal for the current step.
+    # The actor returns one concrete execution outcome for the current step.
     plan_step_id: str
     result_type: ActorResultType
     summary: str
@@ -73,6 +78,7 @@ class ActorResult:
     external_impact: bool = False
     output_text: str | None = None
     blocking_reason: str | None = None
+    tool_request: ToolRequest | None = None
 
 
 class ActorPort(Protocol):
@@ -107,6 +113,8 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
         )
         for step in task_state.plan_steps
     )
+
+    # Freeze the executed step history so the actor can reason from prior completions.
     actor_past_steps = tuple(
         ActorPastStep(
             step_id=step.step_id,
@@ -126,12 +134,26 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
         runtime_flags=tuple(task_state.runtime_flags),
         plan_steps=actor_plan_steps,
         past_steps=actor_past_steps,
+        observed_evidence=tuple(task_state.observed_evidence),
+        last_tool_result=task_state.last_tool_result,
+        tool_call_count=task_state.tool_call_count,
+        # Keep tool budget explicit while allowing policies with no hard tool-call ceiling.
+        remaining_tool_calls=_compute_remaining_tool_calls(task_state=task_state),
         current_plan_step_index=current_index,
         current_plan_step=actor_plan_steps[current_index],
         planner_rationale=task_state.planner_rationale,
         planner_name=task_state.planner_name,
         planner_prompt_version=task_state.planner_prompt_version,
     )
+
+
+# Convert the optional tool-call budget into a remaining count the actor can reason about.
+def _compute_remaining_tool_calls(*, task_state: TaskState) -> int | None:
+    max_tool_calls = task_state.execution_policy.budget.max_tool_calls
+    if max_tool_calls is None:
+        return None
+
+    return max(max_tool_calls - task_state.tool_call_count, 0)
 
 
 __all__ = [

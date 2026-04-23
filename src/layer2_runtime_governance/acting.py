@@ -5,8 +5,6 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from .actor_contract import (
     ActorPort,
     ActorResult,
@@ -14,6 +12,7 @@ from .actor_contract import (
     ActorTask,
     CapabilityAccessMode,
 )
+from .tool_contract import ToolName, ToolRequest
 
 try:
     from openai import OpenAI
@@ -48,60 +47,28 @@ class OpenAIActorSettings:
 
 
 class ActorExecutionError(RuntimeError):
-    """Raised when the actor cannot produce a valid operational proposal."""
-
-
-class _ActorPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    result_type: ActorResultType
-    summary: str = Field(..., min_length=1)
-    capability_mode: CapabilityAccessMode = CapabilityAccessMode.NONE
-    external_impact: bool = False
-    output_text: str | None = None
-    blocking_reason: str | None = None
+    """Raised when the actor cannot produce a valid execution outcome."""
 
 
 # Build the constrained system prompt for Layer 2 step execution.
 def build_actor_system_prompt() -> str:
     return """
-You are the execution agent for layer 2 of a plan-and-execute runtime.
-The planner has already produced a multi-step semantic plan.
-Your job is to execute only the current plan step, using the prior executed steps as context.
-
-Return a structured object with:
-- result_type
-- summary
-- capability_mode
-- external_impact
-- output_text
-- blocking_reason
+You are the execution agent for layer 2 of a governed plan-and-execute runtime.
+The planner has already produced the semantic plan.
+Your job is to execute only the current plan step, using prior executed steps, observed evidence, and the last tool result as context.
 
 Rules:
 - Operate only on the current plan step.
-- Use the full plan and past executed steps as context, not as a second planning task.
+- Use the full plan as context, not as a second planning task.
 - Do not rewrite the plan and do not invent new plan steps.
-- Work in a local ReAct-like way for the current step, but return only the final structured outcome.
-- Produce exactly one execution outcome for the current step.
-- Keep the outcome compact, explicit, and directly actionable by the later runtime.
-- If the step requires external capability access, choose capability_mode:
-  - none
-  - read_only
-  - write
-- Set external_impact to true only for externally impactful write-like actions.
-- Use result_type:
-  - propose_action when the current step requires a later tool or external capability to proceed
-  - intermediate_output when the current step can be executed locally and yields a grounded partial output
-  - final_output when the step can already complete the task safely
-  - ask_clarification when missing information blocks safe progress
-  - blocked when the task cannot proceed safely from the current state
-  - needs_replan when the current semantic step is misaligned or insufficient
-- Do not emit chain-of-thought.
-- Do not emit concrete shell commands, API payloads, or raw tool call arguments.
-- Do not mention specific URLs unless they are already explicitly part of user-provided context.
+- Work in a local ReAct-like way for the current step.
+- Use the runtime-bound tools when external information is required.
+- If you do not need an external tool, finish the turn by emitting exactly one structured outcome tool.
+- Keep the turn compact, explicit, and directly actionable by the runtime.
 - Respect read_only_mode when it is true.
-- Prefer read-only evidence collection before synthesis for research or analysis tasks.
-- If the current step can be completed from the already executed steps and current context, prefer intermediate_output or final_output with capability_mode none.
+- Do not emit chain-of-thought.
+- Do not emit concrete shell commands or raw implementation details.
+- Prefer grounded local outputs when the available evidence is already sufficient.
 """.strip()
 
 
@@ -128,6 +95,8 @@ def build_actor_user_prompt(*, actor_task: ActorTask) -> str:
                 "max_steps": actor_task.execution_policy.budget.max_steps,
                 "max_tool_calls": actor_task.execution_policy.budget.max_tool_calls,
             },
+            "tool_call_count": actor_task.tool_call_count,
+            "remaining_tool_calls": actor_task.remaining_tool_calls,
         },
         "intake_metadata": {
             "parse_status": actor_task.intake_metadata.parse_status.value,
@@ -174,17 +143,46 @@ def build_actor_user_prompt(*, actor_task: ActorTask) -> str:
             }
             for step in actor_task.past_steps
         ],
+        "observed_evidence": [
+            {
+                "evidence_id": evidence.evidence_id,
+                "title": evidence.title,
+                "locator": evidence.locator,
+                "excerpt": evidence.excerpt,
+                "source_tool": evidence.source_tool.value,
+            }
+            for evidence in actor_task.observed_evidence
+        ],
+        "last_tool_result": (
+            {
+                "tool_name": actor_task.last_tool_result.request.tool_name.value,
+                "success": actor_task.last_tool_result.success,
+                "summary": actor_task.last_tool_result.summary,
+                "content": actor_task.last_tool_result.content,
+                "error_message": actor_task.last_tool_result.error_message,
+                "sources": [
+                    {
+                        "title": source.title,
+                        "locator": source.locator,
+                        "snippet": source.snippet,
+                    }
+                    for source in actor_task.last_tool_result.sources
+                ],
+            }
+            if actor_task.last_tool_result is not None
+            else None
+        ),
     }
 
     return (
-        "Execute the current plan step in a plan-and-execute runtime.\n\n"
+        "Execute the current plan step in the governed plan-and-execute runtime.\n\n"
         f"{json.dumps(payload, indent=2, ensure_ascii=False)}"
     )
 
 
 class OpenAIActor(ActorPort):
     actor_name = "openai_layer2_actor"
-    prompt_version = "actor_v2_plan_execute"
+    prompt_version = "actor_v4_runtime_tool_binding"
 
     def __init__(self, settings: OpenAIActorSettings | None = None) -> None:
         # Validate actor prerequisites once at construction time.
@@ -204,10 +202,10 @@ class OpenAIActor(ActorPort):
             timeout=self._settings.timeout_seconds,
         )
 
-    # Ask OpenAI for one typed actor proposal and convert it into the domain result.
+    # Ask OpenAI for one tool-bound actor turn and convert it into the domain result.
     def act(self, *, actor_task: ActorTask) -> ActorResult:
         try:
-            response = self._client.responses.parse(
+            response = self._client.responses.create(
                 model=self._settings.model,
                 input=[
                     {
@@ -219,24 +217,256 @@ class OpenAIActor(ActorPort):
                         "content": build_actor_user_prompt(actor_task=actor_task),
                     },
                 ],
-                text_format=_ActorPayload,
+                tools=_build_actor_runtime_tools(),
             )
         except Exception as exc:  # pragma: no cover - network/client errors
             raise ActorExecutionError(f"Actor request failed: {exc}") from exc
 
-        payload = getattr(response, "output_parsed", None)
-        if payload is None:
-            raise ActorExecutionError("Actor returned no structured output.")
-
-        return ActorResult(
-            plan_step_id=actor_task.current_plan_step.step_id,
-            result_type=payload.result_type,
-            summary=payload.summary,
-            capability_mode=payload.capability_mode,
-            external_impact=payload.external_impact,
-            output_text=payload.output_text,
-            blocking_reason=payload.blocking_reason,
+        tool_call = _extract_single_function_call(response)
+        return _convert_tool_call_to_actor_result(
+            actor_task=actor_task,
+            tool_call=tool_call,
         )
+
+
+# Build the bound runtime tools exposed to the actor model.
+def _build_actor_runtime_tools() -> list[dict[str, object]]:
+    return [
+        {
+            "type": "function",
+            "name": "request_web_search",
+            "description": (
+                "Request a read-only web search when the current plan step requires discovering external sources."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "reason": {"type": "string"},
+                    "query": {"type": "string"},
+                    "max_results": {"type": "integer", "minimum": 1, "maximum": 10},
+                    "extractive_goal": {"type": "string"},
+                },
+                "required": ["summary", "reason", "query"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "request_fetch_url_text",
+            "description": (
+                "Request a read-only fetch of a concrete URL when the current plan step needs extraction from a known source."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "reason": {"type": "string"},
+                    "url": {"type": "string"},
+                    "extractive_goal": {"type": "string"},
+                },
+                "required": ["summary", "reason", "url"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "emit_intermediate_output",
+            "description": "Emit a grounded partial output when the current plan step has been completed locally.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "output_text": {"type": "string"},
+                },
+                "required": ["summary", "output_text"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "emit_final_output",
+            "description": "Emit the final answer when the task can already be completed safely.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "output_text": {"type": "string"},
+                },
+                "required": ["summary", "output_text"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "emit_ask_clarification",
+            "description": "Ask for clarification when missing information blocks safe progress.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "blocking_reason": {"type": "string"},
+                },
+                "required": ["summary", "blocking_reason"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "emit_blocked",
+            "description": "Signal that the current step cannot proceed safely from the current state.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "blocking_reason": {"type": "string"},
+                },
+                "required": ["summary", "blocking_reason"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "emit_needs_replan",
+            "description": "Signal that the current semantic step is insufficient or misaligned and requires replanning.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "blocking_reason": {"type": "string"},
+                },
+                "required": ["summary", "blocking_reason"],
+                "additionalProperties": False,
+            },
+        },
+    ]
+
+
+# Extract exactly one function tool call from the model response.
+def _extract_single_function_call(response):
+    function_calls = [
+        item
+        for item in getattr(response, "output", []) or []
+        if getattr(item, "type", None) == "function_call"
+    ]
+
+    if len(function_calls) != 1:
+        raise ActorExecutionError(
+            f"Actor must emit exactly one function tool call, received {len(function_calls)}."
+        )
+
+    return function_calls[0]
+
+
+# Convert one function tool call into the stable ActorResult domain model.
+def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> ActorResult:
+    tool_name = getattr(tool_call, "name", None)
+    raw_arguments = getattr(tool_call, "arguments", None)
+
+    if tool_name is None or raw_arguments is None:
+        raise ActorExecutionError("Actor returned a malformed function tool call.")
+
+    try:
+        arguments = json.loads(raw_arguments)
+    except json.JSONDecodeError as exc:
+        raise ActorExecutionError(f"Actor returned invalid tool arguments: {exc}") from exc
+
+    plan_step_id = actor_task.current_plan_step.step_id
+
+    if tool_name == "request_web_search":
+        _require_arguments(arguments, "summary", "reason", "query")
+        return ActorResult(
+            plan_step_id=plan_step_id,
+            result_type=ActorResultType.PROPOSE_ACTION,
+            summary=arguments["summary"],
+            capability_mode=CapabilityAccessMode.READ_ONLY,
+            external_impact=False,
+            tool_request=ToolRequest(
+                plan_step_id=plan_step_id,
+                tool_name=ToolName.WEB_SEARCH,
+                reason=arguments["reason"],
+                query=arguments["query"],
+                max_results=int(arguments.get("max_results", 5)),
+                extractive_goal=arguments.get("extractive_goal"),
+            ),
+        )
+
+    if tool_name == "request_fetch_url_text":
+        _require_arguments(arguments, "summary", "reason", "url")
+        return ActorResult(
+            plan_step_id=plan_step_id,
+            result_type=ActorResultType.PROPOSE_ACTION,
+            summary=arguments["summary"],
+            capability_mode=CapabilityAccessMode.READ_ONLY,
+            external_impact=False,
+            tool_request=ToolRequest(
+                plan_step_id=plan_step_id,
+                tool_name=ToolName.FETCH_URL_TEXT,
+                reason=arguments["reason"],
+                url=arguments["url"],
+                extractive_goal=arguments.get("extractive_goal"),
+            ),
+        )
+
+    if tool_name == "emit_intermediate_output":
+        _require_arguments(arguments, "summary", "output_text")
+        return ActorResult(
+            plan_step_id=plan_step_id,
+            result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+            summary=arguments["summary"],
+            capability_mode=CapabilityAccessMode.NONE,
+            output_text=arguments["output_text"],
+        )
+
+    if tool_name == "emit_final_output":
+        _require_arguments(arguments, "summary", "output_text")
+        return ActorResult(
+            plan_step_id=plan_step_id,
+            result_type=ActorResultType.FINAL_OUTPUT,
+            summary=arguments["summary"],
+            capability_mode=CapabilityAccessMode.NONE,
+            output_text=arguments["output_text"],
+        )
+
+    if tool_name == "emit_ask_clarification":
+        _require_arguments(arguments, "summary", "blocking_reason")
+        return ActorResult(
+            plan_step_id=plan_step_id,
+            result_type=ActorResultType.ASK_CLARIFICATION,
+            summary=arguments["summary"],
+            capability_mode=CapabilityAccessMode.NONE,
+            blocking_reason=arguments["blocking_reason"],
+        )
+
+    if tool_name == "emit_blocked":
+        _require_arguments(arguments, "summary", "blocking_reason")
+        return ActorResult(
+            plan_step_id=plan_step_id,
+            result_type=ActorResultType.BLOCKED,
+            summary=arguments["summary"],
+            capability_mode=CapabilityAccessMode.NONE,
+            blocking_reason=arguments["blocking_reason"],
+        )
+
+    if tool_name == "emit_needs_replan":
+        _require_arguments(arguments, "summary", "blocking_reason")
+        return ActorResult(
+            plan_step_id=plan_step_id,
+            result_type=ActorResultType.NEEDS_REPLAN,
+            summary=arguments["summary"],
+            capability_mode=CapabilityAccessMode.NONE,
+            blocking_reason=arguments["blocking_reason"],
+        )
+
+    raise ActorExecutionError(f"Actor emitted an unknown runtime tool: {tool_name}")
+
+
+# Validate that required tool arguments are present and non-empty.
+def _require_arguments(arguments: dict[str, object], *required_keys: str) -> None:
+    for key in required_keys:
+        value = arguments.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise ActorExecutionError(f"Actor tool call is missing required string argument '{key}'.")
 
 
 # Build the production actor used by the live Layer 2 runtime.

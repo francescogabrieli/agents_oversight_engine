@@ -34,6 +34,11 @@ from layer2_runtime_governance import (
     PlannerDecision,
     RuntimeFlag,
     RuntimeState,
+    ToolExecutionResult,
+    ToolGatewayPort,
+    ToolName,
+    ToolRequest,
+    ToolSource,
     build_actor_task,
     build_runtime_graph,
 )
@@ -70,23 +75,71 @@ class StubActor(ActorPort):
     actor_name = "stub_actor"
     prompt_version = "stub_actor_v1"
 
-    # Return one stable read-only execution outcome for the current semantic step.
+    # Drive one deterministic actor/tool/observe loop across two semantic steps.
     def act(self, *, actor_task: ActorTask) -> ActorResult:
+        if actor_task.current_plan_step.step_id == "step_1" and not actor_task.observed_evidence:
+            return ActorResult(
+                plan_step_id=actor_task.current_plan_step.step_id,
+                result_type=ActorResultType.PROPOSE_ACTION,
+                summary="Request a read-only evidence search for the first step.",
+                capability_mode=CapabilityAccessMode.READ_ONLY,
+                external_impact=False,
+                tool_request=ToolRequest(
+                    plan_step_id=actor_task.current_plan_step.step_id,
+                    tool_name=ToolName.WEB_SEARCH,
+                    reason="The first semantic step requires authoritative documentary evidence.",
+                    query="Digital Markets Act official EU sources",
+                    max_results=3,
+                    extractive_goal="Find official EU sources about the Digital Markets Act.",
+                ),
+            )
+
+        if actor_task.current_plan_step.step_id == "step_1":
+            return ActorResult(
+                plan_step_id=actor_task.current_plan_step.step_id,
+                result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+                summary="The first step is complete and produced grounded evidence.",
+                capability_mode=CapabilityAccessMode.NONE,
+                output_text="Collected grounded evidence from official sources.",
+            )
+
         return ActorResult(
             plan_step_id=actor_task.current_plan_step.step_id,
-            result_type=ActorResultType.PROPOSE_ACTION,
-            summary="Propose a read-only documentary evidence collection action.",
-            capability_mode=CapabilityAccessMode.READ_ONLY,
+            result_type=ActorResultType.FINAL_OUTPUT,
+            summary="The task can now be completed from the grounded evidence.",
+            capability_mode=CapabilityAccessMode.NONE,
             external_impact=False,
+            output_text="The DMA is an EU regulation that targets gatekeeper platforms.",
+        )
+
+
+class StubToolGateway(ToolGatewayPort):
+    gateway_name = "stub_tool_gateway"
+
+    # Return one stable tool result so the actor can continue its local loop.
+    def execute(self, *, tool_request: ToolRequest) -> ToolExecutionResult:
+        return ToolExecutionResult(
+            request=tool_request,
+            success=True,
+            summary="Stub web search completed successfully.",
+            content="Official EU sources describe the Digital Markets Act as a regulation for gatekeeper platforms.",
+            sources=(
+                ToolSource(
+                    title="European Commission - Digital Markets Act",
+                    locator="https://commission.europa.eu/dma",
+                    snippet="The DMA sets rules for gatekeeper platforms.",
+                ),
+            ),
         )
 
 
 class Layer2RuntimeGraphTests(unittest.TestCase):
-    # These tests verify the bootstrap-plus-planner-plus-actor behavior.
-    def test_complete_intake_reaches_ready_tool_execution_state(self) -> None:
+    # These tests verify the bootstrap-plus-planner-plus-actor/tool behavior.
+    def test_complete_intake_reaches_completed_state(self) -> None:
         graph = build_runtime_graph(
             planner_service=StubPlanner(),
             actor_service=StubActor(),
+            tool_gateway_service=StubToolGateway(),
         )
         result = graph.invoke(
             {"intake_result": _build_research_intake_result()},
@@ -94,39 +147,48 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         )
 
         task_state = result["task_state"]
-        self.assertEqual(task_state.current_state, RuntimeState.READY_TOOL_EXECUTION)
+        self.assertEqual(task_state.current_state, RuntimeState.COMPLETED)
         self.assertTrue(task_state.bootstrap_completed)
-        self.assertEqual(len(task_state.step_history), 4)
+        self.assertEqual(len(task_state.step_history), 8)
         self.assertEqual(
             [step.node_name for step in task_state.step_history],
             [
                 "bootstrap_from_intake",
                 "planner",
                 "actor",
+                "tool_gateway",
+                "observe_tool_result",
+                "actor",
+                "actor",
                 "finalize_bootstrap",
             ],
         )
         self.assertEqual(task_state.runtime_flags, [])
         self.assertEqual(len(task_state.plan_steps), 2)
-        self.assertEqual(task_state.current_plan_step_index, 0)
-        self.assertEqual(
-            task_state.current_plan_step.objective,
-            "Collect the minimum official evidence needed for the task.",
-        )
-        self.assertEqual(task_state.current_plan_step.status, PlanStepStatus.IN_PROGRESS)
+        self.assertIsNone(task_state.current_plan_step_index)
+        self.assertIsNone(task_state.current_plan_step)
+        self.assertEqual(task_state.plan_steps[0].status, PlanStepStatus.COMPLETED)
+        self.assertEqual(task_state.plan_steps[1].status, PlanStepStatus.COMPLETED)
         self.assertEqual(task_state.planner_name, "stub_planner")
         self.assertEqual(task_state.planner_prompt_version, "stub_v1")
         self.assertEqual(task_state.actor_name, "stub_actor")
         self.assertEqual(task_state.actor_prompt_version, "stub_actor_v1")
         self.assertIsNotNone(task_state.actor_result)
-        self.assertEqual(task_state.actor_result.result_type, ActorResultType.PROPOSE_ACTION)
-        self.assertEqual(task_state.actor_result.capability_mode, CapabilityAccessMode.READ_ONLY)
-        self.assertEqual(task_state.executed_steps, [])
+        self.assertEqual(task_state.actor_result.result_type, ActorResultType.FINAL_OUTPUT)
+        self.assertEqual(task_state.actor_result.capability_mode, CapabilityAccessMode.NONE)
+        self.assertEqual(len(task_state.executed_steps), 2)
+        self.assertEqual(task_state.tool_call_count, 1)
+        self.assertEqual(len(task_state.observed_evidence), 1)
+        self.assertEqual(
+            task_state.final_output_text,
+            "The DMA is an EU regulation that targets gatekeeper platforms.",
+        )
 
     def test_needs_clarification_skips_actor(self) -> None:
         graph = build_runtime_graph(
             planner_service=StubPlanner(),
             actor_service=StubActor(),
+            tool_gateway_service=StubToolGateway(),
         )
         result = graph.invoke(
             {"intake_result": _build_clarification_intake_result()},
@@ -157,6 +219,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         graph = build_runtime_graph(
             planner_service=StubPlanner(),
             actor_service=StubActor(),
+            tool_gateway_service=StubToolGateway(),
         )
         result = graph.invoke(
             {"intake_result": _build_research_intake_result()},
@@ -164,31 +227,17 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         )
 
         task_state = result["task_state"]
-        actor_task = build_actor_task(task_state=task_state)
+        self.assertEqual(len(task_state.executed_steps), 2)
+        self.assertEqual(len(task_state.observed_evidence), 1)
 
-        self.assertIsInstance(actor_task, ActorTask)
-        self.assertEqual(actor_task.current_state, RuntimeState.READY_TOOL_EXECUTION)
-        self.assertEqual(len(actor_task.plan_steps), 2)
-        self.assertIsInstance(actor_task.plan_steps, tuple)
-        self.assertEqual(actor_task.past_steps, ())
-        self.assertEqual(actor_task.current_plan_step_index, 0)
-        self.assertEqual(
-            actor_task.current_plan_step.objective,
-            "Collect the minimum official evidence needed for the task.",
-        )
-        self.assertEqual(
-            actor_task.plan_steps[actor_task.current_plan_step_index].step_id,
-            actor_task.current_plan_step.step_id,
-        )
-        self.assertEqual(actor_task.current_plan_step.status, PlanStepStatus.IN_PROGRESS)
-        self.assertEqual(actor_task.plan_steps[1].status, PlanStepStatus.PENDING)
-        self.assertEqual(actor_task.planner_name, "stub_planner")
-        self.assertEqual(actor_task.planner_prompt_version, "stub_v1")
+        with self.assertRaises(ValueError):
+            build_actor_task(task_state=task_state)
 
     def test_build_actor_task_requires_current_plan_step(self) -> None:
         graph = build_runtime_graph(
             planner_service=StubPlanner(),
             actor_service=StubActor(),
+            tool_gateway_service=StubToolGateway(),
         )
         result = graph.invoke(
             {"intake_result": _build_clarification_intake_result()},
@@ -200,8 +249,47 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_actor_task(task_state=task_state)
 
+    def test_complete_intake_supports_unbounded_tool_budget(self) -> None:
+        graph = build_runtime_graph(
+            planner_service=StubPlanner(),
+            actor_service=StubActor(),
+            tool_gateway_service=StubToolGateway(),
+        )
+        result = graph.invoke(
+            {"intake_result": _build_research_intake_result(max_tool_calls=None)},
+            config={"configurable": {"thread_id": "layer2-unbounded-tool-budget"}},
+        )
 
-def _build_research_intake_result() -> IntakeResult:
+        task_state = result["task_state"]
+        self.assertEqual(task_state.current_state, RuntimeState.COMPLETED)
+        self.assertEqual(task_state.tool_call_count, 1)
+        self.assertEqual(len(task_state.observed_evidence), 1)
+
+    def test_planner_trims_semantic_plan_to_max_steps(self) -> None:
+        graph = build_runtime_graph(
+            planner_service=StubPlanner(),
+            actor_service=StubActor(),
+            tool_gateway_service=StubToolGateway(),
+        )
+        result = graph.invoke(
+            {"intake_result": _build_research_intake_result(max_steps=1, max_tool_calls=10)},
+            config={"configurable": {"thread_id": "layer2-max-steps-trimmed"}},
+        )
+
+        task_state = result["task_state"]
+        self.assertEqual(task_state.current_state, RuntimeState.COMPLETED)
+        self.assertEqual(len(task_state.plan_steps), 1)
+        self.assertEqual(task_state.plan_steps[0].status, PlanStepStatus.COMPLETED)
+        self.assertEqual(len(task_state.executed_steps), 1)
+        self.assertIsNone(task_state.final_output_text)
+        self.assertIn("trimmed to the configured max_steps budget", task_state.step_history[1].summary)
+
+
+def _build_research_intake_result(
+    *,
+    max_steps: int = 5,
+    max_tool_calls: int | None = 10,
+) -> IntakeResult:
     return IntakeResult(
         structured_task=StructuredTask(
             task_spec=TaskSpec(
@@ -215,7 +303,7 @@ def _build_research_intake_result() -> IntakeResult:
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.65,
-                budget=BudgetConfig(max_steps=5, max_tool_calls=10),
+                budget=BudgetConfig(max_steps=max_steps, max_tool_calls=max_tool_calls),
             ),
         ),
         metadata=IntakeMetadata(

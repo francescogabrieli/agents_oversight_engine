@@ -13,11 +13,13 @@ from layer1_intake import (
     TaskSpec,
 )
 
+from .tool_contract import ObservedEvidence, ToolExecutionResult, ToolRequest
+
 if TYPE_CHECKING:
     from .actor_contract import ActorResult, ActorResultType
 
 
-# Layer 2 currently covers bootstrap, planning, and the first actor execution step.
+# Layer 2 currently covers bootstrap, planning, and the actor/tool observation loop.
 # This file keeps the canonical runtime state shared by the graph nodes.
 class RuntimeState(str, Enum):
     PLANNING = "planning"
@@ -73,7 +75,7 @@ class PlannerDecision:
 
 @dataclass
 class ExecutedPlanStep:
-    # Keep a compact trace of each step the actor has already executed.
+    # Keep a compact trace of each plan step the actor has already completed.
     step_id: str
     objective: str
     result_type: ActorResultType
@@ -109,6 +111,13 @@ class TaskState:
     actor_prompt_version: str | None = None
     executed_steps: list[ExecutedPlanStep] = field(default_factory=list)
     final_output_text: str | None = None
+    actor_turn_count: int = 0
+
+    # Tool loop snapshot.
+    current_tool_request: ToolRequest | None = None
+    last_tool_result: ToolExecutionResult | None = None
+    observed_evidence: list[ObservedEvidence] = field(default_factory=list)
+    tool_call_count: int = 0
 
     @property
     def current_plan_step(self) -> PlanStep | None:

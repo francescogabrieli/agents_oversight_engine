@@ -6,11 +6,12 @@ from layer1_intake import IntakeResult
 
 from .actor_contract import ActorPort, ActorResult, ActorResultType, build_actor_task
 from .planning import PlannerPort
-from .state import ExecutedPlanStep, PlanStepStatus, RuntimeState, StepRecord, TaskState
+from .state import ExecutedPlanStep, PlanStep, PlanStepStatus, RuntimeState, StepRecord, TaskState
+from .tool_contract import ObservedEvidence, ToolExecutionResult, ToolGatewayPort
 
 
 # Nodes.py contains the executable Layer 2 business logic.
-# At this stage the runtime performs bootstrap, planning, and one actor execution step.
+# At this stage the runtime performs bootstrap, planning, and the actor/tool loop.
 def bootstrap_from_intake(intake_result: IntakeResult) -> TaskState:
     # Build the first TaskState and record that the bootstrap node executed.
     state = TaskState.from_intake(intake_result)
@@ -36,8 +37,11 @@ def planner(state: TaskState, *, planner_service: PlannerPort) -> TaskState:
         return state
 
     decision = planner_service.plan(task_state=state)
-    state.plan_steps = decision.plan_steps
-    state.current_plan_step_index = 0 if decision.plan_steps else None
+    state.plan_steps = _enforce_plan_step_budget(
+        plan_steps=decision.plan_steps,
+        max_steps=state.execution_policy.budget.max_steps,
+    )
+    state.current_plan_step_index = 0 if state.plan_steps else None
     state.planner_rationale = decision.rationale
     state.planner_name = decision.planner_name
     state.planner_prompt_version = decision.prompt_version
@@ -45,23 +49,36 @@ def planner(state: TaskState, *, planner_service: PlannerPort) -> TaskState:
     if state.current_plan_step is not None:
         state.current_plan_step.status = PlanStepStatus.IN_PROGRESS
 
+    planner_summary = "Initial semantic full plan created from the current task state."
+    if len(state.plan_steps) != len(decision.plan_steps):
+        planner_summary = (
+            "Initial semantic full plan created from the current task state and "
+            "trimmed to the configured max_steps budget."
+        )
+
     _append_step_record(
         state,
         node_name="planner",
-        summary="Initial semantic full plan created from the current task state.",
+        summary=planner_summary,
     )
     return state
 
 
-# Ask the actor to execute the current semantic plan step.
+# Ask the actor to execute the current semantic plan step or continue its local tool loop.
 def actor(state: TaskState, *, actor_service: ActorPort) -> TaskState:
-    if state.current_state != RuntimeState.PLANNING or state.current_plan_step is None:
+    if state.current_state not in {
+        RuntimeState.PLANNING,
+        RuntimeState.ACTING,
+        RuntimeState.READY_NEXT_STEP,
+    } or state.current_plan_step is None:
         _append_step_record(
             state,
             node_name="actor",
-            summary="Actor skipped because there is no executable plan step in a planning state.",
+            summary="Actor skipped because there is no executable plan step in an actor-ready state.",
         )
         return state
+
+    state.actor_turn_count += 1
 
     actor_task = build_actor_task(task_state=state)
     actor_result = actor_service.act(actor_task=actor_task)
@@ -69,6 +86,10 @@ def actor(state: TaskState, *, actor_service: ActorPort) -> TaskState:
     state.actor_result = actor_result
     state.actor_name = actor_service.actor_name
     state.actor_prompt_version = actor_service.prompt_version
+    state.current_tool_request = (
+        actor_result.tool_request if actor_result.result_type == ActorResultType.PROPOSE_ACTION else None
+    )
+
     _record_actor_execution(state, actor_result=actor_result)
     state.current_state = _map_actor_result_to_runtime_state(state, actor_result=actor_result)
 
@@ -80,8 +101,76 @@ def actor(state: TaskState, *, actor_service: ActorPort) -> TaskState:
     return state
 
 
+# Execute the current typed tool request through the external tool gateway.
+def tool_gateway(state: TaskState, *, tool_gateway_service: ToolGatewayPort) -> TaskState:
+    if state.current_state != RuntimeState.READY_TOOL_EXECUTION or state.current_tool_request is None:
+        _append_step_record(
+            state,
+            node_name="tool_gateway",
+            summary="Tool gateway skipped because no tool request was ready for execution.",
+        )
+        return state
+
+    # Convert budget exhaustion into a typed failed tool result instead of crashing the loop.
+    if _tool_call_budget_exhausted(state=state):
+        state.last_tool_result = ToolExecutionResult(
+            request=state.current_tool_request,
+            success=False,
+            summary="Tool call budget exhausted before executing the requested tool.",
+            error_message="The runtime exhausted the configured tool call budget.",
+        )
+        state.current_tool_request = None
+        state.current_state = RuntimeState.ACTING
+
+        _append_step_record(
+            state,
+            node_name="tool_gateway",
+            summary="Tool gateway did not execute the request because the tool budget was exhausted.",
+        )
+        return state
+
+    tool_result = tool_gateway_service.execute(tool_request=state.current_tool_request)
+    state.last_tool_result = tool_result
+    state.tool_call_count += 1
+    state.current_tool_request = None
+    state.current_state = RuntimeState.ACTING
+
+    _append_step_record(
+        state,
+        node_name="tool_gateway",
+        summary=f"Tool gateway executed '{tool_result.request.tool_name.value}'.",
+    )
+    return state
+
+
+# Observe the latest tool result and convert it into explicit evidence for the actor.
+def observe_tool_result(state: TaskState) -> TaskState:
+    if state.last_tool_result is None:
+        _append_step_record(
+            state,
+            node_name="observe_tool_result",
+            summary="Observation skipped because there was no tool result to observe.",
+        )
+        return state
+
+    # Observation should preserve the failed result too, so the actor can react to it explicitly.
+    new_evidence = _build_observed_evidence_from_tool_result(
+        state=state,
+        tool_result=state.last_tool_result,
+    )
+    state.observed_evidence.extend(new_evidence)
+    state.current_state = RuntimeState.ACTING
+
+    _append_step_record(
+        state,
+        node_name="observe_tool_result",
+        summary="Tool result observed and converted into explicit runtime evidence.",
+    )
+    return state
+
+
 def finalize_bootstrap(state: TaskState) -> TaskState:
-    # Close the current Layer 2 slice after the first actor execution step.
+    # Close the current runtime slice after the planner/actor/tool loop reaches a stable stop point.
     next_state = deepcopy(state)
     next_state.bootstrap_completed = True
     next_state.step_index += 1
@@ -94,6 +183,11 @@ def finalize_bootstrap(state: TaskState) -> TaskState:
         )
     )
     return next_state
+
+
+# Keep the planner output within the configured semantic step budget.
+def _enforce_plan_step_budget(*, plan_steps: list[PlanStep], max_steps: int) -> list[PlanStep]:
+    return list(plan_steps[:max_steps])
 
 
 # Keep step history mutation consistent across nodes after bootstrap.
@@ -109,7 +203,16 @@ def _append_step_record(state: TaskState, *, node_name: str, summary: str) -> No
     )
 
 
-# Persist the local execution trace for the current step before the graph stops.
+# Treat a missing max_tool_calls limit as unbounded rather than as a runtime error.
+def _tool_call_budget_exhausted(*, state: TaskState) -> bool:
+    max_tool_calls = state.execution_policy.budget.max_tool_calls
+    if max_tool_calls is None:
+        return False
+
+    return state.tool_call_count >= max_tool_calls
+
+
+# Persist the local execution trace for the current step before the graph continues or stops.
 def _record_actor_execution(state: TaskState, *, actor_result: ActorResult) -> None:
     current_step = state.current_plan_step
     if current_step is None:
@@ -124,9 +227,12 @@ def _record_actor_execution(state: TaskState, *, actor_result: ActorResult) -> N
         ActorResultType.NEEDS_REPLAN,
     }:
         current_step.status = PlanStepStatus.BLOCKED
+        state.current_tool_request = None
         return
 
     if actor_result.result_type == ActorResultType.PROPOSE_ACTION:
+        if actor_result.tool_request is None:
+            raise ValueError("propose_action requires tool_request.")
         current_step.status = PlanStepStatus.IN_PROGRESS
         return
 
@@ -141,6 +247,10 @@ def _record_actor_execution(state: TaskState, *, actor_result: ActorResult) -> N
         )
     )
 
+    # Once a step is completed, the last tool result becomes historical context rather than live intent.
+    state.current_tool_request = None
+    state.last_tool_result = None
+
     if actor_result.result_type == ActorResultType.FINAL_OUTPUT:
         state.final_output_text = actor_result.output_text
         state.current_plan_step_index = None
@@ -149,7 +259,7 @@ def _record_actor_execution(state: TaskState, *, actor_result: ActorResult) -> N
     _advance_to_next_plan_step(state)
 
 
-# Advance the runtime cursor to the next semantic step after a completed local execution.
+# Advance the runtime cursor to the next semantic step after a completed execution.
 def _advance_to_next_plan_step(state: TaskState) -> None:
     current_index = state.current_plan_step_index
     if current_index is None:
@@ -192,15 +302,61 @@ def _map_actor_result_to_runtime_state(
     return RuntimeState.READY_NEXT_STEP
 
 
-# Keep the closing trace message aligned with the actual endpoint reached by the actor.
+# Convert a tool result into explicit evidence objects that later actor turns can consume.
+def _build_observed_evidence_from_tool_result(
+    *,
+    state: TaskState,
+    tool_result: ToolExecutionResult,
+) -> list[ObservedEvidence]:
+    current_step = state.current_plan_step
+    if current_step is None:
+        return []
+
+    evidence_items: list[ObservedEvidence] = []
+
+    # Preserve source-level provenance whenever the tool returned it.
+    for index, source in enumerate(tool_result.sources, start=1):
+        excerpt = source.snippet or tool_result.content or tool_result.summary
+        evidence_items.append(
+            ObservedEvidence(
+                evidence_id=f"{current_step.step_id}:tool:{state.tool_call_count}:source:{index}",
+                plan_step_id=current_step.step_id,
+                title=source.title,
+                locator=source.locator,
+                excerpt=(excerpt or "")[:1000],
+                source_tool=tool_result.request.tool_name,
+            )
+        )
+
+    # Keep at least one fallback evidence item even when the tool returned no structured sources.
+    if not evidence_items:
+        locator = tool_result.request.url or tool_result.request.query or tool_result.request.tool_name.value
+        excerpt = tool_result.content or tool_result.error_message or tool_result.summary
+        evidence_items.append(
+            ObservedEvidence(
+                evidence_id=f"{current_step.step_id}:tool:{state.tool_call_count}:fallback",
+                plan_step_id=current_step.step_id,
+                title=tool_result.request.tool_name.value,
+                locator=locator,
+                excerpt=(excerpt or "")[:1000],
+                source_tool=tool_result.request.tool_name,
+            )
+        )
+
+    return evidence_items
+
+
+# Keep the closing trace message aligned with the actual endpoint reached by the runtime.
 def _build_finalize_summary(state: TaskState) -> str:
     if state.actor_result is None:
-        return "Layer 2 stopped before actor execution because no operational proposal was available."
+        return "Layer 2 stopped before actor execution because no operational outcome was available."
 
     return (
-        "Layer 2 stopped after the first actor execution step "
-        f"with actor result '{state.actor_result.result_type.value}' "
-        f"and runtime state '{state.current_state.value}'."
+        "Layer 2 stopped after the planner/actor/tool loop "
+        f"with actor result '{state.actor_result.result_type.value}', "
+        f"runtime state '{state.current_state.value}', "
+        f"actor turns {state.actor_turn_count}, "
+        f"and tool calls {state.tool_call_count}."
     )
 
 
@@ -208,5 +364,7 @@ __all__ = [
     "actor",
     "bootstrap_from_intake",
     "finalize_bootstrap",
+    "observe_tool_result",
     "planner",
+    "tool_gateway",
 ]

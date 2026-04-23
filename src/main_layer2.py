@@ -27,6 +27,7 @@ from layer1_intake.infrastructure import build_intake_service
 from layer2_runtime_governance import build_runtime_graph
 from layer2_runtime_governance.actor_contract import ActorPort
 from layer2_runtime_governance.planning import PlannerPort
+from layer2_runtime_governance.tool_contract import ToolGatewayPort
 
 
 class IntakeExecutorPort(Protocol):
@@ -44,11 +45,13 @@ def run_layer2_flow(
     intake_service: IntakeExecutorPort | None = None,
     planner_service: PlannerPort | None = None,
     actor_service: ActorPort | None = None,
+    tool_gateway_service: ToolGatewayPort | None = None,
 ) -> dict[str, Any]:
     # Run Layer 1 plus the current Layer 2 graph and return the resulting trace.
     runtime_graph = build_runtime_graph(
         planner_service=planner_service,
         actor_service=actor_service,
+        tool_gateway_service=tool_gateway_service,
     )
 
     resolved_thread_id = thread_id or f"layer2-{uuid4()}"
@@ -214,6 +217,40 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
                 else []
             ),
         },
+        "tool_snapshot": {
+            "actor_turn_count": (
+                final_task_state.actor_turn_count if final_task_state is not None else 0
+            ),
+            "tool_call_count": (
+                final_task_state.tool_call_count if final_task_state is not None else 0
+            ),
+            "current_tool_request": (
+                {
+                    "tool_name": final_task_state.current_tool_request.tool_name.value,
+                    "reason": final_task_state.current_tool_request.reason,
+                    "query": final_task_state.current_tool_request.query,
+                    "url": final_task_state.current_tool_request.url,
+                    "max_results": final_task_state.current_tool_request.max_results,
+                    "extractive_goal": final_task_state.current_tool_request.extractive_goal,
+                }
+                if final_task_state is not None and final_task_state.current_tool_request is not None
+                else None
+            ),
+            "last_tool_result": (
+                {
+                    "tool_name": final_task_state.last_tool_result.request.tool_name.value,
+                    "success": final_task_state.last_tool_result.success,
+                    "summary": final_task_state.last_tool_result.summary,
+                    "error_message": final_task_state.last_tool_result.error_message,
+                    "source_count": len(final_task_state.last_tool_result.sources),
+                }
+                if final_task_state is not None and final_task_state.last_tool_result is not None
+                else None
+            ),
+            "observed_evidence_count": (
+                len(final_task_state.observed_evidence) if final_task_state is not None else 0
+            ),
+        },
     }
 
 
@@ -257,6 +294,7 @@ def print_layer2_summary(trace: dict[str, Any]) -> None:
     _print_section("PLANNING SNAPSHOT", compact_trace["planning_snapshot"])
     _print_section("ACTOR SNAPSHOT", compact_trace["actor_snapshot"])
     _print_section("EXECUTION SNAPSHOT", compact_trace["execution_snapshot"])
+    _print_section("TOOL SNAPSHOT", compact_trace["tool_snapshot"])
     _print_section("BOOTSTRAP STATE", compact_trace["bootstrap_state"])
 
 
@@ -268,7 +306,7 @@ def print_layer2_trace(trace: dict[str, Any]) -> None:
 def parse_cli_args() -> argparse.Namespace:
     # Parse CLI arguments for the current Layer 2 runtime slice.
     parser = argparse.ArgumentParser(
-        description="Run the current Layer 2 bootstrap, planner, and first actor execution step."
+        description="Run the current Layer 2 bootstrap, planner, actor, and tool loop."
     )
     parser.add_argument(
         "--task",

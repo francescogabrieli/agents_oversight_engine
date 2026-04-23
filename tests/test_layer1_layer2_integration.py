@@ -29,15 +29,20 @@ from layer1_intake.service import (
     TaskSpecBuilder,
 )
 from layer2_runtime_governance import (
-    ActorResultType,
-    CapabilityAccessMode,
     ActorPort,
     ActorResult,
+    ActorResultType,
     ActorTask,
+    CapabilityAccessMode,
     PlanStep,
     PlannerDecision,
     RuntimeFlag,
     RuntimeState,
+    ToolExecutionResult,
+    ToolGatewayPort,
+    ToolName,
+    ToolRequest,
+    ToolSource,
 )
 from main_layer2 import run_layer2_flow
 
@@ -94,12 +99,58 @@ class StubActor(ActorPort):
     prompt_version = "stub_actor_v1"
 
     def act(self, *, actor_task: ActorTask) -> ActorResult:
+        if actor_task.current_plan_step.step_id == "step_1" and not actor_task.observed_evidence:
+            return ActorResult(
+                plan_step_id=actor_task.current_plan_step.step_id,
+                result_type=ActorResultType.PROPOSE_ACTION,
+                summary="Request a read-only evidence search for the first step.",
+                capability_mode=CapabilityAccessMode.READ_ONLY,
+                external_impact=False,
+                tool_request=ToolRequest(
+                    plan_step_id=actor_task.current_plan_step.step_id,
+                    tool_name=ToolName.WEB_SEARCH,
+                    reason="The first semantic step requires authoritative documentary evidence.",
+                    query="Digital Markets Act official EU sources",
+                    max_results=3,
+                    extractive_goal="Find official EU sources about the Digital Markets Act.",
+                ),
+            )
+
+        if actor_task.current_plan_step.step_id == "step_1":
+            return ActorResult(
+                plan_step_id=actor_task.current_plan_step.step_id,
+                result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+                summary="The first step is complete and produced grounded evidence.",
+                capability_mode=CapabilityAccessMode.NONE,
+                output_text="Collected grounded evidence from official sources.",
+            )
+
         return ActorResult(
             plan_step_id=actor_task.current_plan_step.step_id,
-            result_type=ActorResultType.PROPOSE_ACTION,
-            summary="Propose a read-only documentary evidence collection action.",
-            capability_mode=CapabilityAccessMode.READ_ONLY,
+            result_type=ActorResultType.FINAL_OUTPUT,
+            summary="The task can now be completed from the grounded evidence.",
+            capability_mode=CapabilityAccessMode.NONE,
             external_impact=False,
+            output_text="The DMA is an EU regulation that targets gatekeeper platforms.",
+        )
+
+
+class StubToolGateway(ToolGatewayPort):
+    gateway_name = "stub_tool_gateway"
+
+    def execute(self, *, tool_request: ToolRequest) -> ToolExecutionResult:
+        return ToolExecutionResult(
+            request=tool_request,
+            success=True,
+            summary="Stub web search completed successfully.",
+            content="Official EU sources describe the Digital Markets Act as a regulation for gatekeeper platforms.",
+            sources=(
+                ToolSource(
+                    title="European Commission - Digital Markets Act",
+                    locator="https://commission.europa.eu/dma",
+                    snippet="The DMA sets rules for gatekeeper platforms.",
+                ),
+            ),
         )
 
 
@@ -122,6 +173,7 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
             ),
             planner_service=StubPlanner(),
             actor_service=StubActor(),
+            tool_gateway_service=StubToolGateway(),
         )
 
         intake_result = trace["intake_result"]
@@ -132,7 +184,7 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
             intake_result.metadata.raw_input_fingerprint,
             "fp::Find official sources about the DMA and summarize them.",
         )
-        self.assertEqual(task_state.current_state, RuntimeState.READY_TOOL_EXECUTION)
+        self.assertEqual(task_state.current_state, RuntimeState.COMPLETED)
         self.assertTrue(task_state.bootstrap_completed)
         self.assertEqual(task_state.task_spec.goal, intake_result.structured_task.task_spec.goal)
         self.assertEqual(task_state.execution_policy, intake_result.structured_task.execution_policy)
@@ -143,19 +195,21 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
                 "bootstrap_from_intake",
                 "planner",
                 "actor",
+                "tool_gateway",
+                "observe_tool_result",
+                "actor",
+                "actor",
                 "finalize_bootstrap",
             ],
         )
-        self.assertEqual(task_state.current_plan_step_index, 0)
-        self.assertEqual(
-            task_state.current_plan_step.objective,
-            "Collect reliable evidence aligned with the intake goal.",
-        )
+        self.assertIsNone(task_state.current_plan_step_index)
         self.assertEqual(task_state.planner_name, "stub_planner")
         self.assertIsNotNone(task_state.actor_result)
-        self.assertEqual(task_state.actor_result.result_type, ActorResultType.PROPOSE_ACTION)
-        self.assertEqual(task_state.actor_result.capability_mode, CapabilityAccessMode.READ_ONLY)
-        self.assertEqual(task_state.executed_steps, [])
+        self.assertEqual(task_state.actor_result.result_type, ActorResultType.FINAL_OUTPUT)
+        self.assertEqual(task_state.actor_result.capability_mode, CapabilityAccessMode.NONE)
+        self.assertEqual(len(task_state.executed_steps), 2)
+        self.assertEqual(task_state.tool_call_count, 1)
+        self.assertEqual(len(task_state.observed_evidence), 1)
 
     def test_clarification_task_bootstraps_end_to_end(self) -> None:
         trace = run_layer2_flow(
@@ -175,6 +229,7 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
             ),
             planner_service=StubPlanner(),
             actor_service=StubActor(),
+            tool_gateway_service=StubToolGateway(),
         )
 
         intake_result = trace["intake_result"]

@@ -3,6 +3,11 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+# Install targeted warning filters before importing langgraph and langchain_core dependencies.
+from .runtime_warnings import suppress_known_runtime_warnings
+
+suppress_known_runtime_warnings()
+
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
@@ -25,7 +30,14 @@ from .actor_contract import (
     ActorResultType,
     CapabilityAccessMode,
 )
-from .nodes import actor, bootstrap_from_intake, finalize_bootstrap, planner
+from .nodes import (
+    actor,
+    bootstrap_from_intake,
+    finalize_bootstrap,
+    observe_tool_result,
+    planner,
+    tool_gateway,
+)
 from .planning import PlannerPort, build_default_planner
 from .state import (
     ExecutedPlanStep,
@@ -37,6 +49,15 @@ from .state import (
     StepRecord,
     TaskState,
 )
+from .tool_contract import (
+    ObservedEvidence,
+    ToolExecutionResult,
+    ToolGatewayPort,
+    ToolName,
+    ToolRequest,
+    ToolSource,
+)
+from .tool_gateway import build_default_tool_gateway
 
 
 class Layer2GraphInput(TypedDict):
@@ -50,7 +71,7 @@ class Layer2GraphState(Layer2GraphInput, total=False):
 
 
 class Layer2GraphOutput(TypedDict):
-    # The current graph returns the state after bootstrap, planning, and one actor execution step.
+    # The current graph returns the state after the planner/actor/tool loop reaches a stable stop point.
     task_state: TaskState
 
 
@@ -59,10 +80,12 @@ def build_runtime_graph(
     checkpointer: Any | None = None,
     planner_service: PlannerPort | None = None,
     actor_service: ActorPort | None = None,
+    tool_gateway_service: ToolGatewayPort | None = None,
 ):
-    # Wire the current compact Layer 2 graph and compile it into an executable LangGraph.
+    # Wire the current Layer 2 graph and compile it into an executable LangGraph.
     resolved_planner = planner_service or build_default_planner()
     resolved_actor = actor_service or build_default_actor()
+    resolved_tool_gateway = tool_gateway_service or build_default_tool_gateway()
 
     builder = StateGraph(
         Layer2GraphState,
@@ -73,12 +96,27 @@ def build_runtime_graph(
     builder.add_node("bootstrap_from_intake", _bootstrap_node)
     builder.add_node("planner", _build_planner_node(resolved_planner))
     builder.add_node("actor", _build_actor_node(resolved_actor))
+    builder.add_node("tool_gateway", _build_tool_gateway_node(resolved_tool_gateway))
+    builder.add_node("observe_tool_result", _observe_tool_result_node)
     builder.add_node("finalize_bootstrap", _finalize_bootstrap_node)
 
     builder.add_edge(START, "bootstrap_from_intake")
     builder.add_edge("bootstrap_from_intake", "planner")
     builder.add_edge("planner", "actor")
-    builder.add_edge("actor", "finalize_bootstrap")
+
+    # Keep the internal execution loop inside the graph so the outer surface still feels agentic.
+    builder.add_conditional_edges(
+        "actor",
+        _route_after_actor,
+        {
+            "actor": "actor",
+            "tool_gateway": "tool_gateway",
+            "finalize_bootstrap": "finalize_bootstrap",
+        },
+    )
+
+    builder.add_edge("tool_gateway", "observe_tool_result")
+    builder.add_edge("observe_tool_result", "actor")
     builder.add_edge("finalize_bootstrap", END)
 
     return builder.compile(checkpointer=checkpointer or _build_default_checkpointer())
@@ -115,9 +153,40 @@ def _build_actor_node(actor_service: ActorPort):
     return _actor_node
 
 
+def _build_tool_gateway_node(tool_gateway_service: ToolGatewayPort):
+    # Close over the resolved tool gateway so the graph can remain deterministic in tests.
+    def _tool_gateway_node(state: Layer2GraphState) -> dict[str, TaskState]:
+        return {
+            "task_state": tool_gateway(
+                _copy_task_state(state["task_state"]),
+                tool_gateway_service=tool_gateway_service,
+            )
+        }
+
+    return _tool_gateway_node
+
+
+def _observe_tool_result_node(state: Layer2GraphState) -> dict[str, TaskState]:
+    # Observe the latest tool result before returning control to the actor.
+    return {"task_state": observe_tool_result(_copy_task_state(state["task_state"]))}
+
+
 def _finalize_bootstrap_node(state: Layer2GraphState) -> dict[str, TaskState]:
     # Close the current Layer 2 slice using a copied TaskState so node updates stay explicit.
     return {"task_state": finalize_bootstrap(_copy_task_state(state["task_state"]))}
+
+
+# Route actor outcomes to the next internal runtime node.
+def _route_after_actor(state: Layer2GraphState) -> str:
+    task_state = state["task_state"]
+
+    if task_state.current_state == RuntimeState.READY_TOOL_EXECUTION:
+        return "tool_gateway"
+
+    if task_state.current_state == RuntimeState.READY_NEXT_STEP:
+        return "actor"
+
+    return "finalize_bootstrap"
 
 
 def _copy_task_state(task_state: TaskState) -> TaskState:
@@ -136,6 +205,7 @@ def _build_default_checkpointer() -> MemorySaver:
             ExecutionPolicy,
             IntakeMetadata,
             IntakeResult,
+            ObservedEvidence,
             ParseStatus,
             PlanStep,
             PlanStepStatus,
@@ -147,6 +217,10 @@ def _build_default_checkpointer() -> MemorySaver:
             StructuredTask,
             TaskSpec,
             TaskState,
+            ToolExecutionResult,
+            ToolName,
+            ToolRequest,
+            ToolSource,
         ]
     )
     return MemorySaver(serde=serializer)
