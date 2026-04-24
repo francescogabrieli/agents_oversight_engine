@@ -127,6 +127,11 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
             "planner_name": (
                 final_task_state.planner_name if final_task_state is not None else None
             ),
+            "planning_source": (
+                _resolve_planning_source(final_task_state.planner_name)
+                if final_task_state is not None
+                else None
+            ),
             "planner_prompt_version": (
                 final_task_state.planner_prompt_version if final_task_state is not None else None
             ),
@@ -311,6 +316,15 @@ def to_jsonable(value: Any) -> Any:
         return [to_jsonable(item) for item in value]
 
     return value
+
+
+def _resolve_planning_source(planner_name: str | None) -> str | None:
+    # Make replanner recovery visible in compact traces without adding another state field.
+    if planner_name is None:
+        return None
+    if "replanner" in planner_name:
+        return "replanner"
+    return "planner"
 
 
 def _print_section(title: str, payload: Any) -> None:

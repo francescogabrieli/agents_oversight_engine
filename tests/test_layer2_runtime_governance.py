@@ -38,6 +38,7 @@ from layer2_runtime_governance import (
     ScratchpadEntryType,
     StepValidation,
     StepValidationDecision,
+    TaskState,
     ToolExecutionResult,
     ToolGatewayPort,
     ToolName,
@@ -46,7 +47,15 @@ from layer2_runtime_governance import (
     build_actor_task,
     build_runtime_graph,
 )
-from layer2_runtime_governance.replanning import ReplanDecision, ReplannerPort
+from main_layer2 import build_compact_trace
+from layer2_runtime_governance.replanning import (
+    OpenAIReplanner,
+    OpenAIReplannerSettings,
+    ReplanDecision,
+    ReplannerPort,
+    build_replanner_system_prompt,
+    build_replanner_user_prompt,
+)
 
 
 class StubPlanner:
@@ -292,6 +301,29 @@ class StubReplanner(ReplannerPort):
         )
 
 
+class FakeParsedReplanResponse:
+    # Minimal fake response object matching the OpenAI SDK parsed response shape.
+    def __init__(self, output_parsed) -> None:
+        self.output_parsed = output_parsed
+
+
+class FakeReplannerResponses:
+    # Capture parse inputs while returning a deterministic structured payload.
+    def __init__(self, output_parsed) -> None:
+        self.output_parsed = output_parsed
+        self.last_kwargs = None
+
+    def parse(self, **kwargs):
+        self.last_kwargs = kwargs
+        return FakeParsedReplanResponse(self.output_parsed)
+
+
+class FakeReplannerClient:
+    # Expose the responses.parse surface used by OpenAIReplanner.
+    def __init__(self, output_parsed) -> None:
+        self.responses = FakeReplannerResponses(output_parsed)
+
+
 class Layer2RuntimeGraphTests(unittest.TestCase):
     # These tests verify the bootstrap-plus-planner-plus-actor/tool behavior.
     def test_complete_intake_reaches_completed_state(self) -> None:
@@ -299,6 +331,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             planner_service=StubPlanner(),
             actor_service=StubActor(),
             tool_gateway_service=StubToolGateway(),
+            replanner_service=StubReplanner(),
         )
         result = graph.invoke(
             {"intake_result": _build_research_intake_result()},
@@ -351,6 +384,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             planner_service=StubPlanner(),
             actor_service=StubActor(),
             tool_gateway_service=StubToolGateway(),
+            replanner_service=StubReplanner(),
         )
         result = graph.invoke(
             {"intake_result": _build_clarification_intake_result()},
@@ -382,6 +416,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             planner_service=StubPlanner(),
             actor_service=StubActor(),
             tool_gateway_service=StubToolGateway(),
+            replanner_service=StubReplanner(),
         )
         result = graph.invoke(
             {"intake_result": _build_research_intake_result()},
@@ -400,6 +435,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             planner_service=StubPlanner(),
             actor_service=StubActor(),
             tool_gateway_service=StubToolGateway(),
+            replanner_service=StubReplanner(),
         )
         result = graph.invoke(
             {"intake_result": _build_clarification_intake_result()},
@@ -416,6 +452,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             planner_service=StubPlanner(),
             actor_service=StubActor(),
             tool_gateway_service=StubToolGateway(),
+            replanner_service=StubReplanner(),
         )
         result = graph.invoke(
             {"intake_result": _build_research_intake_result(max_tool_calls=None)},
@@ -432,6 +469,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             planner_service=StubPlanner(),
             actor_service=ProgressThenCompleteActor(),
             tool_gateway_service=StubToolGateway(),
+            replanner_service=StubReplanner(),
         )
         result = graph.invoke(
             {"intake_result": _build_research_intake_result(max_steps=1, max_tool_calls=10)},
@@ -490,12 +528,67 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             task_state.final_output_text,
             "Completed from the replanned recovery step.",
         )
+        compact_trace = build_compact_trace(
+            {
+                "thread_id": "layer2-replanner-continues",
+                "intake_result": _build_research_intake_result(),
+                "final_result": result,
+            }
+        )
+        self.assertEqual(compact_trace["planning_snapshot"]["planning_source"], "replanner")
+
+    def test_openai_replanner_converts_structured_payload_without_network(self) -> None:
+        from layer2_runtime_governance.replanning import _ReplanningPayload, _ReplanStepPayload
+
+        task_state = _build_replanning_task_state()
+        payload = _ReplanningPayload(
+            rationale_summary="The original step was too broad, so the remaining path was narrowed.",
+            replacement_steps=[
+                _ReplanStepPayload(
+                    objective="Recover with a narrower semantic step.",
+                    rationale="The actor reported the previous step was not executable.",
+                    expected_outcome="A narrower step the actor can complete.",
+                ),
+                _ReplanStepPayload(
+                    objective="Synthesize the recovered result.",
+                    rationale="The task still requires a final grounded answer.",
+                    expected_outcome="A concise final output.",
+                ),
+            ],
+        )
+        replanner = OpenAIReplanner(
+            settings=OpenAIReplannerSettings(api_key="test-key", model="test-model")
+        )
+        fake_client = FakeReplannerClient(payload)
+        replanner._client = fake_client
+
+        decision = replanner.replan(task_state=task_state)
+
+        self.assertEqual(decision.replanner_name, "openai_layer2_replanner")
+        self.assertEqual(decision.prompt_version, "replanner_v1")
+        self.assertEqual(len(decision.replacement_steps), 2)
+        self.assertEqual(decision.replacement_steps[0].step_id, "replan_step_1")
+        self.assertEqual(decision.replacement_steps[0].status, PlanStepStatus.PENDING)
+        self.assertEqual(fake_client.responses.last_kwargs["model"], "test-model")
+        self.assertEqual(fake_client.responses.last_kwargs["text_format"], _ReplanningPayload)
+
+    def test_replanner_prompts_include_recovery_context(self) -> None:
+        task_state = _build_replanning_task_state()
+
+        system_prompt = build_replanner_system_prompt()
+        user_prompt = build_replanner_user_prompt(task_state=task_state)
+
+        self.assertIn("Do not modify or repeat completed steps", system_prompt)
+        self.assertIn("actor_replan_request", user_prompt)
+        self.assertIn("The initial step is too broad", user_prompt)
+        self.assertIn("current_blocked_step", user_prompt)
 
     def test_planner_trims_semantic_plan_to_max_steps(self) -> None:
         graph = build_runtime_graph(
             planner_service=StubPlanner(),
             actor_service=StubActor(),
             tool_gateway_service=StubToolGateway(),
+            replanner_service=StubReplanner(),
         )
         result = graph.invoke(
             {"intake_result": _build_research_intake_result(max_steps=1, max_tool_calls=10)},
@@ -566,6 +659,45 @@ def _build_clarification_intake_result() -> IntakeResult:
             missing_information=["constraints", "success_criteria"],
         ),
     )
+
+
+def _build_replanning_task_state() -> TaskState:
+    state = TaskState.from_intake(_build_research_intake_result())
+    state.current_state = RuntimeState.REPLANNING
+    state.plan_steps = [
+        PlanStep(
+            step_id="step_1",
+            objective="Collect broad evidence for the task.",
+            rationale="The initial plan assumed a broad evidence step was enough.",
+            expected_outcome="A broad evidence base.",
+            status=PlanStepStatus.BLOCKED,
+        ),
+        PlanStep(
+            step_id="step_2",
+            objective="Synthesize the result.",
+            rationale="Synthesis should follow evidence collection.",
+            expected_outcome="A final answer.",
+            status=PlanStepStatus.PENDING,
+        ),
+    ]
+    state.current_plan_step_index = 0
+    state.actor_turn_count = 1
+    state.actor_result = ActorResult(
+        plan_step_id="step_1",
+        result_type=ActorResultType.NEEDS_REPLAN,
+        summary="The current step is not executable as planned.",
+        capability_mode=CapabilityAccessMode.NONE,
+        blocking_reason="The initial step is too broad and needs a narrower recovery step.",
+    )
+    state.scratchpad.append(
+        ScratchpadEntry(
+            turn_index=1,
+            plan_step_id="step_1",
+            entry_type=ScratchpadEntryType.UNCERTAINTY,
+            summary="The actor cannot execute the broad initial step reliably.",
+        )
+    )
+    return state
 
 
 if __name__ == "__main__":

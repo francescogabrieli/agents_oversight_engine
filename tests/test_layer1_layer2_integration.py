@@ -36,6 +36,8 @@ from layer2_runtime_governance import (
     CapabilityAccessMode,
     PlanStep,
     PlannerDecision,
+    ReplanDecision,
+    ReplannerPort,
     RuntimeFlag,
     RuntimeState,
     ScratchpadEntry,
@@ -194,6 +196,26 @@ class StubToolGateway(ToolGatewayPort):
         )
 
 
+class StubReplanner(ReplannerPort):
+    replanner_name = "stub_replanner"
+    prompt_version = "stub_replanner_v1"
+
+    def replan(self, *, task_state) -> ReplanDecision:
+        return ReplanDecision(
+            replacement_steps=[
+                PlanStep(
+                    step_id="step_1_replanned",
+                    objective="Complete a deterministic recovery step.",
+                    rationale="Integration tests should not call the live replanner.",
+                    expected_outcome="A completed recovery output.",
+                )
+            ],
+            rationale="The integration stub provided one recovery step.",
+            replanner_name=self.replanner_name,
+            prompt_version=self.prompt_version,
+        )
+
+
 class Layer1Layer2IntegrationTests(unittest.TestCase):
     def test_research_task_bootstraps_end_to_end(self) -> None:
         trace = run_layer2_flow(
@@ -214,6 +236,7 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
             planner_service=StubPlanner(),
             actor_service=StubActor(),
             tool_gateway_service=StubToolGateway(),
+            replanner_service=StubReplanner(),
         )
 
         intake_result = trace["intake_result"]
@@ -272,6 +295,7 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
             planner_service=StubPlanner(),
             actor_service=StubActor(),
             tool_gateway_service=StubToolGateway(),
+            replanner_service=StubReplanner(),
         )
 
         intake_result = trace["intake_result"]

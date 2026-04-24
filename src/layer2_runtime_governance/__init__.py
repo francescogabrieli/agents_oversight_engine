@@ -38,9 +38,14 @@ from .planning import (
 )
 from .replanning import (
     LocalConservativeReplanner,
+    OpenAIReplanner,
+    OpenAIReplannerSettings,
     ReplanDecision,
+    ReplannerExecutionError,
     ReplannerPort,
     build_default_replanner,
+    build_replanner_system_prompt,
+    build_replanner_user_prompt,
 )
 from .state import (
     ExecutedPlanStep,
@@ -89,6 +94,8 @@ __all__ = [
     "OpenAIActorSettings",
     "OpenAIPlanner",
     "OpenAIPlannerSettings",
+    "OpenAIReplanner",
+    "OpenAIReplannerSettings",
     "OpenAIToolGateway",
     "OpenAIToolGatewaySettings",
     "PlanStep",
@@ -98,6 +105,7 @@ __all__ = [
     "PlannerPort",
     "LocalConservativeReplanner",
     "ReplanDecision",
+    "ReplannerExecutionError",
     "ReplannerPort",
     "RuntimeFlag",
     "RuntimeState",
@@ -120,6 +128,8 @@ __all__ = [
     "build_default_planner",
     "build_default_replanner",
     "build_default_tool_gateway",
+    "build_replanner_system_prompt",
+    "build_replanner_user_prompt",
     "build_runtime_graph",
     "finalize_bootstrap",
     "observe_tool_result",
