@@ -26,6 +26,7 @@ from .nodes import (
     finalize_bootstrap,
     observe_tool_result,
     planner,
+    replanner,
     tool_gateway,
 )
 from .planning import (
@@ -35,6 +36,12 @@ from .planning import (
     PlannerPort,
     build_default_planner,
 )
+from .replanning import (
+    LocalConservativeReplanner,
+    ReplanDecision,
+    ReplannerPort,
+    build_default_replanner,
+)
 from .state import (
     ExecutedPlanStep,
     PlanStep,
@@ -42,7 +49,11 @@ from .state import (
     PlannerDecision,
     RuntimeFlag,
     RuntimeState,
+    ScratchpadEntry,
+    ScratchpadEntryType,
     StepRecord,
+    StepValidation,
+    StepValidationDecision,
     TaskState,
 )
 from .tool_contract import (
@@ -85,9 +96,16 @@ __all__ = [
     "PlannerDecision",
     "PlannerExecutionError",
     "PlannerPort",
+    "LocalConservativeReplanner",
+    "ReplanDecision",
+    "ReplannerPort",
     "RuntimeFlag",
     "RuntimeState",
+    "ScratchpadEntry",
+    "ScratchpadEntryType",
     "StepRecord",
+    "StepValidation",
+    "StepValidationDecision",
     "TaskState",
     "ToolExecutionError",
     "ToolExecutionResult",
@@ -100,10 +118,12 @@ __all__ = [
     "build_actor_task",
     "build_default_actor",
     "build_default_planner",
+    "build_default_replanner",
     "build_default_tool_gateway",
     "build_runtime_graph",
     "finalize_bootstrap",
     "observe_tool_result",
     "planner",
+    "replanner",
     "tool_gateway",
 ]

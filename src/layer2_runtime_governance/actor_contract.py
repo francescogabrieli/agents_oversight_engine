@@ -6,7 +6,16 @@ from typing import Protocol
 
 from layer1_intake import ExecutionPolicy, IntakeMetadata, TaskSpec
 
-from .state import ExecutedPlanStep, PlanStepStatus, RuntimeFlag, RuntimeState, TaskState
+from .state import (
+    ExecutedPlanStep,
+    PlanStepStatus,
+    RuntimeFlag,
+    RuntimeState,
+    ScratchpadEntry,
+    ScratchpadEntryType,
+    StepValidation,
+    TaskState,
+)
 from .tool_contract import ObservedEvidence, ToolExecutionResult, ToolRequest
 
 
@@ -50,6 +59,7 @@ class ActorPastStep:
 @dataclass(frozen=True)
 class ActorTask:
     # The actor sees the whole plan, past executed steps, and observed evidence.
+    # Execution authority still belongs only to current_plan_step.
     task_spec: TaskSpec
     execution_policy: ExecutionPolicy
     intake_metadata: IntakeMetadata
@@ -58,9 +68,12 @@ class ActorTask:
     plan_steps: tuple[ActorPlanStep, ...]
     past_steps: tuple[ActorPastStep, ...]
     observed_evidence: tuple[ObservedEvidence, ...]
+    scratchpad: tuple[ScratchpadEntry, ...]
+    step_validations: tuple[StepValidation, ...]
     last_tool_result: ToolExecutionResult | None
     tool_call_count: int
     remaining_tool_calls: int | None
+    actor_turn_count: int
     current_plan_step_index: int
     current_plan_step: ActorPlanStep
     planner_rationale: str | None = None
@@ -71,6 +84,7 @@ class ActorTask:
 @dataclass(frozen=True)
 class ActorResult:
     # The actor returns one concrete execution outcome for the current step.
+    # Runtime nodes interpret this result; the actor never mutates TaskState directly.
     plan_step_id: str
     result_type: ActorResultType
     summary: str
@@ -79,6 +93,10 @@ class ActorResult:
     output_text: str | None = None
     blocking_reason: str | None = None
     tool_request: ToolRequest | None = None
+    # Optional audit-safe memory from the actor turn.
+    scratchpad_entry: ScratchpadEntry | None = None
+    # Required before local or final outputs can complete a plan step.
+    step_validation: StepValidation | None = None
 
 
 class ActorPort(Protocol):
@@ -135,10 +153,13 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
         plan_steps=actor_plan_steps,
         past_steps=actor_past_steps,
         observed_evidence=tuple(task_state.observed_evidence),
+        scratchpad=tuple(task_state.scratchpad),
+        step_validations=tuple(task_state.step_validations),
         last_tool_result=task_state.last_tool_result,
         tool_call_count=task_state.tool_call_count,
         # Keep tool budget explicit while allowing policies with no hard tool-call ceiling.
         remaining_tool_calls=_compute_remaining_tool_calls(task_state=task_state),
+        actor_turn_count=task_state.actor_turn_count,
         current_plan_step_index=current_index,
         current_plan_step=actor_plan_steps[current_index],
         planner_rationale=task_state.planner_rationale,
@@ -164,5 +185,8 @@ __all__ = [
     "ActorResultType",
     "ActorTask",
     "CapabilityAccessMode",
+    "ScratchpadEntry",
+    "ScratchpadEntryType",
+    "StepValidation",
     "build_actor_task",
 ]

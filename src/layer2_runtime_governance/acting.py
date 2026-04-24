@@ -12,6 +12,7 @@ from .actor_contract import (
     ActorTask,
     CapabilityAccessMode,
 )
+from .state import ScratchpadEntry, ScratchpadEntryType, StepValidation, StepValidationDecision
 from .tool_contract import ToolName, ToolRequest
 
 try:
@@ -64,6 +65,8 @@ Rules:
 - Work in a local ReAct-like way for the current step.
 - Use the runtime-bound tools when external information is required.
 - If you do not need an external tool, finish the turn by emitting exactly one structured outcome tool.
+- Use emit_intermediate_output only for progress that should continue the current step.
+- Use emit_step_completed or emit_final_output only after validating that the current step objective is satisfied.
 - Keep the turn compact, explicit, and directly actionable by the runtime.
 - Respect read_only_mode when it is true.
 - Do not emit chain-of-thought.
@@ -106,6 +109,7 @@ def build_actor_user_prompt(*, actor_task: ActorTask) -> str:
         "runtime": {
             "current_state": actor_task.current_state.value,
             "runtime_flags": [flag.value for flag in actor_task.runtime_flags],
+            "actor_turn_count": actor_task.actor_turn_count,
         },
         "planner": {
             "planner_name": actor_task.planner_name,
@@ -152,6 +156,29 @@ def build_actor_user_prompt(*, actor_task: ActorTask) -> str:
                 "source_tool": evidence.source_tool.value,
             }
             for evidence in actor_task.observed_evidence
+        ],
+        # Scratchpad and validations are summarized state, not chain-of-thought.
+        "scratchpad": [
+            {
+                "turn_index": entry.turn_index,
+                "plan_step_id": entry.plan_step_id,
+                "entry_type": entry.entry_type.value,
+                "summary": entry.summary,
+                "evidence_refs": entry.evidence_refs,
+            }
+            for entry in actor_task.scratchpad
+        ],
+        "step_validations": [
+            {
+                "plan_step_id": validation.plan_step_id,
+                "objective_satisfied": validation.objective_satisfied,
+                "evidence_sufficient": validation.evidence_sufficient,
+                "confidence": validation.confidence,
+                "next_action": validation.next_action.value,
+                "rationale_summary": validation.rationale_summary,
+                "residual_uncertainty": validation.residual_uncertainty,
+            }
+            for validation in actor_task.step_validations
         ],
         "last_tool_result": (
             {
@@ -272,28 +299,73 @@ def _build_actor_runtime_tools() -> list[dict[str, object]]:
         {
             "type": "function",
             "name": "emit_intermediate_output",
-            "description": "Emit a grounded partial output when the current plan step has been completed locally.",
+            "description": (
+                "Emit a grounded progress note when the current plan step should continue without completing yet."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "summary": {"type": "string"},
                     "output_text": {"type": "string"},
+                    "progress_note": {"type": "string"},
+                    "residual_uncertainty": {"type": "string"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                 },
-                "required": ["summary", "output_text"],
+                "required": ["summary", "output_text", "progress_note", "confidence"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "emit_step_completed",
+            "description": (
+                "Complete the current plan step only after self-validating that the objective is satisfied."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "output_text": {"type": "string"},
+                    "completion_rationale": {"type": "string"},
+                    "objective_satisfied": {"type": "boolean"},
+                    "evidence_sufficient": {"type": "boolean"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "residual_uncertainty": {"type": "string"},
+                },
+                "required": [
+                    "summary",
+                    "output_text",
+                    "completion_rationale",
+                    "objective_satisfied",
+                    "evidence_sufficient",
+                    "confidence",
+                ],
                 "additionalProperties": False,
             },
         },
         {
             "type": "function",
             "name": "emit_final_output",
-            "description": "Emit the final answer when the task can already be completed safely.",
+            "description": "Emit the final answer only after self-validating that the final plan step is satisfied.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "summary": {"type": "string"},
                     "output_text": {"type": "string"},
+                    "completion_rationale": {"type": "string"},
+                    "objective_satisfied": {"type": "boolean"},
+                    "evidence_sufficient": {"type": "boolean"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                    "residual_uncertainty": {"type": "string"},
                 },
-                "required": ["summary", "output_text"],
+                "required": [
+                    "summary",
+                    "output_text",
+                    "completion_rationale",
+                    "objective_satisfied",
+                    "evidence_sufficient",
+                    "confidence",
+                ],
                 "additionalProperties": False,
             },
         },
@@ -375,6 +447,7 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
 
     if tool_name == "request_web_search":
         _require_arguments(arguments, "summary", "reason", "query")
+        # Tool-selection outcomes are converted into ToolRequest for the gateway node.
         return ActorResult(
             plan_step_id=plan_step_id,
             result_type=ActorResultType.PROPOSE_ACTION,
@@ -388,6 +461,11 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
                 query=arguments["query"],
                 max_results=int(arguments.get("max_results", 5)),
                 extractive_goal=arguments.get("extractive_goal"),
+            ),
+            scratchpad_entry=_build_scratchpad_entry(
+                actor_task=actor_task,
+                entry_type=ScratchpadEntryType.TOOL_DECISION,
+                summary=arguments["summary"],
             ),
         )
 
@@ -406,26 +484,79 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
                 url=arguments["url"],
                 extractive_goal=arguments.get("extractive_goal"),
             ),
+            scratchpad_entry=_build_scratchpad_entry(
+                actor_task=actor_task,
+                entry_type=ScratchpadEntryType.TOOL_DECISION,
+                summary=arguments["summary"],
+            ),
         )
 
     if tool_name == "emit_intermediate_output":
-        _require_arguments(arguments, "summary", "output_text")
+        _require_arguments(arguments, "summary", "output_text", "progress_note")
+        # Intermediate output deliberately keeps the current step active.
         return ActorResult(
             plan_step_id=plan_step_id,
             result_type=ActorResultType.INTERMEDIATE_OUTPUT,
             summary=arguments["summary"],
             capability_mode=CapabilityAccessMode.NONE,
             output_text=arguments["output_text"],
+            scratchpad_entry=_build_scratchpad_entry(
+                actor_task=actor_task,
+                entry_type=ScratchpadEntryType.PROGRESS_NOTE,
+                summary=arguments["progress_note"],
+            ),
+            step_validation=_build_step_validation(
+                actor_task=actor_task,
+                arguments=arguments,
+                next_action=StepValidationDecision.CONTINUE_ACTING,
+                rationale_key="progress_note",
+                objective_satisfied=False,
+                evidence_sufficient=False,
+            ),
+        )
+
+    if tool_name == "emit_step_completed":
+        _require_arguments(arguments, "summary", "output_text", "completion_rationale")
+        # Step completion is represented as local output plus positive validation.
+        return ActorResult(
+            plan_step_id=plan_step_id,
+            result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+            summary=arguments["summary"],
+            capability_mode=CapabilityAccessMode.NONE,
+            output_text=arguments["output_text"],
+            scratchpad_entry=_build_scratchpad_entry(
+                actor_task=actor_task,
+                entry_type=ScratchpadEntryType.COMPLETION_RATIONALE,
+                summary=arguments["completion_rationale"],
+            ),
+            step_validation=_build_step_validation(
+                actor_task=actor_task,
+                arguments=arguments,
+                next_action=StepValidationDecision.COMPLETE_STEP,
+                rationale_key="completion_rationale",
+            ),
         )
 
     if tool_name == "emit_final_output":
-        _require_arguments(arguments, "summary", "output_text")
+        _require_arguments(arguments, "summary", "output_text", "completion_rationale")
+        # Final output is still subject to the same validation contract as normal steps.
         return ActorResult(
             plan_step_id=plan_step_id,
             result_type=ActorResultType.FINAL_OUTPUT,
             summary=arguments["summary"],
             capability_mode=CapabilityAccessMode.NONE,
             output_text=arguments["output_text"],
+            scratchpad_entry=_build_scratchpad_entry(
+                actor_task=actor_task,
+                entry_type=ScratchpadEntryType.COMPLETION_RATIONALE,
+                summary=arguments["completion_rationale"],
+            ),
+            step_validation=_build_step_validation(
+                actor_task=actor_task,
+                arguments=arguments,
+                next_action=StepValidationDecision.COMPLETE_STEP,
+                rationale_key="completion_rationale",
+            ),
         )
 
     if tool_name == "emit_ask_clarification":
@@ -436,6 +567,11 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
             summary=arguments["summary"],
             capability_mode=CapabilityAccessMode.NONE,
             blocking_reason=arguments["blocking_reason"],
+            scratchpad_entry=_build_scratchpad_entry(
+                actor_task=actor_task,
+                entry_type=ScratchpadEntryType.UNCERTAINTY,
+                summary=arguments["blocking_reason"],
+            ),
         )
 
     if tool_name == "emit_blocked":
@@ -446,6 +582,11 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
             summary=arguments["summary"],
             capability_mode=CapabilityAccessMode.NONE,
             blocking_reason=arguments["blocking_reason"],
+            scratchpad_entry=_build_scratchpad_entry(
+                actor_task=actor_task,
+                entry_type=ScratchpadEntryType.UNCERTAINTY,
+                summary=arguments["blocking_reason"],
+            ),
         )
 
     if tool_name == "emit_needs_replan":
@@ -456,9 +597,75 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
             summary=arguments["summary"],
             capability_mode=CapabilityAccessMode.NONE,
             blocking_reason=arguments["blocking_reason"],
+            scratchpad_entry=_build_scratchpad_entry(
+                actor_task=actor_task,
+                entry_type=ScratchpadEntryType.UNCERTAINTY,
+                summary=arguments["blocking_reason"],
+            ),
         )
 
     raise ActorExecutionError(f"Actor emitted an unknown runtime tool: {tool_name}")
+
+
+# Create one audit-safe scratchpad entry for the current actor turn.
+def _build_scratchpad_entry(
+    *,
+    actor_task: ActorTask,
+    entry_type: ScratchpadEntryType,
+    summary: str,
+) -> ScratchpadEntry:
+    return ScratchpadEntry(
+        turn_index=actor_task.actor_turn_count,
+        plan_step_id=actor_task.current_plan_step.step_id,
+        entry_type=entry_type,
+        summary=summary,
+        evidence_refs=[item.evidence_id for item in actor_task.observed_evidence],
+    )
+
+
+# Build the compact self-validation contract used before step completion.
+def _build_step_validation(
+    *,
+    actor_task: ActorTask,
+    arguments: dict[str, object],
+    next_action: StepValidationDecision,
+    rationale_key: str,
+    objective_satisfied: bool | None = None,
+    evidence_sufficient: bool | None = None,
+) -> StepValidation:
+    confidence = arguments.get("confidence", 0.0)
+    if not isinstance(confidence, int | float):
+        raise ActorExecutionError("Actor validation confidence must be numeric.")
+
+    # Some runtime tools fix these booleans, while completion tools read them from the model.
+    resolved_objective_satisfied = (
+        bool(arguments.get("objective_satisfied"))
+        if objective_satisfied is None
+        else objective_satisfied
+    )
+    resolved_evidence_sufficient = (
+        bool(arguments.get("evidence_sufficient"))
+        if evidence_sufficient is None
+        else evidence_sufficient
+    )
+
+    rationale = arguments.get(rationale_key)
+    if not isinstance(rationale, str) or not rationale.strip():
+        raise ActorExecutionError(f"Actor validation is missing '{rationale_key}'.")
+
+    residual_uncertainty = arguments.get("residual_uncertainty")
+    if residual_uncertainty is not None and not isinstance(residual_uncertainty, str):
+        raise ActorExecutionError("Actor validation residual_uncertainty must be a string.")
+
+    return StepValidation(
+        plan_step_id=actor_task.current_plan_step.step_id,
+        objective_satisfied=resolved_objective_satisfied,
+        evidence_sufficient=resolved_evidence_sufficient,
+        confidence=max(0.0, min(float(confidence), 1.0)),
+        next_action=next_action,
+        rationale_summary=rationale,
+        residual_uncertainty=residual_uncertainty,
+    )
 
 
 # Validate that required tool arguments are present and non-empty.

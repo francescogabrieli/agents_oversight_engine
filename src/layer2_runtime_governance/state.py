@@ -45,6 +45,24 @@ class PlanStepStatus(str, Enum):
     BLOCKED = "blocked"
 
 
+class ScratchpadEntryType(str, Enum):
+    # These are audit categories, not hidden reasoning transcripts.
+    OBSERVATION = "observation"
+    TOOL_DECISION = "tool_decision"
+    PROGRESS_NOTE = "progress_note"
+    UNCERTAINTY = "uncertainty"
+    COMPLETION_RATIONALE = "completion_rationale"
+
+
+class StepValidationDecision(str, Enum):
+    # Validation decisions let the actor self-check without directly mutating graph routing.
+    COMPLETE_STEP = "complete_step"
+    CONTINUE_ACTING = "continue_acting"
+    REQUEST_MORE_EVIDENCE = "request_more_evidence"
+    ASK_CLARIFICATION = "ask_clarification"
+    NEEDS_REPLAN = "needs_replan"
+
+
 @dataclass
 class StepRecord:
     # This is the minimal audit entry recorded while Layer 2 performs runtime transitions.
@@ -84,6 +102,28 @@ class ExecutedPlanStep:
 
 
 @dataclass
+class ScratchpadEntry:
+    # Store audit-safe working memory without preserving hidden chain-of-thought.
+    turn_index: int
+    plan_step_id: str
+    entry_type: ScratchpadEntryType
+    summary: str
+    evidence_refs: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class StepValidation:
+    # Capture the actor self-check used before the runtime completes a semantic step.
+    plan_step_id: str
+    objective_satisfied: bool
+    evidence_sufficient: bool
+    confidence: float
+    next_action: StepValidationDecision
+    rationale_summary: str
+    residual_uncertainty: str | None = None
+
+
+@dataclass
 class TaskState:
     # Direct handoff from Layer 1.
     intake_payload: IntakeResult
@@ -112,6 +152,10 @@ class TaskState:
     executed_steps: list[ExecutedPlanStep] = field(default_factory=list)
     final_output_text: str | None = None
     actor_turn_count: int = 0
+    # Scratchpad is intentionally summarized working memory, safe for audit and HITL display.
+    scratchpad: list[ScratchpadEntry] = field(default_factory=list)
+    # Step validations are the bridge toward confidence/self-stop logic.
+    step_validations: list[StepValidation] = field(default_factory=list)
 
     # Tool loop snapshot.
     current_tool_request: ToolRequest | None = None
@@ -173,6 +217,10 @@ __all__ = [
     "PlannerDecision",
     "RuntimeFlag",
     "RuntimeState",
+    "ScratchpadEntry",
+    "ScratchpadEntryType",
     "StepRecord",
+    "StepValidation",
+    "StepValidationDecision",
     "TaskState",
 ]

@@ -1,0 +1,407 @@
+# AGENTS.md
+
+## Purpose
+
+This repository contains a thesis-oriented proof of concept for a governed AI agent architecture with strong human oversight.
+
+The project is not a generic chatbot. It is an architectural prototype focused on:
+
+- controlled task intake
+- runtime orchestration
+- governance and policy enforcement
+- human-in-the-loop review
+- evidence tracking and observability
+- future evaluation and continuous improvement
+- autonomous plan execution with audit-safe self-monitoring
+
+The current design references are:
+
+- `architecture/architecturev3.md`
+- `training_plan.md`
+
+
+## Current Scope
+
+At the moment, the repository mainly covers:
+
+- `Layer 1 - Task Intake`
+- `Layer 2 - Bootstrap + Planner + Actor/Tool Loop`
+
+These are the folders to treat as the active implementation baseline:
+
+- `src/layer1_intake`
+- `src/layer2_runtime_governance`
+- `src/main_layer1.py`
+- `src/main_layer2.py`
+
+Supporting material lives in:
+
+- `architecture/`
+- `configs/`
+- `docs/`
+- `tests/`
+
+
+## Architectural Intent
+
+The repository follows the architecture described in `architecture/architecturev3.md`.
+It should also remain aligned with the objectives and design priorities described in `training_plan.md`, especially around:
+
+- autonomous agent behavior with strong human oversight
+- uncertainty management and escalation logic
+- traceability, transparency, and organizational accountability
+- observability and evaluation of behavior under uncertainty
+
+High-level macro-blocks:
+
+1. `Task Intake`
+2. `Runtime & Governance`
+3. `Tool Bus / External Capabilities`
+4. `State, Evidence & Observability`
+5. `Evaluation & Continuous Improvement`
+
+Important implementation principles:
+
+- `Layer 1` is external to the LangGraph runtime.
+- `Layer 2` is the live orchestration layer and is implemented with LangGraph.
+- for the `planner + actor` branch, follow `docs/plan-and-execute.ipynb` as the primary implementation pattern reference:
+  - multi-step semantic planner
+  - step-bounded executor
+  - structured tool binding at the runtime level
+- `HITL`, when activated later, should be implemented through `interrupt / resume`.
+- `external_communication` is handled conservatively:
+  - first evidence collection
+  - then draft proposal
+  - then human review before externally impactful execution
+- policy and governance logic should remain explicit and explainable
+
+
+## Repository Map
+
+### `src/layer1_intake`
+
+Purpose:
+
+- parse raw task input into a canonical structured payload
+- assign execution policy
+- attach intake metadata
+
+Core outputs:
+
+- `TaskSpec`
+- `ExecutionPolicy`
+- `IntakeMetadata`
+- `IntakeResult`
+
+Notes:
+
+- current parser implementation uses OpenAI for real parsing
+- execution policy is resolved from `configs/layer1_execution_policies.json`
+- `context` missing is a warning, not a mandatory downgrade to `partial`
+
+
+### `src/layer2_runtime_governance`
+
+Purpose:
+
+- initialize runtime state from Layer 1
+- produce the first semantic planner snapshot
+- execute the current semantic plan step through the actor
+- execute read-only capability calls through `tool_gateway`
+- observe tool results and feed them back into the actor loop
+- maintain an audit-safe scratchpad and typed step self-validations during actor execution
+- stop after the current planner/actor/tool slice reaches a stable stop point in canonical `TaskState`
+
+Main files:
+
+- `state.py`
+- `nodes.py`
+- `graph.py`
+- `planning.py`
+- `acting.py`
+- `actor_contract.py`
+- `tool_contract.py`
+- `tool_gateway.py`
+
+Current design:
+
+- `state.py` defines the bootstrap state contract, runtime flags, planner snapshot models, actor execution snapshot, tool loop state, observed evidence, audit-safe scratchpad entries, typed step validations, and runtime step outcomes
+- `nodes.py` contains `bootstrap_from_intake`, `planner`, `actor`, `tool_gateway`, `observe_tool_result`, and bootstrap closure helpers
+- `planning.py` defines the planner port, prompt builders, and the default OpenAI-backed planner
+- `acting.py` defines the actor port, prompt builders, and the default OpenAI-backed actor using runtime-bound tools instead of a prompt-only tool inventory
+- `actor_contract.py` defines the typed handoff from planner state into actor-facing execution context for the current plan step, including observed evidence, scratchpad entries, and prior step validations
+- `tool_contract.py` defines typed tool requests, tool results, and observed evidence contracts
+- `tool_gateway.py` contains the read-only operational tool surface currently available to the runtime
+- `graph.py` contains the current LangGraph wiring for the planner/actor/tool loop:
+  `START -> bootstrap_from_intake -> planner -> actor -> tool_gateway -> observe_tool_result -> actor ... -> finalize_bootstrap -> END`
+
+Reference implementation note:
+
+- `docs/plan-and-execute.ipynb` is the main local reference for the internal planner/executor split
+- when tools are introduced, prefer the LangGraph/LangChain pattern of binding real tools to the executor instead of describing the available tools only in natural language inside the prompt
+- the executor prompt may still be richer and more architecture-specific than the minimal prompt shown in the tutorial
+
+
+### `configs`
+
+Contains configuration inputs that influence runtime behavior.
+
+Current relevant file:
+
+- `configs/layer1_execution_policies.json`
+
+
+### `docs`
+
+Contains diagrams and visual aids.
+
+Current relevant files:
+
+- `docs/plan-and-execute.ipynb`
+- `docs/plan-and-execute.jpg`
+- `docs/planner_use_cases.html`
+- `docs/architecturev3_presentation.html`
+
+Notes:
+
+- `docs/architecturev3_presentation.html` is the current thesis-facing architecture presentation artifact
+
+
+### `tests`
+
+Contains unit and integration-style tests for the implemented layers.
+
+Current relevant files:
+
+- `tests/test_layer1_intake.py`
+- `tests/test_layer2_runtime_governance.py`
+- `tests/test_layer1_layer2_integration.py`
+
+
+## Coding Standards
+
+### General
+
+- Prefer clear, explicit code over clever code.
+- Keep architecture-aligned naming.
+- Avoid hidden behavior and implicit coupling.
+- Preserve separation of concerns between:
+  - state models
+  - runtime logic
+  - graph wiring
+  - infrastructure concerns
+
+### Comments
+
+- Prefer short `#` comments over docstrings for internal implementation explanation.
+- Keep comments focused on why the code exists or what contract it enforces.
+- Avoid low-value comments that restate the code mechanically.
+- Prefer one clear explanatory comment over duplicated comment-plus-docstring blocks when the code is internal.
+- Every new code addition must include short `#` comments above each new `def` and on non-obvious lines or blocks where readability would otherwise suffer.
+
+### Typing
+
+- Prefer strong typed models over anonymous dictionaries where contracts matter.
+- Use enums instead of free-form strings for stable runtime markers and decision types.
+- Use `dict[str, Any]` only as an extension field, not as the primary domain contract.
+
+### Dataclasses and Models
+
+- Layer 2 runtime state uses dataclasses.
+- Layer 1 canonical payloads use Pydantic models.
+- Preserve this split unless there is a strong architectural reason to change it.
+
+
+## Layer-Specific Rules
+
+### Layer 1 Rules
+
+- `Layer 1` must output a canonical `IntakeResult`.
+- `ExecutionPolicy` is system-controlled, not inferred freely from the user task.
+- `confidence_threshold` and budget are configuration-driven.
+- `context` may be empty without forcing `partial`.
+- `success_criteria` and missing constraints for sensitive tasks are more important than missing context.
+
+### Layer 2 Rules
+
+- `TaskState` is the central runtime contract.
+- New runtime data should be modeled explicitly before being spread through nodes.
+- `graph.py` should not contain business logic beyond routing and LangGraph integration.
+- `nodes.py` should not become a dumping ground for framework-specific plumbing.
+- the current implementation scope covers the current planner/actor/tool loop slice
+- the active baseline includes `bootstrap_from_intake -> planner -> actor -> tool_gateway -> observe_tool_result -> actor`
+- the planner/executor split should remain aligned with `docs/plan-and-execute.ipynb` unless there is a clear thesis-driven reason to diverge
+- planner output must remain semantic and typed
+- planner output must not contain concrete tool calls, executable payloads, or framework-specific actions
+- actor execution must operate on the current plan step, not on the full task as a second planner
+- actor output must remain typed and compact even when backed by an LLM
+- actor execution may produce local outputs, request later capability use, ask clarification, or signal replan
+- actor execution should record audit-safe scratchpad entries rather than hidden chain-of-thought
+- plan steps should be completed only after a typed `StepValidation` indicates that the objective is satisfied and evidence is sufficient
+- `INTERMEDIATE_OUTPUT` is a progress/local-output outcome and must not automatically complete the current plan step without positive validation
+- executed step history and current plan step cursor must remain explicit in `TaskState`
+- when tools are added, do not rely on a prompt-only tool inventory as the primary mechanism; prefer structured tool binding in the LangGraph/LangChain style
+- prompt text may contain policy, behavioral, and architecture constraints, but should not replace the runtime-level tool contract
+- the current tool surface is read-only and externally conservative
+- `max_steps` is enforced as a semantic plan-step ceiling in the current runtime
+- `max_tool_calls = null` means the current runtime does not impose a hard tool-call ceiling
+- governance and HITL are not active yet, while read-only tool execution is active
+
+### HITL Rules
+
+- Any externally impactful write-like action should be reviewable before execution.
+- HITL payloads must remain readable and compact.
+- Human decisions should remain canonical and typed.
+
+
+## Debugging Guidance
+
+Debug the runtime from:
+
+- `src/main_layer2.py`
+
+Do not debug `state.py` or `nodes.py` as standalone entrypoints.
+
+Useful breakpoint locations:
+
+- `src/main_layer2.py`
+- `src/layer2_runtime_governance/nodes.py`
+- `src/layer2_runtime_governance/state.py`
+- `src/layer2_runtime_governance/planning.py`
+- `src/layer2_runtime_governance/acting.py`
+
+In particular:
+
+- inspect the output of Layer 1 before graph invocation
+- inspect `bootstrap_from_intake`
+- inspect `planner`
+- inspect `actor`
+- inspect `TaskState.from_intake`
+
+When debugging in VS Code:
+
+- place breakpoints on executable lines inside function bodies
+- do not place the main breakpoint on the `def` line if you want local variables immediately available
+
+
+## Running the Project
+
+### Layer 1
+
+Run the Layer 1 example:
+
+```powershell
+.\.venv\Scripts\python.exe src\main_layer1.py
+```
+
+### Layer 2
+
+Run Layer 2 bootstrap, planner, actor, and tool loop with real Layer 1 parsing:
+
+```powershell
+.\.venv\Scripts\python.exe src\main_layer2.py --task "Find official sources about the Digital Markets Act and produce a short summary." --context "Prefer official EU sources."
+```
+
+Run Layer 2 bootstrap, planner, actor, and tool loop with deterministic demo intake:
+
+```powershell
+.\.venv\Scripts\python.exe src\main_layer2.py --demo-intake-profile research --task "Find official sources about the Digital Markets Act and produce a short summary."
+```
+
+
+## Testing
+
+Run Layer 1 tests:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_layer1_intake -v
+```
+
+Run Layer 2 tests:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_layer2_runtime_governance -v
+```
+
+Run the Layer 1 -> Layer 2 integration tests:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_layer1_layer2_integration -v
+```
+
+Run all current tests:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+
+## Environment Notes
+
+The project currently uses:
+
+- Python in local virtual environment `.venv`
+- OpenAI API for the real Layer 1 parser
+- OpenAI API for the default Layer 2 planner
+- OpenAI API for the default Layer 2 actor
+- LangGraph for Layer 2 runtime orchestration
+
+Environment variables may be loaded from:
+
+- `.env`
+- `src/.env`
+
+Expected secret:
+
+- `OPENAI_API_KEY`
+
+
+## Change Policy
+
+When making changes:
+
+1. preserve alignment with `architecture/architecturev3.md`
+2. preserve alignment with `training_plan.md`
+3. prefer evolving existing contracts over adding parallel ad-hoc ones
+4. keep runtime behavior explainable
+5. update tests when contracts change
+6. keep the implementation compact, but not ambiguous
+7. update `AGENTS.md` whenever the repository behavior, architecture, contracts, commands, workflows, or conventions materially change
+
+When a change introduces an important architectural step, debugging aid, workflow clarification, or visual explanation that could be useful later in the thesis, it is acceptable and encouraged to produce supporting documentation material inside `docs/`.
+
+This can include:
+
+- markdown notes
+- diagrams
+- HTML visualizations
+- HTML slide decks
+- interactive HTML documents or prototypes
+- screenshots or other visual references
+- other thesis-useful documentation artifacts
+
+This does **not** mean producing documentation for every minor change. The threshold should be pragmatic:
+
+- create documentation when it materially improves explainability, traceability, or thesis reuse
+- do not create documentation for routine edits that add little long-term value
+
+Avoid:
+
+- introducing broad untyped dictionaries where stable models already exist
+- mixing graph wiring and business logic
+- silently changing runtime contracts without updating tests
+
+`AGENTS.md` is not optional documentation. It must be treated as a living operational contract for the repository. If a change makes any section inaccurate, that file must be updated in the same change set.
+
+
+## Recommended Next Steps
+
+The current most relevant near-term evolution path is:
+
+1. keep Layer 1 stable and explicit
+2. keep the Layer 1 -> Layer 2 bootstrap-planner-actor-tool contract stable
+3. strengthen the actor/tool integration toward richer autonomous execution and tool choice
+4. add a real `replanner` node so `NEEDS_REPLAN` becomes an actual runtime branch instead of a stop condition
+5. evolve typed confidence/self-stop logic from the current step validation contract
+6. reintroduce explicit governance on the actor output once the actor/tool contract is stable
+7. evolve toward a real agent runtime incrementally by adding richer evidence observation, HITL, and post-run evaluation only after the current baseline remains solid

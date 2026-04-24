@@ -34,6 +34,10 @@ from layer2_runtime_governance import (
     PlannerDecision,
     RuntimeFlag,
     RuntimeState,
+    ScratchpadEntry,
+    ScratchpadEntryType,
+    StepValidation,
+    StepValidationDecision,
     ToolExecutionResult,
     ToolGatewayPort,
     ToolName,
@@ -42,6 +46,7 @@ from layer2_runtime_governance import (
     build_actor_task,
     build_runtime_graph,
 )
+from layer2_runtime_governance.replanning import ReplanDecision, ReplannerPort
 
 
 class StubPlanner:
@@ -92,6 +97,12 @@ class StubActor(ActorPort):
                     max_results=3,
                     extractive_goal="Find official EU sources about the Digital Markets Act.",
                 ),
+                scratchpad_entry=ScratchpadEntry(
+                    turn_index=actor_task.actor_turn_count,
+                    plan_step_id=actor_task.current_plan_step.step_id,
+                    entry_type=ScratchpadEntryType.TOOL_DECISION,
+                    summary="The current step needs external documentary evidence.",
+                ),
             )
 
         if actor_task.current_plan_step.step_id == "step_1":
@@ -101,6 +112,21 @@ class StubActor(ActorPort):
                 summary="The first step is complete and produced grounded evidence.",
                 capability_mode=CapabilityAccessMode.NONE,
                 output_text="Collected grounded evidence from official sources.",
+                scratchpad_entry=ScratchpadEntry(
+                    turn_index=actor_task.actor_turn_count,
+                    plan_step_id=actor_task.current_plan_step.step_id,
+                    entry_type=ScratchpadEntryType.COMPLETION_RATIONALE,
+                    summary="The observed source satisfies the evidence collection step.",
+                    evidence_refs=[item.evidence_id for item in actor_task.observed_evidence],
+                ),
+                step_validation=StepValidation(
+                    plan_step_id=actor_task.current_plan_step.step_id,
+                    objective_satisfied=True,
+                    evidence_sufficient=True,
+                    confidence=0.86,
+                    next_action=StepValidationDecision.COMPLETE_STEP,
+                    rationale_summary="Official evidence was collected for the step objective.",
+                ),
             )
 
         return ActorResult(
@@ -110,6 +136,21 @@ class StubActor(ActorPort):
             capability_mode=CapabilityAccessMode.NONE,
             external_impact=False,
             output_text="The DMA is an EU regulation that targets gatekeeper platforms.",
+            scratchpad_entry=ScratchpadEntry(
+                turn_index=actor_task.actor_turn_count,
+                plan_step_id=actor_task.current_plan_step.step_id,
+                entry_type=ScratchpadEntryType.COMPLETION_RATIONALE,
+                summary="The final synthesis satisfies the remaining plan step.",
+                evidence_refs=[item.evidence_id for item in actor_task.observed_evidence],
+            ),
+            step_validation=StepValidation(
+                plan_step_id=actor_task.current_plan_step.step_id,
+                objective_satisfied=True,
+                evidence_sufficient=True,
+                confidence=0.84,
+                next_action=StepValidationDecision.COMPLETE_STEP,
+                rationale_summary="The synthesis uses the collected official evidence.",
+            ),
         )
 
 
@@ -130,6 +171,124 @@ class StubToolGateway(ToolGatewayPort):
                     snippet="The DMA sets rules for gatekeeper platforms.",
                 ),
             ),
+        )
+
+
+class ProgressThenCompleteActor(ActorPort):
+    actor_name = "progress_then_complete_actor"
+    prompt_version = "progress_then_complete_v1"
+
+    # Emit one progress note before validating the step as complete.
+    def act(self, *, actor_task: ActorTask) -> ActorResult:
+        if actor_task.current_plan_step.step_id == "step_1" and not actor_task.step_validations:
+            return ActorResult(
+                plan_step_id=actor_task.current_plan_step.step_id,
+                result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+                summary="Progress was recorded but the step is not complete yet.",
+                capability_mode=CapabilityAccessMode.NONE,
+                output_text="Partial local synthesis.",
+                scratchpad_entry=ScratchpadEntry(
+                    turn_index=actor_task.actor_turn_count,
+                    plan_step_id=actor_task.current_plan_step.step_id,
+                    entry_type=ScratchpadEntryType.PROGRESS_NOTE,
+                    summary="The actor needs one more local pass before completion.",
+                ),
+                step_validation=StepValidation(
+                    plan_step_id=actor_task.current_plan_step.step_id,
+                    objective_satisfied=False,
+                    evidence_sufficient=False,
+                    confidence=0.45,
+                    next_action=StepValidationDecision.CONTINUE_ACTING,
+                    rationale_summary="The current partial output is not enough to complete the step.",
+                    residual_uncertainty="The step still needs a completion pass.",
+                ),
+            )
+
+        return ActorResult(
+            plan_step_id=actor_task.current_plan_step.step_id,
+            result_type=ActorResultType.FINAL_OUTPUT,
+            summary="The single-step task is now complete.",
+            capability_mode=CapabilityAccessMode.NONE,
+            output_text="Completed after a second local actor pass.",
+            scratchpad_entry=ScratchpadEntry(
+                turn_index=actor_task.actor_turn_count,
+                plan_step_id=actor_task.current_plan_step.step_id,
+                entry_type=ScratchpadEntryType.COMPLETION_RATIONALE,
+                summary="The second pass satisfies the single-step plan.",
+            ),
+            step_validation=StepValidation(
+                plan_step_id=actor_task.current_plan_step.step_id,
+                objective_satisfied=True,
+                evidence_sufficient=True,
+                confidence=0.82,
+                next_action=StepValidationDecision.COMPLETE_STEP,
+                rationale_summary="The step objective is satisfied after the second pass.",
+            ),
+        )
+
+
+class ReplanRequestActor(ActorPort):
+    actor_name = "replan_request_actor"
+    prompt_version = "replan_request_v1"
+
+    # Request replanning once, then complete the replacement step produced by the replanner.
+    def act(self, *, actor_task: ActorTask) -> ActorResult:
+        if actor_task.current_plan_step.step_id == "step_1":
+            return ActorResult(
+                plan_step_id=actor_task.current_plan_step.step_id,
+                result_type=ActorResultType.NEEDS_REPLAN,
+                summary="The current step is not executable as planned.",
+                capability_mode=CapabilityAccessMode.NONE,
+                blocking_reason="The initial step is too broad and needs a narrower recovery step.",
+                scratchpad_entry=ScratchpadEntry(
+                    turn_index=actor_task.actor_turn_count,
+                    plan_step_id=actor_task.current_plan_step.step_id,
+                    entry_type=ScratchpadEntryType.UNCERTAINTY,
+                    summary="The actor cannot execute the broad initial step reliably.",
+                ),
+            )
+
+        return ActorResult(
+            plan_step_id=actor_task.current_plan_step.step_id,
+            result_type=ActorResultType.FINAL_OUTPUT,
+            summary="The replanned task is now complete.",
+            capability_mode=CapabilityAccessMode.NONE,
+            output_text="Completed from the replanned recovery step.",
+            scratchpad_entry=ScratchpadEntry(
+                turn_index=actor_task.actor_turn_count,
+                plan_step_id=actor_task.current_plan_step.step_id,
+                entry_type=ScratchpadEntryType.COMPLETION_RATIONALE,
+                summary="The replacement step is narrow enough to complete directly.",
+            ),
+            step_validation=StepValidation(
+                plan_step_id=actor_task.current_plan_step.step_id,
+                objective_satisfied=True,
+                evidence_sufficient=True,
+                confidence=0.8,
+                next_action=StepValidationDecision.COMPLETE_STEP,
+                rationale_summary="The replanned step satisfies the task within the test scope.",
+            ),
+        )
+
+
+class StubReplanner(ReplannerPort):
+    replanner_name = "stub_replanner"
+    prompt_version = "stub_replanner_v1"
+
+    # Replace the blocked current/pending trajectory with a narrow executable step.
+    def replan(self, *, task_state) -> ReplanDecision:
+        return ReplanDecision(
+            replacement_steps=[
+                PlanStep(
+                    step_id="step_1_replanned",
+                    objective="Complete a narrower recovery step after the actor requested replanning.",
+                    rationale="The actor reported that the previous step was too broad.",
+                    expected_outcome="A completed recovery output.",
+                )
+            ],
+            rationale="The stub replanner replaced the blocked trajectory with one recovery step.",
+            replanner_name=self.replanner_name,
+            prompt_version=self.prompt_version,
         )
 
 
@@ -179,6 +338,9 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertEqual(len(task_state.executed_steps), 2)
         self.assertEqual(task_state.tool_call_count, 1)
         self.assertEqual(len(task_state.observed_evidence), 1)
+        self.assertEqual(len(task_state.scratchpad), 4)
+        self.assertEqual(len(task_state.step_validations), 2)
+        self.assertTrue(all(item.confidence > 0 for item in task_state.step_validations))
         self.assertEqual(
             task_state.final_output_text,
             "The DMA is an EU regulation that targets gatekeeper platforms.",
@@ -264,6 +426,70 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertEqual(task_state.current_state, RuntimeState.COMPLETED)
         self.assertEqual(task_state.tool_call_count, 1)
         self.assertEqual(len(task_state.observed_evidence), 1)
+
+    def test_intermediate_output_does_not_complete_step_without_validation(self) -> None:
+        graph = build_runtime_graph(
+            planner_service=StubPlanner(),
+            actor_service=ProgressThenCompleteActor(),
+            tool_gateway_service=StubToolGateway(),
+        )
+        result = graph.invoke(
+            {"intake_result": _build_research_intake_result(max_steps=1, max_tool_calls=10)},
+            config={"configurable": {"thread_id": "layer2-intermediate-output-continues"}},
+        )
+
+        task_state = result["task_state"]
+        self.assertEqual(task_state.current_state, RuntimeState.COMPLETED)
+        self.assertEqual(task_state.actor_turn_count, 2)
+        self.assertEqual(len(task_state.executed_steps), 1)
+        self.assertEqual(len(task_state.step_validations), 2)
+        self.assertEqual(
+            task_state.step_validations[0].next_action,
+            StepValidationDecision.CONTINUE_ACTING,
+        )
+        self.assertEqual(
+            task_state.step_validations[1].next_action,
+            StepValidationDecision.COMPLETE_STEP,
+        )
+        self.assertEqual(task_state.plan_steps[0].status, PlanStepStatus.COMPLETED)
+
+    def test_needs_replan_routes_through_replanner_and_continues(self) -> None:
+        graph = build_runtime_graph(
+            planner_service=StubPlanner(),
+            actor_service=ReplanRequestActor(),
+            tool_gateway_service=StubToolGateway(),
+            replanner_service=StubReplanner(),
+        )
+        result = graph.invoke(
+            {"intake_result": _build_research_intake_result()},
+            config={"configurable": {"thread_id": "layer2-replanner-continues"}},
+        )
+
+        task_state = result["task_state"]
+        self.assertEqual(task_state.current_state, RuntimeState.COMPLETED)
+        self.assertEqual(task_state.actor_turn_count, 2)
+        self.assertEqual(
+            [step.node_name for step in task_state.step_history],
+            [
+                "bootstrap_from_intake",
+                "planner",
+                "actor",
+                "replanner",
+                "actor",
+                "finalize_bootstrap",
+            ],
+        )
+        self.assertEqual(len(task_state.plan_steps), 1)
+        self.assertEqual(task_state.plan_steps[0].step_id, "step_1_replanned")
+        self.assertEqual(task_state.plan_steps[0].status, PlanStepStatus.COMPLETED)
+        self.assertEqual(task_state.planner_name, "stub_replanner")
+        self.assertEqual(task_state.planner_prompt_version, "stub_replanner_v1")
+        self.assertEqual(len(task_state.executed_steps), 1)
+        self.assertEqual(task_state.executed_steps[0].step_id, "step_1_replanned")
+        self.assertEqual(
+            task_state.final_output_text,
+            "Completed from the replanned recovery step.",
+        )
 
     def test_planner_trims_semantic_plan_to_max_steps(self) -> None:
         graph = build_runtime_graph(

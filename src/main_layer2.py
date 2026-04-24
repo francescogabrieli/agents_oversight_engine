@@ -27,6 +27,7 @@ from layer1_intake.infrastructure import build_intake_service
 from layer2_runtime_governance import build_runtime_graph
 from layer2_runtime_governance.actor_contract import ActorPort
 from layer2_runtime_governance.planning import PlannerPort
+from layer2_runtime_governance.replanning import ReplannerPort
 from layer2_runtime_governance.tool_contract import ToolGatewayPort
 
 
@@ -46,12 +47,14 @@ def run_layer2_flow(
     planner_service: PlannerPort | None = None,
     actor_service: ActorPort | None = None,
     tool_gateway_service: ToolGatewayPort | None = None,
+    replanner_service: ReplannerPort | None = None,
 ) -> dict[str, Any]:
     # Run Layer 1 plus the current Layer 2 graph and return the resulting trace.
     runtime_graph = build_runtime_graph(
         planner_service=planner_service,
         actor_service=actor_service,
         tool_gateway_service=tool_gateway_service,
+        replanner_service=replanner_service,
     )
 
     resolved_thread_id = thread_id or f"layer2-{uuid4()}"
@@ -201,6 +204,36 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
             ),
             "final_output_text": (
                 final_task_state.final_output_text if final_task_state is not None else None
+            ),
+            "scratchpad": (
+                [
+                    {
+                        "turn_index": entry.turn_index,
+                        "plan_step_id": entry.plan_step_id,
+                        "entry_type": entry.entry_type.value,
+                        "summary": entry.summary,
+                        "evidence_refs": entry.evidence_refs,
+                    }
+                    for entry in final_task_state.scratchpad
+                ]
+                if final_task_state is not None
+                else []
+            ),
+            "step_validations": (
+                [
+                    {
+                        "plan_step_id": validation.plan_step_id,
+                        "objective_satisfied": validation.objective_satisfied,
+                        "evidence_sufficient": validation.evidence_sufficient,
+                        "confidence": validation.confidence,
+                        "next_action": validation.next_action.value,
+                        "rationale_summary": validation.rationale_summary,
+                        "residual_uncertainty": validation.residual_uncertainty,
+                    }
+                    for validation in final_task_state.step_validations
+                ]
+                if final_task_state is not None
+                else []
             ),
         },
         "bootstrap_state": {

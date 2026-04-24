@@ -6,8 +6,19 @@ from layer1_intake import IntakeResult
 
 from .actor_contract import ActorPort, ActorResult, ActorResultType, build_actor_task
 from .planning import PlannerPort
-from .state import ExecutedPlanStep, PlanStep, PlanStepStatus, RuntimeState, StepRecord, TaskState
+from .state import (
+    ExecutedPlanStep,
+    PlanStep,
+    PlanStepStatus,
+    RuntimeState,
+    ScratchpadEntry,
+    ScratchpadEntryType,
+    StepRecord,
+    StepValidationDecision,
+    TaskState,
+)
 from .tool_contract import ObservedEvidence, ToolExecutionResult, ToolGatewayPort
+from .replanning import ReplannerPort
 
 
 # Nodes.py contains the executable Layer 2 business logic.
@@ -185,6 +196,53 @@ def finalize_bootstrap(state: TaskState) -> TaskState:
     return next_state
 
 
+# Replace the current/pending trajectory after the actor requests replanning.
+def replanner(state: TaskState, *, replanner_service: ReplannerPort) -> TaskState:
+    if state.current_state != RuntimeState.REPLANNING:
+        _append_step_record(
+            state,
+            node_name="replanner",
+            summary="Replanner skipped because the runtime is not in replanning state.",
+        )
+        return state
+
+    if state.current_plan_step_index is None:
+        _append_step_record(
+            state,
+            node_name="replanner",
+            summary="Replanner skipped because there is no current plan step to replace.",
+        )
+        return state
+
+    decision = replanner_service.replan(task_state=state)
+    # Completed steps are immutable history; only current and future trajectory is replaced.
+    completed_steps = [
+        step for step in state.plan_steps if step.status == PlanStepStatus.COMPLETED
+    ]
+
+    replacement_steps = list(decision.replacement_steps)
+    if replacement_steps:
+        # The first replacement step becomes the next executable actor target.
+        replacement_steps[0].status = PlanStepStatus.IN_PROGRESS
+        for step in replacement_steps[1:]:
+            step.status = PlanStepStatus.PENDING
+
+    state.plan_steps = completed_steps + replacement_steps
+    state.current_plan_step_index = len(completed_steps) if replacement_steps else None
+    state.planner_rationale = decision.rationale
+    state.planner_name = decision.replanner_name
+    state.planner_prompt_version = decision.prompt_version
+    state.current_state = RuntimeState.ACTING if replacement_steps else RuntimeState.COMPLETED
+
+    _append_step_record(
+        state,
+        node_name="replanner",
+        summary="Replanner replaced the current/pending trajectory after actor replan request.",
+    )
+    return state
+
+
+
 # Keep the planner output within the configured semantic step budget.
 def _enforce_plan_step_budget(*, plan_steps: list[PlanStep], max_steps: int) -> list[PlanStep]:
     return list(plan_steps[:max_steps])
@@ -221,6 +279,15 @@ def _record_actor_execution(state: TaskState, *, actor_result: ActorResult) -> N
     if actor_result.plan_step_id != current_step.step_id:
         raise ValueError("actor_result.plan_step_id does not match the current plan step.")
 
+    if actor_result.scratchpad_entry is not None:
+        # Store summarized working memory before any routing decision changes the state.
+        state.scratchpad.append(actor_result.scratchpad_entry)
+
+    if actor_result.step_validation is not None:
+        if actor_result.step_validation.plan_step_id != current_step.step_id:
+            raise ValueError("step_validation.plan_step_id does not match the current plan step.")
+        state.step_validations.append(actor_result.step_validation)
+
     if actor_result.result_type in {
         ActorResultType.ASK_CLARIFICATION,
         ActorResultType.BLOCKED,
@@ -233,6 +300,41 @@ def _record_actor_execution(state: TaskState, *, actor_result: ActorResult) -> N
     if actor_result.result_type == ActorResultType.PROPOSE_ACTION:
         if actor_result.tool_request is None:
             raise ValueError("propose_action requires tool_request.")
+        # Tool proposals keep the current semantic step alive until observation returns.
+        current_step.status = PlanStepStatus.IN_PROGRESS
+        return
+
+    if actor_result.step_validation is None:
+        raise ValueError("Completing a plan step requires step_validation.")
+
+    validation = actor_result.step_validation
+
+    if validation.next_action in {
+        StepValidationDecision.CONTINUE_ACTING,
+        StepValidationDecision.REQUEST_MORE_EVIDENCE,
+    }:
+        # A local output can be useful progress without satisfying the semantic objective.
+        current_step.status = PlanStepStatus.IN_PROGRESS
+        return
+
+    if validation.next_action == StepValidationDecision.ASK_CLARIFICATION:
+        current_step.status = PlanStepStatus.BLOCKED
+        state.current_tool_request = None
+        state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        return
+
+    if validation.next_action == StepValidationDecision.NEEDS_REPLAN:
+        current_step.status = PlanStepStatus.BLOCKED
+        state.current_tool_request = None
+        state.current_state = RuntimeState.REPLANNING
+        return
+
+    if not (
+        validation.next_action == StepValidationDecision.COMPLETE_STEP
+        and validation.objective_satisfied
+        and validation.evidence_sufficient
+    ):
+        # Invalid or low-confidence completion attempts are treated as continued work.
         current_step.status = PlanStepStatus.IN_PROGRESS
         return
 
@@ -293,6 +395,32 @@ def _map_actor_result_to_runtime_state(
     if actor_result.result_type == ActorResultType.PROPOSE_ACTION:
         return RuntimeState.READY_TOOL_EXECUTION
 
+    if actor_result.step_validation is not None:
+        # StepValidation is the runtime-facing self-check that decides whether to continue,
+        # escalate, replan, or advance after local actor output.
+        if actor_result.step_validation.next_action in {
+            StepValidationDecision.CONTINUE_ACTING,
+            StepValidationDecision.REQUEST_MORE_EVIDENCE,
+        }:
+            return RuntimeState.ACTING
+        if actor_result.step_validation.next_action == StepValidationDecision.ASK_CLARIFICATION:
+            return RuntimeState.WAITING_HUMAN_REVIEW
+        if actor_result.step_validation.next_action == StepValidationDecision.NEEDS_REPLAN:
+            return RuntimeState.REPLANNING
+        if actor_result.step_validation.next_action == StepValidationDecision.COMPLETE_STEP:
+            if (
+                actor_result.step_validation.objective_satisfied
+                and actor_result.step_validation.evidence_sufficient
+                and state.current_plan_step_index is None
+            ):
+                return RuntimeState.COMPLETED
+            if (
+                actor_result.step_validation.objective_satisfied
+                and actor_result.step_validation.evidence_sufficient
+            ):
+                return RuntimeState.READY_NEXT_STEP
+            return RuntimeState.ACTING
+
     if actor_result.result_type == ActorResultType.FINAL_OUTPUT:
         return RuntimeState.COMPLETED
 
@@ -343,7 +471,35 @@ def _build_observed_evidence_from_tool_result(
             )
         )
 
+    state.scratchpad.append(
+        _build_observation_scratchpad_entry(
+            state=state,
+            tool_result=tool_result,
+            evidence_refs=[item.evidence_id for item in evidence_items],
+        )
+    )
+
     return evidence_items
+
+
+# Record tool observations as audit-safe working memory for later actor turns.
+def _build_observation_scratchpad_entry(
+    *,
+    state: TaskState,
+    tool_result: ToolExecutionResult,
+    evidence_refs: list[str],
+) -> ScratchpadEntry:
+    current_step = state.current_plan_step
+    if current_step is None:
+        raise ValueError("Cannot create observation scratchpad entry without a current plan step.")
+
+    return ScratchpadEntry(
+        turn_index=state.actor_turn_count,
+        plan_step_id=current_step.step_id,
+        entry_type=ScratchpadEntryType.OBSERVATION,
+        summary=f"Observed tool result from '{tool_result.request.tool_name.value}': {tool_result.summary}",
+        evidence_refs=evidence_refs,
+    )
 
 
 # Keep the closing trace message aligned with the actual endpoint reached by the runtime.
@@ -367,4 +523,5 @@ __all__ = [
     "observe_tool_result",
     "planner",
     "tool_gateway",
+    "replanner",
 ]
