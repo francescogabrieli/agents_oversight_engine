@@ -17,6 +17,7 @@ from .tool_contract import ObservedEvidence, ToolExecutionResult, ToolRequest
 
 if TYPE_CHECKING:
     from .actor_contract import ActorResult, ActorResultType
+    from .governance import GovernanceDecision
 
 
 # Layer 2 currently covers bootstrap, planning, and the actor/tool observation loop.
@@ -29,6 +30,7 @@ class RuntimeState(str, Enum):
     REPLANNING = "replanning"
     WAITING_HUMAN_REVIEW = "waiting_human_review"
     COMPLETED = "completed"
+    ABORTED = "aborted"
 
 
 class RuntimeFlag(str, Enum):
@@ -162,6 +164,10 @@ class TaskState:
     last_tool_result: ToolExecutionResult | None = None
     observed_evidence: list[ObservedEvidence] = field(default_factory=list)
     tool_call_count: int = 0
+
+    # Governance snapshot.
+    last_governance_decision: GovernanceDecision | None = None
+    governance_history: list[GovernanceDecision] = field(default_factory=list)
 
     @property
     def current_plan_step(self) -> PlanStep | None:

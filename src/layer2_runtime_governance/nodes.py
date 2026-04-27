@@ -5,6 +5,14 @@ from copy import deepcopy
 from layer1_intake import IntakeResult
 
 from .actor_contract import ActorPort, ActorResult, ActorResultType, build_actor_task
+from .governance import (
+    GovernanceDecision,
+    GovernanceDirective,
+    PolicyEnginePort,
+    PolicyEvaluationInput,
+    build_governance_decision,
+    build_policy_evaluation_input,
+)
 from .planning import PlannerPort
 from .state import (
     ExecutedPlanStep,
@@ -108,6 +116,42 @@ def actor(state: TaskState, *, actor_service: ActorPort) -> TaskState:
         state,
         node_name="actor",
         summary="Actor executed the current semantic step and returned one typed execution outcome.",
+    )
+    return state
+
+
+# Route the actor outcome through the deterministic governance layer.
+def governance(state: TaskState, *, policy_engine_service: PolicyEnginePort) -> TaskState:
+    if state.actor_result is None:
+        _append_step_record(
+            state,
+            node_name="governance",
+            summary="Governance skipped because there was no actor result to evaluate.",
+        )
+        return state
+
+    policy_input = build_policy_evaluation_input(task_state=state)
+    policy_result = policy_engine_service.evaluate(policy_input=policy_input)
+    governance_decision = build_governance_decision(
+        policy_input=policy_input,
+        policy_result=policy_result,
+    )
+
+    state.last_governance_decision = governance_decision
+    state.governance_history.append(governance_decision)
+    _apply_governance_decision(
+        state,
+        governance_decision=governance_decision,
+        policy_input=policy_input,
+    )
+
+    _append_step_record(
+        state,
+        node_name="governance",
+        summary=(
+            "Governance evaluated the actor outcome and produced "
+            f"directive '{governance_decision.directive.value}'."
+        ),
     )
     return state
 
@@ -430,6 +474,58 @@ def _map_actor_result_to_runtime_state(
     return RuntimeState.READY_NEXT_STEP
 
 
+# Convert the governance decision into the next runtime state while preserving the actor trace.
+def _apply_governance_decision(
+    state: TaskState,
+    *,
+    governance_decision: GovernanceDecision,
+    policy_input: PolicyEvaluationInput,
+) -> None:
+    if governance_decision.directive == GovernanceDirective.STOP:
+        state.current_state = RuntimeState.ABORTED
+        state.current_tool_request = None
+        return
+
+    if governance_decision.directive in {
+        GovernanceDirective.WAIT_HUMAN_REVIEW,
+        GovernanceDirective.ASK_USER_CLARIFICATION,
+    }:
+        state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        state.current_tool_request = None
+        return
+
+    if governance_decision.directive == GovernanceDirective.REPLAN:
+        state.current_state = RuntimeState.REPLANNING
+        state.current_tool_request = None
+        return
+
+    if policy_input.actor_result_type == ActorResultType.PROPOSE_ACTION:
+        state.current_state = RuntimeState.READY_TOOL_EXECUTION
+        return
+
+    if policy_input.actor_result_type == ActorResultType.NEEDS_REPLAN:
+        state.current_state = RuntimeState.REPLANNING
+        return
+
+    if policy_input.actor_result_type == ActorResultType.ASK_CLARIFICATION:
+        state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        state.current_tool_request = None
+        return
+
+    if policy_input.actor_result_type == ActorResultType.BLOCKED:
+        state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        state.current_tool_request = None
+        return
+
+    if policy_input.actor_result_type in {
+        ActorResultType.INTERMEDIATE_OUTPUT,
+        ActorResultType.FINAL_OUTPUT,
+    }:
+        return
+
+    state.current_state = RuntimeState.ACTING
+
+
 # Convert a tool result into explicit evidence objects that later actor turns can consume.
 def _build_observed_evidence_from_tool_result(
     *,
@@ -507,6 +603,12 @@ def _build_finalize_summary(state: TaskState) -> str:
     if state.actor_result is None:
         return "Layer 2 stopped before actor execution because no operational outcome was available."
 
+    if state.current_state == RuntimeState.ABORTED:
+        return (
+            "Layer 2 stopped after governance denied the actor outcome "
+            f"'{state.actor_result.result_type.value}'."
+        )
+
     return (
         "Layer 2 stopped after the planner/actor/tool loop "
         f"with actor result '{state.actor_result.result_type.value}', "
@@ -520,6 +622,7 @@ __all__ = [
     "actor",
     "bootstrap_from_intake",
     "finalize_bootstrap",
+    "governance",
     "observe_tool_result",
     "planner",
     "tool_gateway",

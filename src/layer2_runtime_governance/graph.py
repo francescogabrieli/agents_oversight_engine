@@ -30,10 +30,22 @@ from .actor_contract import (
     ActorResultType,
     CapabilityAccessMode,
 )
+from .governance import (
+    GovernanceDecision,
+    GovernanceDirective,
+    GovernanceReasonCode,
+    OPAHttpPolicyEngineSettings,
+    PolicyDecision,
+    PolicyEnginePort,
+    PolicyEvaluationInput,
+    PolicyEvaluationResult,
+    build_default_policy_engine,
+)
 from .nodes import (
     actor,
     bootstrap_from_intake,
     finalize_bootstrap,
+    governance,
     observe_tool_result,
     planner,
     replanner,
@@ -88,12 +100,14 @@ def build_runtime_graph(
     actor_service: ActorPort | None = None,
     tool_gateway_service: ToolGatewayPort | None = None,
     replanner_service: ReplannerPort | None = None,
+    policy_engine_service: PolicyEnginePort | None = None,
 ):
     # Wire the current Layer 2 graph and compile it into an executable LangGraph.
     resolved_planner = planner_service or build_default_planner()
     resolved_actor = actor_service or build_default_actor()
     resolved_tool_gateway = tool_gateway_service or build_default_tool_gateway()
     resolved_replanner = replanner_service or build_default_replanner()
+    resolved_policy_engine = policy_engine_service or build_default_policy_engine()
 
     builder = StateGraph(
         Layer2GraphState,
@@ -104,6 +118,7 @@ def build_runtime_graph(
     builder.add_node("bootstrap_from_intake", _bootstrap_node)
     builder.add_node("planner", _build_planner_node(resolved_planner))
     builder.add_node("actor", _build_actor_node(resolved_actor))
+    builder.add_node("governance", _build_governance_node(resolved_policy_engine))
     builder.add_node("tool_gateway", _build_tool_gateway_node(resolved_tool_gateway))
     builder.add_node("observe_tool_result", _observe_tool_result_node)
     builder.add_node("replanner", _build_replanner_node(resolved_replanner))
@@ -113,11 +128,12 @@ def build_runtime_graph(
     builder.add_edge("bootstrap_from_intake", "planner")
     builder.add_edge("planner", "actor")
 
+    builder.add_edge("actor", "governance")
     # Keep the internal execution loop inside the graph so the outer surface still feels agentic.
-    # The actor is the decision point; routing only follows its typed runtime outcome.
+    # The governance node is the decision point; routing only follows its typed runtime outcome.
     builder.add_conditional_edges(
-        "actor",
-        _route_after_actor,
+        "governance",
+        _route_after_governance,
         {
             "actor": "actor",
             "tool_gateway": "tool_gateway",
@@ -165,6 +181,19 @@ def _build_actor_node(actor_service: ActorPort):
     return _actor_node
 
 
+# Close over the resolved policy engine so governance stays deterministic in tests.
+def _build_governance_node(policy_engine_service: PolicyEnginePort):
+    def _governance_node(state: Layer2GraphState) -> dict[str, TaskState]:
+        return {
+            "task_state": governance(
+                _copy_task_state(state["task_state"]),
+                policy_engine_service=policy_engine_service,
+            )
+        }
+
+    return _governance_node
+
+
 def _build_tool_gateway_node(tool_gateway_service: ToolGatewayPort):
     # Close over the resolved tool gateway so the graph can remain deterministic in tests.
     def _tool_gateway_node(state: Layer2GraphState) -> dict[str, TaskState]:
@@ -201,8 +230,8 @@ def _finalize_bootstrap_node(state: Layer2GraphState) -> dict[str, TaskState]:
     return {"task_state": finalize_bootstrap(_copy_task_state(state["task_state"]))}
 
 
-# Route actor outcomes to the next internal runtime node.
-def _route_after_actor(state: Layer2GraphState) -> str:
+# Route governance outcomes to the next internal runtime node.
+def _route_after_governance(state: Layer2GraphState) -> str:
     task_state = state["task_state"]
 
     if task_state.current_state == RuntimeState.READY_TOOL_EXECUTION:
@@ -240,11 +269,18 @@ def _build_default_checkpointer() -> MemorySaver:
             ExecutionPolicy,
             IntakeMetadata,
             IntakeResult,
+            GovernanceDecision,
+            GovernanceDirective,
+            GovernanceReasonCode,
             ObservedEvidence,
             ParseStatus,
             PlanStep,
             PlanStepStatus,
             PlannerDecision,
+            PolicyDecision,
+            PolicyEvaluationInput,
+            PolicyEvaluationResult,
+            OPAHttpPolicyEngineSettings,
             ReplanDecision,
             RuntimeFlag,
             RuntimeState,

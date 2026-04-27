@@ -34,8 +34,14 @@ from layer2_runtime_governance import (
     ActorResultType,
     ActorTask,
     CapabilityAccessMode,
+    GovernanceDirective,
+    GovernanceReasonCode,
     PlanStep,
     PlannerDecision,
+    PolicyDecision,
+    PolicyEnginePort,
+    PolicyEvaluationInput,
+    PolicyEvaluationResult,
     ReplanDecision,
     ReplannerPort,
     RuntimeFlag,
@@ -196,6 +202,68 @@ class StubToolGateway(ToolGatewayPort):
         )
 
 
+class StubPolicyEngine(PolicyEnginePort):
+    policy_engine_name = "stub_policy_engine"
+    policy_bundle_version = "stub_policy_bundle_v1"
+
+    def evaluate(self, *, policy_input: PolicyEvaluationInput) -> PolicyEvaluationResult:
+        if (
+            policy_input.external_impact
+            or policy_input.capability_mode == CapabilityAccessMode.WRITE
+        ):
+            return PolicyEvaluationResult(
+                policy_decision=PolicyDecision.DENY,
+                reason_codes=(GovernanceReasonCode.WRITE_CAPABILITY_BLOCKED,),
+                summary="Write-like capability is blocked by the policy stub.",
+                policy_engine_name=self.policy_engine_name,
+                policy_bundle_version=self.policy_bundle_version,
+            )
+
+        if policy_input.actor_result_type == ActorResultType.ASK_CLARIFICATION:
+            return PolicyEvaluationResult(
+                policy_decision=PolicyDecision.ASK_CLARIFICATION,
+                reason_codes=(GovernanceReasonCode.ASK_CLARIFICATION_REQUIRED,),
+                summary="Clarification is required by the policy stub.",
+                policy_engine_name=self.policy_engine_name,
+                policy_bundle_version=self.policy_bundle_version,
+            )
+
+        if policy_input.actor_result_type == ActorResultType.NEEDS_REPLAN:
+            return PolicyEvaluationResult(
+                policy_decision=PolicyDecision.ALLOW,
+                reason_codes=(GovernanceReasonCode.REPLAN_ALLOWED,),
+                summary="Replanning is allowed by the policy stub.",
+                policy_engine_name=self.policy_engine_name,
+                policy_bundle_version=self.policy_bundle_version,
+            )
+
+        if policy_input.tool_name is not None and policy_input.read_only_mode:
+            return PolicyEvaluationResult(
+                policy_decision=PolicyDecision.ALLOW_READ_ONLY,
+                reason_codes=(GovernanceReasonCode.READ_ONLY_ALLOWED,),
+                summary="Read-only tool use is allowed by the policy stub.",
+                policy_engine_name=self.policy_engine_name,
+                policy_bundle_version=self.policy_bundle_version,
+            )
+
+        if policy_input.tool_name is not None:
+            return PolicyEvaluationResult(
+                policy_decision=PolicyDecision.ALLOW,
+                reason_codes=(GovernanceReasonCode.TOOL_ALLOWED,),
+                summary="The requested tool is allowed by the policy stub.",
+                policy_engine_name=self.policy_engine_name,
+                policy_bundle_version=self.policy_bundle_version,
+            )
+
+        return PolicyEvaluationResult(
+            policy_decision=PolicyDecision.ALLOW,
+            reason_codes=(GovernanceReasonCode.LOCAL_OUTPUT_ALLOWED,),
+            summary="Local-only output is allowed by the policy stub.",
+            policy_engine_name=self.policy_engine_name,
+            policy_bundle_version=self.policy_bundle_version,
+        )
+
+
 class StubReplanner(ReplannerPort):
     replanner_name = "stub_replanner"
     prompt_version = "stub_replanner_v1"
@@ -237,6 +305,7 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
             actor_service=StubActor(),
             tool_gateway_service=StubToolGateway(),
             replanner_service=StubReplanner(),
+            policy_engine_service=StubPolicyEngine(),
         )
 
         intake_result = trace["intake_result"]
@@ -258,10 +327,13 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
                 "bootstrap_from_intake",
                 "planner",
                 "actor",
+                "governance",
                 "tool_gateway",
                 "observe_tool_result",
                 "actor",
+                "governance",
                 "actor",
+                "governance",
                 "finalize_bootstrap",
             ],
         )
@@ -275,6 +347,9 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
         self.assertEqual(len(task_state.observed_evidence), 1)
         self.assertEqual(len(task_state.scratchpad), 4)
         self.assertEqual(len(task_state.step_validations), 2)
+        self.assertEqual(len(task_state.governance_history), 3)
+        self.assertEqual(task_state.governance_history[0].policy_decision, PolicyDecision.ALLOW)
+        self.assertEqual(task_state.governance_history[0].directive, GovernanceDirective.CONTINUE)
 
     def test_clarification_task_bootstraps_end_to_end(self) -> None:
         trace = run_layer2_flow(
@@ -296,6 +371,7 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
             actor_service=StubActor(),
             tool_gateway_service=StubToolGateway(),
             replanner_service=StubReplanner(),
+            policy_engine_service=StubPolicyEngine(),
         )
 
         intake_result = trace["intake_result"]
@@ -312,12 +388,14 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
                 "bootstrap_from_intake",
                 "planner",
                 "actor",
+                "governance",
                 "finalize_bootstrap",
             ],
         )
         self.assertEqual(task_state.plan_steps, [])
         self.assertIsNone(task_state.current_plan_step_index)
         self.assertIsNone(task_state.actor_result)
+        self.assertEqual(task_state.governance_history, [])
 
 
 def _build_intake_service(task_spec: TaskSpec) -> IntakeService:

@@ -26,6 +26,7 @@ from layer1_intake import (
 from layer1_intake.infrastructure import build_intake_service
 from layer2_runtime_governance import build_runtime_graph
 from layer2_runtime_governance.actor_contract import ActorPort
+from layer2_runtime_governance.governance import PolicyEnginePort
 from layer2_runtime_governance.planning import PlannerPort
 from layer2_runtime_governance.replanning import ReplannerPort
 from layer2_runtime_governance.tool_contract import ToolGatewayPort
@@ -48,6 +49,7 @@ def run_layer2_flow(
     actor_service: ActorPort | None = None,
     tool_gateway_service: ToolGatewayPort | None = None,
     replanner_service: ReplannerPort | None = None,
+    policy_engine_service: PolicyEnginePort | None = None,
 ) -> dict[str, Any]:
     # Run Layer 1 plus the current Layer 2 graph and return the resulting trace.
     runtime_graph = build_runtime_graph(
@@ -55,6 +57,7 @@ def run_layer2_flow(
         actor_service=actor_service,
         tool_gateway_service=tool_gateway_service,
         replanner_service=replanner_service,
+        policy_engine_service=policy_engine_service,
     )
 
     resolved_thread_id = thread_id or f"layer2-{uuid4()}"
@@ -241,6 +244,41 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
                 else []
             ),
         },
+        "governance_snapshot": {
+            "governance_pass_count": (
+                len(final_task_state.governance_history) if final_task_state is not None else 0
+            ),
+            "last_governance_decision": (
+                {
+                    "directive": final_task_state.last_governance_decision.directive.value,
+                    "policy_decision": final_task_state.last_governance_decision.policy_decision.value,
+                    "reason_codes": [
+                        code.value
+                        for code in final_task_state.last_governance_decision.reason_codes
+                    ],
+                    "summary": final_task_state.last_governance_decision.summary,
+                    "constrains_capability_use": (
+                        final_task_state.last_governance_decision.constrains_capability_use
+                    ),
+                    "evaluated_actor_result_type": (
+                        final_task_state.last_governance_decision.evaluated_actor_result_type.value
+                    ),
+                    "evaluated_tool_name": (
+                        final_task_state.last_governance_decision.evaluated_tool_name.value
+                        if final_task_state.last_governance_decision.evaluated_tool_name is not None
+                        else None
+                    ),
+                    "policy_engine_name": (
+                        final_task_state.last_governance_decision.policy_engine_name
+                    ),
+                    "policy_bundle_version": (
+                        final_task_state.last_governance_decision.policy_bundle_version
+                    ),
+                }
+                if final_task_state is not None and final_task_state.last_governance_decision is not None
+                else None
+            ),
+        },
         "bootstrap_state": {
             "current_state": (
                 final_task_state.current_state.value if final_task_state is not None else None
@@ -341,6 +379,7 @@ def print_layer2_summary(trace: dict[str, Any]) -> None:
     _print_section("PLANNING SNAPSHOT", compact_trace["planning_snapshot"])
     _print_section("ACTOR SNAPSHOT", compact_trace["actor_snapshot"])
     _print_section("EXECUTION SNAPSHOT", compact_trace["execution_snapshot"])
+    _print_section("GOVERNANCE SNAPSHOT", compact_trace["governance_snapshot"])
     _print_section("TOOL SNAPSHOT", compact_trace["tool_snapshot"])
     _print_section("BOOTSTRAP STATE", compact_trace["bootstrap_state"])
 

@@ -25,7 +25,19 @@ The current design references are:
 At the moment, the repository mainly covers:
 
 - `Layer 1 - Task Intake`
-- `Layer 2 - Bootstrap + Planner + Actor/Tool Loop`
+- `Layer 2 - Bootstrap + Planner + Actor/Tool Loop + Replanner + Governance`
+
+The currently implemented Layer 2 slice is not just a single planner/executor pass.
+It already includes:
+
+- typed planner output
+- typed actor output
+- runtime-bound read-only tool requests
+- tool result observation into explicit evidence
+- audit-safe scratchpad entries
+- typed step self-validations
+- an active `replanner` branch for `NEEDS_REPLAN`
+- compact runtime tracing through `src/main_layer2.py`
 
 These are the folders to treat as the active implementation baseline:
 
@@ -109,6 +121,9 @@ Purpose:
 - execute the current semantic plan step through the actor
 - execute read-only capability calls through `tool_gateway`
 - observe tool results and feed them back into the actor loop
+- replace the current and pending semantic trajectory through `replanner` when the actor signals `NEEDS_REPLAN`
+- evaluate actor outcomes through a typed governance node backed by an OPA policy engine
+- persist governance decisions in `TaskState` with an explicit `ABORTED` stop state for hard denials
 - maintain an audit-safe scratchpad and typed step self-validations during actor execution
 - stop after the current planner/actor/tool slice reaches a stable stop point in canonical `TaskState`
 
@@ -119,21 +134,30 @@ Main files:
 - `graph.py`
 - `planning.py`
 - `acting.py`
+- `replanning.py`
 - `actor_contract.py`
 - `tool_contract.py`
 - `tool_gateway.py`
+- `governance.py`
+- `runtime_warnings.py`
 
 Current design:
 
 - `state.py` defines the bootstrap state contract, runtime flags, planner snapshot models, actor execution snapshot, tool loop state, observed evidence, audit-safe scratchpad entries, typed step validations, and runtime step outcomes
-- `nodes.py` contains `bootstrap_from_intake`, `planner`, `actor`, `tool_gateway`, `observe_tool_result`, and bootstrap closure helpers
+- `nodes.py` contains `bootstrap_from_intake`, `planner`, `actor`, `governance`, `tool_gateway`, `observe_tool_result`, `replanner`, and bootstrap closure helpers
 - `planning.py` defines the planner port, prompt builders, and the default OpenAI-backed planner
 - `acting.py` defines the actor port, prompt builders, and the default OpenAI-backed actor using runtime-bound tools instead of a prompt-only tool inventory
+- `replanning.py` defines the replanner port, prompt builders, the default OpenAI-backed replanner, and a local conservative fallback replanner for tests/offline use
 - `actor_contract.py` defines the typed handoff from planner state into actor-facing execution context for the current plan step, including observed evidence, scratchpad entries, and prior step validations
 - `tool_contract.py` defines typed tool requests, tool results, and observed evidence contracts
-- `tool_gateway.py` contains the read-only operational tool surface currently available to the runtime
-- `graph.py` contains the current LangGraph wiring for the planner/actor/tool loop:
-  `START -> bootstrap_from_intake -> planner -> actor -> tool_gateway -> observe_tool_result -> actor ... -> finalize_bootstrap -> END`
+- `tool_gateway.py` contains the read-only operational tool surface currently available to the runtime, currently `web_search` and `fetch_url_text`
+- `governance.py` defines the typed policy input/output contracts, OPA HTTP policy engine, and governance decision mapping used after actor execution
+- `runtime_warnings.py` centralizes warning suppression needed before importing selected LangGraph/LangChain dependencies
+- `graph.py` contains the current LangGraph wiring for the planner/actor/governance/tool/replanner loop:
+  `START -> bootstrap_from_intake -> planner -> actor -> governance -> { tool_gateway | replanner | finalize_bootstrap }`
+  `tool_gateway -> observe_tool_result -> actor`
+  `replanner -> actor`
+  `finalize_bootstrap -> END`
 
 Reference implementation note:
 
@@ -228,8 +252,10 @@ Current relevant files:
 - New runtime data should be modeled explicitly before being spread through nodes.
 - `graph.py` should not contain business logic beyond routing and LangGraph integration.
 - `nodes.py` should not become a dumping ground for framework-specific plumbing.
-- the current implementation scope covers the current planner/actor/tool loop slice
-- the active baseline includes `bootstrap_from_intake -> planner -> actor -> tool_gateway -> observe_tool_result -> actor`
+- the current implementation scope covers the current planner/actor/tool/replanner/governance slice
+- the active baseline includes `bootstrap_from_intake -> planner -> actor -> governance -> tool_gateway -> observe_tool_result -> actor`
+- the active baseline also includes the real `replanner` branch triggered by `NEEDS_REPLAN`
+- the active baseline also includes a typed governance branch after `actor` that can continue, replan, escalate, or abort
 - the planner/executor split should remain aligned with `docs/plan-and-execute.ipynb` unless there is a clear thesis-driven reason to diverge
 - planner output must remain semantic and typed
 - planner output must not contain concrete tool calls, executable payloads, or framework-specific actions
@@ -243,9 +269,14 @@ Current relevant files:
 - when tools are added, do not rely on a prompt-only tool inventory as the primary mechanism; prefer structured tool binding in the LangGraph/LangChain style
 - prompt text may contain policy, behavioral, and architecture constraints, but should not replace the runtime-level tool contract
 - the current tool surface is read-only and externally conservative
+- read-only capability use is currently explicit and typed through `ToolRequest`, `ToolExecutionResult`, and `ObservedEvidence`
+- `replanner` may replace only the current and pending semantic trajectory; completed steps remain immutable history
 - `max_steps` is enforced as a semantic plan-step ceiling in the current runtime
 - `max_tool_calls = null` means the current runtime does not impose a hard tool-call ceiling
-- governance and HITL are not active yet, while read-only tool execution is active
+- `WAITING_HUMAN_REVIEW` currently acts as a typed stop/escalation state, not as a full `interrupt / resume` HITL implementation yet
+- governance is active as an explicit runtime node and uses OPA over HTTP as the deterministic policy engine target
+- `ABORTED` is the hard-denial runtime state for governance decisions that must not be conflated with review
+- HITL is still not wired as `interrupt / resume`; governance currently stops in typed states and leaves human continuation for later
 
 ### HITL Rules
 
@@ -269,6 +300,8 @@ Useful breakpoint locations:
 - `src/layer2_runtime_governance/state.py`
 - `src/layer2_runtime_governance/planning.py`
 - `src/layer2_runtime_governance/acting.py`
+- `src/layer2_runtime_governance/replanning.py`
+- `src/layer2_runtime_governance/tool_gateway.py`
 
 In particular:
 
@@ -276,6 +309,8 @@ In particular:
 - inspect `bootstrap_from_intake`
 - inspect `planner`
 - inspect `actor`
+- inspect `replanner` when `NEEDS_REPLAN` is emitted
+- inspect `observe_tool_result` when evidence is unexpectedly weak or missing
 - inspect `TaskState.from_intake`
 
 When debugging in VS Code:
@@ -296,13 +331,13 @@ Run the Layer 1 example:
 
 ### Layer 2
 
-Run Layer 2 bootstrap, planner, actor, and tool loop with real Layer 1 parsing:
+Run Layer 2 bootstrap, planner, actor, tool loop, and replanner with real Layer 1 parsing:
 
 ```powershell
 .\.venv\Scripts\python.exe src\main_layer2.py --task "Find official sources about the Digital Markets Act and produce a short summary." --context "Prefer official EU sources."
 ```
 
-Run Layer 2 bootstrap, planner, actor, and tool loop with deterministic demo intake:
+Run Layer 2 bootstrap, planner, actor, tool loop, and replanner with deterministic demo intake:
 
 ```powershell
 .\.venv\Scripts\python.exe src\main_layer2.py --demo-intake-profile research --task "Find official sources about the Digital Markets Act and produce a short summary."
@@ -344,7 +379,11 @@ The project currently uses:
 - OpenAI API for the real Layer 1 parser
 - OpenAI API for the default Layer 2 planner
 - OpenAI API for the default Layer 2 actor
+- OpenAI API for the default Layer 2 replanner
+- OpenAI API for the `web_search` path in the default Layer 2 tool gateway
+- Python standard library HTTP/HTML extraction for the `fetch_url_text` path in the default Layer 2 tool gateway
 - LangGraph for Layer 2 runtime orchestration
+- in-memory LangGraph checkpointing for the current local runtime graph
 
 Environment variables may be loaded from:
 
@@ -399,9 +438,9 @@ Avoid:
 The current most relevant near-term evolution path is:
 
 1. keep Layer 1 stable and explicit
-2. keep the Layer 1 -> Layer 2 bootstrap-planner-actor-tool contract stable
-3. strengthen the actor/tool integration toward richer autonomous execution and tool choice
-4. add a real `replanner` node so `NEEDS_REPLAN` becomes an actual runtime branch instead of a stop condition
-5. evolve typed confidence/self-stop logic from the current step validation contract
-6. reintroduce explicit governance on the actor output once the actor/tool contract is stable
-7. evolve toward a real agent runtime incrementally by adding richer evidence observation, HITL, and post-run evaluation only after the current baseline remains solid
+2. keep the Layer 1 -> Layer 2 bootstrap-planner-actor-tool-replanner contract stable
+3. harden the governance contract and policy bundle boundaries before adding more policy dimensions
+4. evolve confidence, risk, and trajectory signals into explicit inputs for governance instead of ad hoc heuristics
+5. separate `WAITING_HUMAN_REVIEW` into a future `interrupt / resume` path rather than only a terminal typed state
+6. introduce LLM-as-a-judge only after the deterministic governance slice remains stable and testable
+7. strengthen observability and evidence quality assessment before widening the tool surface
