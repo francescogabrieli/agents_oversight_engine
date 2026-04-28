@@ -1,0 +1,2 @@
+The fixture MCP server exposes deterministic read-only tools for gateway tests.
+It is intentionally small so evidence normalization remains easy to inspect.

@@ -9,6 +9,10 @@ from typing import Protocol
 class ToolName(str, Enum):
     WEB_SEARCH = "web_search"
     FETCH_URL_TEXT = "fetch_url_text"
+    MCP_LOCAL_TEST_ECHO = "mcp.local_test.echo"
+    MCP_LOCAL_TEST_READ_FIXTURE = "mcp.local_test.read_fixture"
+    MCP_LOCAL_TEST_TEXT_STATS = "mcp.local_test.text_stats"
+    MCP_LOCAL_TEST_CALCULATE_EXPRESSION = "mcp.local_test.calculate_expression"
 
 
 @dataclass(frozen=True)
@@ -19,6 +23,11 @@ class ToolRequest:
     reason: str
     query: str | None = None
     url: str | None = None
+    text: str | None = None
+    path: str | None = None
+    expression: str | None = None
+    timezone: str | None = None
+    limit: int | None = None
     max_results: int = 5
     extractive_goal: str | None = None
 

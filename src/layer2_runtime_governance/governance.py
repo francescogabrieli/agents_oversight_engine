@@ -12,6 +12,10 @@ from urllib.request import Request, urlopen
 from layer1_intake import DomainType, SensitivityLevel
 
 from .actor_contract import ActorResult, ActorResultType, CapabilityAccessMode
+from .oversight import (
+    OversightAssessment,
+    OversightRecommendedDirective,
+)
 from .state import RuntimeFlag, RuntimeState, TaskState
 from .tool_contract import ToolName
 
@@ -29,6 +33,7 @@ class PolicyDecision(str, Enum):
 class GovernanceDirective(str, Enum):
     CONTINUE = "continue"
     CONTINUE_READ_ONLY = "continue_read_only"
+    REQUEST_MORE_EVIDENCE = "request_more_evidence"
     REPLAN = "replan"
     ASK_USER_CLARIFICATION = "ask_user_clarification"
     WAIT_HUMAN_REVIEW = "wait_human_review"
@@ -104,6 +109,9 @@ class GovernanceDecision:
     evaluated_tool_name: ToolName | None
     policy_engine_name: str
     policy_bundle_version: str
+    policy_directive: GovernanceDirective
+    oversight_recommended_directive: GovernanceDirective
+    oversight_summary: str | None = None
 
 
 # PolicyEnginePort keeps the runtime decoupled from the policy engine backend.
@@ -286,20 +294,117 @@ def build_governance_decision(
     *,
     policy_input: PolicyEvaluationInput,
     policy_result: PolicyEvaluationResult,
+    oversight_assessment: OversightAssessment | None = None,
 ) -> GovernanceDecision:
+    policy_directive = derive_governance_directive(
+        policy_input=policy_input,
+        policy_result=policy_result,
+    )
+    final_directive = combine_governance_directives(
+        policy_result=policy_result,
+        policy_directive=policy_directive,
+        oversight_assessment=oversight_assessment,
+    )
+    oversight_directive = _map_oversight_directive(
+        oversight_assessment.recommended_directive
+        if oversight_assessment is not None
+        else OversightRecommendedDirective.CONTINUE
+    )
+
     return GovernanceDecision(
-        directive=derive_governance_directive(policy_input=policy_input, policy_result=policy_result),
+        directive=final_directive,
         policy_decision=policy_result.policy_decision,
         reason_codes=policy_result.reason_codes,
-        summary=policy_result.summary,
+        summary=_build_combined_summary(
+            policy_summary=policy_result.summary,
+            policy_directive=policy_directive,
+            final_directive=final_directive,
+            oversight_assessment=oversight_assessment,
+        ),
         constrains_capability_use=constrains_capability_use(
             policy_input=policy_input,
             policy_result=policy_result,
-        ),
+        )
+        or final_directive != policy_directive,
         evaluated_actor_result_type=policy_input.actor_result_type,
         evaluated_tool_name=policy_input.tool_name,
         policy_engine_name=policy_result.policy_engine_name,
         policy_bundle_version=policy_result.policy_bundle_version,
+        policy_directive=policy_directive,
+        oversight_recommended_directive=oversight_directive,
+        oversight_summary=oversight_assessment.summary if oversight_assessment is not None else None,
+    )
+
+
+# Combine hard policy with adaptive oversight without making policy more permissive.
+def combine_governance_directives(
+    *,
+    policy_result: PolicyEvaluationResult,
+    policy_directive: GovernanceDirective,
+    oversight_assessment: OversightAssessment | None,
+) -> GovernanceDirective:
+    if policy_result.policy_decision == PolicyDecision.DENY:
+        return GovernanceDirective.STOP
+
+    if policy_result.policy_decision == PolicyDecision.REQUIRE_HUMAN_REVIEW:
+        return GovernanceDirective.WAIT_HUMAN_REVIEW
+
+    if policy_result.policy_decision == PolicyDecision.ASK_CLARIFICATION:
+        return GovernanceDirective.ASK_USER_CLARIFICATION
+
+    if oversight_assessment is None:
+        return policy_directive
+
+    oversight_directive = _map_oversight_directive(oversight_assessment.recommended_directive)
+    if oversight_directive == GovernanceDirective.WAIT_HUMAN_REVIEW:
+        return GovernanceDirective.WAIT_HUMAN_REVIEW
+
+    if oversight_directive == GovernanceDirective.REPLAN:
+        return GovernanceDirective.REPLAN
+
+    if oversight_directive == GovernanceDirective.REQUEST_MORE_EVIDENCE:
+        return GovernanceDirective.REQUEST_MORE_EVIDENCE
+
+    return policy_directive
+
+
+# Convert the oversight recommendation into the governance directive enum.
+def _map_oversight_directive(
+    recommended_directive: OversightRecommendedDirective,
+) -> GovernanceDirective:
+    if recommended_directive == OversightRecommendedDirective.WAIT_HUMAN_REVIEW:
+        return GovernanceDirective.WAIT_HUMAN_REVIEW
+    if recommended_directive == OversightRecommendedDirective.REPLAN:
+        return GovernanceDirective.REPLAN
+    if recommended_directive == OversightRecommendedDirective.REQUEST_MORE_EVIDENCE:
+        return GovernanceDirective.REQUEST_MORE_EVIDENCE
+    if recommended_directive == OversightRecommendedDirective.CONTINUE_READ_ONLY:
+        return GovernanceDirective.CONTINUE_READ_ONLY
+    return GovernanceDirective.CONTINUE
+
+
+# Summarize how policy and adaptive oversight produced the final directive.
+def _build_combined_summary(
+    *,
+    policy_summary: str,
+    policy_directive: GovernanceDirective,
+    final_directive: GovernanceDirective,
+    oversight_assessment: OversightAssessment | None,
+) -> str:
+    if oversight_assessment is None:
+        return policy_summary
+
+    if final_directive == policy_directive:
+        return (
+            f"{policy_summary} Adaptive oversight recommended "
+            f"'{oversight_assessment.recommended_directive.value}' and preserved the policy directive "
+            f"'{policy_directive.value}'."
+        )
+
+    return (
+        f"{policy_summary} Adaptive oversight made the decision more conservative: "
+        f"policy directive '{policy_directive.value}' became '{final_directive.value}'. "
+        f"{oversight_assessment.summary}"
     )
 
 
@@ -462,6 +567,7 @@ __all__ = [
     "build_governance_decision",
     "build_opa_input_document",
     "build_policy_evaluation_input",
+    "combine_governance_directives",
     "constrains_capability_use",
     "derive_governance_directive",
 ]

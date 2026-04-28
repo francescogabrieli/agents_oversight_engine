@@ -1,0 +1,1043 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Confidence, Risk &amp; Trajectory - Layer di supervisione adattiva</title>
+  <style>
+    :root {
+      --bg: #eef2f6;
+      --paper: #ffffff;
+      --ink: #172033;
+      --muted: #5f6b7a;
+      --line: #d8e0ea;
+      --blue: #1f5f9f;
+      --blue-soft: #eaf2fb;
+      --green: #2f7d64;
+      --green-soft: #e8f4ef;
+      --amber: #9a6a15;
+      --amber-soft: #fbf2df;
+      --red: #9d3a3a;
+      --red-soft: #f8e8e8;
+      --violet: #674d9a;
+      --violet-soft: #f0ebfa;
+      --shadow: 0 18px 42px rgba(23, 32, 51, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Segoe UI", Arial, sans-serif;
+    }
+
+    .deck-shell {
+      min-height: 100vh;
+      padding: 22px;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      max-width: 1180px;
+      margin: 0 auto 18px;
+      padding: 12px 14px;
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: 0 8px 22px rgba(23, 32, 51, 0.06);
+      backdrop-filter: blur(8px);
+    }
+
+    .topbar strong {
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .topbar nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      justify-content: flex-end;
+    }
+
+    .topbar a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 28px;
+      min-height: 28px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--ink);
+      font-size: 12px;
+      text-decoration: none;
+      background: #fff;
+    }
+
+    .topbar a:hover,
+    .topbar a:focus {
+      border-color: var(--blue);
+      outline: none;
+    }
+
+    .slide {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      width: min(1180px, calc(100vw - 44px));
+      min-height: min(720px, calc(100vh - 120px));
+      margin: 0 auto 22px;
+      padding: 44px 52px 34px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .slide-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 24px;
+      padding-bottom: 22px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .kicker {
+      margin: 0 0 10px;
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      font-family: Cambria, Georgia, "Times New Roman", serif;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      max-width: 900px;
+      font-size: 52px;
+      line-height: 1.06;
+    }
+
+    h2 {
+      max-width: 850px;
+      font-size: 38px;
+      line-height: 1.12;
+    }
+
+    h3 {
+      font-size: 23px;
+      line-height: 1.2;
+    }
+
+    .slide-no {
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .slide-body {
+      align-content: center;
+      padding: 28px 0;
+    }
+
+    p,
+    li {
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.55;
+    }
+
+    .lead {
+      max-width: 900px;
+      color: #3f4a5a;
+      font-size: 24px;
+      line-height: 1.42;
+    }
+
+    .thesis-statement {
+      max-width: 980px;
+      padding: 24px 28px;
+      border-left: 6px solid var(--blue);
+      background: var(--blue-soft);
+      color: var(--ink);
+      font-size: 27px;
+      line-height: 1.38;
+      font-family: Cambria, Georgia, "Times New Roman", serif;
+    }
+
+    .grid {
+      display: grid;
+      gap: 18px;
+    }
+
+    .cols-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .cols-3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .cols-4 {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .card {
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+    }
+
+    .card.blue {
+      background: var(--blue-soft);
+      border-color: #c7dced;
+    }
+
+    .card.green {
+      background: var(--green-soft);
+      border-color: #c8e4d8;
+    }
+
+    .card.amber {
+      background: var(--amber-soft);
+      border-color: #ead7ac;
+    }
+
+    .card.red {
+      background: var(--red-soft);
+      border-color: #edcaca;
+    }
+
+    .card.violet {
+      background: var(--violet-soft);
+      border-color: #d9cfee;
+    }
+
+    .card p {
+      margin: 10px 0 0;
+      font-size: 16px;
+    }
+
+    .tight-list {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .tight-list li {
+      margin: 8px 0;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 27px;
+      padding: 4px 9px;
+      border-radius: 999px;
+      background: var(--blue-soft);
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .diagram {
+      display: grid;
+      gap: 14px;
+      align-items: center;
+    }
+
+    .flow-row {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .flow-box {
+      position: relative;
+      display: flex;
+      min-height: 96px;
+      align-items: center;
+      justify-content: center;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      color: var(--ink);
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .flow-box:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      right: -13px;
+      top: 50%;
+      width: 13px;
+      border-top: 2px solid #a8b5c5;
+    }
+
+    .flow-box.active {
+      border-color: var(--blue);
+      background: var(--blue-soft);
+      box-shadow: inset 0 0 0 2px rgba(31, 95, 159, 0.08);
+    }
+
+    .hierarchy {
+      display: grid;
+      gap: 12px;
+      max-width: 940px;
+      margin: 0 auto;
+    }
+
+    .layer {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr) 190px;
+      gap: 14px;
+      align-items: center;
+      padding: 16px 18px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+    }
+
+    .layer strong {
+      font-size: 17px;
+    }
+
+    .layer span {
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .rule-table {
+      width: 100%;
+      border-collapse: collapse;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      font-size: 15px;
+    }
+
+    .rule-table th,
+    .rule-table td {
+      padding: 12px 13px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .rule-table th {
+      background: #f5f8fb;
+      color: var(--ink);
+      font-size: 13px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .rule-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    code,
+    pre {
+      font-family: Consolas, "Courier New", monospace;
+    }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 5px;
+      background: #f2f5f8;
+      color: #24364c;
+      font-size: 0.9em;
+    }
+
+    pre {
+      margin: 0;
+      padding: 18px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #111827;
+      color: #e5e7eb;
+      font-size: 14px;
+      line-height: 1.46;
+    }
+
+    .formula {
+      padding: 16px 18px;
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--blue);
+      border-radius: 10px;
+      background: #fff;
+    }
+
+    .formula strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 17px;
+    }
+
+    .formula code {
+      display: inline-block;
+      margin-top: 4px;
+      background: #eef3f9;
+    }
+
+    .scorebar {
+      display: grid;
+      grid-template-columns: 190px minmax(0, 1fr) 56px;
+      gap: 12px;
+      align-items: center;
+      margin: 14px 0;
+    }
+
+    .track {
+      height: 13px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #dce3eb;
+    }
+
+    .fill {
+      height: 100%;
+      border-radius: 999px;
+      background: var(--blue);
+    }
+
+    .fill.green {
+      background: var(--green);
+    }
+
+    .fill.amber {
+      background: var(--amber);
+    }
+
+    .fill.red {
+      background: var(--red);
+    }
+
+    .speaker-note {
+      margin-top: 20px;
+      padding: 14px 16px;
+      border: 1px dashed #b8c3d0;
+      border-radius: 10px;
+      background: #fafcff;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.45;
+    }
+
+    .speaker-note strong {
+      color: var(--ink);
+    }
+
+    .mini {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .center {
+      text-align: center;
+    }
+
+    @media (max-width: 900px) {
+      .slide {
+        width: calc(100vw - 24px);
+        min-height: auto;
+        padding: 28px 24px;
+      }
+
+      h1 {
+        font-size: 38px;
+      }
+
+      h2 {
+        font-size: 30px;
+      }
+
+      .lead,
+      .thesis-statement {
+        font-size: 20px;
+      }
+
+      .cols-2,
+      .cols-3,
+      .cols-4,
+      .flow-row {
+        grid-template-columns: 1fr;
+      }
+
+      .flow-box:not(:last-child)::after {
+        display: none;
+      }
+
+      .layer,
+      .scorebar {
+        grid-template-columns: 1fr;
+      }
+
+      .topbar {
+        position: static;
+        align-items: flex-start;
+        flex-direction: column;
+      }
+    }
+
+    @media print {
+      body {
+        background: #fff;
+      }
+
+      .deck-shell {
+        padding: 0;
+      }
+
+      .topbar {
+        display: none;
+      }
+
+      .slide {
+        width: 100%;
+        min-height: 100vh;
+        margin: 0;
+        padding: 34px 42px;
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+        page-break-after: always;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="deck-shell">
+    <header class="topbar" aria-label="Navigazione deck">
+      <strong>Confidence, Risk &amp; Trajectory</strong>
+      <nav>
+        <a href="#s1">1</a>
+        <a href="#s2">2</a>
+        <a href="#s3">3</a>
+        <a href="#s4">4</a>
+        <a href="#s5">5</a>
+        <a href="#s6">6</a>
+        <a href="#s7">7</a>
+        <a href="#s8">8</a>
+        <a href="#s9">9</a>
+        <a href="#s10">10</a>
+        <a href="#s11">11</a>
+        <a href="#s12">12</a>
+      </nav>
+    </header>
+
+    <section class="slide" id="s1">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Deck di tesi</p>
+          <h1>Confidence, Risk &amp; Trajectory come supervisione adattiva deterministica</h1>
+        </div>
+        <div class="slide-no">01 / 12</div>
+      </header>
+      <main class="slide-body">
+        <p class="lead">
+          Un layer deterministico di oversight che valuta se un'azione dell'agente gia'
+          ammissibile secondo policy e' sufficientemente supportata, prudente e coerente
+          con la traiettoria di esecuzione corrente.
+        </p>
+        <div class="thesis-statement">
+          Il contributo della tesi non e' un generico punteggio di confidenza. E' un layer di
+          controllo strutturato che scompone l'incertezza in qualita' delle evidenze,
+          rischio operativo e salute della traiettoria, trasformando questi segnali in
+          direttive runtime auditabili.
+        </div>
+      </main>
+    </section>
+
+    <section class="slide" id="s2">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Problema</p>
+          <h2>Perche' un singolo punteggio di confidenza non basta</h2>
+        </div>
+        <div class="slide-no">02 / 12</div>
+      </header>
+      <main class="slide-body">
+        <div class="grid cols-2">
+          <div class="card red">
+            <h3>Compressione fuorviante</h3>
+            <p>Un solo numero nasconde modalita' di fallimento diverse: evidenze deboli, azioni rischiose e traiettorie degradate possono produrre lo stesso valore aggregato.</p>
+          </div>
+          <div class="card amber">
+            <h3>Semantica di governance debole</h3>
+            <p>La governance ha bisogno di istruzioni operative: continuare, richiedere piu' evidenze, ripianificare, attendere revisione o fermarsi.</p>
+          </div>
+          <div class="card blue">
+            <h3>Auditabilita' insufficiente</h3>
+            <p>Un punteggio aggregato e' difficile da spiegare a un revisore perche' non mostra quale dimensione di controllo ha fallito.</p>
+          </div>
+          <div class="card green">
+            <h3>Percorso di escalation errato</h3>
+            <p>Evidenze deboli dovrebbero richiedere piu' evidenze; una traiettoria degradata dovrebbe attivare replanning; un rischio alto dovrebbe attivare human review.</p>
+          </div>
+        </div>
+        <div class="speaker-note">
+          <strong>Nota per il relatore:</strong> l'obiettivo non e' rendere l'agente meno autonomo. L'obiettivo e' rendere l'autonomia condizionata a una robustezza osservabile.
+        </div>
+      </main>
+    </section>
+
+    <section class="slide" id="s3">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Tre segnali</p>
+          <h2>Separazione tra evidenze, rischio e traiettoria</h2>
+        </div>
+        <div class="slide-no">03 / 12</div>
+      </header>
+      <main class="slide-body">
+        <div class="grid cols-3">
+          <div class="card green">
+            <span class="tag">Evidenze</span>
+            <h3>evidence_quality_score</h3>
+            <p>Misura se il runtime possiede evidenze sufficienti, rilevanti, riuscite e aggiornate per il passo corrente del piano.</p>
+          </div>
+          <div class="card amber">
+            <span class="tag">Operazione</span>
+            <h3>operational_risk_score</h3>
+            <p>Misura il rischio dell'azione proposta considerando modalita' di capacita', metadati dello strumento, impatto esterno e sensibilita' del task.</p>
+          </div>
+          <div class="card violet">
+            <span class="tag">Trajectory</span>
+            <h3>trajectory_health_score</h3>
+            <p>Misura se l'esecuzione sta avanzando in modo coerente nel piano semantico, senza cicli, fallimenti o ripianificazioni eccessive.</p>
+          </div>
+        </div>
+        <div class="speaker-note">
+          <strong>Nota per il relatore:</strong> questi punteggi rispondono a domande diverse: sappiamo abbastanza? La prossima azione e' prudente? L'esecuzione e' ancora su un percorso sano?
+        </div>
+      </main>
+    </section>
+
+    <section class="slide" id="s4">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Collocazione runtime</p>
+          <h2>Dove si colloca il layer nell'architettura corrente</h2>
+        </div>
+        <div class="slide-no">04 / 12</div>
+      </header>
+      <main class="slide-body">
+        <div class="diagram">
+          <div class="flow-row">
+            <div class="flow-box">Layer 1<br />Task Intake</div>
+            <div class="flow-box">Planner<br />piano semantico</div>
+            <div class="flow-box">Actor<br />step corrente</div>
+            <div class="flow-box active">Governance<br />OPA + CRT</div>
+            <div class="flow-box">Tool Gateway<br />MCP / sola lettura</div>
+          </div>
+          <div class="card blue">
+            <h3>Baseline corrente e incremento proposto</h3>
+            <p>
+              Il repository implementa gia' intake tipizzato di Layer 1, orchestrazione LangGraph
+              di Layer 2, output dell'actor, governance basata su OPA, esecuzione tramite Tool Gateway,
+              evidenze osservate, scratchpad audit-safe, validazioni di step e ripianificazione. Il layer
+              <code>confidence_risk_trajectory</code> e' il prossimo passo deterministico di rafforzamento
+              della governance dentro lo stesso percorso runtime.
+            </p>
+          </div>
+        </div>
+      </main>
+    </section>
+
+    <section class="slide" id="s5">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Configurazione deterministica</p>
+          <h2>Configurazione tramite <code>configs/layer2_oversight_policy.json</code></h2>
+        </div>
+        <div class="slide-no">05 / 12</div>
+      </header>
+      <main class="slide-body">
+        <div class="grid cols-2">
+          <div>
+            <p class="lead">
+              Il layer di oversight dovrebbe essere configurato come dato, non nascosto nei prompt.
+              Questo rende soglie e pesi auditabili, testabili e regolabili durante la futura valutazione.
+            </p>
+            <ul class="tight-list">
+              <li>Pesi dei punteggi e soglie sono deterministici.</li>
+              <li>La mappatura del rischio degli strumenti viene letta da metadati controllati.</li>
+              <li>I decision hint sono riproducibili per lo stesso snapshot di stato.</li>
+              <li>Il miglioramento futuro puo' regolare la configurazione senza riscrivere il contratto runtime.</li>
+            </ul>
+          </div>
+          <pre><code>{
+  "version": "layer2_oversight_v1",
+  "thresholds": {
+    "min_evidence_quality": 0.75,
+    "min_trajectory_health": 0.70,
+    "request_more_evidence_below": 0.50,
+    "replan_trajectory_below": 0.45,
+    "human_review_risk_above": 0.75
+  },
+  "risk_weights": {
+    "tool_risk": 0.35,
+    "capability_mode": 0.25,
+    "external_impact": 0.25,
+    "task_sensitivity": 0.15
+  }
+}</code></pre>
+        </div>
+        <div class="speaker-note">
+          <strong>Nota di stato:</strong> questo file e' proposto dal deck. Non e' ancora presente nella baseline corrente del repository.
+        </div>
+      </main>
+    </section>
+
+    <section class="slide" id="s6">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Formule iniziali</p>
+          <h2>Prime definizioni deterministiche dei punteggi</h2>
+        </div>
+        <div class="slide-no">06 / 12</div>
+      </header>
+      <main class="slide-body">
+        <div class="grid">
+          <div class="formula">
+            <strong>Qualita' delle evidenze</strong>
+            <span>Combina successo delle evidenze, rilevanza rispetto allo step corrente, copertura delle fonti e self-validation dell'actor.</span><br />
+            <code>EQ = 0.35*success + 0.30*relevance + 0.20*coverage + 0.15*validation</code>
+          </div>
+          <div class="formula">
+            <strong>Rischio operativo</strong>
+            <span>Combina rischio dello strumento, modalita' di capacita', impatto esterno, sensibilita' del task e reversibilita' quando disponibile.</span><br />
+            <code>OR = 0.35*tool_risk + 0.25*capability + 0.20*external_impact + 0.15*sensitivity + 0.05*irreversibility</code>
+          </div>
+          <div class="formula">
+            <strong>Salute della traiettoria</strong>
+            <span>Combina progresso, pressione sul budget, fallimenti recenti, pressione di replanning e consistenza delle validazioni.</span><br />
+            <code>TH = 0.30*progress + 0.25*budget_health + 0.20*validation_consistency + 0.15*low_error_rate + 0.10*low_replan_pressure</code>
+          </div>
+        </div>
+      </main>
+    </section>
+
+    <section class="slide" id="s7">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Output dell'oversight</p>
+          <h2>Dai punteggi alle direttive runtime</h2>
+        </div>
+        <div class="slide-no">07 / 12</div>
+      </header>
+      <main class="slide-body">
+        <table class="rule-table" aria-label="Regole decisionali di oversight">
+          <thead>
+            <tr>
+              <th>Condizione</th>
+              <th>Indicazione decisionale</th>
+              <th>Significato runtime</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>EQ &gt;= 0.75</code>, <code>OR &lt;= 0.30</code>, <code>TH &gt;= 0.70</code></td>
+              <td><code>continue</code></td>
+              <td>L'azione e' supportata, a basso rischio e allineata alla traiettoria.</td>
+            </tr>
+            <tr>
+              <td><code>EQ &lt; 0.50</code></td>
+              <td><code>request_more_evidence</code></td>
+              <td>L'actor dovrebbe raccogliere o osservare piu' evidenze prima di completare lo step.</td>
+            </tr>
+            <tr>
+              <td><code>TH &lt; 0.45</code></td>
+              <td><code>replan</code></td>
+              <td>Il percorso semantico e' degradato e dovrebbe essere sostituito dallo step corrente in avanti.</td>
+            </tr>
+            <tr>
+              <td><code>OR &gt; 0.75</code></td>
+              <td><code>wait_human_review</code></td>
+              <td>L'azione puo' essere ammissibile, ma l'esecuzione autonoma e' troppo rischiosa.</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="speaker-note">
+          <strong>Nota per il relatore:</strong> il layer non autorizza azioni vietate. Rende soltanto piu' conservative le azioni permesse quando lo stato runtime e' debole.
+        </div>
+      </main>
+    </section>
+
+    <section class="slide" id="s8">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Relazione con OPA</p>
+          <h2>Relazione gerarchica con OPA</h2>
+        </div>
+        <div class="slide-no">08 / 12</div>
+      </header>
+      <main class="slide-body">
+        <div class="hierarchy">
+          <div class="layer">
+            <strong>1. Policy Engine OPA</strong>
+            <span>Applica il deterministic policy envelope: deny, require human review, ask clarification, allow read-only oppure allow.</span>
+            <span class="tag">Confine hard</span>
+          </div>
+          <div class="layer">
+            <strong>2. Confidence / Risk / Trajectory</strong>
+            <span>Valuta la robustezza dentro l'envelope permesso dalla policy e puo' rendere la decisione piu' prudente.</span>
+            <span class="tag">Prudenza adattiva</span>
+          </div>
+          <div class="layer">
+            <strong>3. Judge</strong>
+            <span>Futuro sensore semantico per drift o incoerenze difficili da codificare come logica deterministica di scoring.</span>
+            <span class="tag">Segnale semantico</span>
+          </div>
+          <div class="layer">
+            <strong>4. Decision combiner</strong>
+            <span>Produce una sola direttiva per il grafo: continue, continue_read_only, request_more_evidence, replan, review, clarification oppure stop.</span>
+            <span class="tag">Direttiva unica</span>
+          </div>
+        </div>
+      </main>
+    </section>
+
+    <section class="slide" id="s9">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Contratto di stato</p>
+          <h2>Cosa salvare in <code>TaskState</code></h2>
+        </div>
+        <div class="slide-no">09 / 12</div>
+      </header>
+      <main class="slide-body">
+        <div class="grid cols-2">
+          <div class="card blue">
+            <h3>Campi live compatti</h3>
+            <ul class="tight-list">
+              <li><code>last_oversight_snapshot</code></li>
+              <li><code>oversight_history</code> oppure estensione di <code>governance_history</code></li>
+              <li><code>evidence_quality_score</code>, <code>operational_risk_score</code>, <code>trajectory_health_score</code></li>
+              <li><code>decision_hint</code> e <code>triggered_rules</code></li>
+              <li><code>evidence_ids_used</code></li>
+            </ul>
+          </div>
+          <div class="card green">
+            <h3>Input esistenti gia' disponibili</h3>
+            <ul class="tight-list">
+              <li><code>observed_evidence</code> dai risultati degli strumenti</li>
+              <li><code>last_tool_result</code> e <code>tool_call_count</code></li>
+              <li><code>step_validations</code> con confidence dell'actor e sufficienza delle evidenze</li>
+              <li><code>runtime_flags</code> e sensibilita' del task</li>
+              <li><code>plan_steps</code>, <code>executed_steps</code> e cursore dello step corrente</li>
+            </ul>
+          </div>
+        </div>
+        <pre><code>{
+  "oversight_snapshot": {
+    "version": "layer2_oversight_v1",
+    "scores": {
+      "evidence_quality_score": 0.86,
+      "operational_risk_score": 0.18,
+      "trajectory_health_score": 0.82
+    },
+    "decision_hint": "continue",
+    "reason_codes": ["mcp_read_only_low_risk", "evidence_sufficient"],
+    "evidence_ids_used": ["step_1:tool:1:source:1"]
+  }
+}</code></pre>
+      </main>
+    </section>
+
+    <section class="slide" id="s10">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Esempio applicato</p>
+          <h2>Applicazione a MCP <code>text_stats</code></h2>
+        </div>
+        <div class="slide-no">10 / 12</div>
+      </header>
+      <main class="slide-body">
+        <div class="grid cols-2">
+          <div>
+            <div class="card">
+              <h3>Task</h3>
+              <p>Analizza: <code>agent agent governance MCP evidence evidence evidence</code></p>
+              <p>Obiettivo: identificare le parole piu' frequenti usando strumenti in sola lettura se utili.</p>
+            </div>
+            <div class="card blue" style="margin-top: 14px;">
+              <h3>Fatti runtime</h3>
+              <ul class="tight-list">
+                <li>Strumento: <code>mcp.local_test.text_stats</code></li>
+                <li>Capacita': <code>read</code></li>
+                <li>Rischio nel registry: <code>low</code></li>
+                <li>Impatto esterno: <code>false</code></li>
+                <li>Evidenza osservata: un risultato MCP riuscito</li>
+              </ul>
+            </div>
+          </div>
+          <div>
+            <div class="scorebar">
+              <strong>Qualita' evidenze</strong>
+              <div class="track"><div class="fill green" style="width: 86%;"></div></div>
+              <strong>0.86</strong>
+            </div>
+            <div class="scorebar">
+              <strong>Rischio operativo</strong>
+              <div class="track"><div class="fill green" style="width: 18%;"></div></div>
+              <strong>0.18</strong>
+            </div>
+            <div class="scorebar">
+              <strong>Salute traiettoria</strong>
+              <div class="track"><div class="fill blue" style="width: 82%;"></div></div>
+              <strong>0.82</strong>
+            </div>
+            <div class="card green">
+              <h3>Direttiva di oversight</h3>
+              <p><code>continue_read_only</code> oppure <code>continue</code>, in base all'output del combiner dopo OPA. Non serve human review perche' l'azione e' read-only, a basso rischio e supportata da evidenza diretta del tool.</p>
+            </div>
+          </div>
+        </div>
+      </main>
+    </section>
+
+    <section class="slide" id="s11">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Formulazione di tesi</p>
+          <h2>Formulazione forte per la tesi</h2>
+        </div>
+        <div class="slide-no">11 / 12</div>
+      </header>
+      <main class="slide-body">
+        <div class="thesis-statement">
+          In un'architettura agentica governata, l'oversight non dovrebbe essere ridotto
+          a una stima ex-post di confidence. Dovrebbe essere implementato come un layer
+          deterministico di controllo che mappa in modo continuo evidenze runtime osservabili,
+          rischio operativo e salute della traiettoria in direttive esplicite e revisionabili.
+        </div>
+        <div class="grid cols-3" style="margin-top: 24px;">
+          <div class="card">
+            <h3>Autonomia</h3>
+            <p>L'agente puo' pianificare, agire, usare strumenti, osservare risultati, validare step e ripianificare senza fermarsi a ogni transizione.</p>
+          </div>
+          <div class="card">
+            <h3>Oversight</h3>
+            <p>Il sistema escala selettivamente quando l'esecuzione diventa non supportata, rischiosa o degradata nella traiettoria.</p>
+          </div>
+          <div class="card">
+            <h3>Responsabilita' organizzativa</h3>
+            <p>Ogni decisione di controllo puo' essere spiegata tramite punteggi, soglie, ID delle evidenze e codici di motivazione.</p>
+          </div>
+        </div>
+      </main>
+    </section>
+
+    <section class="slide" id="s12">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Sintesi</p>
+          <h2>Cosa aggiunge questo layer al prototipo</h2>
+        </div>
+        <div class="slide-no">12 / 12</div>
+      </header>
+      <main class="slide-body">
+        <div class="grid cols-2">
+          <div class="card green">
+            <h3>Valore concreto per la tesi</h3>
+            <ul class="tight-list">
+              <li>Separa tre dimensioni di oversight che spesso vengono collassate.</li>
+              <li>Trasforma l'incertezza in controllo runtime deterministico.</li>
+              <li>Preserva la gerarchia di OPA come confine di policy non negoziabile.</li>
+              <li>Alimenta osservabilita', replay, valutazione e miglioramento futuro.</li>
+            </ul>
+          </div>
+          <div class="card blue">
+            <h3>Prossimo incremento implementativo</h3>
+            <ul class="tight-list">
+              <li>Aggiungere <code>configs/layer2_oversight_policy.json</code>.</li>
+              <li>Introdurre modelli tipizzati di ingresso/uscita per l'oversight.</li>
+              <li>Calcolare i punteggi dopo l'output dell'actor e prima dell'instradamento finale di governance.</li>
+              <li>Persistire snapshot in <code>TaskState</code> e nella cronologia di trace.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="speaker-note">
+          <strong>Chiusura:</strong> l'architettura non chiede agli esseri umani di supervisionare ogni azione; fornisce al sistema abbastanza self-monitoring deterministico da sapere quando l'oversight umano diventa necessario.
+        </div>
+      </main>
+    </section>
+  </div>
+
+  <script>
+    const slides = Array.from(document.querySelectorAll(".slide"));
+
+    function activeSlideIndex() {
+      const midpoint = window.scrollY + window.innerHeight / 2;
+      let index = 0;
+      slides.forEach((slide, candidate) => {
+        if (slide.offsetTop <= midpoint) {
+          index = candidate;
+        }
+      });
+      return index;
+    }
+
+    function goToSlide(index) {
+      const bounded = Math.max(0, Math.min(slides.length - 1, index));
+      slides[bounded].scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowRight" || event.key === "PageDown") {
+        event.preventDefault();
+        goToSlide(activeSlideIndex() + 1);
+      }
+
+      if (event.key === "ArrowLeft" || event.key === "PageUp") {
+        event.preventDefault();
+        goToSlide(activeSlideIndex() - 1);
+      }
+
+      if (event.key === "Home") {
+        event.preventDefault();
+        goToSlide(0);
+      }
+
+      if (event.key === "End") {
+        event.preventDefault();
+        goToSlide(slides.length - 1);
+      }
+    });
+  </script>
+</body>
+</html>

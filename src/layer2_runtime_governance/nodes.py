@@ -13,6 +13,7 @@ from .governance import (
     build_governance_decision,
     build_policy_evaluation_input,
 )
+from .oversight import evaluate_confidence_risk_trajectory
 from .planning import PlannerPort
 from .state import (
     ExecutedPlanStep,
@@ -132,11 +133,18 @@ def governance(state: TaskState, *, policy_engine_service: PolicyEnginePort) -> 
 
     policy_input = build_policy_evaluation_input(task_state=state)
     policy_result = policy_engine_service.evaluate(policy_input=policy_input)
+    oversight_assessment = evaluate_confidence_risk_trajectory(
+        task_state=state,
+        policy_input=policy_input,
+    )
     governance_decision = build_governance_decision(
         policy_input=policy_input,
         policy_result=policy_result,
+        oversight_assessment=oversight_assessment,
     )
 
+    state.last_oversight_assessment = oversight_assessment
+    state.oversight_history.append(oversight_assessment)
     state.last_governance_decision = governance_decision
     state.governance_history.append(governance_decision)
     _apply_governance_decision(
@@ -499,6 +507,12 @@ def _apply_governance_decision(
         state.current_tool_request = None
         return
 
+    if governance_decision.directive == GovernanceDirective.REQUEST_MORE_EVIDENCE:
+        _restore_actor_step_for_more_evidence(state)
+        state.current_state = RuntimeState.ACTING
+        state.current_tool_request = None
+        return
+
     if policy_input.actor_result_type == ActorResultType.PROPOSE_ACTION:
         state.current_state = RuntimeState.READY_TOOL_EXECUTION
         return
@@ -524,6 +538,26 @@ def _apply_governance_decision(
         return
 
     state.current_state = RuntimeState.ACTING
+
+
+# Undo a fragile completion attempt so the actor can collect more evidence.
+def _restore_actor_step_for_more_evidence(state: TaskState) -> None:
+    actor_result = state.actor_result
+    if actor_result is None:
+        return
+
+    for index, step in enumerate(state.plan_steps):
+        if step.step_id == actor_result.plan_step_id:
+            step.status = PlanStepStatus.IN_PROGRESS
+            state.current_plan_step_index = index
+        elif step.status == PlanStepStatus.IN_PROGRESS:
+            step.status = PlanStepStatus.PENDING
+
+    state.executed_steps = [
+        step for step in state.executed_steps if step.step_id != actor_result.plan_step_id
+    ]
+    if state.final_output_text == actor_result.output_text:
+        state.final_output_text = None
 
 
 # Convert a tool result into explicit evidence objects that later actor turns can consume.

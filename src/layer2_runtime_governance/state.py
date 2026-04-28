@@ -18,6 +18,7 @@ from .tool_contract import ObservedEvidence, ToolExecutionResult, ToolRequest
 if TYPE_CHECKING:
     from .actor_contract import ActorResult, ActorResultType
     from .governance import GovernanceDecision
+    from .oversight import OversightAssessment
 
 
 # Layer 2 currently covers bootstrap, planning, and the actor/tool observation loop.
@@ -168,6 +169,8 @@ class TaskState:
     # Governance snapshot.
     last_governance_decision: GovernanceDecision | None = None
     governance_history: list[GovernanceDecision] = field(default_factory=list)
+    last_oversight_assessment: OversightAssessment | None = None
+    oversight_history: list[OversightAssessment] = field(default_factory=list)
 
     @property
     def current_plan_step(self) -> PlanStep | None:

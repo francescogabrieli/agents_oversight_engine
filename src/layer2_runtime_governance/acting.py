@@ -298,6 +298,67 @@ def _build_actor_runtime_tools() -> list[dict[str, object]]:
         },
         {
             "type": "function",
+            "name": "request_mcp_echo",
+            "description": "Request the configured read-only MCP echo tool for gateway connectivity checks.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "reason": {"type": "string"},
+                    "text": {"type": "string"},
+                },
+                "required": ["summary", "reason", "text"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "request_mcp_read_fixture",
+            "description": "Request a read-only MCP fixture read from the configured test fixture directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "reason": {"type": "string"},
+                    "path": {"type": "string"},
+                },
+                "required": ["summary", "reason", "path"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "request_mcp_text_stats",
+            "description": "Request read-only text statistics through the configured MCP test server.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "reason": {"type": "string"},
+                    "text": {"type": "string"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+                },
+                "required": ["summary", "reason", "text"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
+            "name": "request_mcp_calculate_expression",
+            "description": "Request safe arithmetic calculation through the configured MCP test server.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "reason": {"type": "string"},
+                    "expression": {"type": "string"},
+                },
+                "required": ["summary", "reason", "expression"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "type": "function",
             "name": "emit_intermediate_output",
             "description": (
                 "Emit a grounded progress note when the current plan step should continue without completing yet."
@@ -491,6 +552,47 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
             ),
         )
 
+    if tool_name == "request_mcp_echo":
+        _require_arguments(arguments, "summary", "reason", "text")
+        return _build_mcp_actor_result(
+            actor_task=actor_task,
+            plan_step_id=plan_step_id,
+            arguments=arguments,
+            tool_name=ToolName.MCP_LOCAL_TEST_ECHO,
+            text=arguments["text"],
+        )
+
+    if tool_name == "request_mcp_read_fixture":
+        _require_arguments(arguments, "summary", "reason", "path")
+        return _build_mcp_actor_result(
+            actor_task=actor_task,
+            plan_step_id=plan_step_id,
+            arguments=arguments,
+            tool_name=ToolName.MCP_LOCAL_TEST_READ_FIXTURE,
+            path=arguments["path"],
+        )
+
+    if tool_name == "request_mcp_text_stats":
+        _require_arguments(arguments, "summary", "reason", "text")
+        return _build_mcp_actor_result(
+            actor_task=actor_task,
+            plan_step_id=plan_step_id,
+            arguments=arguments,
+            tool_name=ToolName.MCP_LOCAL_TEST_TEXT_STATS,
+            text=arguments["text"],
+            limit=int(arguments.get("limit", 5)),
+        )
+
+    if tool_name == "request_mcp_calculate_expression":
+        _require_arguments(arguments, "summary", "reason", "expression")
+        return _build_mcp_actor_result(
+            actor_task=actor_task,
+            plan_step_id=plan_step_id,
+            arguments=arguments,
+            tool_name=ToolName.MCP_LOCAL_TEST_CALCULATE_EXPRESSION,
+            expression=arguments["expression"],
+        )
+
     if tool_name == "emit_intermediate_output":
         _require_arguments(arguments, "summary", "output_text", "progress_note")
         # Intermediate output deliberately keeps the current step active.
@@ -605,6 +707,41 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
         )
 
     raise ActorExecutionError(f"Actor emitted an unknown runtime tool: {tool_name}")
+
+
+# Build one read-only ActorResult for configured MCP tool requests.
+def _build_mcp_actor_result(
+    *,
+    actor_task: ActorTask,
+    plan_step_id: str,
+    arguments: dict[str, object],
+    tool_name: ToolName,
+    text: object | None = None,
+    path: object | None = None,
+    expression: object | None = None,
+    limit: int | None = None,
+) -> ActorResult:
+    return ActorResult(
+        plan_step_id=plan_step_id,
+        result_type=ActorResultType.PROPOSE_ACTION,
+        summary=str(arguments["summary"]),
+        capability_mode=CapabilityAccessMode.READ_ONLY,
+        external_impact=False,
+        tool_request=ToolRequest(
+            plan_step_id=plan_step_id,
+            tool_name=tool_name,
+            reason=str(arguments["reason"]),
+            text=str(text) if text is not None else None,
+            path=str(path) if path is not None else None,
+            expression=str(expression) if expression is not None else None,
+            limit=limit,
+        ),
+        scratchpad_entry=_build_scratchpad_entry(
+            actor_task=actor_task,
+            entry_type=ScratchpadEntryType.TOOL_DECISION,
+            summary=str(arguments["summary"]),
+        ),
+    )
 
 
 # Create one audit-safe scratchpad entry for the current actor turn.

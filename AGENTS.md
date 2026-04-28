@@ -37,6 +37,7 @@ It already includes:
 - audit-safe scratchpad entries
 - typed step self-validations
 - an active `replanner` branch for `NEEDS_REPLAN`
+- deterministic `confidence_risk_trajectory` oversight for evidence quality, operational risk, and trajectory health
 - compact runtime tracing through `src/main_layer2.py`
 
 These are the folders to treat as the active implementation baseline:
@@ -123,7 +124,9 @@ Purpose:
 - observe tool results and feed them back into the actor loop
 - replace the current and pending semantic trajectory through `replanner` when the actor signals `NEEDS_REPLAN`
 - evaluate actor outcomes through a typed governance node backed by an OPA policy engine
+- combine OPA hard policy decisions with deterministic adaptive oversight signals
 - persist governance decisions in `TaskState` with an explicit `ABORTED` stop state for hard denials
+- persist oversight assessments in `TaskState` for audit and thesis traceability
 - maintain an audit-safe scratchpad and typed step self-validations during actor execution
 - stop after the current planner/actor/tool slice reaches a stable stop point in canonical `TaskState`
 
@@ -139,11 +142,12 @@ Main files:
 - `tool_contract.py`
 - `tool_gateway.py`
 - `governance.py`
+- `oversight.py`
 - `runtime_warnings.py`
 
 Current design:
 
-- `state.py` defines the bootstrap state contract, runtime flags, planner snapshot models, actor execution snapshot, tool loop state, observed evidence, audit-safe scratchpad entries, typed step validations, and runtime step outcomes
+- `state.py` defines the bootstrap state contract, runtime flags, planner snapshot models, actor execution snapshot, tool loop state, observed evidence, audit-safe scratchpad entries, typed step validations, oversight history, and runtime step outcomes
 - `nodes.py` contains `bootstrap_from_intake`, `planner`, `actor`, `governance`, `tool_gateway`, `observe_tool_result`, `replanner`, and bootstrap closure helpers
 - `planning.py` defines the planner port, prompt builders, and the default OpenAI-backed planner
 - `acting.py` defines the actor port, prompt builders, and the default OpenAI-backed actor using runtime-bound tools instead of a prompt-only tool inventory
@@ -151,7 +155,11 @@ Current design:
 - `actor_contract.py` defines the typed handoff from planner state into actor-facing execution context for the current plan step, including observed evidence, scratchpad entries, and prior step validations
 - `tool_contract.py` defines typed tool requests, tool results, and observed evidence contracts
 - `tool_gateway.py` contains the read-only operational tool surface currently available to the runtime, currently `web_search` and `fetch_url_text`
+- `configs/layer2_tool_gateway.json` is the active Tool Gateway registry for configured native, HTTP, OpenAI, and MCP-backed tools
+- MCP is usable as a governed backend behind the Tool Gateway; the actor must never call MCP servers directly
 - `governance.py` defines the typed policy input/output contracts, OPA HTTP policy engine, and governance decision mapping used after actor execution
+- `oversight.py` defines deterministic adaptive oversight for `evidence_quality`, `operational_risk`, and `trajectory_health`, plus the combiner recommendation consumed by governance
+- `configs/layer2_oversight_policy.json` defines the explicit weights, thresholds, risk scores, sensitivity multipliers, and trajectory penalties used by the oversight layer
 - `runtime_warnings.py` centralizes warning suppression needed before importing selected LangGraph/LangChain dependencies
 - `graph.py` contains the current LangGraph wiring for the planner/actor/governance/tool/replanner loop:
   `START -> bootstrap_from_intake -> planner -> actor -> governance -> { tool_gateway | replanner | finalize_bootstrap }`
@@ -173,6 +181,8 @@ Contains configuration inputs that influence runtime behavior.
 Current relevant file:
 
 - `configs/layer1_execution_policies.json`
+- `configs/layer2_tool_gateway.json`
+- `configs/layer2_oversight_policy.json`
 
 
 ### `docs`
@@ -200,6 +210,7 @@ Current relevant files:
 - `tests/test_layer1_intake.py`
 - `tests/test_layer2_runtime_governance.py`
 - `tests/test_layer1_layer2_integration.py`
+- `tests/test_layer2_oversight.py`
 
 
 ## Coding Standards
@@ -256,6 +267,7 @@ Current relevant files:
 - the active baseline includes `bootstrap_from_intake -> planner -> actor -> governance -> tool_gateway -> observe_tool_result -> actor`
 - the active baseline also includes the real `replanner` branch triggered by `NEEDS_REPLAN`
 - the active baseline also includes a typed governance branch after `actor` that can continue, replan, escalate, or abort
+- governance now combines OPA hard policy with deterministic `confidence_risk_trajectory` oversight; OPA denials, required review, and clarification decisions remain non-negotiable
 - the planner/executor split should remain aligned with `docs/plan-and-execute.ipynb` unless there is a clear thesis-driven reason to diverge
 - planner output must remain semantic and typed
 - planner output must not contain concrete tool calls, executable payloads, or framework-specific actions
@@ -270,11 +282,17 @@ Current relevant files:
 - prompt text may contain policy, behavioral, and architecture constraints, but should not replace the runtime-level tool contract
 - the current tool surface is read-only and externally conservative
 - read-only capability use is currently explicit and typed through `ToolRequest`, `ToolExecutionResult`, and `ObservedEvidence`
+- the Tool Gateway supports a configured MCP local test server with read-only tools:
+  `mcp.local_test.echo`, `mcp.local_test.read_fixture`, `mcp.local_test.text_stats`, and `mcp.local_test.calculate_expression`
+- MCP tool calls must be server-configured, tool-allowlisted, read-only, and normalized back into `ToolExecutionResult`
+- MCP authentication and per-principal authorization are not implemented yet; credentials and runtime identity must be added above the backend adapter later, not inside actor prompts or `ToolRequest`
 - `replanner` may replace only the current and pending semantic trajectory; completed steps remain immutable history
 - `max_steps` is enforced as a semantic plan-step ceiling in the current runtime
 - `max_tool_calls = null` means the current runtime does not impose a hard tool-call ceiling
 - `WAITING_HUMAN_REVIEW` currently acts as a typed stop/escalation state, not as a full `interrupt / resume` HITL implementation yet
 - governance is active as an explicit runtime node and uses OPA over HTTP as the deterministic policy engine target
+- adaptive oversight may only preserve or make the policy decision more conservative; it must never make an OPA decision more permissive
+- oversight scoring must remain deterministic, explainable, and configured through `configs/layer2_oversight_policy.json`
 - `ABORTED` is the hard-denial runtime state for governance decisions that must not be conflated with review
 - HITL is still not wired as `interrupt / resume`; governance currently stops in typed states and leaves human continuation for later
 
@@ -302,6 +320,7 @@ Useful breakpoint locations:
 - `src/layer2_runtime_governance/acting.py`
 - `src/layer2_runtime_governance/replanning.py`
 - `src/layer2_runtime_governance/tool_gateway.py`
+- `src/layer2_runtime_governance/oversight.py`
 
 In particular:
 

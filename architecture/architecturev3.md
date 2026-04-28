@@ -381,13 +381,18 @@ Ruolo architetturale del contract:
 
 #### Governance Core
 
-Implementazione: **subgraph LangGraph**.
+Implementazione corrente: **nodo LangGraph `governance` con componenti interni tipizzati**.
 
-Componenti principali:
-- `policy_engine_node`
-- `confidence_risk_trajectory_node`
-- `judge_node`
-- `decision_combiner_node`
+Direzione architetturale futura: **subgraph LangGraph esplicito**, quando HITL `interrupt / resume`, judge semantico e osservabilita avanzata richiederanno nodi separati.
+
+Componenti principali nella baseline corrente:
+- `policy_engine`, backed by OPA HTTP
+- `confidence_risk_trajectory`, deterministico e configurato da `configs/layer2_oversight_policy.json`
+- `decision_combiner`, tipizzato in `governance.py`
+
+Componenti futuri:
+- `judge_node`, come sensore semantico separato
+- `hitl_gateway`, come interrupt/resume reale invece di solo stato terminale tipizzato
 
 Ruolo:
 - osservare in continuo lo stream operativo emesso dall'`Agent Core`
@@ -425,7 +430,15 @@ I livelli adattivi successivi non possono mai allargare ciò che il `Policy Engi
 
 #### Confidence, Risk & Trajectory
 
-Implementazione: **nodo del subgraph di governance**.
+Implementazione corrente: **componente deterministico interno al nodo `governance`**.
+
+File principali:
+- `src/layer2_runtime_governance/oversight.py`
+- `configs/layer2_oversight_policy.json`
+
+Persistenza runtime:
+- `TaskState.last_oversight_assessment`
+- `TaskState.oversight_history`
 
 Score distinti:
 - `evidence_quality_score`
@@ -441,9 +454,18 @@ Ruolo:
 
 Questo blocco non stabilisce se un'azione è ammissibile in assoluto; valuta se un'azione già ammissibile è sufficientemente supportata, prudente e robusta da eseguire nel contesto corrente.
 
+La baseline implementata evita intenzionalmente un unico `confidence_score`.
+Le formule sono configurabili e auditabili:
+- `evidence_quality` combina validazione del passo, confidence dell'actor, evidenze osservate, locator di provenienza e successo dell'ultimo tool
+- `operational_risk` combina rischio del tool nel registry, sensibilita del task, impatto esterno, capability write-like e richiesta di human review
+- `trajectory_health` penalizza troppi turni actor, tool falliti, segnali `needs_replan` e incertezza residua con confidence bassa
+
+Il layer produce una raccomandazione, non un permesso assoluto.
+OPA resta il confine hard: l'oversight puo solo confermare o rendere piu prudente la decisione di policy.
+
 #### Judge
 
-Implementazione: **nodo del subgraph di governance**.
+Implementazione futura: **nodo del subgraph di governance**.
 
 Ruolo:
 - operare come sensore semantico live del runtime
@@ -458,17 +480,26 @@ Produce invece una valutazione semantica che può contribuire a `continue`, `rep
 
 #### Decision Combiner
 
-Implementazione: **nodo del subgraph di governance**.
+Implementazione corrente: **funzione tipizzata in `governance.py`**.
 
 Ruolo:
-- ricevere gli esiti di `policy_engine`, `confidence_risk_trajectory` e `judge`
+- ricevere gli esiti di `policy_engine` e `confidence_risk_trajectory`
 - produrre una sola direttiva di controllo per il runtime
 - applicare una gerarchia esplicita di decisione
 
 Gerarchia di combinazione:
 1. il `Policy Engine` ha priorità sui vincoli non negoziabili
 2. il layer `confidence_risk_trajectory` può rendere più prudente la decisione entro i confini ammessi dalla policy
-3. il `judge` contribuisce come segnale semantico ad alta priorità, ma non amplia mai ciò che la policy ha vietato
+3. il `judge` contribuira in futuro come segnale semantico ad alta priorita, ma non potra ampliare cio che la policy ha vietato
+
+Regole correnti:
+- `OPA deny` diventa sempre `stop`
+- `OPA require_human_review` diventa sempre `wait_human_review`
+- `OPA ask_clarification` diventa sempre `ask_user_clarification`
+- `OPA allow` con rischio operativo alto diventa `wait_human_review`
+- `OPA allow` con completion fragile diventa `request_more_evidence`
+- `OPA allow` con traiettoria degradata diventa `replan`
+- `OPA allow` con segnali sani conserva la direttiva policy-derived
 
 Output possibili:
 - `continue`
@@ -553,6 +584,25 @@ Responsabilità principali:
 - supportare `dry_run` o `preview`
 - eseguire il tool oppure produrre una proposta leggibile
 - restituire un risultato strutturato
+
+Nel PoC corrente il `Tool Gateway` usa MCP come backend operativo principale per il paniere locale di test, ma MCP non viene esposto direttamente all'`actor`.
+L'`actor` emette sempre una `ToolRequest` tipizzata; il gateway risolve la richiesta verso un backend configurato, applica allowlist e vincoli read-only, esegue il tool e normalizza l'esito in `ToolExecutionResult`.
+
+Backend supportati nella baseline:
+- `mcp`: server locali configurati esplicitamente, senza discovery libera
+- `openai`: `web_search`
+- `http_fetch`: `fetch_url_text` con protezioni su schema e host
+- `local_runtime`: riservato per tool locali futuri
+
+Il paniere MCP locale attuale include tool read-only per:
+- echo / connectivity check
+- lettura controllata di fixture
+- statistiche testuali
+- calcolo aritmetico sicuro
+
+Autenticazione e autorizzazione per utente, team o organizzazione non sono ancora implementate.
+Il punto di inserimento previsto è sopra il backend MCP, dentro il `Tool Gateway` o in un futuro control layer collegato al gateway.
+Anche prima dell'auth completa, il gateway non opera come client MCP aperto: usa solo server configurati, tool allowlisted e parametri costruiti dal contratto tipizzato del runtime.
 
 Metadati minimi utili:
 - `side_effects`
