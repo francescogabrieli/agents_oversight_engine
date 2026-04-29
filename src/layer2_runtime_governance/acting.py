@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from types import SimpleNamespace
 from pathlib import Path
+from typing import Any
 
 from .actor_contract import (
     ActorPort,
@@ -11,6 +13,11 @@ from .actor_contract import (
     ActorResultType,
     ActorTask,
     CapabilityAccessMode,
+)
+from .openrouter_client import (
+    OpenRouterChatClient,
+    OpenRouterRuntimeError,
+    OpenRouterRuntimeSettings,
 )
 from .state import ScratchpadEntry, ScratchpadEntryType, StepValidation, StepValidationDecision
 from .tool_contract import ToolName, ToolRequest
@@ -44,6 +51,30 @@ class OpenAIActorSettings:
                     env_file_values.get("LAYER2_ACTOR_OPENAI_TIMEOUT_SECONDS", "30"),
                 )
             ),
+        )
+
+
+@dataclass(frozen=True)
+class OpenRouterActorSettings:
+    # OpenRouterActorSettings selects the temporary cloud actor test model.
+    model: str = "openai/gpt-oss-120b:free"
+    api_key: str | None = None
+    base_url: str = "https://openrouter.ai/api/v1"
+    timeout_seconds: float = 120.0
+    temperature: float = 0.0
+
+    @classmethod
+    def from_env(cls) -> "OpenRouterActorSettings":
+        # Reuse the shared OpenRouter settings while allowing actor-specific model override.
+        settings = OpenRouterRuntimeSettings.from_env(
+            model_env_key="LAYER2_ACTOR_OPENROUTER_MODEL"
+        )
+        return cls(
+            model=settings.model,
+            api_key=settings.api_key,
+            base_url=settings.base_url,
+            timeout_seconds=settings.timeout_seconds,
+            temperature=settings.temperature,
         )
 
 
@@ -254,6 +285,39 @@ class OpenAIActor(ActorPort):
             actor_task=actor_task,
             tool_call=tool_call,
         )
+
+
+class OpenRouterActor(ActorPort):
+    # OpenRouterActor runs only the actor role on the temporary cloud test backend.
+    actor_name = "openrouter_gpt_oss_120b_actor"
+    prompt_version = "actor_v4_openrouter_json_runtime_tool_binding"
+
+    def __init__(self, settings: OpenRouterActorSettings | None = None) -> None:
+        # Validate OpenRouter actor settings without affecting planner/replanner providers.
+        self._settings = settings or OpenRouterActorSettings.from_env()
+        self._client = OpenRouterChatClient(
+            OpenRouterRuntimeSettings(
+                model=self._settings.model,
+                api_key=self._settings.api_key,
+                base_url=self._settings.base_url,
+                timeout_seconds=self._settings.timeout_seconds,
+                temperature=self._settings.temperature,
+            )
+        )
+
+    # Ask OpenRouter for one JSON runtime action and convert it into ActorResult.
+    def act(self, *, actor_task: ActorTask) -> ActorResult:
+        try:
+            payload = self._client.complete_json(
+                system_prompt=build_actor_system_prompt(),
+                user_prompt=build_actor_user_prompt(actor_task=actor_task),
+                expected_shape=_build_json_actor_output_shape(),
+            )
+        except OpenRouterRuntimeError as exc:
+            raise ActorExecutionError(f"OpenRouter actor request failed: {exc}") from exc
+
+        tool_call = _convert_json_payload_to_tool_call(payload)
+        return _convert_tool_call_to_actor_result(actor_task=actor_task, tool_call=tool_call)
 
 
 # Build the bound runtime tools exposed to the actor model.
@@ -473,6 +537,41 @@ def _build_actor_runtime_tools() -> list[dict[str, object]]:
             },
         },
     ]
+
+
+# Build the JSON action schema described to non-tool-calling actor models.
+def _build_json_actor_output_shape() -> str:
+    tool_names = [str(tool["name"]) for tool in _build_actor_runtime_tools()]
+    return json.dumps(
+        {
+            "tool_name": "one of the allowed runtime action names",
+            "arguments": {
+                "summary": "short audit-safe summary",
+                "reason": "required for request_* tool actions",
+                "output_text": "required for emit_* output actions",
+                "confidence": "number from 0.0 to 1.0 when validating output",
+            },
+            "allowed_tool_names": tool_names,
+        },
+        indent=2,
+        ensure_ascii=False,
+    )
+
+
+# Convert JSON actor output into the same shape used by OpenAI function tool calls.
+def _convert_json_payload_to_tool_call(payload: dict[str, Any]) -> SimpleNamespace:
+    tool_name = payload.get("tool_name")
+    arguments = payload.get("arguments")
+    if not isinstance(tool_name, str) or not tool_name.strip():
+        raise ActorExecutionError("Actor JSON response must include string 'tool_name'.")
+    if not isinstance(arguments, dict):
+        raise ActorExecutionError("Actor JSON response must include object 'arguments'.")
+
+    allowed_names = {str(tool["name"]) for tool in _build_actor_runtime_tools()}
+    if tool_name not in allowed_names:
+        raise ActorExecutionError(f"Actor emitted an unknown runtime action: {tool_name}")
+
+    return SimpleNamespace(name=tool_name, arguments=json.dumps(arguments, ensure_ascii=False))
 
 
 # Extract exactly one function tool call from the model response.
@@ -815,7 +914,23 @@ def _require_arguments(arguments: dict[str, object], *required_keys: str) -> Non
 
 # Build the production actor used by the live Layer 2 runtime.
 def build_default_actor() -> ActorPort:
-    return OpenAIActor()
+    provider = _resolve_actor_provider()
+    if provider == "openai":
+        return OpenAIActor()
+    if provider == "openrouter":
+        return OpenRouterActor()
+    raise RuntimeError(
+        "Unsupported LAYER2_ACTOR_PROVIDER. Use 'openrouter' for temporary actor tests or 'openai'."
+    )
+
+
+# Resolve only the actor provider so planner and replanner can stay on OpenAI.
+def _resolve_actor_provider() -> str:
+    env_file_values = _load_env_file_values()
+    return os.getenv(
+        "LAYER2_ACTOR_PROVIDER",
+        env_file_values.get("LAYER2_ACTOR_PROVIDER", "openrouter"),
+    ).strip().lower()
 
 
 def _load_env_file_values() -> dict[str, str]:
@@ -857,6 +972,8 @@ __all__ = [
     "ActorExecutionError",
     "OpenAIActor",
     "OpenAIActorSettings",
+    "OpenRouterActor",
+    "OpenRouterActorSettings",
     "build_actor_system_prompt",
     "build_actor_user_prompt",
     "build_default_actor",

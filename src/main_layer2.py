@@ -2,14 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import asdict, is_dataclass
-from datetime import datetime
-from enum import Enum
-from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
-
-from pydantic import BaseModel
 
 from layer1_intake import (
     BudgetConfig,
@@ -29,6 +23,12 @@ from layer2_runtime_governance.actor_contract import ActorPort
 from layer2_runtime_governance.governance import PolicyEnginePort
 from layer2_runtime_governance.planning import PlannerPort
 from layer2_runtime_governance.replanning import ReplannerPort
+from layer2_runtime_governance.trace import (
+    build_compact_trace_from_runtime_trace,
+    build_layer2_runtime_trace,
+    layer2_trace_to_dict,
+    layer2_trace_to_json,
+)
 from layer2_runtime_governance.tool_contract import ToolGatewayPort
 
 
@@ -98,271 +98,25 @@ def run_layer2_flow(
 
 
 def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
-    # Reduce the raw trace to the parts that matter for the current Layer 2 slice.
+    # Preserve the legacy compact trace API while delegating to the typed exporter.
     intake_result = trace["intake_result"]
     final_result = trace["final_result"]
     final_task_state = final_result.get("task_state")
 
-    return {
-        "runtime": {
-            "thread_id": trace["thread_id"],
-            "demo_intake_used": trace["intake_result"].metadata.parser_name == "demo_intake_builder",
-        },
-        "intake_summary": {
-            "goal": intake_result.structured_task.task_spec.goal,
-            "domain_type": intake_result.structured_task.task_spec.domain_type.value,
-            "sensitivity": intake_result.structured_task.task_spec.sensitivity.value,
-            "parse_status": intake_result.metadata.parse_status.value,
-            "read_only_mode": intake_result.structured_task.execution_policy.read_only_mode,
-        },
-        "planning_snapshot": {
-            "plan_step_count": len(final_task_state.plan_steps) if final_task_state else 0,
-            "current_plan_step_index": (
-                final_task_state.current_plan_step_index
-                if final_task_state is not None
-                else None
-            ),
-            "current_plan_step": (
-                final_task_state.current_plan_step.objective
-                if final_task_state is not None and final_task_state.current_plan_step is not None
-                else None
-            ),
-            "planner_name": (
-                final_task_state.planner_name if final_task_state is not None else None
-            ),
-            "planning_source": (
-                _resolve_planning_source(final_task_state.planner_name)
-                if final_task_state is not None
-                else None
-            ),
-            "planner_prompt_version": (
-                final_task_state.planner_prompt_version if final_task_state is not None else None
-            ),
-            "plan_steps": (
-                # Flatten dataclass steps into dictionaries for compact terminal output.
-                [
-                    {
-                        "step_id": step.step_id,
-                        "objective": step.objective,
-                        "rationale": step.rationale,
-                        "expected_outcome": step.expected_outcome,
-                        "status": step.status.value,
-                    }
-                    for step in final_task_state.plan_steps
-                ]
-                if final_task_state is not None
-                else []
-            ),
-        },
-        "actor_snapshot": {
-            "actor_name": (
-                final_task_state.actor_name if final_task_state is not None else None
-            ),
-            "actor_prompt_version": (
-                final_task_state.actor_prompt_version if final_task_state is not None else None
-            ),
-            "result_type": (
-                final_task_state.actor_result.result_type.value
-                if final_task_state is not None and final_task_state.actor_result is not None
-                else None
-            ),
-            "summary": (
-                final_task_state.actor_result.summary
-                if final_task_state is not None and final_task_state.actor_result is not None
-                else None
-            ),
-            "capability_mode": (
-                final_task_state.actor_result.capability_mode.value
-                if final_task_state is not None and final_task_state.actor_result is not None
-                else None
-            ),
-            "external_impact": (
-                final_task_state.actor_result.external_impact
-                if final_task_state is not None and final_task_state.actor_result is not None
-                else None
-            ),
-            "output_text": (
-                final_task_state.actor_result.output_text
-                if final_task_state is not None and final_task_state.actor_result is not None
-                else None
-            ),
-            "blocking_reason": (
-                final_task_state.actor_result.blocking_reason
-                if final_task_state is not None and final_task_state.actor_result is not None
-                else None
-            ),
-        },
-        "execution_snapshot": {
-            "executed_step_count": (
-                len(final_task_state.executed_steps) if final_task_state is not None else 0
-            ),
-            "executed_steps": (
-                [
-                    {
-                        "step_id": step.step_id,
-                        "objective": step.objective,
-                        "result_type": step.result_type.value,
-                        "summary": step.summary,
-                        "output_text": step.output_text,
-                    }
-                    for step in final_task_state.executed_steps
-                ]
-                if final_task_state is not None
-                else []
-            ),
-            "final_output_text": (
-                final_task_state.final_output_text if final_task_state is not None else None
-            ),
-            "scratchpad": (
-                [
-                    {
-                        "turn_index": entry.turn_index,
-                        "plan_step_id": entry.plan_step_id,
-                        "entry_type": entry.entry_type.value,
-                        "summary": entry.summary,
-                        "evidence_refs": entry.evidence_refs,
-                    }
-                    for entry in final_task_state.scratchpad
-                ]
-                if final_task_state is not None
-                else []
-            ),
-            "step_validations": (
-                [
-                    {
-                        "plan_step_id": validation.plan_step_id,
-                        "objective_satisfied": validation.objective_satisfied,
-                        "evidence_sufficient": validation.evidence_sufficient,
-                        "confidence": validation.confidence,
-                        "next_action": validation.next_action.value,
-                        "rationale_summary": validation.rationale_summary,
-                        "residual_uncertainty": validation.residual_uncertainty,
-                    }
-                    for validation in final_task_state.step_validations
-                ]
-                if final_task_state is not None
-                else []
-            ),
-        },
-        "governance_snapshot": {
-            "governance_pass_count": (
-                len(final_task_state.governance_history) if final_task_state is not None else 0
-            ),
-            "last_governance_decision": (
-                {
-                    "directive": final_task_state.last_governance_decision.directive.value,
-                    "policy_decision": final_task_state.last_governance_decision.policy_decision.value,
-                    "reason_codes": [
-                        code.value
-                        for code in final_task_state.last_governance_decision.reason_codes
-                    ],
-                    "summary": final_task_state.last_governance_decision.summary,
-                    "constrains_capability_use": (
-                        final_task_state.last_governance_decision.constrains_capability_use
-                    ),
-                    "evaluated_actor_result_type": (
-                        final_task_state.last_governance_decision.evaluated_actor_result_type.value
-                    ),
-                    "evaluated_tool_name": (
-                        final_task_state.last_governance_decision.evaluated_tool_name.value
-                        if final_task_state.last_governance_decision.evaluated_tool_name is not None
-                        else None
-                    ),
-                    "policy_engine_name": (
-                        final_task_state.last_governance_decision.policy_engine_name
-                    ),
-                    "policy_bundle_version": (
-                        final_task_state.last_governance_decision.policy_bundle_version
-                    ),
-                }
-                if final_task_state is not None and final_task_state.last_governance_decision is not None
-                else None
-            ),
-        },
-        "bootstrap_state": {
-            "current_state": (
-                final_task_state.current_state.value if final_task_state is not None else None
-            ),
-            "step_count": len(final_task_state.step_history) if final_task_state else 0,
-            "bootstrap_completed": (
-                final_task_state.bootstrap_completed if final_task_state is not None else None
-            ),
-            "runtime_flags": (
-                [flag.value for flag in final_task_state.runtime_flags]
-                if final_task_state is not None
-                else []
-            ),
-        },
-        "tool_snapshot": {
-            "actor_turn_count": (
-                final_task_state.actor_turn_count if final_task_state is not None else 0
-            ),
-            "tool_call_count": (
-                final_task_state.tool_call_count if final_task_state is not None else 0
-            ),
-            "current_tool_request": (
-                {
-                    "tool_name": final_task_state.current_tool_request.tool_name.value,
-                    "reason": final_task_state.current_tool_request.reason,
-                    "query": final_task_state.current_tool_request.query,
-                    "url": final_task_state.current_tool_request.url,
-                    "max_results": final_task_state.current_tool_request.max_results,
-                    "extractive_goal": final_task_state.current_tool_request.extractive_goal,
-                }
-                if final_task_state is not None and final_task_state.current_tool_request is not None
-                else None
-            ),
-            "last_tool_result": (
-                {
-                    "tool_name": final_task_state.last_tool_result.request.tool_name.value,
-                    "success": final_task_state.last_tool_result.success,
-                    "summary": final_task_state.last_tool_result.summary,
-                    "error_message": final_task_state.last_tool_result.error_message,
-                    "source_count": len(final_task_state.last_tool_result.sources),
-                }
-                if final_task_state is not None and final_task_state.last_tool_result is not None
-                else None
-            ),
-            "observed_evidence_count": (
-                len(final_task_state.observed_evidence) if final_task_state is not None else 0
-            ),
-        },
-    }
+    if final_task_state is None:
+        raise ValueError("Cannot build Layer 2 trace without final task_state.")
+
+    runtime_trace = build_layer2_runtime_trace(
+        thread_id=trace["thread_id"],
+        intake_result=intake_result,
+        task_state=final_task_state,
+    )
+    return build_compact_trace_from_runtime_trace(runtime_trace)
 
 
 def to_jsonable(value: Any) -> Any:
-    # Convert runtime objects into plain JSON so traces can be printed consistently.
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-
-    if isinstance(value, Enum):
-        return value.value
-
-    if isinstance(value, datetime):
-        return value.isoformat()
-
-    if isinstance(value, Path):
-        return str(value)
-
-    if is_dataclass(value):
-        return to_jsonable(asdict(value))
-
-    if isinstance(value, dict):
-        return {key: to_jsonable(item) for key, item in value.items()}
-
-    if isinstance(value, (list, tuple)):
-        return [to_jsonable(item) for item in value]
-
-    return value
-
-
-def _resolve_planning_source(planner_name: str | None) -> str | None:
-    # Make replanner recovery visible in compact traces without adding another state field.
-    if planner_name is None:
-        return None
-    if "replanner" in planner_name:
-        return "replanner"
-    return "planner"
+    # Keep a small compatibility helper for existing terminal printing code.
+    return layer2_trace_to_dict(value) if hasattr(value, "__dataclass_fields__") else value
 
 
 def _print_section(title: str, payload: Any) -> None:
@@ -385,8 +139,17 @@ def print_layer2_summary(trace: dict[str, Any]) -> None:
 
 
 def print_layer2_trace(trace: dict[str, Any]) -> None:
-    # Print the full raw trace when compact output hides too much detail.
-    print(json.dumps(to_jsonable(trace), indent=2, ensure_ascii=False))
+    # Print the typed full runtime trace when compact output hides too much detail.
+    final_task_state = trace["final_result"].get("task_state")
+    if final_task_state is None:
+        raise ValueError("Cannot print Layer 2 trace without final task_state.")
+
+    runtime_trace = build_layer2_runtime_trace(
+        thread_id=trace["thread_id"],
+        intake_result=trace["intake_result"],
+        task_state=final_task_state,
+    )
+    print(layer2_trace_to_json(runtime_trace))
 
 
 def parse_cli_args() -> argparse.Namespace:

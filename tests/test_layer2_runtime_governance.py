@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +26,7 @@ from layer1_intake import (
     TaskSpec,
 )
 from layer2_runtime_governance import (
+    ActorExecutionError,
     ActorPort,
     ActorResult,
     ActorResultType,
@@ -51,7 +54,10 @@ from layer2_runtime_governance import (
     ToolName,
     ToolRequest,
     ToolSource,
+    OpenRouterActor,
+    OpenRouterActorSettings,
     build_actor_task,
+    build_default_actor,
     build_governance_decision,
     build_policy_evaluation_input,
     build_runtime_graph,
@@ -69,6 +75,7 @@ from layer2_runtime_governance.governance import (
     OPAHttpPolicyEngine,
     OPAHttpPolicyEngineSettings,
 )
+import layer2_runtime_governance.openrouter_client as openrouter_client_module
 
 
 class StubPlanner:
@@ -461,6 +468,22 @@ class FakeReplannerClient:
         self.responses = FakeReplannerResponses(output_parsed)
 
 
+class _FakeOpenRouterClient:
+    # Return one cloud actor JSON action without touching the OpenRouter service.
+    def complete_json(self, **kwargs):
+        return {
+            "tool_name": "emit_final_output",
+            "arguments": {
+                "summary": "OpenRouter actor produced a final answer.",
+                "output_text": "OpenRouter actor completed the step.",
+                "completion_rationale": "The current step objective is satisfied locally.",
+                "objective_satisfied": True,
+                "evidence_sufficient": True,
+                "confidence": 0.82,
+            },
+        }
+
+
 class FakeOPAResponse:
     # Minimal fake HTTP response object matching the urllib context manager shape.
     def __init__(self, body: bytes) -> None:
@@ -834,6 +857,8 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             }
         )
         self.assertEqual(compact_trace["planning_snapshot"]["planning_source"], "replanner")
+        self.assertEqual(compact_trace["governance_snapshot"]["oversight_pass_count"], 2)
+        self.assertIsNotNone(compact_trace["governance_snapshot"]["last_oversight_assessment"])
 
     def test_openai_replanner_converts_structured_payload_without_network(self) -> None:
         from layer2_runtime_governance.replanning import _ReplanningPayload, _ReplanStepPayload
@@ -880,6 +905,52 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertIn("actor_replan_request", user_prompt)
         self.assertIn("The initial step is too broad", user_prompt)
         self.assertIn("current_blocked_step", user_prompt)
+
+    def test_default_actor_can_be_configured_to_openrouter(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"LAYER2_ACTOR_PROVIDER": "openrouter", "OPENROUTER_API_KEY": "test-key"},
+            clear=False,
+        ):
+            actor = build_default_actor()
+
+        self.assertIsInstance(actor, OpenRouterActor)
+
+    def test_openrouter_actor_converts_json_action_to_actor_result_without_network(self) -> None:
+        actor = OpenRouterActor(
+            settings=OpenRouterActorSettings(
+                model="openai/gpt-oss-120b:free",
+                api_key="test-key",
+                base_url="https://openrouter.ai/api/v1",
+                timeout_seconds=1.0,
+            )
+        )
+        actor._client = _FakeOpenRouterClient()  # type: ignore[attr-defined]
+        state = _build_policy_input_task_state()
+        actor_task = build_actor_task(task_state=state)
+
+        result = actor.act(actor_task=actor_task)
+
+        self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
+        self.assertEqual(result.output_text, "OpenRouter actor completed the step.")
+        self.assertIsNotNone(result.step_validation)
+        self.assertEqual(result.step_validation.confidence, 0.82)
+
+    def test_openrouter_actor_timeout_is_normalized(self) -> None:
+        actor = OpenRouterActor(
+            settings=OpenRouterActorSettings(
+                model="openai/gpt-oss-120b:free",
+                api_key="test-key",
+                base_url="https://openrouter.ai/api/v1",
+                timeout_seconds=1.0,
+            )
+        )
+        state = _build_policy_input_task_state()
+        actor_task = build_actor_task(task_state=state)
+
+        with patch.object(openrouter_client_module, "urlopen", side_effect=TimeoutError()):
+            with self.assertRaisesRegex(ActorExecutionError, "timed out"):
+                actor.act(actor_task=actor_task)
 
     def test_planner_trims_semantic_plan_to_max_steps(self) -> None:
         graph = _build_test_graph()

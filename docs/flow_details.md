@@ -742,6 +742,81 @@ Il grafo arriva a `finalize_bootstrap` e termina.
 }
 ```
 
+## Runtime Trace Export
+
+Alla fine della run, `src/layer2_runtime_governance/trace.py` costruisce un artefatto tipizzato a partire da `TaskState`.
+Il trace non Ã¨ un secondo stato runtime: Ã¨ una vista read-only e JSON-safe per debug, tesi, valutazione futura e payload HITL.
+
+Forma semplificata:
+
+```json
+{
+  "runtime": {
+    "thread_id": "layer2-demo",
+    "current_state": "completed",
+    "bootstrap_completed": true,
+    "actor_turn_count": 3,
+    "tool_call_count": 1
+  },
+  "intake": {
+    "goal": "Analizza questo testo...",
+    "domain_type": "analysis",
+    "sensitivity": "low",
+    "policy_profile_name": "default"
+  },
+  "plan_steps": [
+    {
+      "step_id": "step_1",
+      "objective": "Compute word frequency statistics.",
+      "status": "completed"
+    }
+  ],
+  "tool_calls": [
+    {
+      "tool_name": "mcp.local_test.text_stats",
+      "success": true,
+      "summary": "Computed text statistics.",
+      "sources": [
+        {
+          "locator": "mcp://local_test/text_stats"
+        }
+      ]
+    }
+  ],
+  "observed_evidence": [
+    {
+      "evidence_id": "step_1:tool:1:source:1",
+      "locator": "mcp://local_test/text_stats",
+      "source_tool": "mcp.local_test.text_stats"
+    }
+  ],
+  "governance_decisions": [
+    {
+      "policy_decision": "allow_read_only",
+      "policy_directive": "continue_read_only",
+      "oversight_recommended_directive": "continue",
+      "directive": "continue_read_only"
+    }
+  ],
+  "oversight_assessments": [
+    {
+      "evidence_quality": {"score": 0.98, "level": "strong"},
+      "operational_risk": {"score": 0.15, "level": "low"},
+      "trajectory_health": {"score": 1.0, "level": "healthy"},
+      "recommended_directive": "continue"
+    }
+  ],
+  "execution": {
+    "final_output_text": "Nel testo fornito...",
+    "scratchpad": [],
+    "step_validations": []
+  }
+}
+```
+
+`src/main_layer2.py --full-trace` stampa questo trace completo.
+Il compact trace della CLI resta disponibile, ma viene derivato dallo stesso exporter tipizzato.
+
 ## Sintesi Architetturale
 
 Il flusso dimostra la distinzione centrale della tesi:

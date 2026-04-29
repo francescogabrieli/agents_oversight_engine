@@ -38,7 +38,7 @@ It already includes:
 - typed step self-validations
 - an active `replanner` branch for `NEEDS_REPLAN`
 - deterministic `confidence_risk_trajectory` oversight for evidence quality, operational risk, and trajectory health
-- compact runtime tracing through `src/main_layer2.py`
+- typed runtime trace export through `trace.py`, surfaced by `src/main_layer2.py`
 
 These are the folders to treat as the active implementation baseline:
 
@@ -143,6 +143,8 @@ Main files:
 - `tool_gateway.py`
 - `governance.py`
 - `oversight.py`
+- `openrouter_client.py`
+- `trace.py`
 - `runtime_warnings.py`
 
 Current design:
@@ -150,7 +152,7 @@ Current design:
 - `state.py` defines the bootstrap state contract, runtime flags, planner snapshot models, actor execution snapshot, tool loop state, observed evidence, audit-safe scratchpad entries, typed step validations, oversight history, and runtime step outcomes
 - `nodes.py` contains `bootstrap_from_intake`, `planner`, `actor`, `governance`, `tool_gateway`, `observe_tool_result`, `replanner`, and bootstrap closure helpers
 - `planning.py` defines the planner port, prompt builders, and the default OpenAI-backed planner
-- `acting.py` defines the actor port, prompt builders, and the default OpenAI-backed actor using runtime-bound tools instead of a prompt-only tool inventory
+- `acting.py` defines the actor port, prompt builders, the temporary OpenRouter-backed actor, and the optional OpenAI-backed actor using runtime-bound tools instead of a prompt-only tool inventory
 - `replanning.py` defines the replanner port, prompt builders, the default OpenAI-backed replanner, and a local conservative fallback replanner for tests/offline use
 - `actor_contract.py` defines the typed handoff from planner state into actor-facing execution context for the current plan step, including observed evidence, scratchpad entries, and prior step validations
 - `tool_contract.py` defines typed tool requests, tool results, and observed evidence contracts
@@ -159,6 +161,8 @@ Current design:
 - MCP is usable as a governed backend behind the Tool Gateway; the actor must never call MCP servers directly
 - `governance.py` defines the typed policy input/output contracts, OPA HTTP policy engine, and governance decision mapping used after actor execution
 - `oversight.py` defines deterministic adaptive oversight for `evidence_quality`, `operational_risk`, and `trajectory_health`, plus the combiner recommendation consumed by governance
+- `openrouter_client.py` defines the OpenRouter HTTP adapter used by the temporary Layer 2 actor test backend
+- `trace.py` defines the typed, JSON-exportable Layer 2 runtime trace contract used for debugging, thesis evidence, future HITL payloads, and evaluation
 - `configs/layer2_oversight_policy.json` defines the explicit weights, thresholds, risk scores, sensitivity multipliers, and trajectory penalties used by the oversight layer
 - `runtime_warnings.py` centralizes warning suppression needed before importing selected LangGraph/LangChain dependencies
 - `graph.py` contains the current LangGraph wiring for the planner/actor/governance/tool/replanner loop:
@@ -211,6 +215,7 @@ Current relevant files:
 - `tests/test_layer2_runtime_governance.py`
 - `tests/test_layer1_layer2_integration.py`
 - `tests/test_layer2_oversight.py`
+- `tests/test_layer2_trace.py`
 
 
 ## Coding Standards
@@ -273,6 +278,9 @@ Current relevant files:
 - planner output must not contain concrete tool calls, executable payloads, or framework-specific actions
 - actor execution must operate on the current plan step, not on the full task as a second planner
 - actor output must remain typed and compact even when backed by an LLM
+- the current Layer 2 actor backend is OpenRouter with `openai/gpt-oss-120b:free` for first cloud-based tests; this remains a temporary test choice before moving to a stable large cloud model
+- planner and replanner remain OpenAI-backed for now
+- actor provider selection is controlled by `LAYER2_ACTOR_PROVIDER`, with supported values `openrouter` and `openai`
 - actor execution may produce local outputs, request later capability use, ask clarification, or signal replan
 - actor execution should record audit-safe scratchpad entries rather than hidden chain-of-thought
 - plan steps should be completed only after a typed `StepValidation` indicates that the objective is satisfied and evidence is sufficient
@@ -293,6 +301,8 @@ Current relevant files:
 - governance is active as an explicit runtime node and uses OPA over HTTP as the deterministic policy engine target
 - adaptive oversight may only preserve or make the policy decision more conservative; it must never make an OPA decision more permissive
 - oversight scoring must remain deterministic, explainable, and configured through `configs/layer2_oversight_policy.json`
+- runtime trace export must be read-only over `TaskState`; it must not mutate runtime state or become a parallel source of truth
+- `main_layer2.py` may print trace views, but reusable trace construction belongs in `trace.py`
 - `ABORTED` is the hard-denial runtime state for governance decisions that must not be conflated with review
 - HITL is still not wired as `interrupt / resume`; governance currently stops in typed states and leaves human continuation for later
 
@@ -321,6 +331,7 @@ Useful breakpoint locations:
 - `src/layer2_runtime_governance/replanning.py`
 - `src/layer2_runtime_governance/tool_gateway.py`
 - `src/layer2_runtime_governance/oversight.py`
+- `src/layer2_runtime_governance/trace.py`
 
 In particular:
 
@@ -397,7 +408,7 @@ The project currently uses:
 - Python in local virtual environment `.venv`
 - OpenAI API for the real Layer 1 parser
 - OpenAI API for the default Layer 2 planner
-- OpenAI API for the default Layer 2 actor
+- OpenRouter API for the current Layer 2 actor test backend, currently `openai/gpt-oss-120b:free`
 - OpenAI API for the default Layer 2 replanner
 - OpenAI API for the `web_search` path in the default Layer 2 tool gateway
 - Python standard library HTTP/HTML extraction for the `fetch_url_text` path in the default Layer 2 tool gateway
@@ -412,6 +423,19 @@ Environment variables may be loaded from:
 Expected secret:
 
 - `OPENAI_API_KEY`
+- `OPENROUTER_API_KEY`
+
+Expected temporary actor runtime for first tests:
+
+- optional overrides:
+  - `LAYER2_ACTOR_PROVIDER=openrouter`
+  - `LAYER2_ACTOR_OPENROUTER_MODEL=openai/gpt-oss-120b:free`
+  - `LAYER2_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1`
+  - `LAYER2_OPENROUTER_TIMEOUT_SECONDS=120`
+
+Future actor runtime target:
+
+- replace the temporary OpenRouter free actor backend with a stable large cloud model once the runtime contracts, governance, tool gateway, oversight, and trace surfaces are stable
 
 
 ## Change Policy

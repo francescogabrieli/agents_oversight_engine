@@ -470,20 +470,29 @@ Deve soltanto orchestrare e instradare.
 
 ---
 
-## 13. `main_layer2.py`: entrypoint e trace
+## 13. `trace.py` e `main_layer2.py`: export osservabile
 
 `src/main_layer2.py` è il punto migliore da cui debuggare l'intero sistema.
+
+`src/layer2_runtime_governance/trace.py` ora contiene il contratto di trace riusabile.
+Il modulo legge `TaskState` in modo read-only e produce un artefatto tipizzato, JSON-safe e auditabile.
+`src/main_layer2.py` resta l'entrypoint operativo e stampa viste compatte o complete derivate dallo stesso exporter.
 
 ### Cosa mostra
 
 - output di Layer 1
 - stato iniziale del runtime
-- compact trace finale
+- trace completo Layer 2
+- compact trace derivato dal trace tipizzato
 - summary delle decisioni prese
+- governance history
+- oversight history
+- tool calls ed evidenze osservate
 
 ### Perché è utile
 
 Permette di vedere la pipeline completa senza dover aprire subito ogni singolo modulo.
+Lo stesso contratto puo diventare base per payload HITL, evaluation harness e judge semantico.
 
 ### Cosa controllare quando si debuga
 
@@ -505,10 +514,13 @@ Ad oggi il progetto copre già in modo consistente:
 - Runtime Layer 2
 - Planner semantico
 - Actor sul passo corrente
+- Backend OpenRouter `openai/gpt-oss-120b:free` per i primi test cloud dell'actor
 - Tool loop read-only
 - Observability
 - Replanning
 - Governance tipizzata
+- Oversight deterministico `confidence_risk_trajectory`
+- Runtime trace exporter tipizzato
 - Test deterministici
 
 ### Cosa è stabile
@@ -518,16 +530,22 @@ Ad oggi il progetto copre già in modo consistente:
 - l'actor è separato dal planner
 - il tool usage è tipizzato
 - la governance è reale e tracciata
+- OPA e oversight vengono combinati senza rendere la policy piÃ¹ permissiva
+- il trace Layer 2 Ã¨ esportabile come JSON stabile
 - i test sono verdi
 
 ### Cosa non è ancora attivo
 
+Nota sui modelli: nei primi test cloud l'actor usa `openai/gpt-oss-120b:free` via OpenRouter.
+Questa resta una scelta temporanea per test gratuiti/intermedi.
+Quando il runtime sara stabile, l'actor verra migrato verso un grande modello cloud stabile.
+Planner e replanner restano separati dall'actor e possono mantenere backend diversi.
+
 Non sono ancora parte del runtime attivo:
 
-- confidence engine
-- risk engine
 - LLM-as-a-judge
 - HITL completo con `interrupt / resume`
+- persistenza automatica dei trace su file o backend osservabilitÃ 
 
 ### Significato architetturale
 
@@ -597,4 +615,3 @@ Il passo successivo non è “aggiungere altro caos”, ma innestare in modo ord
 - HITL con `interrupt / resume`
 
 L'architettura attuale è il livello di base su cui questi strati potranno essere aggiunti senza perdere chiarezza.
-
