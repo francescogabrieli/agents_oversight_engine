@@ -262,6 +262,7 @@ class OpenAIActor(ActorPort):
 
     # Ask OpenAI for one tool-bound actor turn and convert it into the domain result.
     def act(self, *, actor_task: ActorTask) -> ActorResult:
+        # Keep the actor to one tool call so the runtime can validate a single typed outcome per turn.
         try:
             response = self._client.responses.create(
                 model=self._settings.model,
@@ -276,6 +277,9 @@ class OpenAIActor(ActorPort):
                     },
                 ],
                 tools=_build_actor_runtime_tools(),
+                tool_choice="required",
+                parallel_tool_calls=False,
+                max_tool_calls=1,
             )
         except Exception as exc:  # pragma: no cover - network/client errors
             raise ActorExecutionError(f"Actor request failed: {exc}") from exc
@@ -606,7 +610,8 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
     plan_step_id = actor_task.current_plan_step.step_id
 
     if tool_name == "request_web_search":
-        _require_arguments(arguments, "summary", "reason", "query")
+        _require_arguments(arguments, "summary", "reason")
+        query = _resolve_search_query(actor_task=actor_task, arguments=arguments)
         # Tool-selection outcomes are converted into ToolRequest for the gateway node.
         return ActorResult(
             plan_step_id=plan_step_id,
@@ -618,7 +623,7 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
                 plan_step_id=plan_step_id,
                 tool_name=ToolName.WEB_SEARCH,
                 reason=arguments["reason"],
-                query=arguments["query"],
+                query=query,
                 max_results=int(arguments.get("max_results", 5)),
                 extractive_goal=arguments.get("extractive_goal"),
             ),
@@ -910,6 +915,21 @@ def _require_arguments(arguments: dict[str, object], *required_keys: str) -> Non
         value = arguments.get(key)
         if not isinstance(value, str) or not value.strip():
             raise ActorExecutionError(f"Actor tool call is missing required string argument '{key}'.")
+
+
+# Build a conservative search query if a JSON actor omits the explicit query field.
+def _resolve_search_query(*, actor_task: ActorTask, arguments: dict[str, object]) -> str:
+    query = arguments.get("query")
+    if isinstance(query, str) and query.strip():
+        return query
+
+    # Prefer the current step objective because the actor is scoped to that semantic step.
+    fallback_parts = [
+        actor_task.current_plan_step.objective,
+        actor_task.task_spec.context,
+        "official sources",
+    ]
+    return " ".join(part.strip() for part in fallback_parts if part and part.strip())
 
 
 # Build the production actor used by the live Layer 2 runtime.

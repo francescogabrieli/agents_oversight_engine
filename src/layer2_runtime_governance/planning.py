@@ -30,7 +30,7 @@ class OpenAIPlannerSettings:
         return cls(
             model=os.getenv(
                 "LAYER2_PLANNER_OPENAI_MODEL",
-                env_file_values.get("LAYER2_PLANNER_OPENAI_MODEL"),
+                env_file_values.get("LAYER2_PLANNER_OPENAI_MODEL", "gpt-5.4-nano"),
             ),
             api_key=os.getenv("OPENAI_API_KEY", env_file_values.get("OPENAI_API_KEY")),
             timeout_seconds=float(

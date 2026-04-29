@@ -3,34 +3,34 @@ package layer2.governance
 # Layer 2 governance policy bundle.
 # The Python adapter posts a typed input document to this package and reads back `decision`.
 
-default decision = {
+default decision := {
   "policy_decision": "allow",
   "reason_codes": ["allowed_by_policy"],
   "summary": "Allowed by default."
 }
 
-decision = {
+decision := {
   "policy_decision": "deny",
   "reason_codes": ["write_capability_blocked"],
   "summary": "Write-like capability is blocked by policy."
-} {
+} if {
   write_capability_blocked
 }
 
-decision = {
+decision := {
   "policy_decision": "deny",
   "reason_codes": ["tool_disallowed"],
   "summary": "Requested tool is explicitly disallowed."
-} {
+} if {
   not write_capability_blocked
   tool_is_disallowed
 }
 
-decision = {
+decision := {
   "policy_decision": "require_human_review",
   "reason_codes": ["tool_not_allowed"],
   "summary": "Requested tool is outside the allowed tool list."
-} {
+} if {
   not write_capability_blocked
   not tool_is_disallowed
   allowed_tool_list_present
@@ -38,11 +38,11 @@ decision = {
   not tool_is_allowed
 }
 
-decision = {
+decision := {
   "policy_decision": "allow_read_only",
   "reason_codes": ["read_only_allowed"],
   "summary": "Read-only capability use is allowed by the active policy."
-} {
+} if {
   not write_capability_blocked
   not tool_is_disallowed
   input.tool.name != null
@@ -50,11 +50,11 @@ decision = {
   not allowed_tool_list_present
 }
 
-decision = {
+decision := {
   "policy_decision": "allow_read_only",
   "reason_codes": ["read_only_allowed"],
   "summary": "Read-only capability use is allowed by the active policy."
-} {
+} if {
   not write_capability_blocked
   not tool_is_disallowed
   input.tool.name != null
@@ -63,22 +63,22 @@ decision = {
   tool_is_allowed
 }
 
-decision = {
+decision := {
   "policy_decision": "ask_clarification",
   "reason_codes": ["ask_clarification_required"],
   "summary": "The actor requested clarification."
-} {
+} if {
   not write_capability_blocked
   not tool_is_disallowed
   not read_only_tool_request
   clarification_requested
 }
 
-decision = {
+decision := {
   "policy_decision": "allow",
   "reason_codes": ["local_output_allowed"],
   "summary": "Local output and replanning remain within policy."
-} {
+} if {
   not write_capability_blocked
   not tool_is_disallowed
   input.tool.name == null
@@ -86,28 +86,28 @@ decision = {
   not clarification_requested
 }
 
-write_capability_blocked {
+write_capability_blocked if {
   input.actor.external_impact == true
 }
 
-tool_is_disallowed {
+tool_is_disallowed if {
   input.tool.name != null
   input.tool.name == input.policy.disallowed_tools[_]
 }
 
-allowed_tool_list_present {
+allowed_tool_list_present if {
   count(input.policy.allowed_tools) > 0
 }
 
-tool_is_allowed {
+tool_is_allowed if {
   input.tool.name != null
   input.tool.name == input.policy.allowed_tools[_]
 }
 
-read_only_tool_request {
+read_only_tool_request if {
   input.actor.capability_mode == "read_only"
 }
 
-clarification_requested {
+clarification_requested if {
   input.actor.result_type == "ask_clarification"
 }

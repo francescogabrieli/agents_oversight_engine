@@ -484,6 +484,18 @@ class _FakeOpenRouterClient:
         }
 
 
+class _FakeOpenRouterSearchWithoutQueryClient:
+    # Return a web-search action missing query to verify runtime fallback behavior.
+    def complete_json(self, **kwargs):
+        return {
+            "tool_name": "request_web_search",
+            "arguments": {
+                "summary": "Need official evidence.",
+                "reason": "The current research step requires authoritative sources.",
+            },
+        }
+
+
 class FakeOPAResponse:
     # Minimal fake HTTP response object matching the urllib context manager shape.
     def __init__(self, body: bytes) -> None:
@@ -935,6 +947,26 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertEqual(result.output_text, "OpenRouter actor completed the step.")
         self.assertIsNotNone(result.step_validation)
         self.assertEqual(result.step_validation.confidence, 0.82)
+
+    def test_openrouter_actor_web_search_without_query_uses_step_fallback(self) -> None:
+        actor = OpenRouterActor(
+            settings=OpenRouterActorSettings(
+                model="openai/gpt-oss-120b:free",
+                api_key="test-key",
+                base_url="https://openrouter.ai/api/v1",
+                timeout_seconds=1.0,
+            )
+        )
+        actor._client = _FakeOpenRouterSearchWithoutQueryClient()  # type: ignore[attr-defined]
+        state = _build_policy_input_task_state()
+        actor_task = build_actor_task(task_state=state)
+
+        result = actor.act(actor_task=actor_task)
+
+        self.assertEqual(result.result_type, ActorResultType.PROPOSE_ACTION)
+        self.assertIsNotNone(result.tool_request)
+        self.assertEqual(result.tool_request.tool_name, ToolName.WEB_SEARCH)
+        self.assertIn("Collect the minimum official evidence", result.tool_request.query)
 
     def test_openrouter_actor_timeout_is_normalized(self) -> None:
         actor = OpenRouterActor(
