@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from types import SimpleNamespace
 from pathlib import Path
@@ -20,7 +21,7 @@ from .openrouter_client import (
     OpenRouterRuntimeSettings,
 )
 from .state import ScratchpadEntry, ScratchpadEntryType, StepValidation, StepValidationDecision
-from .tool_contract import ToolName, ToolRequest
+from .tool_contract import EvidenceSupportLevel, ObservedEvidence, ToolName, ToolRequest
 
 try:
     from openai import OpenAI
@@ -98,6 +99,13 @@ Rules:
 - If you do not need an external tool, finish the turn by emitting exactly one structured outcome tool.
 - Use emit_intermediate_output only for progress that should continue the current step.
 - Use emit_step_completed or emit_final_output only after validating that the current step objective is satisfied.
+- Treat the current plan step as the only active objective. Do not gather evidence for future steps.
+- If the current step can be completed from existing evidence, complete it even if later steps may still have open evidence gaps.
+- After a replan, the replacement step objective overrides the older blocked path; do not keep pursuing the pre-replan objective unless the new step explicitly says to do so.
+- If one official source already supports the current step and another source fetch fails, prefer completing the current step with residual uncertainty instead of retrying many near-equivalent retrieval attempts.
+- A residual uncertainty about missing precision is not, by itself, a reason to keep the current step open when the step only asks for high-level supported themes.
+- A discovered source URL is not factual support by itself. Treat only observed excerpts and successful fetched content as direct support for factual claims.
+- Do not introduce exact dates, years, thresholds, deadlines, or other precise numeric/legal claims unless those details are directly present in the observed evidence or fetched content.
 - Keep the turn compact, explicit, and directly actionable by the runtime.
 - Respect read_only_mode when it is true.
 - Do not emit chain-of-thought.
@@ -230,12 +238,385 @@ def build_actor_user_prompt(*, actor_task: ActorTask) -> str:
             if actor_task.last_tool_result is not None
             else None
         ),
+        "execution_hints": _build_actor_execution_hints(actor_task=actor_task),
     }
 
     return (
         "Execute the current plan step in the governed plan-and-execute runtime.\n\n"
         f"{json.dumps(payload, indent=2, ensure_ascii=False)}"
     )
+
+
+# Add deterministic runtime hints so the actor stays inside the semantic boundary of the current step.
+def _build_actor_execution_hints(*, actor_task: ActorTask) -> dict[str, object]:
+    current_step_id = actor_task.current_plan_step.step_id
+    current_step_evidence = [
+        evidence for evidence in actor_task.observed_evidence if evidence.plan_step_id == current_step_id
+    ]
+    direct_support_evidence = [
+        evidence for evidence in actor_task.observed_evidence if _is_direct_fact_support_evidence(evidence)
+    ]
+    available_support_level = _max_available_evidence_support_level(actor_task=actor_task)
+    required_support_level = _required_evidence_support_level(
+        actor_task=actor_task,
+        output_text=None,
+    )
+    successful_current_step_tools = [
+        entry
+        for entry in actor_task.scratchpad
+        if entry.plan_step_id == current_step_id
+        and entry.entry_type == ScratchpadEntryType.OBSERVATION
+        and "successfully" in entry.summary.lower()
+    ]
+    prior_failed_same_step_tools = [
+        entry.summary
+        for entry in actor_task.scratchpad
+        if entry.plan_step_id == current_step_id
+        and entry.entry_type == ScratchpadEntryType.OBSERVATION
+        and (
+            "empty" in entry.summary.lower()
+            or "failed" in entry.summary.lower()
+            or "exceeded the configured byte limit" in entry.summary.lower()
+            or "duplicate tool request blocked" in entry.summary.lower()
+        )
+    ]
+    has_primary_legal_text_excerpt = any(
+        _looks_like_primary_legal_text_source(title=evidence.title, locator=evidence.locator)
+        for evidence in direct_support_evidence
+    )
+
+    return {
+        "current_step_only": True,
+        "current_step_evidence_count": len(current_step_evidence),
+        "direct_fact_support_evidence_count": len(direct_support_evidence),
+        "current_step_successful_observation_count": len(successful_current_step_tools),
+        "current_step_failed_observation_summaries": prior_failed_same_step_tools[-3:],
+        "prefer_completion_with_existing_evidence": bool(current_step_evidence),
+        "replan_replacement_step_active": current_step_id.startswith("replan_"),
+        "do_not_collect_future_step_evidence": True,
+        "source_discovery_is_not_direct_fact_support": True,
+        "available_evidence_support_level": available_support_level.value,
+        "required_evidence_support_level": required_support_level.value,
+        "current_or_prior_steps_have_primary_legal_text_excerpt": has_primary_legal_text_excerpt,
+        "avoid_exact_dates_numbers_without_primary_excerpt": (
+            required_support_level == EvidenceSupportLevel.PRIMARY_LEGAL
+            and not has_primary_legal_text_excerpt
+        ),
+    }
+
+
+# Treat fetched excerpts as direct factual support; source-discovery results stay weaker evidence.
+def _is_direct_fact_support_evidence(evidence: ObservedEvidence) -> bool:
+    return (
+        evidence.source_tool == ToolName.FETCH_URL_TEXT
+        and evidence.support_level != EvidenceSupportLevel.SOURCE_DISCOVERY
+        and bool(evidence.excerpt.strip())
+    )
+
+
+# Order evidence levels from weakest to strongest for deterministic comparisons.
+def _evidence_support_level_rank(level: EvidenceSupportLevel) -> int:
+    ordering = {
+        EvidenceSupportLevel.LOCAL_ONLY: 0,
+        EvidenceSupportLevel.SOURCE_DISCOVERY: 1,
+        EvidenceSupportLevel.HIGH_LEVEL_SUMMARY: 2,
+        EvidenceSupportLevel.DETAILED_EXTRACTED: 3,
+        EvidenceSupportLevel.PRIMARY_LEGAL: 4,
+    }
+    return ordering[level]
+
+
+# Return the strongest evidence support level available to the actor.
+def _max_available_evidence_support_level(*, actor_task: ActorTask) -> EvidenceSupportLevel:
+    available_levels = [item.support_level for item in actor_task.observed_evidence]
+    if not available_levels:
+        return EvidenceSupportLevel.LOCAL_ONLY
+    return max(available_levels, key=_evidence_support_level_rank)
+
+
+# Compute the minimum evidence level needed by the current step and optional output draft.
+def _required_evidence_support_level(
+    *,
+    actor_task: ActorTask,
+    output_text: str | None,
+) -> EvidenceSupportLevel:
+    required_level = _required_evidence_support_level_from_step(actor_task=actor_task)
+    if output_text and output_text.strip():
+        output_level = _required_evidence_support_level_from_output_text(text=output_text)
+        if _evidence_support_level_rank(output_level) > _evidence_support_level_rank(required_level):
+            return output_level
+    return required_level
+
+
+# Infer the minimum support level from the semantic scope of the current step.
+def _required_evidence_support_level_from_step(*, actor_task: ActorTask) -> EvidenceSupportLevel:
+    scope_text = " ".join(
+        part.strip()
+        for part in (
+            actor_task.current_plan_step.objective,
+            actor_task.current_plan_step.expected_outcome,
+            actor_task.current_plan_step.rationale,
+        )
+        if part and part.strip()
+    ).lower()
+
+    if _step_is_source_discovery_only(scope_text):
+        return EvidenceSupportLevel.SOURCE_DISCOVERY
+
+    if any(
+        marker in scope_text
+        for marker in (
+            "deadline",
+            "deadlines",
+            "threshold",
+            "thresholds",
+            "turnover",
+            "number of users",
+            "article ",
+            "full legal text",
+            "entry into force",
+            "applicability details",
+            "timeline",
+        )
+    ):
+        return EvidenceSupportLevel.PRIMARY_LEGAL
+
+    if any(
+        marker in scope_text
+        for marker in (
+            "obligation",
+            "obligations",
+            "prohibition",
+            "prohibitions",
+            "requirements",
+            "criteria",
+            "enforcement mechanism",
+            "what it requires",
+            "who it applies to",
+            "regulatory mechanisms",
+            "main obligations",
+        )
+    ):
+        return EvidenceSupportLevel.DETAILED_EXTRACTED
+
+    if any(
+        marker in scope_text
+        for marker in ("purpose", "scope", "overview", "brief summary", "high-level", "concise")
+    ):
+        return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
+
+    return EvidenceSupportLevel.LOCAL_ONLY
+
+
+# Infer the minimum support level from the draft output itself.
+def _required_evidence_support_level_from_output_text(*, text: str) -> EvidenceSupportLevel:
+    lowered_text = _normalize_output_text_for_precision_checks(text).lower()
+
+    if _output_text_is_source_shortlist_only(text.lower()):
+        return EvidenceSupportLevel.SOURCE_DISCOVERY
+
+    if _extract_precision_claim_markers(text=text):
+        return EvidenceSupportLevel.PRIMARY_LEGAL
+
+    if any(
+        marker in lowered_text
+        for marker in (
+            "threshold",
+            "thresholds",
+            "turnover",
+            "number of users",
+            "specific size",
+            "article ",
+        )
+    ):
+        return EvidenceSupportLevel.PRIMARY_LEGAL
+
+    if any(
+        marker in lowered_text
+        for marker in (
+            "obligation",
+            "obligations",
+            "prohibit",
+            "prohibiting",
+            "requires",
+            "requiring",
+            "must",
+            "criteria",
+            "interoperability",
+            "data portability",
+            "ranking",
+            "self-preferencing",
+            "non-discriminatory access",
+        )
+    ):
+        return EvidenceSupportLevel.DETAILED_EXTRACTED
+
+    if any(
+        marker in lowered_text
+        for marker in (
+            "summary",
+            "overview",
+            "aims to",
+            "applies to",
+            "official sources",
+        )
+    ):
+        return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
+
+    return EvidenceSupportLevel.LOCAL_ONLY
+
+
+# Detect drafts that only lock in source identities/URLs without adding substantive claims.
+def _output_text_is_source_shortlist_only(text: str) -> bool:
+    lines = [line.strip().lower() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return False
+
+    if any(
+        marker in text
+        for marker in (
+            "aims to",
+            "applies to",
+            "purpose",
+            "scope",
+            "obligation",
+            "obligations",
+            "requires",
+            "requirement",
+            "criteria",
+            "timeline",
+            "entry into force",
+        )
+    ):
+        return False
+
+    source_identity_markers = (
+        "official sources",
+        "official eu sources",
+        "shortlist of official",
+        "source shortlist",
+        "dma portal",
+        "summary page",
+        "legislation page",
+        "eur-lex",
+        "european commission",
+    )
+    if not any(marker in text for marker in source_identity_markers):
+        return False
+
+    return any("http://" in line or "https://" in line for line in lines)
+
+
+# Distinguish pure source-list tasks from factual summarization tasks.
+def _step_is_source_discovery_only(scope_text: str) -> bool:
+    discovery_markers = ("identify", "find", "source", "sources", "links", "references", "citations")
+    summary_markers = (
+        "summary",
+        "summar",
+        "purpose",
+        "scope",
+        "obligation",
+        "requirement",
+        "criteria",
+        "timeline",
+        "what it requires",
+    )
+    return any(marker in scope_text for marker in discovery_markers) and not any(
+        marker in scope_text for marker in summary_markers
+    )
+
+
+# Identify evidence that looks like a primary legal text rather than a secondary overview page.
+def _looks_like_primary_legal_text_source(*, title: str, locator: str) -> bool:
+    lowered_title = title.lower()
+    lowered_locator = locator.lower()
+    return "eur-lex.europa.eu" in lowered_locator or "eli/reg/" in lowered_locator or "regulation" in lowered_title
+
+
+# Normalize output text before precision checks so citations like [1] do not look like unsupported numbers.
+def _normalize_output_text_for_precision_checks(text: str) -> str:
+    normalized = re.sub(r"\[\d+\]", " ", text)
+    normalized = re.sub(r"https?://\S+", " ", normalized)
+    return " ".join(normalized.split())
+
+
+# Extract precision-shaped claim markers that should be grounded in direct excerpts.
+def _extract_precision_claim_markers(*, text: str) -> list[str]:
+    normalized = _normalize_output_text_for_precision_checks(text)
+    markers: list[str] = []
+
+    year_matches = sorted(set(re.findall(r"\b(?:19|20)\d{2}\b", normalized)))
+    if year_matches:
+        markers.append(f"calendar years ({', '.join(year_matches[:3])})")
+
+    if re.search(
+        r"\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b",
+        normalized,
+        flags=re.IGNORECASE,
+    ):
+        markers.append("named calendar dates")
+
+    if re.search(r"\b\d+(?:\.\d+)?\s*%", normalized):
+        markers.append("percentages")
+
+    if re.search(r"\b\d+(?:[.,]\d+)?\s*(?:million|billion)\b", normalized, flags=re.IGNORECASE):
+        markers.append("large numeric thresholds")
+
+    if re.search(r"(?:€|\$|eur\s*)\d", normalized, flags=re.IGNORECASE):
+        markers.append("monetary thresholds")
+
+    return markers
+
+
+# Block optimistic completions when precise claims are not backed by direct primary excerpts.
+def _guard_completion_against_unsupported_precision(
+    *,
+    actor_task: ActorTask,
+    arguments: dict[str, object],
+) -> dict[str, object]:
+    output_text = arguments.get("output_text")
+    if not isinstance(output_text, str) or not output_text.strip():
+        return arguments
+
+    precision_markers = _extract_precision_claim_markers(text=output_text)
+    available_level = _max_available_evidence_support_level(actor_task=actor_task)
+    required_level = _required_evidence_support_level(
+        actor_task=actor_task,
+        output_text=output_text,
+    )
+    if _evidence_support_level_rank(available_level) >= _evidence_support_level_rank(required_level):
+        return arguments
+
+    guarded_arguments = dict(arguments)
+    guarded_arguments["objective_satisfied"] = False
+    guarded_arguments["evidence_sufficient"] = False
+    guarded_arguments["_guarded_next_action"] = StepValidationDecision.REQUEST_MORE_EVIDENCE.value
+    guarded_arguments["confidence"] = min(
+        _coerce_provider_confidence(guarded_arguments.get("confidence"), default=0.0),
+        0.35,
+    )
+    guarded_arguments["summary"] = (
+        "The current draft is more specific than the observed evidence currently supports."
+    )
+    support_gap_detail = (
+        f"available evidence level '{available_level.value}' is below required level "
+        f"'{required_level.value}'."
+    )
+    if precision_markers:
+        guarded_arguments["completion_rationale"] = (
+            "The runtime kept the current step open because the draft introduced "
+            f"{', '.join(precision_markers)} and the {support_gap_detail}"
+        )
+    else:
+        guarded_arguments["completion_rationale"] = (
+            "The runtime kept the current step open because the draft claims are more specific "
+            f"than the observed evidence can support; {support_gap_detail}"
+        )
+    guarded_arguments["residual_uncertainty"] = (
+        "Revise the draft to match the current evidence ceiling or fetch stronger excerpts before "
+        "finalizing more specific legal or factual claims."
+    )
+    return guarded_arguments
 
 
 class OpenAIActor(ActorPort):
@@ -611,17 +992,49 @@ def _normalize_actor_payload(*, payload: dict[str, Any]) -> dict[str, Any]:
         "summary",
         "content",
     )
-    if output_value:
+    if output_value and _looks_like_completion_payload(payload):
         return {
-            "tool_name": "emit_intermediate_output",
+            "tool_name": "emit_step_completed",
             "arguments": {
-                "summary": "Actor provider returned JSON without the runtime action envelope.",
+                "summary": _first_string_value(
+                    payload,
+                    "summary",
+                    "completion_rationale",
+                    "output_text",
+                    "answer",
+                    "final_answer",
+                    "content",
+                )
+                or "Actor provider returned JSON without the runtime action envelope.",
                 "output_text": output_value,
-                "progress_note": "Provider JSON was preserved as intermediate output for governance review.",
+                "completion_rationale": _first_string_value(
+                    payload,
+                    "completion_rationale",
+                    "summary",
+                    "output_text",
+                    "answer",
+                    "final_answer",
+                    "content",
+                )
+                or "Provider JSON was recovered as a completion payload.",
+                "objective_satisfied": bool(payload.get("objective_satisfied", True)),
+                "evidence_sufficient": bool(payload.get("evidence_sufficient", True)),
+                "confidence": _coerce_provider_confidence(payload.get("confidence"), default=0.55),
                 "residual_uncertainty": (
                     "The actor provider did not use the required tool-calling protocol."
                 ),
-                "confidence": 0.3,
+            },
+        }
+
+    if output_value:
+        return {
+            "tool_name": "emit_blocked",
+            "arguments": {
+                "summary": "Actor provider returned malformed JSON without a usable runtime action.",
+                "blocking_reason": (
+                    "The actor provider returned answer-like JSON without the required "
+                    f"runtime action envelope. Preserved excerpt: {_truncate_provider_excerpt(output_value)}"
+                ),
             },
         }
 
@@ -635,6 +1048,28 @@ def _first_string_value(payload: dict[str, Any], *keys: str) -> str | None:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+# Recover only clearly completion-shaped JSON payloads without inventing tool intent.
+def _looks_like_completion_payload(payload: dict[str, Any]) -> bool:
+    if isinstance(payload.get("completion_rationale"), str) and payload["completion_rationale"].strip():
+        return True
+    return any(key in payload for key in ("objective_satisfied", "evidence_sufficient", "confidence"))
+
+
+# Clamp provider confidence values before they enter the typed validation contract.
+def _coerce_provider_confidence(value: object, *, default: float) -> float:
+    if isinstance(value, int | float):
+        return max(0.0, min(float(value), 1.0))
+    return default
+
+
+# Keep provider protocol excerpts compact inside blocked outcomes.
+def _truncate_provider_excerpt(value: str, *, limit: int = 240) -> str:
+    normalized = " ".join(value.split())
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[: limit - 3]}..."
 
 
 # Extract exactly one function tool call from the model response.
@@ -783,6 +1218,11 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
     if tool_name == "emit_step_completed":
         _require_arguments(arguments, "output_text")
         completion_arguments = _ensure_completion_arguments(arguments=arguments)
+        completion_arguments = _guard_completion_against_unsupported_precision(
+            actor_task=actor_task,
+            arguments=completion_arguments,
+        )
+        next_action = _resolve_completion_next_action(arguments=completion_arguments)
         # Step completion is represented as local output plus positive validation.
         return ActorResult(
             plan_step_id=plan_step_id,
@@ -798,7 +1238,7 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
             step_validation=_build_step_validation(
                 actor_task=actor_task,
                 arguments=completion_arguments,
-                next_action=StepValidationDecision.COMPLETE_STEP,
+                next_action=next_action,
                 rationale_key="completion_rationale",
             ),
         )
@@ -806,6 +1246,11 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
     if tool_name == "emit_final_output":
         _require_arguments(arguments, "output_text")
         completion_arguments = _ensure_completion_arguments(arguments=arguments)
+        completion_arguments = _guard_completion_against_unsupported_precision(
+            actor_task=actor_task,
+            arguments=completion_arguments,
+        )
+        next_action = _resolve_completion_next_action(arguments=completion_arguments)
         # Final output is still subject to the same validation contract as normal steps.
         return ActorResult(
             plan_step_id=plan_step_id,
@@ -821,7 +1266,7 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
             step_validation=_build_step_validation(
                 actor_task=actor_task,
                 arguments=completion_arguments,
-                next_action=StepValidationDecision.COMPLETE_STEP,
+                next_action=next_action,
                 rationale_key="completion_rationale",
             ),
         )
@@ -968,6 +1413,17 @@ def _build_step_validation(
         rationale_summary=rationale,
         residual_uncertainty=residual_uncertainty,
     )
+
+
+# Let runtime guards downgrade optimistic completions into explicit evidence-seeking actions.
+def _resolve_completion_next_action(*, arguments: dict[str, object]) -> StepValidationDecision:
+    raw_next_action = arguments.get("_guarded_next_action")
+    if isinstance(raw_next_action, str):
+        try:
+            return StepValidationDecision(raw_next_action)
+        except ValueError:
+            pass
+    return StepValidationDecision.COMPLETE_STEP
 
 
 # Validate that required tool arguments are present and non-empty.

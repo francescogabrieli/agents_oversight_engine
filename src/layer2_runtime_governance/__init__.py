@@ -103,6 +103,7 @@ from .state import (
     TaskState,
 )
 from .tool_contract import (
+    EvidenceSupportLevel,
     ObservedEvidence,
     ToolExecutionResult,
     ToolGatewayPort,
@@ -151,6 +152,7 @@ __all__ = [
     "ActorResultType",
     "ActorTask",
     "CapabilityAccessMode",
+    "EvidenceSupportLevel",
     "EvidenceQualityAssessment",
     "EvidenceQualityWeights",
     "GovernanceDecision",

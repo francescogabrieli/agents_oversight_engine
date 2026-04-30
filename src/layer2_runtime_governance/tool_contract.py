@@ -15,6 +15,15 @@ class ToolName(str, Enum):
     MCP_LOCAL_TEST_CALCULATE_EXPRESSION = "mcp.local_test.calculate_expression"
 
 
+class EvidenceSupportLevel(str, Enum):
+    # EvidenceSupportLevel states how much claim precision one observed evidence item can safely support.
+    LOCAL_ONLY = "local_only"
+    SOURCE_DISCOVERY = "source_discovery"
+    HIGH_LEVEL_SUMMARY = "high_level_summary"
+    DETAILED_EXTRACTED = "detailed_extracted"
+    PRIMARY_LEGAL = "primary_legal"
+
+
 @dataclass(frozen=True)
 class ToolRequest:
     # Tool requests are typed so the actor cannot emit opaque free-form tool calls.
@@ -60,6 +69,7 @@ class ObservedEvidence:
     locator: str
     excerpt: str
     source_tool: ToolName
+    support_level: EvidenceSupportLevel = EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
 
 
 class ToolGatewayPort(Protocol):
@@ -70,6 +80,7 @@ class ToolGatewayPort(Protocol):
 
 
 __all__ = [
+    "EvidenceSupportLevel",
     "ObservedEvidence",
     "ToolExecutionResult",
     "ToolGatewayPort",

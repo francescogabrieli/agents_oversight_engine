@@ -90,6 +90,10 @@ write_capability_blocked if {
   input.actor.external_impact == true
 }
 
+write_capability_blocked if {
+  input.actor.capability_mode == "write"
+}
+
 tool_is_disallowed if {
   input.tool.name != null
   input.tool.name == input.policy.disallowed_tools[_]

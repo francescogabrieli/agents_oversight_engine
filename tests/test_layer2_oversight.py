@@ -29,6 +29,7 @@ from layer2_runtime_governance import (
     ActorPort,
     ActorTask,
     CapabilityAccessMode,
+    EvidenceSupportLevel,
     GovernanceDirective,
     GovernanceReasonCode,
     PlanStep,
@@ -40,6 +41,8 @@ from layer2_runtime_governance import (
     ReplanDecision,
     ReplannerPort,
     RuntimeState,
+    ScratchpadEntry,
+    ScratchpadEntryType,
     StepRecord,
     StepValidation,
     StepValidationDecision,
@@ -193,6 +196,7 @@ class Layer2OversightTests(unittest.TestCase):
             validation=None,
         )
         task_state.actor_turn_count = 6
+        _add_step_turn_entries(task_state=task_state, plan_step_id="step_1", turn_indexes=range(1, 7))
         task_state.last_tool_result = _failed_tool_result()
         policy_input = build_policy_evaluation_input(task_state=task_state)
 
@@ -205,6 +209,67 @@ class Layer2OversightTests(unittest.TestCase):
         self.assertLess(assessment.score, 0.60)
         self.assertIn(OversightReasonCode.ACTOR_TURNS_EXCEEDED, assessment.reason_codes)
         self.assertIn(OversightReasonCode.NEEDS_REPLAN_SIGNAL, assessment.reason_codes)
+
+    # Ensure a replanned step is not penalized by global turns and failed tools from the old step.
+    def test_trajectory_health_scopes_turns_and_tool_failures_to_current_step(self) -> None:
+        task_state = _build_task_state_with_actor_result(
+            actor_result_type=ActorResultType.PROPOSE_ACTION,
+            validation=None,
+            tool_request=ToolRequest(
+                plan_step_id="replan_step_1",
+                tool_name=ToolName.MCP_LOCAL_TEST_TEXT_STATS,
+                reason="Continue on the replanned step.",
+                text="agent governance",
+            ),
+        )
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Old blocked step.",
+                rationale="Historical step.",
+                expected_outcome="Old outcome.",
+                status=PlanStepStatus.BLOCKED,
+            ),
+            PlanStep(
+                step_id="replan_step_1",
+                objective="New replanned step.",
+                rationale="Recovery step.",
+                expected_outcome="Fresh progress.",
+                status=PlanStepStatus.IN_PROGRESS,
+            ),
+        ]
+        task_state.current_plan_step_index = 1
+        task_state.actor_turn_count = 6
+        task_state.actor_result = ActorResult(
+            plan_step_id="replan_step_1",
+            result_type=ActorResultType.PROPOSE_ACTION,
+            summary="Request tool use for the replanned step.",
+            capability_mode=CapabilityAccessMode.READ_ONLY,
+            external_impact=False,
+            tool_request=ToolRequest(
+                plan_step_id="replan_step_1",
+                tool_name=ToolName.MCP_LOCAL_TEST_TEXT_STATS,
+                reason="Continue on the replanned step.",
+                text="agent governance",
+            ),
+        )
+        task_state.current_tool_request = task_state.actor_result.tool_request
+        task_state.last_tool_result = _failed_tool_result()
+        _add_step_turn_entries(task_state=task_state, plan_step_id="step_1", turn_indexes=range(1, 6))
+        _add_step_turn_entries(task_state=task_state, plan_step_id="replan_step_1", turn_indexes=[6])
+        policy_input = build_policy_evaluation_input(task_state=task_state)
+
+        assessment = evaluate_trajectory_health(
+            task_state=task_state,
+            policy_input=policy_input,
+            config=load_oversight_policy_config(),
+        )
+
+        self.assertEqual(assessment.score, 1.0)
+        self.assertIn(OversightReasonCode.ACTOR_TURNS_WITHIN_LIMIT, assessment.reason_codes)
+        self.assertIn(OversightReasonCode.NO_FAILED_TOOL_RESULTS, assessment.reason_codes)
+        self.assertNotIn(OversightReasonCode.ACTOR_TURNS_EXCEEDED, assessment.reason_codes)
+        self.assertNotIn(OversightReasonCode.FAILED_TOOL_RESULT_PRESENT, assessment.reason_codes)
 
     def test_replan_limit_escalates_to_human_review(self) -> None:
         task_state = _build_task_state_with_actor_result(
@@ -318,6 +383,65 @@ class Layer2OversightTests(unittest.TestCase):
             GovernanceDirective.REQUEST_MORE_EVIDENCE,
         )
 
+    def test_opa_allow_with_support_level_mismatch_requests_more_evidence(self) -> None:
+        task_state = _build_task_state_with_actor_result(
+            actor_result_type=ActorResultType.FINAL_OUTPUT,
+            validation=StepValidation(
+                plan_step_id="step_1",
+                objective_satisfied=True,
+                evidence_sufficient=True,
+                confidence=0.9,
+                next_action=StepValidationDecision.COMPLETE_STEP,
+                rationale_summary="The draft appears complete.",
+            ),
+        )
+        task_state.plan_steps[0].objective = "Capture the DMA's main obligations and designation criteria."
+        task_state.plan_steps[0].expected_outcome = "A concise set of obligations and criteria."
+        task_state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.FINAL_OUTPUT,
+            summary="Complete the step.",
+            capability_mode=CapabilityAccessMode.NONE,
+            output_text=(
+                "Gatekeeper status depends on specific size thresholds, and the regulation "
+                "requires interoperability and restrictions on self-preferencing."
+            ),
+            step_validation=task_state.step_validations[-1],
+        )
+        task_state.observed_evidence.append(
+            ObservedEvidence(
+                evidence_id="step_1:tool:1:source:1",
+                plan_step_id="step_1",
+                title="DMA legislation page",
+                locator="https://digital-markets-act.ec.europa.eu/legislation_en",
+                excerpt=(
+                    "The DMA contains the main rules for the designation of gatekeepers and "
+                    "the implementation of the obligations and prohibitions imposed on them."
+                ),
+                source_tool=ToolName.FETCH_URL_TEXT,
+                support_level=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
+            )
+        )
+        task_state.last_tool_result = _successful_tool_result()
+        policy_input = build_policy_evaluation_input(task_state=task_state)
+        oversight = evaluate_confidence_risk_trajectory(
+            task_state=task_state,
+            policy_input=policy_input,
+            tool_gateway_config=_tool_config(),
+        )
+
+        decision = build_governance_decision(
+            policy_input=policy_input,
+            policy_result=_policy_result(PolicyDecision.ALLOW),
+            oversight_assessment=oversight,
+        )
+
+        self.assertEqual(decision.directive, GovernanceDirective.REQUEST_MORE_EVIDENCE)
+        self.assertIn(
+            OversightReasonCode.EVIDENCE_SUPPORT_BELOW_STEP_NEED,
+            oversight.evidence_quality.reason_codes,
+        )
+
     def test_opa_allow_with_healthy_signals_preserves_continue(self) -> None:
         task_state = _healthy_completion_state()
         policy_input = build_policy_evaluation_input(task_state=task_state)
@@ -427,6 +551,24 @@ def _step_record(*, node_name: str, summary: str) -> StepRecord:
         node_name=node_name,
         summary=summary,
     )
+
+
+# Seed explicit actor-turn markers for one semantic step in oversight tests.
+def _add_step_turn_entries(
+    *,
+    task_state: TaskState,
+    plan_step_id: str,
+    turn_indexes,
+) -> None:
+    for turn_index in turn_indexes:
+        task_state.scratchpad.append(
+            ScratchpadEntry(
+                turn_index=int(turn_index),
+                plan_step_id=plan_step_id,
+                entry_type=ScratchpadEntryType.PROGRESS_NOTE,
+                summary=f"Turn {turn_index} for {plan_step_id}.",
+            )
+        )
 
 
 # Build a small evidence item with provenance.

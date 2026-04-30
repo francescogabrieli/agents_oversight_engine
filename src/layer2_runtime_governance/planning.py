@@ -36,7 +36,7 @@ class OpenAIPlannerSettings:
             timeout_seconds=float(
                 os.getenv(
                     "LAYER2_PLANNER_OPENAI_TIMEOUT_SECONDS",
-                    env_file_values.get("LAYER2_PLANNER_OPENAI_TIMEOUT_SECONDS"),
+                    env_file_values.get("LAYER2_PLANNER_OPENAI_TIMEOUT_SECONDS", "30"),
                 )
             ),
         )
@@ -97,6 +97,9 @@ Rules:
 - Keep steps concise and operationally meaningful.
 - Prefer direct task steps over meta-steps about formatting, structuring, or validating the answer unless those are materially necessary to complete the task well.
 - Avoid over-decomposing the task into artificial sub-steps when one clear semantic step is enough.
+- For small research tasks that gather sources and produce a short answer, prefer 2-3 semantic steps unless the task genuinely requires more.
+- Merge source selection, fact extraction, and concise synthesis when they are part of one natural semantic step.
+- Do not split "down-select sources", "extract facts", and "write the brief summary" into separate steps unless the user goal or risk profile makes that separation materially necessary.
 - For research or analysis tasks, prefer evidence collection before synthesis.
 - Respect read_only_mode when it is true.
 - Do not include human review as a normal plan step.
@@ -149,7 +152,7 @@ def build_planner_user_prompt(*, task_state: TaskState) -> str:
 
 class OpenAIPlanner(PlannerPort):
     planner_name = "openai_layer2_planner"
-    prompt_version = "planner_v1"
+    prompt_version = "planner_v2"
 
     def __init__(self, settings: OpenAIPlannerSettings | None = None) -> None:
         # Validate planner prerequisites once at construction time.

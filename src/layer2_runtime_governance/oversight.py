@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -10,6 +11,7 @@ from layer1_intake import SensitivityLevel
 
 from .actor_contract import ActorResultType, CapabilityAccessMode
 from .state import StepValidation, StepValidationDecision, TaskState
+from .tool_contract import EvidenceSupportLevel
 from .tool_gateway import (
     ToolCapability,
     ToolGatewayConfig,
@@ -57,6 +59,8 @@ class OversightReasonCode(str, Enum):
     SOURCE_LOCATOR_MISSING = "source_locator_missing"
     LAST_TOOL_SUCCESS = "last_tool_success"
     LAST_TOOL_FAILED = "last_tool_failed"
+    EVIDENCE_SUPPORT_MATCHES_STEP_NEED = "evidence_support_matches_step_need"
+    EVIDENCE_SUPPORT_BELOW_STEP_NEED = "evidence_support_below_step_need"
     TOOL_RISK_LOW = "tool_risk_low"
     TOOL_RISK_MEDIUM = "tool_risk_medium"
     TOOL_RISK_HIGH = "tool_risk_high"
@@ -325,6 +329,8 @@ def evaluate_evidence_quality(
     config: OversightPolicyConfig,
 ) -> EvidenceQualityAssessment:
     validation = _latest_relevant_validation(task_state=task_state)
+    relevant_tool_result = _latest_tool_result_for_evaluated_step(task_state=task_state)
+    required_support_level = _required_evidence_support_level(task_state=task_state)
     weights = config.evidence_quality_weights
     score = 0.0
     reason_codes: list[OversightReasonCode] = []
@@ -356,11 +362,27 @@ def evaluate_evidence_quality(
     else:
         reason_codes.append(OversightReasonCode.SOURCE_LOCATOR_MISSING)
 
-    if task_state.last_tool_result is not None and task_state.last_tool_result.success:
+    if relevant_tool_result is not None and relevant_tool_result.success:
         score += weights.last_tool_success
         reason_codes.append(OversightReasonCode.LAST_TOOL_SUCCESS)
-    elif task_state.last_tool_result is not None:
+    elif relevant_tool_result is not None:
         reason_codes.append(OversightReasonCode.LAST_TOOL_FAILED)
+
+    if _evidence_support_matches_step_need(task_state=task_state):
+        reason_codes.append(OversightReasonCode.EVIDENCE_SUPPORT_MATCHES_STEP_NEED)
+    else:
+        score = min(score, config.min_evidence_quality * 0.49)
+        reason_codes.append(OversightReasonCode.EVIDENCE_SUPPORT_BELOW_STEP_NEED)
+
+    if (
+        required_support_level == EvidenceSupportLevel.LOCAL_ONLY
+        and validation is not None
+        and validation.next_action == StepValidationDecision.COMPLETE_STEP
+        and validation.objective_satisfied
+        and validation.evidence_sufficient
+        and validation.confidence >= config.min_actor_confidence
+    ):
+        score = max(score, config.min_evidence_quality)
 
     score = _clamp(score)
     return EvidenceQualityAssessment(
@@ -440,11 +462,13 @@ def evaluate_trajectory_health(
 ) -> TrajectoryHealthAssessment:
     penalties = config.trajectory_penalties
     validation = _latest_relevant_validation(task_state=task_state)
+    current_step_turn_count = _actor_turn_count_for_evaluated_step(task_state=task_state)
+    relevant_tool_result = _latest_tool_result_for_evaluated_step(task_state=task_state)
     score = 1.0
     reason_codes: list[OversightReasonCode] = []
 
     actor_turn_overage = max(
-        policy_input.actor_turn_count - penalties.max_actor_turns_per_step,
+        current_step_turn_count - penalties.max_actor_turns_per_step,
         0,
     )
     if actor_turn_overage:
@@ -453,7 +477,9 @@ def evaluate_trajectory_health(
     else:
         reason_codes.append(OversightReasonCode.ACTOR_TURNS_WITHIN_LIMIT)
 
-    failed_tool_results = 1 if task_state.last_tool_result is not None and not task_state.last_tool_result.success else 0
+    failed_tool_results = (
+        1 if relevant_tool_result is not None and not relevant_tool_result.success else 0
+    )
     if failed_tool_results:
         score -= failed_tool_results * penalties.failed_tool_result_penalty
         reason_codes.append(OversightReasonCode.FAILED_TOOL_RESULT_PRESENT)
@@ -498,6 +524,61 @@ def _latest_relevant_validation(*, task_state: TaskState) -> StepValidation | No
         if validation.plan_step_id == task_state.actor_result.plan_step_id:
             return validation
     return task_state.actor_result.step_validation
+
+
+# Resolve the currently evaluated plan step id used by adaptive oversight.
+def _evaluated_plan_step_id(*, task_state: TaskState) -> str | None:
+    if task_state.actor_result is not None:
+        return task_state.actor_result.plan_step_id
+    if task_state.current_plan_step is not None:
+        return task_state.current_plan_step.step_id
+    return None
+
+
+# Count only actor turns that belong to the evaluated semantic step.
+def _actor_turn_count_for_evaluated_step(*, task_state: TaskState) -> int:
+    plan_step_id = _evaluated_plan_step_id(task_state=task_state)
+    if plan_step_id is None:
+        return 0
+
+    # Scratchpad turn indexes are the most reliable per-turn markers in the runtime trace.
+    scratchpad_turns = {
+        entry.turn_index
+        for entry in task_state.scratchpad
+        if entry.plan_step_id == plan_step_id
+    }
+    if scratchpad_turns:
+        return len(scratchpad_turns)
+
+    validation_count = sum(
+        1 for validation in task_state.step_validations if validation.plan_step_id == plan_step_id
+    )
+    if validation_count:
+        return validation_count
+
+    if task_state.actor_result is not None and task_state.actor_result.plan_step_id == plan_step_id:
+        return 1
+
+    return 0
+
+
+# Read only the tool result that belongs to the currently evaluated semantic step.
+def _latest_tool_result_for_evaluated_step(*, task_state: TaskState):
+    plan_step_id = _evaluated_plan_step_id(task_state=task_state)
+    if plan_step_id is None:
+        return None
+
+    if (
+        task_state.last_tool_result is not None
+        and task_state.last_tool_result.request.plan_step_id == plan_step_id
+    ):
+        return task_state.last_tool_result
+
+    for tool_result in reversed(task_state.tool_results_history):
+        if tool_result.request.plan_step_id == plan_step_id:
+            return tool_result
+
+    return None
 
 
 # Count completed replanner passes from the canonical runtime step history.
@@ -558,7 +639,255 @@ def _validation_signals_weak_evidence(
     return (
         not validation.evidence_sufficient
         or validation.confidence < config.min_actor_confidence
+        or not _evidence_support_matches_step_need(task_state=task_state)
     )
+
+
+# Compare available evidence strength against the semantic/detail needs of the evaluated step.
+def _evidence_support_matches_step_need(*, task_state: TaskState) -> bool:
+    available_level = _available_evidence_support_level(task_state=task_state)
+    required_level = _required_evidence_support_level(task_state=task_state)
+    return _evidence_support_level_rank(available_level) >= _evidence_support_level_rank(required_level)
+
+
+# Return the strongest evidence support level currently available to the actor.
+def _available_evidence_support_level(*, task_state: TaskState) -> EvidenceSupportLevel:
+    meaningful_evidence = _meaningful_observed_evidence(task_state=task_state)
+    if not meaningful_evidence:
+        return EvidenceSupportLevel.LOCAL_ONLY
+    return max((item.support_level for item in meaningful_evidence), key=_evidence_support_level_rank)
+
+
+# Infer the minimum support level needed by the evaluated step and its current draft output.
+def _required_evidence_support_level(*, task_state: TaskState) -> EvidenceSupportLevel:
+    step = _evaluated_plan_step(task_state=task_state)
+    output_text = task_state.actor_result.output_text if task_state.actor_result is not None else None
+    required_level = _required_evidence_support_level_from_step(step_text=_step_scope_text(step))
+    if output_text and output_text.strip():
+        output_level = _required_evidence_support_level_from_output_text(text=output_text)
+        if _evidence_support_level_rank(output_level) > _evidence_support_level_rank(required_level):
+            return output_level
+    return required_level
+
+
+# Resolve the evaluated semantic plan step for deterministic oversight checks.
+def _evaluated_plan_step(*, task_state: TaskState):
+    plan_step_id = _evaluated_plan_step_id(task_state=task_state)
+    if plan_step_id is None:
+        return task_state.current_plan_step
+    for step in task_state.plan_steps:
+        if step.step_id == plan_step_id:
+            return step
+    return task_state.current_plan_step
+
+
+# Flatten the evaluated step scope into one lowercase text block for heuristic classification.
+def _step_scope_text(step) -> str:
+    if step is None:
+        return ""
+    return " ".join(
+        part.strip()
+        for part in (step.objective, step.expected_outcome, step.rationale)
+        if part and part.strip()
+    ).lower()
+
+
+# Determine the minimum evidence strength implied by the step wording.
+def _required_evidence_support_level_from_step(*, step_text: str) -> EvidenceSupportLevel:
+    if _step_is_source_discovery_only(step_text):
+        return EvidenceSupportLevel.SOURCE_DISCOVERY
+
+    if any(
+        marker in step_text
+        for marker in (
+            "deadline",
+            "deadlines",
+            "threshold",
+            "thresholds",
+            "turnover",
+            "number of users",
+            "article ",
+            "full legal text",
+            "entry into force",
+            "timeline",
+            "applicability details",
+        )
+    ):
+        return EvidenceSupportLevel.PRIMARY_LEGAL
+
+    if any(
+        marker in step_text
+        for marker in (
+            "obligation",
+            "obligations",
+            "prohibition",
+            "prohibitions",
+            "requirements",
+            "criteria",
+            "enforcement mechanism",
+            "what it requires",
+            "who it applies to",
+            "regulatory mechanisms",
+            "main obligations",
+        )
+    ):
+        return EvidenceSupportLevel.DETAILED_EXTRACTED
+
+    if any(
+        marker in step_text
+        for marker in ("purpose", "scope", "overview", "brief summary", "high-level", "concise")
+    ):
+        return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
+
+    return EvidenceSupportLevel.LOCAL_ONLY
+
+
+# Determine the minimum evidence strength implied by the actual actor draft.
+def _required_evidence_support_level_from_output_text(*, text: str) -> EvidenceSupportLevel:
+    lowered_text = _normalize_output_text_for_support_checks(text).lower()
+
+    if _output_text_is_source_shortlist_only(text.lower()):
+        return EvidenceSupportLevel.SOURCE_DISCOVERY
+
+    if _contains_primary_precision_markers(lowered_text):
+        return EvidenceSupportLevel.PRIMARY_LEGAL
+
+    if any(
+        marker in lowered_text
+        for marker in (
+            "obligation",
+            "obligations",
+            "prohibit",
+            "prohibiting",
+            "requires",
+            "requiring",
+            "must",
+            "criteria",
+            "interoperability",
+            "data portability",
+            "ranking",
+            "self-preferencing",
+            "non-discriminatory access",
+        )
+    ):
+        return EvidenceSupportLevel.DETAILED_EXTRACTED
+
+    if any(
+        marker in lowered_text
+        for marker in (
+            "summary",
+            "overview",
+            "aims to",
+            "applies to",
+            "official sources",
+        )
+    ):
+        return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
+
+    return EvidenceSupportLevel.LOCAL_ONLY
+
+
+# Detect drafts that only name sources and URLs without summarizing their substance.
+def _output_text_is_source_shortlist_only(text: str) -> bool:
+    lines = [line.strip().lower() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return False
+
+    if any(
+        marker in text
+        for marker in (
+            "aims to",
+            "applies to",
+            "purpose",
+            "scope",
+            "obligation",
+            "obligations",
+            "requires",
+            "requirement",
+            "criteria",
+            "timeline",
+            "entry into force",
+        )
+    ):
+        return False
+
+    source_identity_markers = (
+        "official sources",
+        "official eu sources",
+        "shortlist of official",
+        "source shortlist",
+        "dma portal",
+        "summary page",
+        "legislation page",
+        "eur-lex",
+        "european commission",
+    )
+    if not any(marker in text for marker in source_identity_markers):
+        return False
+
+    return any("http://" in line or "https://" in line for line in lines)
+
+
+# Keep link/citation formatting from inflating support-level checks.
+def _normalize_output_text_for_support_checks(text: str) -> str:
+    without_citations = re.sub(r"\[\d+\]", " ", text)
+    return " ".join(without_citations.split())
+
+
+# Detect exact legal/numeric detail that needs primary-source support.
+def _contains_primary_precision_markers(text: str) -> bool:
+    if re.search(r"\b(?:19|20)\d{2}\b", text):
+        return True
+    if re.search(
+        r"\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    return any(
+        marker in text
+        for marker in (
+            "threshold",
+            "thresholds",
+            "turnover",
+            "number of users",
+            "specific size",
+            "article ",
+            "deadline",
+            "deadlines",
+        )
+    )
+
+
+# Distinguish source-list steps from semantic extraction/summarization steps.
+def _step_is_source_discovery_only(step_text: str) -> bool:
+    discovery_markers = ("identify", "find", "source", "sources", "links", "references", "citations")
+    summary_markers = (
+        "summary",
+        "summar",
+        "purpose",
+        "scope",
+        "obligation",
+        "requirement",
+        "criteria",
+        "timeline",
+        "what it requires",
+    )
+    return any(marker in step_text for marker in discovery_markers) and not any(
+        marker in step_text for marker in summary_markers
+    )
+
+
+# Order evidence support levels from weakest to strongest.
+def _evidence_support_level_rank(level: EvidenceSupportLevel) -> int:
+    ordering = {
+        EvidenceSupportLevel.LOCAL_ONLY: 0,
+        EvidenceSupportLevel.SOURCE_DISCOVERY: 1,
+        EvidenceSupportLevel.HIGH_LEVEL_SUMMARY: 2,
+        EvidenceSupportLevel.DETAILED_EXTRACTED: 3,
+        EvidenceSupportLevel.PRIMARY_LEGAL: 4,
+    }
+    return ordering[level]
 
 
 # Map one recommendation to a compact reason code.

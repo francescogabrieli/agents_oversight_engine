@@ -156,7 +156,7 @@ Current design:
 - `replanning.py` defines the replanner port, prompt builders, the default OpenAI-backed replanner, and a local conservative fallback replanner for tests/offline use
 - `actor_contract.py` defines the typed handoff from planner state into actor-facing execution context for the current plan step, including observed evidence, scratchpad entries, and prior step validations
 - `tool_contract.py` defines typed tool requests, tool results, and observed evidence contracts
-- `tool_gateway.py` contains the read-only operational tool surface currently available to the runtime, currently `web_search` and `fetch_url_text`
+- `tool_gateway.py` contains the read-only operational tool surface currently available to the runtime, including `web_search`, `fetch_url_text`, and configured read-only MCP test tools behind the gateway registry
 - `configs/layer2_tool_gateway.json` is the active Tool Gateway registry for configured native, HTTP, OpenAI, and MCP-backed tools
 - MCP is usable as a governed backend behind the Tool Gateway; the actor must never call MCP servers directly
 - `governance.py` defines the typed policy input/output contracts, OPA HTTP policy engine, and governance decision mapping used after actor execution
@@ -198,11 +198,8 @@ Current relevant files:
 - `docs/plan-and-execute.ipynb`
 - `docs/plan-and-execute.jpg`
 - `docs/planner_use_cases.html`
-- `docs/architecturev3_presentation.html`
-
-Notes:
-
-- `docs/architecturev3_presentation.html` is the current thesis-facing architecture presentation artifact
+- `docs/confidence_risk_trajectory_deck.html`
+- `docs/tool_gateway_strategy.md`
 
 
 ### `tests`
@@ -216,6 +213,7 @@ Current relevant files:
 - `tests/test_layer1_layer2_integration.py`
 - `tests/test_layer2_oversight.py`
 - `tests/test_layer2_trace.py`
+- `tests/test_tool_gateway_mcp.py`
 
 
 ## Coding Standards
@@ -281,15 +279,22 @@ Current relevant files:
 - the current Layer 2 actor backend is OpenRouter with `gpt-oss-120b` for first cloud-based tests; this remains a temporary test choice before moving to a stable large cloud model
 - planner and replanner remain OpenAI-backed for now
 - actor provider selection is controlled by `LAYER2_ACTOR_PROVIDER`, with supported values `openrouter` and `openai`
+- malformed provider JSON that omits the runtime action envelope should be recovered only when it is clearly completion-shaped; otherwise it should stop conservatively instead of being treated as normal progress
 - actor execution may produce local outputs, request later capability use, ask clarification, or signal replan
 - actor execution should record audit-safe scratchpad entries rather than hidden chain-of-thought
 - plan steps should be completed only after a typed `StepValidation` indicates that the objective is satisfied and evidence is sufficient
+- observed evidence now carries an explicit support level (`local_only`, `source_discovery`, `high_level_summary`, `detailed_extracted`, `primary_legal`) so the runtime can reason about how much claim precision the evidence can safely support
+- source discovery alone is not factual support; simple URL discovery is weaker than extracted content and should not justify detailed factual completion by itself
+- actor completion outputs that are more specific than the available evidence support level should remain in-progress rather than complete the step, even when the LLM self-reports `objective_satisfied=true` and `evidence_sufficient=true`
+- adaptive oversight may request more evidence when the evaluated step/output requires a stronger evidence support level than the observed evidence currently provides
 - `INTERMEDIATE_OUTPUT` is a progress/local-output outcome and must not automatically complete the current plan step without positive validation
+- when the last semantic step completes with positive validation, its output should be promoted into canonical `final_output_text` even if the actor result type is `INTERMEDIATE_OUTPUT`
 - executed step history and current plan step cursor must remain explicit in `TaskState`
 - when tools are added, do not rely on a prompt-only tool inventory as the primary mechanism; prefer structured tool binding in the LangGraph/LangChain style
 - prompt text may contain policy, behavioral, and architecture constraints, but should not replace the runtime-level tool contract
 - the current tool surface is read-only and externally conservative
 - read-only capability use is currently explicit and typed through `ToolRequest`, `ToolExecutionResult`, and `ObservedEvidence`
+- tool observation should preserve source-level provenance without cloning one aggregate tool transcript across multiple returned sources
 - the Tool Gateway supports a configured MCP local test server with read-only tools:
   `mcp.local_test.echo`, `mcp.local_test.read_fixture`, `mcp.local_test.text_stats`, and `mcp.local_test.calculate_expression`
 - MCP tool calls must be server-configured, tool-allowlisted, read-only, and normalized back into `ToolExecutionResult`

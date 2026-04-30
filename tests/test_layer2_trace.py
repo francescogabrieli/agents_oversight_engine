@@ -127,6 +127,7 @@ class Layer2TraceTests(unittest.TestCase):
             "healthy",
         )
         self.assertEqual(compact["tool_snapshot"]["observed_evidence_count"], 1)
+        self.assertIsNone(compact["tool_snapshot"]["current_tool_request"])
 
     def test_waiting_review_and_aborted_states_are_explicit(self) -> None:
         review_state = _complete_task_state()

@@ -112,6 +112,7 @@ class TraceObservedEvidence:
     locator: str
     excerpt: str
     source_tool: str
+    support_level: str
 
 
 @dataclass(frozen=True)
@@ -427,6 +428,7 @@ def _build_observed_evidence(evidence: ObservedEvidence) -> TraceObservedEvidenc
         locator=evidence.locator,
         excerpt=evidence.excerpt,
         source_tool=evidence.source_tool.value,
+        support_level=evidence.support_level.value,
     )
 
 
@@ -541,6 +543,11 @@ def _current_step_objective(trace: Layer2RuntimeTrace) -> str | None:
 def _compact_current_tool_request(tool_calls: tuple[TraceToolCall, ...]) -> dict[str, Any] | None:
     if not tool_calls:
         return None
+
+    # Only a trace entry with success=None represents a still-pending request.
+    if tool_calls[-1].success is not None:
+        return None
+
     call = tool_calls[-1]
     return {
         "tool_name": call.tool_name,

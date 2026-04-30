@@ -26,7 +26,13 @@ from .state import (
     StepValidationDecision,
     TaskState,
 )
-from .tool_contract import ObservedEvidence, ToolExecutionResult, ToolGatewayPort
+from .tool_contract import (
+    EvidenceSupportLevel,
+    ObservedEvidence,
+    ToolExecutionResult,
+    ToolGatewayPort,
+    ToolName,
+)
 from .replanning import ReplannerPort
 
 
@@ -305,6 +311,9 @@ def replanner(state: TaskState, *, replanner_service: ReplannerPort) -> TaskStat
     state.planner_rationale = decision.rationale
     state.planner_name = decision.replanner_name
     state.planner_prompt_version = decision.prompt_version
+    # Replanning replaces the live trajectory, so stale tool execution context must not leak forward.
+    state.current_tool_request = None
+    state.last_tool_result = None
     state.current_state = RuntimeState.ACTING if replacement_steps else RuntimeState.COMPLETED
 
     _append_step_record(
@@ -463,6 +472,9 @@ def _record_actor_execution(state: TaskState, *, actor_result: ActorResult) -> N
         return
 
     _advance_to_next_plan_step(state)
+    # Promote the last completed step output into the canonical final output slot.
+    if state.current_plan_step_index is None and actor_result.output_text:
+        state.final_output_text = actor_result.output_text
 
 
 # Advance the runtime cursor to the next semantic step after a completed execution.
@@ -635,7 +647,10 @@ def _build_observed_evidence_from_tool_result(
 
     # Preserve source-level provenance whenever the tool returned it.
     for index, source in enumerate(tool_result.sources, start=1):
-        excerpt = source.snippet or tool_result.content or tool_result.summary
+        # Avoid cloning one global tool transcript onto every returned source.
+        excerpt = source.snippet
+        if excerpt is None and len(tool_result.sources) == 1:
+            excerpt = tool_result.content or tool_result.summary
         if not _is_meaningful_evidence_excerpt(excerpt):
             continue
         evidence_items.append(
@@ -646,6 +661,12 @@ def _build_observed_evidence_from_tool_result(
                 locator=source.locator,
                 excerpt=(excerpt or "")[:1000],
                 source_tool=tool_result.request.tool_name,
+                support_level=_classify_observed_evidence_support_level(
+                    tool_name=tool_result.request.tool_name,
+                    locator=source.locator,
+                    title=source.title,
+                    excerpt=excerpt or "",
+                ),
             )
         )
 
@@ -670,6 +691,12 @@ def _build_observed_evidence_from_tool_result(
                 locator=locator,
                 excerpt=(excerpt or "")[:1000],
                 source_tool=tool_result.request.tool_name,
+                support_level=_classify_observed_evidence_support_level(
+                    tool_name=tool_result.request.tool_name,
+                    locator=locator,
+                    title=tool_result.request.tool_name.value,
+                    excerpt=excerpt or "",
+                ),
             )
         )
 
@@ -697,6 +724,66 @@ def _is_meaningful_evidence_excerpt(value: str | None) -> bool:
         "tool succeeded.",
     }
     return normalized.lower() not in status_only
+
+
+# Classify how much claim precision one observed evidence item can safely support.
+def _classify_observed_evidence_support_level(
+    *,
+    tool_name: ToolName,
+    locator: str,
+    title: str,
+    excerpt: str,
+) -> EvidenceSupportLevel:
+    lowered_locator = locator.lower()
+    lowered_title = title.lower()
+    lowered_excerpt = excerpt.lower()
+
+    if tool_name == ToolName.WEB_SEARCH:
+        if lowered_title == tool_name.value:
+            return EvidenceSupportLevel.SOURCE_DISCOVERY
+        if len(" ".join(excerpt.split())) >= 40:
+            return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
+        return EvidenceSupportLevel.SOURCE_DISCOVERY
+
+    if tool_name != ToolName.FETCH_URL_TEXT:
+        return EvidenceSupportLevel.DETAILED_EXTRACTED
+
+    if "eur-lex.europa.eu" in lowered_locator and "/summary/" not in lowered_locator:
+        return EvidenceSupportLevel.PRIMARY_LEGAL
+
+    if any(
+        marker in lowered_locator
+        for marker in (
+            "/summary/",
+            "legislation_en",
+            "index_en",
+            "gatekeepers_en",
+        )
+    ):
+        return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
+
+    detailed_markers = (
+        "article ",
+        "articles ",
+        "must ",
+        "shall ",
+        "required to",
+        "prohibited",
+        "obligations",
+        "prohibitions",
+        "criteria",
+        "threshold",
+        "deadline",
+        "interoperability",
+        "data portability",
+    )
+    if sum(1 for marker in detailed_markers if marker in lowered_excerpt) >= 2:
+        return EvidenceSupportLevel.DETAILED_EXTRACTED
+
+    if "regulation" in lowered_title and "summary" not in lowered_title:
+        return EvidenceSupportLevel.DETAILED_EXTRACTED
+
+    return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
 
 
 # Record tool observations as audit-safe working memory for later actor turns.

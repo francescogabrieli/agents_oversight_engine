@@ -1,6 +1,7 @@
-from __future__ import annotations
-
+import json
 import os
+import shutil
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -49,6 +50,7 @@ from layer2_runtime_governance import (
     StepValidation,
     StepValidationDecision,
     TaskState,
+    EvidenceSupportLevel,
     ToolExecutionResult,
     ToolGatewayPort,
     ToolName,
@@ -61,6 +63,7 @@ from layer2_runtime_governance import (
     build_governance_decision,
     build_policy_evaluation_input,
     build_runtime_graph,
+    replanner,
 )
 from main_layer2 import build_compact_trace
 from layer2_runtime_governance.replanning import (
@@ -71,10 +74,15 @@ from layer2_runtime_governance.replanning import (
     build_replanner_system_prompt,
     build_replanner_user_prompt,
 )
+from layer2_runtime_governance.planning import OpenAIPlannerSettings, build_planner_system_prompt
+from layer2_runtime_governance.acting import build_actor_system_prompt, build_actor_user_prompt
 from layer2_runtime_governance.governance import (
     OPAHttpPolicyEngine,
     OPAHttpPolicyEngineSettings,
+    build_opa_input_document,
 )
+from layer2_runtime_governance.nodes import observe_tool_result
+from layer2_runtime_governance.tool_contract import ObservedEvidence
 import layer2_runtime_governance.openrouter_client as openrouter_client_module
 
 
@@ -558,6 +566,48 @@ class _FakeOpenRouterCompletionWithoutRationaleClient:
         }
 
 
+class _FakeOpenRouterUnsupportedPrecisionCompletionClient:
+    # Return a completion with precise legal timing despite missing primary-source excerpt support.
+    def complete_tool_call(self, **kwargs):
+        return {
+            "tool_name": "emit_final_output",
+            "arguments": {
+                "summary": "Finalize the DMA summary.",
+                "output_text": (
+                    "Regulation (EU) 2022/1925 entered into force in 2023 and applies "
+                    "within the deadlines laid down in the regulation."
+                ),
+                "completion_rationale": "The current step appears complete from the available sources.",
+                "objective_satisfied": True,
+                "evidence_sufficient": True,
+                "confidence": 0.86,
+            },
+        }
+
+
+class _FakeOpenRouterSourceShortlistCompletionClient:
+    # Return a pure source-shortlist completion that should stay within source-discovery support.
+    def complete_tool_call(self, **kwargs):
+        return {
+            "tool_name": "emit_step_completed",
+            "arguments": {
+                "summary": "Lock in the official DMA source shortlist.",
+                "output_text": (
+                    "Shortlist of official EU sources for the Digital Markets Act (DMA):\n"
+                    "1. European Commission DMA portal: https://digital-markets-act.ec.europa.eu/index_en\n"
+                    "2. EUR-Lex DMA summary page: https://eur-lex.europa.eu/EN/legal-content/summary/digital-markets-act.html"
+                ),
+                "completion_rationale": (
+                    "The current step only requires identifying official source pages from the "
+                    "observed source-discovery evidence."
+                ),
+                "objective_satisfied": True,
+                "evidence_sufficient": True,
+                "confidence": 0.79,
+            },
+        }
+
+
 class _FakeOpenRouterJsonWithoutEnvelopeClient:
     # Return JSON without the actor envelope to verify fallback normalization.
     def complete_tool_call(self, **kwargs):
@@ -815,13 +865,28 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         )
 
         task_state = result["task_state"]
-        self.assertEqual(task_state.tool_call_count, 1)
         self.assertGreaterEqual(len(task_state.tool_results_history), 2)
-        self.assertTrue(task_state.tool_results_history[0].success)
-        self.assertFalse(task_state.tool_results_history[1].success)
-        self.assertIn(
-            "same tool request",
-            task_state.tool_results_history[1].error_message or "",
+        successful_results = [result for result in task_state.tool_results_history if result.success]
+        failed_results = [result for result in task_state.tool_results_history if not result.success]
+
+        self.assertGreaterEqual(len(successful_results), 1)
+        self.assertGreaterEqual(len(failed_results), 1)
+        self.assertTrue(
+            all(
+                sum(
+                    1
+                    for result in successful_results
+                    if result.request.plan_step_id == plan_step_id
+                )
+                == 1
+                for plan_step_id in {result.request.plan_step_id for result in successful_results}
+            )
+        )
+        self.assertTrue(
+            all(
+                "same tool request" in (result.error_message or "")
+                for result in failed_results
+            )
         )
 
     def test_write_action_is_denied_by_governance(self) -> None:
@@ -848,6 +913,40 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
                 "finalize_bootstrap",
             ],
         )
+
+    # Verify that the real OPA bundle blocks write capability even without external impact.
+    def test_opa_policy_denies_write_capability_without_external_impact(self) -> None:
+        opa_path = shutil.which("opa")
+        if opa_path is None:
+            self.skipTest("OPA executable is not available.")
+
+        policy_input = build_policy_evaluation_input(task_state=_build_policy_input_task_state())
+        opa_input = build_opa_input_document(policy_input=policy_input)
+        opa_input["actor"]["capability_mode"] = "write"
+        opa_input["actor"]["external_impact"] = False
+
+        # Exercise the actual Rego bundle so the runtime policy and Python stub stay aligned.
+        completed = subprocess.run(
+            [
+                opa_path,
+                "eval",
+                "--format",
+                "json",
+                "--data",
+                str(REPO_ROOT / "configs" / "opa" / "layer2_governance" / "decision.rego"),
+                "--stdin-input",
+                "data.layer2.governance.decision",
+            ],
+            input=json.dumps(opa_input),
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        parsed = json.loads(completed.stdout)
+        decision = parsed["result"][0]["expressions"][0]["value"]
+
+        self.assertEqual(decision["policy_decision"], "deny")
+        self.assertIn("write_capability_blocked", decision["reason_codes"])
 
     def test_actor_asks_for_clarification_routes_to_waiting_review(self) -> None:
         graph = _build_test_graph(actor_service=ClarificationActor())
@@ -969,6 +1068,33 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertEqual(compact_trace["governance_snapshot"]["oversight_pass_count"], 2)
         self.assertIsNotNone(compact_trace["governance_snapshot"]["last_oversight_assessment"])
 
+    # Verify replanning drops stale live tool context from the replaced step trajectory.
+    def test_replanner_clears_stale_live_tool_context(self) -> None:
+        state = _build_replanning_task_state()
+        state.last_tool_result = ToolExecutionResult(
+            request=ToolRequest(
+                plan_step_id="step_1",
+                tool_name=ToolName.FETCH_URL_TEXT,
+                reason="Old failed request.",
+                url="https://example.org/source",
+            ),
+            success=False,
+            summary="Old step failed.",
+            error_message="Duplicate request blocked.",
+        )
+        state.current_tool_request = ToolRequest(
+            plan_step_id="step_1",
+            tool_name=ToolName.FETCH_URL_TEXT,
+            reason="Old pending request.",
+            url="https://example.org/source",
+        )
+
+        replanned_state = replanner(state, replanner_service=StubReplanner())
+
+        self.assertIsNone(replanned_state.last_tool_result)
+        self.assertIsNone(replanned_state.current_tool_request)
+        self.assertEqual(replanned_state.current_plan_step.step_id, "step_1_replanned")
+
     def test_openai_replanner_converts_structured_payload_without_network(self) -> None:
         from layer2_runtime_governance.replanning import _ReplanningPayload, _ReplanStepPayload
 
@@ -1024,6 +1150,16 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             actor = build_default_actor()
 
         self.assertIsInstance(actor, OpenRouterActor)
+
+    # Verify planner settings stay constructible when no timeout override exists.
+    def test_openai_planner_settings_default_timeout_without_env(self) -> None:
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), patch(
+            "layer2_runtime_governance.planning._load_env_file_values",
+            return_value={},
+        ):
+            settings = OpenAIPlannerSettings.from_env()
+
+        self.assertEqual(settings.timeout_seconds, 30.0)
 
     def test_openrouter_actor_converts_json_action_to_actor_result_without_network(self) -> None:
         actor = OpenRouterActor(
@@ -1142,7 +1278,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             requested_model="gpt-oss-120b",
         )
 
-    def test_openrouter_json_without_envelope_is_normalized_to_progress(self) -> None:
+    def test_openrouter_json_without_envelope_is_blocked_when_not_recoverable(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
                 model="gpt-oss-120b",
@@ -1157,9 +1293,103 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
 
         result = actor.act(actor_task=actor_task)
 
+        self.assertEqual(result.result_type, ActorResultType.BLOCKED)
+        self.assertIn("malformed JSON", result.summary)
+        self.assertIsNotNone(result.blocking_reason)
+        self.assertIn("without a tool_name", result.blocking_reason)
+
+    # Verify the planner prompt explicitly discourages oversplitting small research tasks.
+    def test_planner_prompt_discourages_small_task_over_segmentation(self) -> None:
+        prompt = build_planner_system_prompt()
+
+        self.assertIn("prefer 2-3 semantic steps", prompt)
+        self.assertIn('Do not split "down-select sources"', prompt)
+
+    # Verify the actor prompt reinforces current-step boundaries and completion with existing evidence.
+    def test_actor_prompts_bias_toward_current_step_completion(self) -> None:
+        state = _build_policy_input_task_state()
+        state.current_plan_step.step_id = "replan_step_1"
+        state.current_plan_step.objective = (
+            "Use the already-fetched Commission page content to extract high-level supported themes."
+        )
+        state.observed_evidence.append(
+            ObservedEvidence(
+                evidence_id="replan_step_1:tool:1:source:1",
+                plan_step_id="replan_step_1",
+                title="Commission DMA Legislation",
+                locator="https://digital-markets-act.ec.europa.eu/legislation_en",
+                excerpt="The DMA contains the main rules for the designation of gatekeepers and the implementation of obligations and prohibitions.",
+                source_tool=ToolName.FETCH_URL_TEXT,
+            )
+        )
+        state.scratchpad.append(
+            ScratchpadEntry(
+                turn_index=1,
+                plan_step_id="replan_step_1",
+                entry_type=ScratchpadEntryType.OBSERVATION,
+                summary="Observed tool result from 'fetch_url_text': URL text fetched successfully.",
+            )
+        )
+        actor_task = build_actor_task(task_state=state)
+
+        system_prompt = build_actor_system_prompt()
+        user_prompt = build_actor_user_prompt(actor_task=actor_task)
+
+        self.assertIn("Do not gather evidence for future steps", system_prompt)
+        self.assertIn("replacement step objective overrides the older blocked path", system_prompt)
+        self.assertIn("A discovered source URL is not factual support", system_prompt)
+        self.assertIn('"prefer_completion_with_existing_evidence": true', user_prompt)
+        self.assertIn('"replan_replacement_step_active": true', user_prompt)
+        self.assertIn('"source_discovery_is_not_direct_fact_support": true', user_prompt)
+        self.assertIn('"available_evidence_support_level": "high_level_summary"', user_prompt)
+
+    def test_openrouter_completion_with_unsupported_precision_stays_in_progress(self) -> None:
+        actor = OpenRouterActor(
+            settings=OpenRouterActorSettings(
+                model="gpt-oss-120b",
+                api_key="test-key",
+                base_url="https://openrouter.ai/api/v1",
+                timeout_seconds=1.0,
+            )
+        )
+        actor._client = _FakeOpenRouterUnsupportedPrecisionCompletionClient()  # type: ignore[attr-defined]
+        state = _build_high_precision_research_task_state()
+        actor_task = build_actor_task(task_state=state)
+
+        result = actor.act(actor_task=actor_task)
+
+        self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
+        self.assertIsNotNone(result.step_validation)
+        self.assertFalse(result.step_validation.objective_satisfied)
+        self.assertFalse(result.step_validation.evidence_sufficient)
+        self.assertEqual(
+            result.step_validation.next_action,
+            StepValidationDecision.REQUEST_MORE_EVIDENCE,
+        )
+        self.assertIn("more specific than the observed evidence", result.summary.lower())
+        self.assertIsNotNone(result.step_validation.residual_uncertainty)
+        self.assertIn("more specific legal or factual claims", result.step_validation.residual_uncertainty)
+
+    def test_openrouter_source_shortlist_completion_stays_at_source_discovery(self) -> None:
+        actor = OpenRouterActor(
+            settings=OpenRouterActorSettings(
+                model="gpt-oss-120b",
+                api_key="test-key",
+                base_url="https://openrouter.ai/api/v1",
+                timeout_seconds=1.0,
+            )
+        )
+        actor._client = _FakeOpenRouterSourceShortlistCompletionClient()  # type: ignore[attr-defined]
+        state = _build_source_shortlist_task_state()
+        actor_task = build_actor_task(task_state=state)
+
+        result = actor.act(actor_task=actor_task)
+
         self.assertEqual(result.result_type, ActorResultType.INTERMEDIATE_OUTPUT)
-        self.assertEqual(result.step_validation.confidence, 0.3)
-        self.assertIn("without a tool_name", result.output_text)
+        self.assertIsNotNone(result.step_validation)
+        self.assertTrue(result.step_validation.objective_satisfied)
+        self.assertTrue(result.step_validation.evidence_sufficient)
+        self.assertEqual(result.step_validation.next_action, StepValidationDecision.COMPLETE_STEP)
 
     def test_openrouter_empty_response_becomes_blocked_actor_result(self) -> None:
         actor = OpenRouterActor(
@@ -1208,8 +1438,57 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertEqual(len(task_state.plan_steps), 1)
         self.assertEqual(task_state.plan_steps[0].status, PlanStepStatus.COMPLETED)
         self.assertEqual(len(task_state.executed_steps), 1)
-        self.assertIsNone(task_state.final_output_text)
+        self.assertEqual(
+            task_state.final_output_text,
+            "Collected grounded evidence from official sources.",
+        )
         self.assertIn("trimmed to the configured max_steps budget", task_state.step_history[1].summary)
+
+    # Verify source-level observation does not clone one global excerpt across many sources.
+    def test_observe_tool_result_uses_single_fallback_evidence_for_multi_source_results(self) -> None:
+        task_state = TaskState.from_intake(_build_research_intake_result())
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Collect evidence.",
+                rationale="The step needs grounded sources.",
+                expected_outcome="Observed evidence.",
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        task_state.current_plan_step_index = 0
+        task_state.tool_call_count = 1
+        task_state.last_tool_result = ToolExecutionResult(
+            request=ToolRequest(
+                plan_step_id="step_1",
+                tool_name=ToolName.WEB_SEARCH,
+                reason="Collect sources.",
+                query="official eu dma sources",
+            ),
+            success=True,
+            summary="Web search executed successfully.",
+            content="One global transcript covering several returned sources in aggregate.",
+            sources=(
+                ToolSource(
+                    title="Source A",
+                    locator="https://example.org/a",
+                    snippet=None,
+                ),
+                ToolSource(
+                    title="Source B",
+                    locator="https://example.org/b",
+                    snippet=None,
+                ),
+            ),
+        )
+
+        observed_state = observe_tool_result(task_state)
+
+        self.assertEqual(len(observed_state.observed_evidence), 1)
+        self.assertEqual(
+            observed_state.observed_evidence[0].evidence_id,
+            "step_1:tool:1:fallback",
+        )
 
 
 def _build_research_intake_result(
@@ -1279,6 +1558,95 @@ def _build_policy_input_task_state(*, read_only_mode: bool = False) -> TaskState
         ),
     )
     state.current_tool_request = state.actor_result.tool_request
+    return state
+
+
+def _build_high_precision_research_task_state() -> TaskState:
+    state = TaskState.from_intake(_build_research_intake_result())
+    state.plan_steps = [
+        PlanStep(
+            step_id="step_2",
+            objective=(
+                "Extract the key substance needed for a concise overview, including "
+                "timeline or applicability details."
+            ),
+            rationale="The final summary should stay aligned with official sources.",
+            expected_outcome="A concise overview with supported timeline details.",
+            status=PlanStepStatus.IN_PROGRESS,
+        )
+    ]
+    state.current_plan_step_index = 0
+    state.actor_turn_count = 2
+    state.observed_evidence.append(
+        ObservedEvidence(
+            evidence_id="step_2:tool:2:source:1",
+            plan_step_id="step_2",
+            title="Digital Markets Act",
+            locator="https://digital-markets-act.ec.europa.eu/index_en",
+            excerpt=(
+                "The Digital Markets Act is the EU’s law to make the markets in the digital "
+                "sector fairer and more contestable."
+            ),
+            source_tool=ToolName.FETCH_URL_TEXT,
+        )
+    )
+    state.scratchpad.append(
+        ScratchpadEntry(
+            turn_index=1,
+            plan_step_id="step_2",
+            entry_type=ScratchpadEntryType.OBSERVATION,
+            summary="Observed tool result from 'fetch_url_text': URL fetch succeeded but extracted readable text was empty.",
+        )
+    )
+    state.scratchpad.append(
+        ScratchpadEntry(
+            turn_index=2,
+            plan_step_id="step_2",
+            entry_type=ScratchpadEntryType.OBSERVATION,
+            summary="Observed tool result from 'fetch_url_text': URL text fetched successfully.",
+        )
+    )
+    return state
+
+
+def _build_source_shortlist_task_state() -> TaskState:
+    state = TaskState.from_intake(_build_research_intake_result())
+    state.plan_steps = [
+        PlanStep(
+            step_id="replan_step_1",
+            objective="Lock in a shortlist of official EU sources for the DMA.",
+            rationale=(
+                "Use only the observed evidence that these official pages exist and avoid "
+                "substantive factual claims."
+            ),
+            expected_outcome="A final shortlist of at least two official source URLs.",
+            status=PlanStepStatus.IN_PROGRESS,
+        )
+    ]
+    state.current_plan_step_index = 0
+    state.actor_turn_count = 2
+    state.observed_evidence.append(
+        ObservedEvidence(
+            evidence_id="replan_step_1:tool:1:fallback",
+            plan_step_id="replan_step_1",
+            title="web_search",
+            locator="Digital Markets Act official site:europa.eu OR site:eur-lex.europa.eu",
+            excerpt=(
+                "- European Commission DMA portal: https://digital-markets-act.ec.europa.eu/index_en\n"
+                "- EUR-Lex DMA summary page: https://eur-lex.europa.eu/EN/legal-content/summary/digital-markets-act.html"
+            ),
+            source_tool=ToolName.WEB_SEARCH,
+            support_level=EvidenceSupportLevel.SOURCE_DISCOVERY,
+        )
+    )
+    state.scratchpad.append(
+        ScratchpadEntry(
+            turn_index=1,
+            plan_step_id="replan_step_1",
+            entry_type=ScratchpadEntryType.OBSERVATION,
+            summary="Observed tool result from 'web_search': Web search executed successfully.",
+        )
+    )
     return state
 
 
