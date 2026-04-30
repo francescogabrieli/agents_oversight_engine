@@ -180,15 +180,12 @@ class Layer1IntakeTests(unittest.TestCase):
             "default_policy": {
                 "confidence_threshold": 0.65,
                 "budget": {"max_steps": 5, "max_tool_calls": 10},
-                "allowed_tools": [],
-                "disallowed_tools": [],
                 "read_only_mode": False,
             },
             "named_profiles": {},
             "domain_overrides": {
                 "external_communication": {
                     "read_only_mode": True,
-                    "disallowed_tools": ["send_email"],
                 }
             },
             "sensitivity_overrides": {
@@ -226,7 +223,6 @@ class Layer1IntakeTests(unittest.TestCase):
         self.assertEqual(profile.max_steps, 2)
         self.assertEqual(profile.max_tool_calls, 3)
         self.assertTrue(profile.read_only_mode)
-        self.assertEqual(profile.disallowed_tools, ["send_email"])
 
 
 class _StubPolicyRepository:
@@ -244,8 +240,6 @@ class _StubPolicyRepository:
             confidence_threshold=0.65,
             max_steps=5,
             max_tool_calls=10,
-            allowed_tools=[],
-            disallowed_tools=[],
             read_only_mode=False,
         )
 

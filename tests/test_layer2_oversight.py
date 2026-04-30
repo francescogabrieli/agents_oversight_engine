@@ -85,7 +85,12 @@ class Layer2OversightTests(unittest.TestCase):
         self.assertEqual(config.min_evidence_quality, 0.70)
         self.assertEqual(config.evidence_quality_weights.evidence_sufficient, 0.30)
         self.assertEqual(config.risk_scores.tool_risk["low"], 0.15)
-        self.assertEqual(config.trajectory_penalties.actor_turn_overage_penalty, 0.15)
+        self.assertEqual(config.trajectory_penalties.max_actor_turns_per_step, 5)
+        self.assertEqual(config.trajectory_penalties.actor_turn_overage_penalty, 0.10)
+        self.assertEqual(
+            config.trajectory_penalties.completion_attempt_turn_overage_scale,
+            0.50,
+        )
 
     def test_evidence_quality_strong_when_validation_and_sources_are_strong(self) -> None:
         task_state = _build_task_state_with_actor_result(
@@ -209,6 +214,30 @@ class Layer2OversightTests(unittest.TestCase):
         self.assertLess(assessment.score, 0.60)
         self.assertIn(OversightReasonCode.ACTOR_TURNS_EXCEEDED, assessment.reason_codes)
         self.assertIn(OversightReasonCode.NEEDS_REPLAN_SIGNAL, assessment.reason_codes)
+
+    # A nearly finished low-sensitivity step should not be forced into replanning by modest turn overage.
+    def test_trajectory_health_softens_turn_overage_for_complete_step_attempts(self) -> None:
+        task_state = _healthy_completion_state()
+        task_state.actor_turn_count = 8
+        _add_step_turn_entries(
+            task_state=task_state,
+            plan_step_id="step_1",
+            turn_indexes=range(1, 9),
+        )
+        policy_input = build_policy_evaluation_input(task_state=task_state)
+
+        assessment = evaluate_trajectory_health(
+            task_state=task_state,
+            policy_input=policy_input,
+            config=load_oversight_policy_config(),
+        )
+
+        self.assertGreaterEqual(assessment.score, 0.60)
+        self.assertEqual(assessment.level, OversightSignalLevel.HEALTHY)
+        self.assertIn(
+            OversightReasonCode.COMPLETION_ATTEMPT_TURN_OVERAGE_SOFTENED,
+            assessment.reason_codes,
+        )
 
     # Ensure a replanned step is not penalized by global turns and failed tools from the old step.
     def test_trajectory_health_scopes_turns_and_tool_failures_to_current_step(self) -> None:

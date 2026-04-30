@@ -460,8 +460,31 @@ Le formule sono configurabili e auditabili:
 - `operational_risk` combina rischio del tool nel registry, sensibilita del task, impatto esterno, capability write-like e richiesta di human review
 - `trajectory_health` penalizza troppi turni actor, tool falliti, segnali `needs_replan` e incertezza residua con confidence bassa
 
+Granularita dell'evidenza:
+- le affermazioni cronologiche ufficiali come `entered into force`, `applies from`, `applies on` e `timeline` devono normalmente essere trattate come `detailed_extracted`
+- `primary_legal` resta riservato a threshold, articoli, numeri di utenti, turnover e altri dettagli giuridici strettamente normativi
+- i summary brevi e ad alto livello devono restare eseguibili con evidenza `high_level_summary`: parole generali come gatekeeper, obblighi, divieti, enforcement o core platform services non devono trasformare automaticamente il task in un'estrazione clause-by-clause
+- esempi granulari di obblighi, divieti o requisiti specifici devono essere richiesti solo quando il task li domanda o quando sono direttamente presenti nelle evidenze osservate
+
 Il layer produce una raccomandazione, non un permesso assoluto.
 OPA resta il confine hard: l'oversight puo solo confermare o rendere piu prudente la decisione di policy.
+
+#### Guardrail Proporzionati
+
+Un obiettivo architetturale esplicito e che i vincoli di governance migliorino l'affidabilita senza degradare inutilmente il loop agentico.
+I guardrail devono quindi essere:
+- proporzionati alla richiesta utente e al livello di precisione atteso
+- cumulativi solo quando misurano rischi diversi, non quando duplicano lo stesso blocco
+- capaci di ridurre la precisione del draft prima di aumentare l'escalation
+- verificabili nel trace, in modo che ogni `request_more_evidence`, `replan` o `wait_human_review` mostri quale vincolo ha inciso
+
+Per task piccoli come "fonti ufficiali + riassunto breve", il runtime deve preferire:
+- piano compatto
+- una o due raccolte di evidenza ufficiale
+- sintesi al livello di precisione supportato
+- nessun replan se il problema si risolve abbassando granularita o usando evidenza gia raccolta
+
+Questa scelta non indebolisce la governance: separa il controllo utile dall'attrito operativo. Un claim preciso non supportato resta bloccato, ma un summary alto livello non deve fallire solo perche contiene termini normali del dominio.
 
 #### Judge
 

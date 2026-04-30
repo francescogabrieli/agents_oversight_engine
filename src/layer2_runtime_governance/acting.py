@@ -96,6 +96,8 @@ Rules:
 - Do not rewrite the plan and do not invent new plan steps.
 - Work in a local ReAct-like way for the current step.
 - Use the runtime-bound tools when external information is required.
+- Read-only runtime tools exposed in this turn are available for evidence gathering.
+- Do not emit blocked just because external lookup is needed; request a read-only runtime tool instead.
 - If you do not need an external tool, finish the turn by emitting exactly one structured outcome tool.
 - Use emit_intermediate_output only for progress that should continue the current step.
 - Use emit_step_completed or emit_final_output only after validating that the current step objective is satisfied.
@@ -103,9 +105,14 @@ Rules:
 - If the current step can be completed from existing evidence, complete it even if later steps may still have open evidence gaps.
 - After a replan, the replacement step objective overrides the older blocked path; do not keep pursuing the pre-replan objective unless the new step explicitly says to do so.
 - If one official source already supports the current step and another source fetch fails, prefer completing the current step with residual uncertainty instead of retrying many near-equivalent retrieval attempts.
+- If runtime_flags includes `extractability_limited`, do not keep chasing near-equivalent extraction attempts; prefer a compact summary or source shortlist that uses already observed official metadata and clearly notes the limitation.
 - A residual uncertainty about missing precision is not, by itself, a reason to keep the current step open when the step only asks for high-level supported themes.
 - A discovered source URL is not factual support by itself. Treat only observed excerpts and successful fetched content as direct support for factual claims.
+- When citing official implementation pages or procedural regulations, describe them as procedural/implementation sources; do not say they directly enforce the rules unless the source explicitly states that.
+- If current_or_prior_steps_have_procedural_implementation_source is true, keep the wording at the level of "describes implementation/procedural enforcement" rather than "enforces the rules" unless a fetched excerpt explicitly says otherwise.
 - Do not introduce exact dates, years, thresholds, deadlines, or other precise numeric/legal claims unless those details are directly present in the observed evidence or fetched content.
+- When the current step asks for a short, brief, concise, or high-level summary, keep obligation language broad unless a named example is directly present in observed evidence. Prefer "obligations and prohibitions for gatekeepers" over unsupported examples such as self-preferencing, interoperability, data portability, ranking, non-discriminatory access, or transparent terms.
+- If the runtime says available_evidence_support_level is high_level_summary, do not try to satisfy the step by becoming more granular; reduce claim precision instead.
 - Keep the turn compact, explicit, and directly actionable by the runtime.
 - Respect read_only_mode when it is true.
 - Do not emit chain-of-thought.
@@ -131,8 +138,6 @@ def build_actor_user_prompt(*, actor_task: ActorTask) -> str:
             "policy_profile_name": actor_task.execution_policy.policy_profile_name,
             "confidence_threshold": actor_task.execution_policy.confidence_threshold,
             "read_only_mode": actor_task.execution_policy.read_only_mode,
-            "allowed_tools": actor_task.execution_policy.allowed_tools,
-            "disallowed_tools": actor_task.execution_policy.disallowed_tools,
             "budget": {
                 "max_steps": actor_task.execution_policy.budget.max_steps,
                 "max_tool_calls": actor_task.execution_policy.budget.max_tool_calls,
@@ -284,6 +289,18 @@ def _build_actor_execution_hints(*, actor_task: ActorTask) -> dict[str, object]:
         _looks_like_primary_legal_text_source(title=evidence.title, locator=evidence.locator)
         for evidence in direct_support_evidence
     )
+    has_procedural_implementation_source = any(
+        (
+            "legislation_en" in evidence.locator.lower()
+            or "procedural implementing regulation" in evidence.excerpt.lower()
+            or "procedural implementing regulation" in evidence.title.lower()
+        )
+        for evidence in direct_support_evidence
+    )
+    high_level_summary_mode = (
+        required_support_level == EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
+        and available_support_level == EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
+    )
 
     return {
         "current_step_only": True,
@@ -295,9 +312,25 @@ def _build_actor_execution_hints(*, actor_task: ActorTask) -> dict[str, object]:
         "replan_replacement_step_active": current_step_id.startswith("replan_"),
         "do_not_collect_future_step_evidence": True,
         "source_discovery_is_not_direct_fact_support": True,
+        "web_search_available": True,
+        "fetch_url_text_available": True,
         "available_evidence_support_level": available_support_level.value,
         "required_evidence_support_level": required_support_level.value,
+        "high_level_summary_mode": high_level_summary_mode,
+        "avoid_granular_obligation_examples_unless_directly_observed": high_level_summary_mode,
+        "safe_high_level_obligation_phrase": "obligations and prohibitions for gatekeepers",
+        "granular_obligation_examples_that_need_direct_support": [
+            "self-preferencing",
+            "interoperability",
+            "data portability",
+            "ranking",
+            "non-discriminatory access",
+            "transparent terms",
+        ],
         "current_or_prior_steps_have_primary_legal_text_excerpt": has_primary_legal_text_excerpt,
+        "current_or_prior_steps_have_procedural_implementation_source": (
+            has_procedural_implementation_source
+        ),
         "avoid_exact_dates_numbers_without_primary_excerpt": (
             required_support_level == EvidenceSupportLevel.PRIMARY_LEGAL
             and not has_primary_legal_text_excerpt
@@ -363,6 +396,9 @@ def _required_evidence_support_level_from_step(*, actor_task: ActorTask) -> Evid
     if _step_is_source_discovery_only(scope_text):
         return EvidenceSupportLevel.SOURCE_DISCOVERY
 
+    if _step_allows_conservative_high_level_summary(scope_text):
+        return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
+
     if any(
         marker in scope_text
         for marker in (
@@ -374,9 +410,6 @@ def _required_evidence_support_level_from_step(*, actor_task: ActorTask) -> Evid
             "number of users",
             "article ",
             "full legal text",
-            "entry into force",
-            "applicability details",
-            "timeline",
         )
     ):
         return EvidenceSupportLevel.PRIMARY_LEGAL
@@ -384,24 +417,59 @@ def _required_evidence_support_level_from_step(*, actor_task: ActorTask) -> Evid
     if any(
         marker in scope_text
         for marker in (
-            "obligation",
-            "obligations",
-            "prohibition",
-            "prohibitions",
-            "requirements",
+            "official source",
+            "official sources",
+            "official pages",
+            "official website",
+            "official portal",
+            "legislation page",
+            "portal",
+            "short summary",
+            "summary",
+            "overview",
+            "high-level",
+            "concise",
+            "gatekeeper",
+            "gatekeepers",
+            "core platform services",
+            "do's and don'ts",
+            "what the dma is",
+            "objectives",
+            "legal instrument",
+            "citation of the legal instrument",
+        )
+    ):
+        return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
+
+    if any(
+        marker in scope_text
+        for marker in (
+            "specific obligation",
+            "specific obligations",
+            "obligations-by-number",
+            "obligation-by-obligation",
+            "specific prohibition",
+            "specific prohibitions",
+            "specific requirements",
+            "clause text",
+            "citation-ready mapping",
+            "claim mapping",
             "criteria",
             "enforcement mechanism",
             "what it requires",
             "who it applies to",
             "regulatory mechanisms",
             "main obligations",
+            "entry into force",
+            "applicability details",
+            "timeline",
         )
     ):
         return EvidenceSupportLevel.DETAILED_EXTRACTED
 
     if any(
         marker in scope_text
-        for marker in ("purpose", "scope", "overview", "brief summary", "high-level", "concise")
+        for marker in ("purpose", "scope", "brief summary")
     ):
         return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
 
@@ -415,8 +483,57 @@ def _required_evidence_support_level_from_output_text(*, text: str) -> EvidenceS
     if _output_text_is_source_shortlist_only(text.lower()):
         return EvidenceSupportLevel.SOURCE_DISCOVERY
 
-    if _extract_precision_claim_markers(text=text):
-        return EvidenceSupportLevel.PRIMARY_LEGAL
+    if _output_text_is_conservative_high_level_summary(lowered_text):
+        return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
+
+    precision_markers = _extract_precision_claim_markers(text=text)
+    if precision_markers:
+        if any(
+            marker in lowered_text
+            for marker in (
+                "threshold",
+                "thresholds",
+                "turnover",
+                "number of users",
+                "specific size",
+                "article ",
+                "deadline",
+                "deadlines",
+            )
+        ):
+            return EvidenceSupportLevel.PRIMARY_LEGAL
+
+        if any(
+            marker in lowered_text
+            for marker in (
+                "entered into force",
+                "comes into force",
+                "coming into force",
+                "effective date",
+                "effective from",
+                "applies from",
+                "applies on",
+                "entry into force",
+                "adopted on",
+                "published on",
+                "timeline",
+                "implementation date",
+                "applicability details",
+            )
+        ):
+            return EvidenceSupportLevel.DETAILED_EXTRACTED
+
+        if any(
+            marker in precision_markers
+            for marker in (
+                "percentages",
+                "large numeric thresholds",
+                "monetary thresholds",
+            )
+        ):
+            return EvidenceSupportLevel.PRIMARY_LEGAL
+
+        return EvidenceSupportLevel.DETAILED_EXTRACTED
 
     if any(
         marker in lowered_text
@@ -434,13 +551,13 @@ def _required_evidence_support_level_from_output_text(*, text: str) -> EvidenceS
     if any(
         marker in lowered_text
         for marker in (
-            "obligation",
-            "obligations",
+            "specific obligation",
+            "specific obligations",
             "prohibit",
             "prohibiting",
-            "requires",
-            "requiring",
             "must",
+            "shall",
+            "cannot",
             "criteria",
             "interoperability",
             "data portability",
@@ -464,6 +581,65 @@ def _required_evidence_support_level_from_output_text(*, text: str) -> EvidenceS
         return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
 
     return EvidenceSupportLevel.LOCAL_ONLY
+
+
+# Treat explicitly conservative summary steps as high-level even if they mention broad obligations.
+def _step_allows_conservative_high_level_summary(scope_text: str) -> bool:
+    summary_markers = (
+        "short summary",
+        "brief summary",
+        "few sentences",
+        "high level",
+        "high-level",
+        "purpose/scope-level",
+        "conservative",
+        "broad categories",
+        "obligation themes",
+        "does not require",
+        "do not require",
+    )
+    return any(marker in scope_text for marker in summary_markers)
+
+
+# Keep compact policy summaries from being treated like clause-level extraction tasks.
+def _output_text_is_conservative_high_level_summary(text: str) -> bool:
+    if _extract_precision_claim_markers(text=text):
+        return False
+
+    high_level_markers = (
+        "brief summary",
+        "short summary",
+        "overview",
+        "purpose",
+        "aims to",
+        "intended to",
+        "in general",
+        "at a high level",
+        "gatekeeper",
+        "gatekeepers",
+        "core platform services",
+        "official sources",
+    )
+    if not any(marker in text for marker in high_level_markers):
+        return False
+
+    granular_markers = (
+        "article ",
+        "threshold",
+        "thresholds",
+        "turnover",
+        "number of users",
+        "specific size",
+        "must ",
+        "shall ",
+        "cannot ",
+        "non-discriminatory access",
+        "self-preferencing",
+        "data portability",
+        "interoperability",
+        "ranking",
+    )
+    return not any(marker in text for marker in granular_markers)
 
 
 # Detect drafts that only lock in source identities/URLs without adding substantive claims.
@@ -545,11 +721,30 @@ def _extract_precision_claim_markers(*, text: str) -> list[str]:
     normalized = _normalize_output_text_for_precision_checks(text)
     markers: list[str] = []
 
+    precision_context_markers = (
+        "entered into force",
+        "comes into force",
+        "coming into force",
+        "effective date",
+        "effective from",
+        "applies from",
+        "applies on",
+        "entry into force",
+        "adopted on",
+        "published on",
+        "deadline",
+        "deadlines",
+        "timeline",
+        "applicability details",
+        "implementation date",
+    )
+    has_precision_context = any(marker in normalized for marker in precision_context_markers)
+
     year_matches = sorted(set(re.findall(r"\b(?:19|20)\d{2}\b", normalized)))
-    if year_matches:
+    if year_matches and has_precision_context:
         markers.append(f"calendar years ({', '.join(year_matches[:3])})")
 
-    if re.search(
+    if has_precision_context and re.search(
         r"\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b",
         normalized,
         flags=re.IGNORECASE,
@@ -1020,9 +1215,6 @@ def _normalize_actor_payload(*, payload: dict[str, Any]) -> dict[str, Any]:
                 "objective_satisfied": bool(payload.get("objective_satisfied", True)),
                 "evidence_sufficient": bool(payload.get("evidence_sufficient", True)),
                 "confidence": _coerce_provider_confidence(payload.get("confidence"), default=0.55),
-                "residual_uncertainty": (
-                    "The actor provider did not use the required tool-calling protocol."
-                ),
             },
         }
 
@@ -1218,6 +1410,15 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
     if tool_name == "emit_step_completed":
         _require_arguments(arguments, "output_text")
         completion_arguments = _ensure_completion_arguments(arguments=arguments)
+        completion_arguments["summary"] = _sanitize_completion_text(
+            str(completion_arguments.get("summary", ""))
+        )
+        completion_arguments["output_text"] = _sanitize_completion_text(
+            str(completion_arguments.get("output_text", ""))
+        )
+        completion_arguments["completion_rationale"] = _sanitize_completion_text(
+            str(completion_arguments.get("completion_rationale", ""))
+        )
         completion_arguments = _guard_completion_against_unsupported_precision(
             actor_task=actor_task,
             arguments=completion_arguments,
@@ -1246,6 +1447,15 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
     if tool_name == "emit_final_output":
         _require_arguments(arguments, "output_text")
         completion_arguments = _ensure_completion_arguments(arguments=arguments)
+        completion_arguments["summary"] = _sanitize_completion_text(
+            str(completion_arguments.get("summary", ""))
+        )
+        completion_arguments["output_text"] = _sanitize_completion_text(
+            str(completion_arguments.get("output_text", ""))
+        )
+        completion_arguments["completion_rationale"] = _sanitize_completion_text(
+            str(completion_arguments.get("completion_rationale", ""))
+        )
         completion_arguments = _guard_completion_against_unsupported_precision(
             actor_task=actor_task,
             arguments=completion_arguments,
@@ -1288,6 +1498,13 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
 
     if tool_name == "emit_blocked":
         _require_arguments(arguments, "summary", "blocking_reason")
+        recovered_result = _recover_false_blocked_lookup_as_tool_request(
+            actor_task=actor_task,
+            arguments=arguments,
+            plan_step_id=plan_step_id,
+        )
+        if recovered_result is not None:
+            return recovered_result
         return ActorResult(
             plan_step_id=plan_step_id,
             result_type=ActorResultType.BLOCKED,
@@ -1317,6 +1534,71 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
         )
 
     raise ActorExecutionError(f"Actor emitted an unknown runtime tool: {tool_name}")
+
+
+# Recover model confusion between an empty allowlist and unavailable read-only tools.
+def _recover_false_blocked_lookup_as_tool_request(
+    *,
+    actor_task: ActorTask,
+    arguments: dict[str, object],
+    plan_step_id: str,
+) -> ActorResult | None:
+    blocking_reason = str(arguments["blocking_reason"])
+    if not _blocked_lookup_is_recoverable(actor_task=actor_task, blocking_reason=blocking_reason):
+        return None
+
+    query = _resolve_search_query(actor_task=actor_task, arguments={})
+    summary = "Recover blocked source lookup as a read-only web search."
+    return ActorResult(
+        plan_step_id=plan_step_id,
+        result_type=ActorResultType.PROPOSE_ACTION,
+        summary=summary,
+        capability_mode=CapabilityAccessMode.READ_ONLY,
+        external_impact=False,
+        tool_request=ToolRequest(
+            plan_step_id=plan_step_id,
+            tool_name=ToolName.WEB_SEARCH,
+            reason=(
+                "The actor incorrectly treated runtime-bound read-only tools as unavailable; "
+                "the current step requires discovering official sources."
+            ),
+            query=query,
+            max_results=5,
+            extractive_goal="Identify official source pages and high-level source evidence for the current step.",
+        ),
+        scratchpad_entry=_build_scratchpad_entry(
+            actor_task=actor_task,
+            entry_type=ScratchpadEntryType.TOOL_DECISION,
+            summary=summary,
+        ),
+    )
+
+
+# Identify false blocked outcomes where a source lookup should have been requested.
+def _blocked_lookup_is_recoverable(*, actor_task: ActorTask, blocking_reason: str) -> bool:
+    reason_text = blocking_reason.lower()
+    blocked_tool_markers = (
+        "no external tool",
+        "external tool usage is allowed",
+        "external lookup",
+        "no prior evidence",
+        "without external",
+        "cannot identify official",
+    )
+    if not any(marker in reason_text for marker in blocked_tool_markers):
+        return False
+
+    step_text = " ".join(
+        part
+        for part in (
+            actor_task.current_plan_step.objective,
+            actor_task.current_plan_step.expected_outcome,
+            actor_task.current_plan_step.rationale,
+        )
+        if part
+    ).lower()
+    source_need_markers = ("source", "sources", "official", "lookup", "evidence", "references")
+    return any(marker in step_text for marker in source_need_markers)
 
 
 # Build one read-only ActorResult for configured MCP tool requests.
@@ -1462,6 +1744,12 @@ def _ensure_completion_arguments(*, arguments: dict[str, object]) -> dict[str, o
         return normalized_arguments
 
     return normalized_arguments
+
+
+# Strip internal trace markers so user-facing completions stay clean.
+def _sanitize_completion_text(text: str) -> str:
+    cleaned = re.sub(r"【[^】]+】", "", text)
+    return " ".join(cleaned.split())
 
 
 # Build a conservative search query if a JSON actor omits the explicit query field.

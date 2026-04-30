@@ -18,49 +18,13 @@ decision := {
 }
 
 decision := {
-  "policy_decision": "deny",
-  "reason_codes": ["tool_disallowed"],
-  "summary": "Requested tool is explicitly disallowed."
-} if {
-  not write_capability_blocked
-  tool_is_disallowed
-}
-
-decision := {
-  "policy_decision": "require_human_review",
-  "reason_codes": ["tool_not_allowed"],
-  "summary": "Requested tool is outside the allowed tool list."
-} if {
-  not write_capability_blocked
-  not tool_is_disallowed
-  allowed_tool_list_present
-  input.tool.name != null
-  not tool_is_allowed
-}
-
-decision := {
   "policy_decision": "allow_read_only",
   "reason_codes": ["read_only_allowed"],
   "summary": "Read-only capability use is allowed by the active policy."
 } if {
   not write_capability_blocked
-  not tool_is_disallowed
   input.tool.name != null
   read_only_tool_request
-  not allowed_tool_list_present
-}
-
-decision := {
-  "policy_decision": "allow_read_only",
-  "reason_codes": ["read_only_allowed"],
-  "summary": "Read-only capability use is allowed by the active policy."
-} if {
-  not write_capability_blocked
-  not tool_is_disallowed
-  input.tool.name != null
-  read_only_tool_request
-  allowed_tool_list_present
-  tool_is_allowed
 }
 
 decision := {
@@ -69,7 +33,6 @@ decision := {
   "summary": "The actor requested clarification."
 } if {
   not write_capability_blocked
-  not tool_is_disallowed
   not read_only_tool_request
   clarification_requested
 }
@@ -80,7 +43,6 @@ decision := {
   "summary": "Local output and replanning remain within policy."
 } if {
   not write_capability_blocked
-  not tool_is_disallowed
   input.tool.name == null
   not read_only_tool_request
   not clarification_requested
@@ -92,20 +54,6 @@ write_capability_blocked if {
 
 write_capability_blocked if {
   input.actor.capability_mode == "write"
-}
-
-tool_is_disallowed if {
-  input.tool.name != null
-  input.tool.name == input.policy.disallowed_tools[_]
-}
-
-allowed_tool_list_present if {
-  count(input.policy.allowed_tools) > 0
-}
-
-tool_is_allowed if {
-  input.tool.name != null
-  input.tool.name == input.policy.allowed_tools[_]
 }
 
 read_only_tool_request if {

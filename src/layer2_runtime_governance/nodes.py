@@ -19,6 +19,7 @@ from .state import (
     ExecutedPlanStep,
     PlanStep,
     PlanStepStatus,
+    RuntimeFlag,
     RuntimeState,
     ScratchpadEntry,
     ScratchpadEntryType,
@@ -32,6 +33,7 @@ from .tool_contract import (
     ToolExecutionResult,
     ToolGatewayPort,
     ToolName,
+    ToolRequest,
 )
 from .replanning import ReplannerPort
 
@@ -63,8 +65,12 @@ def planner(state: TaskState, *, planner_service: PlannerPort) -> TaskState:
         return state
 
     decision = planner_service.plan(task_state=state)
-    state.plan_steps = _enforce_plan_step_budget(
+    planned_steps = _compact_small_source_summary_plan(
+        task_state=state,
         plan_steps=decision.plan_steps,
+    )
+    state.plan_steps = _enforce_plan_step_budget(
+        plan_steps=planned_steps,
         max_steps=state.execution_policy.budget.max_steps,
     )
     state.current_plan_step_index = 0 if state.plan_steps else None
@@ -76,7 +82,12 @@ def planner(state: TaskState, *, planner_service: PlannerPort) -> TaskState:
         state.current_plan_step.status = PlanStepStatus.IN_PROGRESS
 
     planner_summary = "Initial semantic full plan created from the current task state."
-    if len(state.plan_steps) != len(decision.plan_steps):
+    if len(planned_steps) != len(decision.plan_steps):
+        planner_summary = (
+            "Initial semantic full plan created from the current task state and "
+            "normalized to the task scope and configured max_steps budget."
+        )
+    elif len(state.plan_steps) != len(planned_steps):
         planner_summary = (
             "Initial semantic full plan created from the current task state and "
             "trimmed to the configured max_steps budget."
@@ -249,6 +260,11 @@ def observe_tool_result(state: TaskState) -> TaskState:
         tool_result=state.last_tool_result,
     )
     state.observed_evidence.extend(new_evidence)
+
+    # Promote repeated empty URL extraction failures into an explicit runtime flag.
+    if _tool_result_indicates_extractability_limit(state.last_tool_result):
+        if RuntimeFlag.EXTRACTABILITY_LIMITED not in state.runtime_flags:
+            state.runtime_flags.append(RuntimeFlag.EXTRACTABILITY_LIMITED)
     state.current_state = RuntimeState.ACTING
 
     _append_step_record(
@@ -328,6 +344,95 @@ def replanner(state: TaskState, *, replanner_service: ReplannerPort) -> TaskStat
 # Keep the planner output within the configured semantic step budget.
 def _enforce_plan_step_budget(*, plan_steps: list[PlanStep], max_steps: int) -> list[PlanStep]:
     return list(plan_steps[:max_steps])
+
+
+# Collapse over-decomposed source-plus-short-summary plans into a proportional trajectory.
+def _compact_small_source_summary_plan(
+    *,
+    task_state: TaskState,
+    plan_steps: list[PlanStep],
+) -> list[PlanStep]:
+    if len(plan_steps) <= 2:
+        return plan_steps
+    if not _task_is_small_source_summary(task_state=task_state):
+        return plan_steps
+    if not _plan_looks_like_extraction_pipeline(plan_steps=plan_steps):
+        return plan_steps
+
+    return [
+        PlanStep(
+            step_id="step_1",
+            objective=(
+                "Identify official sources and collect only the high-level evidence needed "
+                "for the requested short summary."
+            ),
+            rationale=(
+                "The task asks for official references and a brief answer, so source selection "
+                "and minimal evidence gathering should stay in one bounded semantic step."
+            ),
+            expected_outcome=(
+                "A compact set of official source references plus enough high-level source "
+                "content or metadata to support a concise summary."
+            ),
+        ),
+        PlanStep(
+            step_id="step_2",
+            objective=(
+                "Produce the short source-grounded summary with references, staying at the "
+                "precision level supported by the observed evidence."
+            ),
+            rationale=(
+                "A short user-facing summary should not become a separate extraction pipeline "
+                "unless the user asks for granular legal or technical detail."
+            ),
+            expected_outcome=(
+                "A brief summary and official source list, with no unsupported thresholds, "
+                "article-level claims, or granular obligations."
+            ),
+        ),
+    ]
+
+
+# Detect small research tasks whose deliverable is official sources plus a brief summary.
+def _task_is_small_source_summary(*, task_state: TaskState) -> bool:
+    task_text = " ".join(
+        part
+        for part in (
+            task_state.task_spec.goal,
+            task_state.task_spec.context,
+            " ".join(task_state.task_spec.constraints),
+            " ".join(task_state.task_spec.success_criteria),
+        )
+        if part
+    ).lower()
+    source_markers = ("source", "sources", "reference", "references", "official")
+    summary_markers = ("short summary", "brief summary", "concise summary", "short answer")
+    detailed_markers = (
+        "threshold",
+        "thresholds",
+        "article-level",
+        "full legal text",
+        "compliance mapping",
+        "detailed analysis",
+    )
+    return (
+        any(marker in task_text for marker in source_markers)
+        and any(marker in task_text for marker in summary_markers)
+        and not any(marker in task_text for marker in detailed_markers)
+    )
+
+
+# Identify the common over-decomposition pattern: sources, extraction, then synthesis.
+def _plan_looks_like_extraction_pipeline(*, plan_steps: list[PlanStep]) -> bool:
+    plan_text = " ".join(
+        " ".join((step.objective, step.rationale, step.expected_outcome))
+        for step in plan_steps
+    ).lower()
+    return (
+        any(marker in plan_text for marker in ("source", "sources", "references"))
+        and any(marker in plan_text for marker in ("extract", "extraction", "capture"))
+        and any(marker in plan_text for marker in ("summary", "summar", "synthesis", "draft"))
+    )
 
 
 # Keep step history mutation consistent across nodes after bootstrap.
@@ -726,6 +831,21 @@ def _is_meaningful_evidence_excerpt(value: str | None) -> bool:
     return normalized.lower() not in status_only
 
 
+# Detect URL fetch failures that show the runtime could not extract readable text from a source.
+def _tool_result_indicates_extractability_limit(tool_result: ToolExecutionResult) -> bool:
+    if tool_result.request.tool_name != ToolName.FETCH_URL_TEXT:
+        return False
+    if tool_result.success:
+        return False
+
+    failure_text = " ".join(
+        part.strip().lower()
+        for part in (tool_result.summary, tool_result.error_message)
+        if part and part.strip()
+    )
+    return "extracted readable text was empty" in failure_text
+
+
 # Classify how much claim precision one observed evidence item can safely support.
 def _classify_observed_evidence_support_level(
     *,
@@ -737,8 +857,44 @@ def _classify_observed_evidence_support_level(
     lowered_locator = locator.lower()
     lowered_title = title.lower()
     lowered_excerpt = excerpt.lower()
+    timeline_markers = (
+        "entered into force",
+        "comes into force",
+        "coming into force",
+        "effective date",
+        "effective from",
+        "applies from",
+        "applies on",
+        "entry into force",
+        "adopted on",
+        "published on",
+        "implementation date",
+    )
+
+    if any(marker in lowered_excerpt for marker in timeline_markers):
+        if tool_name == ToolName.WEB_SEARCH:
+            return EvidenceSupportLevel.DETAILED_EXTRACTED
+        if tool_name == ToolName.FETCH_URL_TEXT:
+            return EvidenceSupportLevel.DETAILED_EXTRACTED
 
     if tool_name == ToolName.WEB_SEARCH:
+        high_level_markers = (
+            "official pages",
+            "official website",
+            "overview",
+            "what the ",
+            "purpose",
+            "gatekeepers",
+            "core platform services",
+            "obligations",
+            "prohibitions",
+            "legislation",
+            "website",
+            "summary",
+            "aim",
+        )
+        if any(marker in lowered_excerpt for marker in high_level_markers):
+            return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
         if lowered_title == tool_name.value:
             return EvidenceSupportLevel.SOURCE_DISCOVERY
         if len(" ".join(excerpt.split())) >= 40:

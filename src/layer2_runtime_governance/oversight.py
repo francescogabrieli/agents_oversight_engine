@@ -75,6 +75,7 @@ class OversightReasonCode(str, Enum):
     TOOL_REQUIRES_HUMAN_REVIEW = "tool_requires_human_review"
     ACTOR_TURNS_WITHIN_LIMIT = "actor_turns_within_limit"
     ACTOR_TURNS_EXCEEDED = "actor_turns_exceeded"
+    COMPLETION_ATTEMPT_TURN_OVERAGE_SOFTENED = "completion_attempt_turn_overage_softened"
     NO_FAILED_TOOL_RESULTS = "no_failed_tool_results"
     FAILED_TOOL_RESULT_PRESENT = "failed_tool_result_present"
     NO_REPLAN_NEEDED = "no_replan_needed"
@@ -114,6 +115,7 @@ class TrajectoryPenalties:
     max_actor_turns_per_step: int
     max_replans: int
     actor_turn_overage_penalty: float
+    completion_attempt_turn_overage_scale: float
     failed_tool_result_penalty: float
     needs_replan_penalty: float
     low_confidence_uncertainty_penalty: float
@@ -213,10 +215,16 @@ def load_oversight_policy_config(*, config_path: Path | None = None) -> Oversigh
             ),
         ),
         trajectory_penalties=TrajectoryPenalties(
-            max_actor_turns_per_step=int(trajectory_penalties.get("max_actor_turns_per_step", 3)),
+            max_actor_turns_per_step=int(trajectory_penalties.get("max_actor_turns_per_step", 5)),
             max_replans=int(trajectory_penalties.get("max_replans", 2)),
             actor_turn_overage_penalty=float(
-                trajectory_penalties.get("actor_turn_overage_penalty", 0.15)
+                trajectory_penalties.get("actor_turn_overage_penalty", 0.10)
+            ),
+            completion_attempt_turn_overage_scale=float(
+                trajectory_penalties.get(
+                    "completion_attempt_turn_overage_scale",
+                    0.50,
+                )
             ),
             failed_tool_result_penalty=float(
                 trajectory_penalties.get("failed_tool_result_penalty", 0.20)
@@ -258,9 +266,10 @@ def build_default_oversight_policy_config() -> OversightPolicyConfig:
             requires_human_review_additive=0.40,
         ),
         trajectory_penalties=TrajectoryPenalties(
-            max_actor_turns_per_step=3,
+            max_actor_turns_per_step=5,
             max_replans=2,
-            actor_turn_overage_penalty=0.15,
+            actor_turn_overage_penalty=0.10,
+            completion_attempt_turn_overage_scale=0.50,
             failed_tool_result_penalty=0.20,
             needs_replan_penalty=0.25,
             low_confidence_uncertainty_penalty=0.20,
@@ -472,7 +481,19 @@ def evaluate_trajectory_health(
         0,
     )
     if actor_turn_overage:
-        score -= actor_turn_overage * penalties.actor_turn_overage_penalty
+        turn_overage_penalty = penalties.actor_turn_overage_penalty
+        if (
+            validation is not None
+            and validation.next_action == StepValidationDecision.COMPLETE_STEP
+            and validation.objective_satisfied
+            and validation.evidence_sufficient
+            and validation.confidence >= config.min_actor_confidence
+        ):
+            turn_overage_penalty *= penalties.completion_attempt_turn_overage_scale
+            reason_codes.append(
+                OversightReasonCode.COMPLETION_ATTEMPT_TURN_OVERAGE_SOFTENED
+            )
+        score -= actor_turn_overage * turn_overage_penalty
         reason_codes.append(OversightReasonCode.ACTOR_TURNS_EXCEEDED)
     else:
         reason_codes.append(OversightReasonCode.ACTOR_TURNS_WITHIN_LIMIT)
@@ -697,6 +718,9 @@ def _required_evidence_support_level_from_step(*, step_text: str) -> EvidenceSup
     if _step_is_source_discovery_only(step_text):
         return EvidenceSupportLevel.SOURCE_DISCOVERY
 
+    if _step_allows_conservative_high_level_summary(step_text):
+        return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
+
     if any(
         marker in step_text
         for marker in (
@@ -708,9 +732,6 @@ def _required_evidence_support_level_from_step(*, step_text: str) -> EvidenceSup
             "number of users",
             "article ",
             "full legal text",
-            "entry into force",
-            "timeline",
-            "applicability details",
         )
     ):
         return EvidenceSupportLevel.PRIMARY_LEGAL
@@ -718,24 +739,59 @@ def _required_evidence_support_level_from_step(*, step_text: str) -> EvidenceSup
     if any(
         marker in step_text
         for marker in (
-            "obligation",
-            "obligations",
-            "prohibition",
-            "prohibitions",
-            "requirements",
+            "official source",
+            "official sources",
+            "official pages",
+            "official website",
+            "official portal",
+            "legislation page",
+            "portal",
+            "short summary",
+            "summary",
+            "overview",
+            "high-level",
+            "concise",
+            "gatekeeper",
+            "gatekeepers",
+            "core platform services",
+            "do's and don'ts",
+            "what the dma is",
+            "objectives",
+            "legal instrument",
+            "citation of the legal instrument",
+        )
+    ):
+        return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
+
+    if any(
+        marker in step_text
+        for marker in (
+            "specific obligation",
+            "specific obligations",
+            "obligations-by-number",
+            "obligation-by-obligation",
+            "specific prohibition",
+            "specific prohibitions",
+            "specific requirements",
+            "clause text",
+            "citation-ready mapping",
+            "claim mapping",
             "criteria",
             "enforcement mechanism",
             "what it requires",
             "who it applies to",
             "regulatory mechanisms",
             "main obligations",
+            "entry into force",
+            "timeline",
+            "applicability details",
         )
     ):
         return EvidenceSupportLevel.DETAILED_EXTRACTED
 
     if any(
         marker in step_text
-        for marker in ("purpose", "scope", "overview", "brief summary", "high-level", "concise")
+        for marker in ("purpose", "scope", "brief summary")
     ):
         return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
 
@@ -749,19 +805,67 @@ def _required_evidence_support_level_from_output_text(*, text: str) -> EvidenceS
     if _output_text_is_source_shortlist_only(text.lower()):
         return EvidenceSupportLevel.SOURCE_DISCOVERY
 
+    if _output_text_is_conservative_high_level_summary(lowered_text):
+        return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
+
     if _contains_primary_precision_markers(lowered_text):
-        return EvidenceSupportLevel.PRIMARY_LEGAL
+        if any(
+            marker in lowered_text
+            for marker in (
+                "threshold",
+                "thresholds",
+                "turnover",
+                "number of users",
+                "specific size",
+                "article ",
+                "deadline",
+                "deadlines",
+            )
+        ):
+            return EvidenceSupportLevel.PRIMARY_LEGAL
+
+        if any(
+            marker in lowered_text
+            for marker in (
+                "entered into force",
+                "comes into force",
+                "coming into force",
+                "effective date",
+                "effective from",
+                "applies from",
+                "applies on",
+                "entry into force",
+                "adopted on",
+                "published on",
+                "timeline",
+                "implementation date",
+                "applicability details",
+            )
+        ):
+            return EvidenceSupportLevel.DETAILED_EXTRACTED
+
+        if any(
+            marker in lowered_text
+            for marker in (
+                "percentages",
+                "large numeric thresholds",
+                "monetary thresholds",
+            )
+        ):
+            return EvidenceSupportLevel.PRIMARY_LEGAL
+
+        return EvidenceSupportLevel.DETAILED_EXTRACTED
 
     if any(
         marker in lowered_text
         for marker in (
-            "obligation",
-            "obligations",
+            "specific obligation",
+            "specific obligations",
             "prohibit",
             "prohibiting",
-            "requires",
-            "requiring",
             "must",
+            "shall",
+            "cannot",
             "criteria",
             "interoperability",
             "data portability",
@@ -785,6 +889,65 @@ def _required_evidence_support_level_from_output_text(*, text: str) -> EvidenceS
         return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
 
     return EvidenceSupportLevel.LOCAL_ONLY
+
+
+# Treat explicitly conservative summary steps as high-level even when they mention broad themes.
+def _step_allows_conservative_high_level_summary(step_text: str) -> bool:
+    summary_markers = (
+        "short summary",
+        "brief summary",
+        "few sentences",
+        "high level",
+        "high-level",
+        "purpose/scope-level",
+        "conservative",
+        "broad categories",
+        "obligation themes",
+        "does not require",
+        "do not require",
+    )
+    return any(marker in step_text for marker in summary_markers)
+
+
+# Keep compact policy summaries from being treated like clause-level extraction tasks.
+def _output_text_is_conservative_high_level_summary(text: str) -> bool:
+    if _contains_primary_precision_markers(text):
+        return False
+
+    high_level_markers = (
+        "brief summary",
+        "short summary",
+        "overview",
+        "purpose",
+        "aims to",
+        "intended to",
+        "in general",
+        "at a high level",
+        "gatekeeper",
+        "gatekeepers",
+        "core platform services",
+        "official sources",
+    )
+    if not any(marker in text for marker in high_level_markers):
+        return False
+
+    granular_markers = (
+        "article ",
+        "threshold",
+        "thresholds",
+        "turnover",
+        "number of users",
+        "specific size",
+        "must ",
+        "shall ",
+        "cannot ",
+        "non-discriminatory access",
+        "self-preferencing",
+        "data portability",
+        "interoperability",
+        "ranking",
+    )
+    return not any(marker in text for marker in granular_markers)
 
 
 # Detect drafts that only name sources and URLs without summarizing their substance.
@@ -836,9 +999,28 @@ def _normalize_output_text_for_support_checks(text: str) -> str:
 
 # Detect exact legal/numeric detail that needs primary-source support.
 def _contains_primary_precision_markers(text: str) -> bool:
-    if re.search(r"\b(?:19|20)\d{2}\b", text):
+    precision_context_markers = (
+        "entered into force",
+        "comes into force",
+        "coming into force",
+        "effective date",
+        "effective from",
+        "applies from",
+        "applies on",
+        "entry into force",
+        "adopted on",
+        "published on",
+        "deadline",
+        "deadlines",
+        "timeline",
+        "applicability details",
+        "implementation date",
+    )
+    has_precision_context = any(marker in text for marker in precision_context_markers)
+
+    if has_precision_context and re.search(r"\b(?:19|20)\d{2}\b", text):
         return True
-    if re.search(
+    if has_precision_context and re.search(
         r"\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\b",
         text,
         flags=re.IGNORECASE,

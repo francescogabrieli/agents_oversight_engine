@@ -5,8 +5,6 @@
       "max_steps": 5,
       "max_tool_calls": 10
     },
-    "allowed_tools": [],
-    "disallowed_tools": [],
     "read_only_mode": false
   },
   "named_profiles": {
@@ -16,8 +14,6 @@
         "max_steps": 5,
         "max_tool_calls": 10
       },
-      "allowed_tools": [],
-      "disallowed_tools": [],
       "read_only_mode": false
     },
     "high_sensitivity_default": {
@@ -26,18 +22,11 @@
         "max_steps": 4,
         "max_tool_calls": 6
       },
-      "allowed_tools": [],
-      "disallowed_tools": [],
       "read_only_mode": true
     }
   },
   "domain_overrides": {
-    "external_communication": {
-      "disallowed_tools": [
-        "send_email",
-        "post_message"
-      ]
-    },
+    "external_communication": {},
     "software_engineering": {
       "budget": {
         "max_steps": 6,

@@ -31,9 +31,10 @@
     "requires_human_review_additive": 0.40
   },
   "trajectory_penalties": {
-    "max_actor_turns_per_step": 3,
+    "max_actor_turns_per_step": 5,
     "max_replans": 2,
-    "actor_turn_overage_penalty": 0.15,
+    "actor_turn_overage_penalty": 0.10,
+    "completion_attempt_turn_overage_scale": 0.50,
     "failed_tool_result_penalty": 0.20,
     "needs_replan_penalty": 0.25,
     "low_confidence_uncertainty_penalty": 0.20

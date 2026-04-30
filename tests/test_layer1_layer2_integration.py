@@ -249,7 +249,7 @@ class StubPolicyEngine(PolicyEnginePort):
         if policy_input.tool_name is not None:
             return PolicyEvaluationResult(
                 policy_decision=PolicyDecision.ALLOW,
-                reason_codes=(GovernanceReasonCode.TOOL_ALLOWED,),
+                reason_codes=(GovernanceReasonCode.ALLOWED_BY_POLICY,),
                 summary="The requested tool is allowed by the policy stub.",
                 policy_engine_name=self.policy_engine_name,
                 policy_bundle_version=self.policy_bundle_version,

@@ -125,8 +125,6 @@ def build_planner_user_prompt(*, task_state: TaskState) -> str:
             "policy_profile_name": task_state.execution_policy.policy_profile_name,
             "confidence_threshold": task_state.execution_policy.confidence_threshold,
             "read_only_mode": task_state.execution_policy.read_only_mode,
-            "allowed_tools": task_state.execution_policy.allowed_tools,
-            "disallowed_tools": task_state.execution_policy.disallowed_tools,
             "budget": {
                 "max_steps": task_state.execution_policy.budget.max_steps,
                 "max_tool_calls": task_state.execution_policy.budget.max_tool_calls,

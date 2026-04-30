@@ -257,6 +257,7 @@ Current relevant files:
 - `Layer 1` must output a canonical `IntakeResult`.
 - `ExecutionPolicy` is system-controlled, not inferred freely from the user task.
 - `confidence_threshold` and budget are configuration-driven.
+- Layer 1 execution policy currently carries budget, confidence threshold, and read-only mode only; tool allowlists/denylists are deferred and should not be exposed to the actor contract.
 - `context` may be empty without forcing `partial`.
 - `success_criteria` and missing constraints for sensitive tasks are more important than missing context.
 
@@ -274,6 +275,7 @@ Current relevant files:
 - the planner/executor split should remain aligned with `docs/plan-and-execute.ipynb` unless there is a clear thesis-driven reason to diverge
 - planner output must remain semantic and typed
 - planner output must not contain concrete tool calls, executable payloads, or framework-specific actions
+- small source-plus-short-summary tasks may be deterministically compacted from an over-decomposed source/extraction/synthesis pipeline into a proportional two-step trajectory
 - actor execution must operate on the current plan step, not on the full task as a second planner
 - actor output must remain typed and compact even when backed by an LLM
 - the current Layer 2 actor backend is OpenRouter with `gpt-oss-120b` for first cloud-based tests; this remains a temporary test choice before moving to a stable large cloud model
@@ -282,8 +284,14 @@ Current relevant files:
 - malformed provider JSON that omits the runtime action envelope should be recovered only when it is clearly completion-shaped; otherwise it should stop conservatively instead of being treated as normal progress
 - actor execution may produce local outputs, request later capability use, ask clarification, or signal replan
 - actor execution should record audit-safe scratchpad entries rather than hidden chain-of-thought
+- official implementation pages and procedural regulations should be described as procedural sources, not as direct enforcers, unless the source explicitly says so
+- when the actor sees an implementation-oriented DMA source, it should phrase the enforcement description as procedural or procedural-enforcement context rather than direct enforcement unless the source text explicitly supports the stronger claim
 - plan steps should be completed only after a typed `StepValidation` indicates that the objective is satisfied and evidence is sufficient
 - observed evidence now carries an explicit support level (`local_only`, `source_discovery`, `high_level_summary`, `detailed_extracted`, `primary_legal`) so the runtime can reason about how much claim precision the evidence can safely support
+- official timeline facts such as `entered into force`, `applies from`, `applies on`, and similar chronology statements are usually `detailed_extracted`; only threshold, article-level, or similarly strict legal claims should force `primary_legal`
+- conservative high-level summaries can be supported by `high_level_summary` evidence even when they mention broad policy themes such as gatekeepers or obligation themes; only granular, specific, article-level, threshold, or clause-like claims should force `detailed_extracted` or `primary_legal`
+- when a step is explicitly short, brief, concise, or high-level, the actor should reduce claim precision before requesting more evidence; named obligation examples such as self-preferencing, interoperability, data portability, ranking, non-discriminatory access, or transparent terms should appear only when directly present in observed evidence or specifically requested
+- governance guardrails must remain proportional: multiple safe-by-design checks should not combine into an execution-degrading loop when the task can be completed by lowering precision to the available evidence level
 - source discovery alone is not factual support; simple URL discovery is weaker than extracted content and should not justify detailed factual completion by itself
 - actor completion outputs that are more specific than the available evidence support level should remain in-progress rather than complete the step, even when the LLM self-reports `objective_satisfied=true` and `evidence_sufficient=true`
 - adaptive oversight may request more evidence when the evaluated step/output requires a stronger evidence support level than the observed evidence currently provides
@@ -294,6 +302,7 @@ Current relevant files:
 - prompt text may contain policy, behavioral, and architecture constraints, but should not replace the runtime-level tool contract
 - the current tool surface is read-only and externally conservative
 - read-only capability use is currently explicit and typed through `ToolRequest`, `ToolExecutionResult`, and `ObservedEvidence`
+- tool availability is governed by the Tool Gateway registry and governance read-only/write policy; Layer 1 no longer passes actor-facing allowed/disallowed tool lists
 - tool observation should preserve source-level provenance without cloning one aggregate tool transcript across multiple returned sources
 - the Tool Gateway supports a configured MCP local test server with read-only tools:
   `mcp.local_test.echo`, `mcp.local_test.read_fixture`, `mcp.local_test.text_stats`, and `mcp.local_test.calculate_expression`
@@ -306,6 +315,7 @@ Current relevant files:
 - governance is active as an explicit runtime node and uses OPA over HTTP as the deterministic policy engine target
 - adaptive oversight may only preserve or make the policy decision more conservative; it must never make an OPA decision more permissive
 - oversight scoring must remain deterministic, explainable, and configured through `configs/layer2_oversight_policy.json`
+- trajectory-health turn pressure should stay forgiving enough that short source-plus-summary tasks can make a few recovery turns without being forced into replanning
 - runtime trace export must be read-only over `TaskState`; it must not mutate runtime state or become a parallel source of truth
 - `main_layer2.py` may print trace views, but reusable trace construction belongs in `trace.py`
 - `ABORTED` is the hard-denial runtime state for governance decisions that must not be conflated with review

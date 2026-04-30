@@ -103,6 +103,7 @@ Rules:
 - Produce only the remaining steps needed from the current blocked point to completion.
 - Keep the replacement trajectory compact and executable by the actor.
 - If the actor needs more evidence, plan semantic evidence acquisition, not a concrete tool invocation.
+- If runtime_flags includes `extractability_limited`, do not keep replacing the trajectory with more extraction-only steps; pivot to a compact source-backed summary path or a controlled stop/clarification if the task truly requires unavailable precision.
 - If the task is no longer safely executable, produce the safest semantic step that leads to clarification or controlled stopping.
 - Do not explain your reasoning outside the schema.
 """.strip()
@@ -127,8 +128,6 @@ def build_replanner_user_prompt(*, task_state: TaskState) -> str:
             "policy_profile_name": task_state.execution_policy.policy_profile_name,
             "confidence_threshold": task_state.execution_policy.confidence_threshold,
             "read_only_mode": task_state.execution_policy.read_only_mode,
-            "allowed_tools": task_state.execution_policy.allowed_tools,
-            "disallowed_tools": task_state.execution_policy.disallowed_tools,
             "budget": {
                 "max_steps": task_state.execution_policy.budget.max_steps,
                 "max_tool_calls": task_state.execution_policy.budget.max_tool_calls,

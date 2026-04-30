@@ -39,6 +39,7 @@ class RuntimeFlag(str, Enum):
     INCOMPLETE_INTAKE = "incomplete_intake"
     READ_ONLY_EXECUTION = "read_only_execution"
     HIGH_SENSITIVITY = "high_sensitivity"
+    EXTRACTABILITY_LIMITED = "extractability_limited"
 
 
 class PlanStepStatus(str, Enum):

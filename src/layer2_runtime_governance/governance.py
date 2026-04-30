@@ -44,9 +44,6 @@ class GovernanceDirective(str, Enum):
 class GovernanceReasonCode(str, Enum):
     ALLOWED_BY_POLICY = "allowed_by_policy"
     READ_ONLY_ALLOWED = "read_only_allowed"
-    TOOL_ALLOWED = "tool_allowed"
-    TOOL_DISALLOWED = "tool_disallowed"
-    TOOL_NOT_ALLOWED = "tool_not_allowed"
     WRITE_CAPABILITY_BLOCKED = "write_capability_blocked"
     READ_ONLY_MODE_ENFORCED = "read_only_mode_enforced"
     LOCAL_OUTPUT_ALLOWED = "local_output_allowed"
@@ -67,8 +64,6 @@ class PolicyEvaluationInput:
     policy_profile_name: str
     confidence_threshold: float
     read_only_mode: bool
-    allowed_tools: tuple[str, ...]
-    disallowed_tools: tuple[str, ...]
     budget_max_steps: int
     budget_max_tool_calls: int | None
     runtime_state: RuntimeState
@@ -176,8 +171,6 @@ def build_policy_evaluation_input(*, task_state: TaskState) -> PolicyEvaluationI
         policy_profile_name=task_state.execution_policy.policy_profile_name,
         confidence_threshold=task_state.execution_policy.confidence_threshold,
         read_only_mode=task_state.execution_policy.read_only_mode,
-        allowed_tools=tuple(task_state.execution_policy.allowed_tools),
-        disallowed_tools=tuple(task_state.execution_policy.disallowed_tools),
         budget_max_steps=task_state.execution_policy.budget.max_steps,
         budget_max_tool_calls=task_state.execution_policy.budget.max_tool_calls,
         runtime_state=task_state.current_state,
@@ -209,8 +202,6 @@ def build_opa_input_document(*, policy_input: PolicyEvaluationInput) -> dict[str
             "profile_name": policy_input.policy_profile_name,
             "confidence_threshold": policy_input.confidence_threshold,
             "read_only_mode": policy_input.read_only_mode,
-            "allowed_tools": list(policy_input.allowed_tools),
-            "disallowed_tools": list(policy_input.disallowed_tools),
             "budget": {
                 "max_steps": policy_input.budget_max_steps,
                 "max_tool_calls": policy_input.budget_max_tool_calls,

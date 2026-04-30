@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
@@ -25,8 +25,6 @@ class PolicyProfile:
     confidence_threshold: float
     max_steps: int
     max_tool_calls: int | None = None
-    allowed_tools: list[str] = field(default_factory=list)
-    disallowed_tools: list[str] = field(default_factory=list)
     read_only_mode: bool = False
 
 
@@ -223,8 +221,6 @@ class PolicyResolver:
                 max_steps=profile.max_steps,
                 max_tool_calls=profile.max_tool_calls,
             ),
-            allowed_tools=profile.allowed_tools,
-            disallowed_tools=profile.disallowed_tools,
             read_only_mode=profile.read_only_mode,
         )
 

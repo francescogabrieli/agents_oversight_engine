@@ -259,6 +259,39 @@ class SingleStepPlanner:
         )
 
 
+class OverDecomposedSourceSummaryPlanner:
+    planner_name = "over_decomposed_source_summary_planner"
+    prompt_version = "stub_v1"
+
+    # Return the source/extraction/synthesis split that the runtime should normalize.
+    def plan(self, *, task_state):
+        return PlannerDecision(
+            plan_steps=[
+                PlanStep(
+                    step_id="step_1",
+                    objective="Down-select official sources for the short summary.",
+                    rationale="The task needs official references.",
+                    expected_outcome="A source shortlist.",
+                ),
+                PlanStep(
+                    step_id="step_2",
+                    objective="Extract factual points from the selected official sources.",
+                    rationale="The summary should be grounded.",
+                    expected_outcome="Extracted facts.",
+                ),
+                PlanStep(
+                    step_id="step_3",
+                    objective="Draft the brief summary.",
+                    rationale="The final output should be concise.",
+                    expected_outcome="A short summary with references.",
+                ),
+            ],
+            rationale="The planner over-decomposed a small source-summary task.",
+            planner_name=self.planner_name,
+            prompt_version=self.prompt_version,
+        )
+
+
 class StubPolicyEngine(PolicyEnginePort):
     policy_engine_name = "stub_policy_engine"
     policy_bundle_version = "stub_policy_bundle_v1"
@@ -304,23 +337,10 @@ class StubPolicyEngine(PolicyEnginePort):
                 policy_bundle_version=self.policy_bundle_version,
             )
 
-        if (
-            policy_input.tool_name is not None
-            and policy_input.allowed_tools
-            and policy_input.tool_name.value not in policy_input.allowed_tools
-        ):
-            return PolicyEvaluationResult(
-                policy_decision=PolicyDecision.REQUIRE_HUMAN_REVIEW,
-                reason_codes=(GovernanceReasonCode.TOOL_NOT_ALLOWED,),
-                summary="The requested tool is outside the allowed list.",
-                policy_engine_name=self.policy_engine_name,
-                policy_bundle_version=self.policy_bundle_version,
-            )
-
         if policy_input.tool_name is not None:
             return PolicyEvaluationResult(
                 policy_decision=PolicyDecision.ALLOW,
-                reason_codes=(GovernanceReasonCode.TOOL_ALLOWED,),
+                reason_codes=(GovernanceReasonCode.ALLOWED_BY_POLICY,),
                 summary="The requested tool is allowed by the policy stub.",
                 policy_engine_name=self.policy_engine_name,
                 policy_bundle_version=self.policy_bundle_version,
@@ -604,6 +624,140 @@ class _FakeOpenRouterSourceShortlistCompletionClient:
                 "objective_satisfied": True,
                 "evidence_sufficient": True,
                 "confidence": 0.79,
+            },
+        }
+
+
+class _FakeOpenRouterSummaryWithRegulationYearClient:
+    # Return a short DMA summary that mentions the regulation number without claiming precise timing.
+    # Keep this response on the safe side of the precision gate.
+    def complete_tool_call(self, **kwargs):
+        return {
+            "tool_name": "emit_final_output",
+            "arguments": {
+                "summary": "Summarize the official DMA sources.",
+                "output_text": (
+                    "The DMA is an EU regulation for gatekeeper platforms. Official sources: "
+                    "Regulation (EU) 2022/1925 and the European Commission DMA legislation page."
+                ),
+                "completion_rationale": (
+                    "The current step is satisfied using the official sources already observed."
+                ),
+                "objective_satisfied": True,
+                "evidence_sufficient": True,
+                "confidence": 0.83,
+            },
+        }
+
+
+class _FakeOpenRouterSummaryWithGenericTimelineClient:
+    # Return a short EU-law summary with a timeline claim for a different regulation.
+    # This exercises the generalized timeline rule outside the DMA.
+    def complete_tool_call(self, **kwargs):
+        return {
+            "tool_name": "emit_final_output",
+            "arguments": {
+                "summary": "Summarize the official AI Act timeline.",
+                "output_text": (
+                    "The AI Act is an EU regulation for AI governance. It entered into force on "
+                    "1 August 2024. Official sources include an EU Commission announcement and the "
+                    "official AI Act legislation page."
+                ),
+                "completion_rationale": (
+                    "The current step is satisfied using the official timeline sources already observed."
+                ),
+                "objective_satisfied": True,
+                "evidence_sufficient": True,
+                "confidence": 0.84,
+            },
+        }
+
+
+class _FakeOpenRouterConservativeSummaryAfterExtractabilityLimitClient:
+    # Return the compact recovery shape expected after extraction attempts are limited.
+    def complete_tool_call(self, **kwargs):
+        return {
+            "tool_name": "emit_final_output",
+            "arguments": {
+                "summary": "Write a conservative high-level official-source summary.",
+                "output_text": (
+                    "**Brief Summary**\n"
+                    "The Digital Markets Act is an EU regulation for large online platforms "
+                    "that act as gatekeepers in digital markets. Its purpose is to support "
+                    "fairer and more contestable digital markets at a high level.\n\n"
+                    "**Official sources**\n"
+                    "European Commission DMA portal: https://digital-markets-act.ec.europa.eu/index_en\n"
+                    "EUR-Lex DMA summary: https://eur-lex.europa.eu/EN/legal-content/summary/digital-markets-act.html"
+                ),
+                "completion_rationale": (
+                    "The replacement step asks for a conservative purpose/scope-level summary "
+                    "and does not require extracted clause text or obligations-by-number claims."
+                ),
+                "objective_satisfied": True,
+                "evidence_sufficient": True,
+                "confidence": 0.82,
+            },
+        }
+
+
+class _FakeOpenRouterRecoveredHighLevelStepOneCompletionClient:
+    # Return completion-shaped JSON without the runtime action envelope to cover provider recovery.
+    def complete_tool_call(self, **kwargs):
+        return {
+            "summary": "Identified official EU sources and gathered high-level evidence.",
+            "output_text": (
+                "Official sources identified:\n"
+                "- European Commission Digital Markets Act portal: https://digital-markets-act.ec.europa.eu/index_en\n"
+                "- Legislation overview page: https://digital-markets-act.ec.europa.eu/legislation_en\n"
+                "High-level evidence from the portal shows that the DMA is EU legislation aimed "
+                "at making digital markets fairer and more contestable. It defines gatekeepers "
+                "as large platforms offering core services such as online search, app stores, "
+                "or messaging, and requires them to comply with a set of obligations and "
+                "prohibitions. The European Commission, through DG COMP and DG CONNECT, is "
+                "the sole enforcer of the DMA."
+            ),
+            "completion_rationale": (
+                "The fetched official page supplies high-level evidence for the source and "
+                "summary step."
+            ),
+            "objective_satisfied": True,
+            "evidence_sufficient": True,
+            "confidence": 0.91,
+        }
+
+
+class _FakeOpenRouterCompletionWithInternalRefsClient:
+    # Return a completion that leaks internal trace refs so sanitization can strip them.
+    def complete_tool_call(self, **kwargs):
+        return {
+            "tool_name": "emit_final_output",
+            "arguments": {
+                "summary": "Step 2 completed with trace refs.",
+                "output_text": (
+                    "The DMA is EU legislation aimed at fair and contestable digital markets "
+                    "【step_1:tool:1:source:1】."
+                ),
+                "completion_rationale": (
+                    "The summary should not expose internal runtime markers 【step_1:tool:2:source:1】."
+                ),
+                "objective_satisfied": True,
+                "evidence_sufficient": True,
+                "confidence": 0.86,
+            },
+        }
+
+
+class _FakeOpenRouterFalseNoToolBlockedClient:
+    # Simulate a weaker actor that mistakes no allowlist for unavailable tools.
+    def complete_tool_call(self, **kwargs):
+        return {
+            "tool_name": "emit_blocked",
+            "arguments": {
+                "summary": "Cannot identify official sources without external lookup",
+                "blocking_reason": (
+                    "No external tool usage is allowed and no prior evidence of official sources "
+                    "is available to satisfy the step's objective."
+                ),
             },
         }
 
@@ -1298,6 +1452,32 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertIsNotNone(result.blocking_reason)
         self.assertIn("without a tool_name", result.blocking_reason)
 
+    # Recovered completion-shaped JSON should not carry protocol noise after positive validation.
+    def test_openrouter_recovered_high_level_completion_has_no_protocol_uncertainty(self) -> None:
+        actor = OpenRouterActor(
+            settings=OpenRouterActorSettings(
+                model="gpt-oss-120b",
+                api_key="test-key",
+                base_url="https://openrouter.ai/api/v1",
+                timeout_seconds=1.0,
+            )
+        )
+        actor._client = _FakeOpenRouterRecoveredHighLevelStepOneCompletionClient()  # type: ignore[attr-defined]
+        state = _build_conservative_replan_summary_task_state()
+        actor_task = build_actor_task(task_state=state)
+
+        result = actor.act(actor_task=actor_task)
+
+        self.assertEqual(result.result_type, ActorResultType.INTERMEDIATE_OUTPUT)
+        self.assertIsNotNone(result.step_validation)
+        self.assertTrue(result.step_validation.objective_satisfied)
+        self.assertTrue(result.step_validation.evidence_sufficient)
+        self.assertEqual(
+            result.step_validation.next_action,
+            StepValidationDecision.COMPLETE_STEP,
+        )
+        self.assertIsNone(result.step_validation.residual_uncertainty)
+
     # Verify the planner prompt explicitly discourages oversplitting small research tasks.
     def test_planner_prompt_discourages_small_task_over_segmentation(self) -> None:
         prompt = build_planner_system_prompt()
@@ -1343,6 +1523,45 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertIn('"source_discovery_is_not_direct_fact_support": true', user_prompt)
         self.assertIn('"available_evidence_support_level": "high_level_summary"', user_prompt)
 
+    # High-level summary mode should tell weaker actors to lower precision instead of chasing detail.
+    def test_actor_prompts_high_level_summary_to_avoid_granular_examples(self) -> None:
+        state = _build_conservative_replan_summary_task_state()
+        state.observed_evidence.append(
+            ObservedEvidence(
+                evidence_id="replan_step_1:tool:6:source:1",
+                plan_step_id="replan_step_1",
+                title="Digital Markets Act (DMA) Legislation",
+                locator="https://digital-markets-act.ec.europa.eu/legislation_en",
+                excerpt=(
+                    "The Procedural Implementing Regulation (EU) 2023/814 details "
+                    "procedural aspects related to the implementation and enforcement "
+                    "of the DMA."
+                ),
+                source_tool=ToolName.FETCH_URL_TEXT,
+            )
+        )
+        actor_task = build_actor_task(task_state=state)
+
+        system_prompt = build_actor_system_prompt()
+        user_prompt = build_actor_user_prompt(actor_task=actor_task)
+
+        self.assertIn("keep obligation language broad", system_prompt)
+        self.assertIn(
+            "describe them as procedural/implementation sources",
+            system_prompt,
+        )
+        self.assertIn(
+            '"current_or_prior_steps_have_procedural_implementation_source": true',
+            user_prompt,
+        )
+        self.assertIn('"high_level_summary_mode": true', user_prompt)
+        self.assertIn(
+            '"avoid_granular_obligation_examples_unless_directly_observed": true',
+            user_prompt,
+        )
+        self.assertIn("self-preferencing", user_prompt)
+        self.assertIn("obligations and prohibitions for gatekeepers", user_prompt)
+
     def test_openrouter_completion_with_unsupported_precision_stays_in_progress(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
@@ -1370,6 +1589,27 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertIsNotNone(result.step_validation.residual_uncertainty)
         self.assertIn("more specific legal or factual claims", result.step_validation.residual_uncertainty)
 
+    # Internal trace markers should be removed from user-facing completion text.
+    def test_openrouter_completion_sanitizes_internal_trace_refs(self) -> None:
+        actor = OpenRouterActor(
+            settings=OpenRouterActorSettings(
+                model="gpt-oss-120b",
+                api_key="test-key",
+                base_url="https://openrouter.ai/api/v1",
+                timeout_seconds=1.0,
+            )
+        )
+        actor._client = _FakeOpenRouterCompletionWithInternalRefsClient()  # type: ignore[attr-defined]
+        state = _build_summary_task_state_with_year_in_citation()
+        actor_task = build_actor_task(task_state=state)
+
+        result = actor.act(actor_task=actor_task)
+
+        self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
+        self.assertNotIn("【", result.output_text or "")
+        self.assertNotIn("step_1:tool:", result.output_text or "")
+        self.assertNotIn("【", result.step_validation.rationale_summary)
+
     def test_openrouter_source_shortlist_completion_stays_at_source_discovery(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
@@ -1390,6 +1630,99 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertTrue(result.step_validation.objective_satisfied)
         self.assertTrue(result.step_validation.evidence_sufficient)
         self.assertEqual(result.step_validation.next_action, StepValidationDecision.COMPLETE_STEP)
+
+    # Confirm that a regulation-year mention still completes when the draft is not over-specific.
+    def test_openrouter_summary_with_regulation_year_stays_supported(self) -> None:
+        actor = OpenRouterActor(
+            settings=OpenRouterActorSettings(
+                model="gpt-oss-120b",
+                api_key="test-key",
+                base_url="https://openrouter.ai/api/v1",
+                timeout_seconds=1.0,
+            )
+        )
+        actor._client = _FakeOpenRouterSummaryWithRegulationYearClient()  # type: ignore[attr-defined]
+        state = _build_summary_task_state_with_year_in_citation()
+        actor_task = build_actor_task(task_state=state)
+
+        result = actor.act(actor_task=actor_task)
+
+        self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
+        self.assertIsNotNone(result.step_validation)
+        self.assertTrue(result.step_validation.objective_satisfied)
+        self.assertTrue(result.step_validation.evidence_sufficient)
+        self.assertEqual(result.step_validation.next_action, StepValidationDecision.COMPLETE_STEP)
+
+    # Confirm the same precision rule works for a different EU-law timeline fact.
+    def test_openrouter_summary_with_generic_timeline_stays_supported(self) -> None:
+        actor = OpenRouterActor(
+            settings=OpenRouterActorSettings(
+                model="gpt-oss-120b",
+                api_key="test-key",
+                base_url="https://openrouter.ai/api/v1",
+                timeout_seconds=1.0,
+            )
+        )
+        actor._client = _FakeOpenRouterSummaryWithGenericTimelineClient()  # type: ignore[attr-defined]
+        state = _build_summary_task_state_with_generic_timeline()
+        observed_state = observe_tool_result(state)
+        actor_task = build_actor_task(task_state=observed_state)
+
+        self.assertEqual(
+            observed_state.observed_evidence[0].support_level,
+            EvidenceSupportLevel.DETAILED_EXTRACTED,
+        )
+
+        result = actor.act(actor_task=actor_task)
+
+        self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
+        self.assertIsNotNone(result.step_validation)
+        self.assertTrue(result.step_validation.objective_satisfied)
+        self.assertTrue(result.step_validation.evidence_sufficient)
+        self.assertEqual(result.step_validation.next_action, StepValidationDecision.COMPLETE_STEP)
+
+    # A conservative replanned summary should not be blocked by negated detailed-extraction wording.
+    def test_openrouter_conservative_summary_after_extractability_limit_completes(self) -> None:
+        actor = OpenRouterActor(
+            settings=OpenRouterActorSettings(
+                model="gpt-oss-120b",
+                api_key="test-key",
+                base_url="https://openrouter.ai/api/v1",
+                timeout_seconds=1.0,
+            )
+        )
+        actor._client = _FakeOpenRouterConservativeSummaryAfterExtractabilityLimitClient()  # type: ignore[attr-defined]
+        state = _build_conservative_replan_summary_task_state()
+        actor_task = build_actor_task(task_state=state)
+
+        result = actor.act(actor_task=actor_task)
+
+        self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
+        self.assertIsNotNone(result.step_validation)
+        self.assertTrue(result.step_validation.objective_satisfied)
+        self.assertTrue(result.step_validation.evidence_sufficient)
+        self.assertEqual(result.step_validation.next_action, StepValidationDecision.COMPLETE_STEP)
+
+    # False "tools unavailable" blocked outcomes should recover into a read-only search request.
+    def test_openrouter_false_no_tool_blocked_recovers_to_web_search(self) -> None:
+        actor = OpenRouterActor(
+            settings=OpenRouterActorSettings(
+                model="gpt-oss-120b",
+                api_key="test-key",
+                base_url="https://openrouter.ai/api/v1",
+                timeout_seconds=1.0,
+            )
+        )
+        actor._client = _FakeOpenRouterFalseNoToolBlockedClient()  # type: ignore[attr-defined]
+        state = _build_policy_input_task_state()
+        actor_task = build_actor_task(task_state=state)
+
+        result = actor.act(actor_task=actor_task)
+
+        self.assertEqual(result.result_type, ActorResultType.PROPOSE_ACTION)
+        self.assertEqual(result.capability_mode, CapabilityAccessMode.READ_ONLY)
+        self.assertIsNotNone(result.tool_request)
+        self.assertEqual(result.tool_request.tool_name, ToolName.WEB_SEARCH)
 
     def test_openrouter_empty_response_becomes_blocked_actor_result(self) -> None:
         actor = OpenRouterActor(
@@ -1444,6 +1777,20 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         )
         self.assertIn("trimmed to the configured max_steps budget", task_state.step_history[1].summary)
 
+    # Small source-plus-summary tasks should not become a three-step extraction pipeline.
+    def test_planner_compacts_over_decomposed_small_source_summary_task(self) -> None:
+        graph = _build_test_graph(planner_service=OverDecomposedSourceSummaryPlanner())
+        result = graph.invoke(
+            {"intake_result": _build_research_intake_result(max_steps=5, max_tool_calls=10)},
+            config={"configurable": {"thread_id": "layer2-small-summary-plan-compacted"}},
+        )
+
+        task_state = result["task_state"]
+        self.assertLessEqual(len(task_state.plan_steps), 2)
+        self.assertIn("normalized to the task scope", task_state.step_history[1].summary)
+        self.assertIn("high-level evidence", task_state.plan_steps[0].objective)
+        self.assertIn("precision level supported", task_state.plan_steps[1].objective)
+
     # Verify source-level observation does not clone one global excerpt across many sources.
     def test_observe_tool_result_uses_single_fallback_evidence_for_multi_source_results(self) -> None:
         task_state = TaskState.from_intake(_build_research_intake_result())
@@ -1488,6 +1835,83 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertEqual(
             observed_state.observed_evidence[0].evidence_id,
             "step_1:tool:1:fallback",
+        )
+
+    # Empty extraction failures should become an explicit runtime signal for replanning.
+    def test_observe_tool_result_marks_extractability_limit_on_empty_fetch(self) -> None:
+        task_state = TaskState.from_intake(_build_research_intake_result())
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Collect evidence from an official source.",
+                rationale="The step needs a concrete official source.",
+                expected_outcome="Observed evidence.",
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        task_state.current_plan_step_index = 0
+        task_state.tool_call_count = 1
+        task_state.last_tool_result = ToolExecutionResult(
+            request=ToolRequest(
+                plan_step_id="step_1",
+                tool_name=ToolName.FETCH_URL_TEXT,
+                reason="Fetch official text.",
+                url="https://eur-lex.europa.eu/legal-content/en/TXT/?uri=CELEX:32022R1925",
+            ),
+            success=False,
+            summary="URL fetch succeeded but extracted readable text was empty.",
+            content=None,
+            error_message="URL fetch succeeded but extracted readable text was empty.",
+            sources=(),
+        )
+
+        observed_state = observe_tool_result(task_state)
+
+        self.assertIn(RuntimeFlag.EXTRACTABILITY_LIMITED, observed_state.runtime_flags)
+        self.assertEqual(observed_state.observed_evidence, [])
+
+    # Search snippets with actual official prose should count as high-level evidence, not pure discovery.
+    def test_observe_tool_result_classifies_substantive_web_search_as_high_level_summary(self) -> None:
+        task_state = TaskState.from_intake(_build_research_intake_result())
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Collect official DMA sources.",
+                rationale="The step needs a grounded official overview.",
+                expected_outcome="Observed evidence.",
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        task_state.current_plan_step_index = 0
+        task_state.tool_call_count = 1
+        task_state.last_tool_result = ToolExecutionResult(
+            request=ToolRequest(
+                plan_step_id="step_1",
+                tool_name=ToolName.WEB_SEARCH,
+                reason="Find the Commission DMA overview.",
+                query="Digital Markets Act European Commission official page",
+            ),
+            success=True,
+            summary="Web search executed successfully.",
+            content=(
+                "Here are the European Commission official pages for the Digital Markets Act (DMA): "
+                "DMA official website and DMA legislation hub, with overview statements about the "
+                "gatekeepers, core platform services, obligations, and purpose of the DMA."
+            ),
+            sources=(
+                ToolSource(
+                    title="web_search",
+                    locator="Digital Markets Act European Commission official page",
+                    snippet=None,
+                ),
+            ),
+        )
+
+        observed_state = observe_tool_result(task_state)
+
+        self.assertEqual(
+            observed_state.observed_evidence[0].support_level,
+            EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
         )
 
 
@@ -1645,6 +2069,130 @@ def _build_source_shortlist_task_state() -> TaskState:
             plan_step_id="replan_step_1",
             entry_type=ScratchpadEntryType.OBSERVATION,
             summary="Observed tool result from 'web_search': Web search executed successfully.",
+        )
+    )
+    return state
+
+
+def _build_summary_task_state_with_year_in_citation() -> TaskState:
+    state = TaskState.from_intake(_build_research_intake_result())
+    state.plan_steps = [
+        PlanStep(
+            step_id="step_1",
+            objective="Produce a short summary from official DMA sources.",
+            rationale="The task only needs a brief grounded summary from official pages.",
+            expected_outcome="A short summary grounded in official sources.",
+            status=PlanStepStatus.IN_PROGRESS,
+        )
+    ]
+    state.current_plan_step_index = 0
+    state.actor_turn_count = 2
+    state.observed_evidence.append(
+        ObservedEvidence(
+            evidence_id="step_1:tool:1:source:1",
+            plan_step_id="step_1",
+            title="Digital Markets Act (DMA) Legislation",
+            locator="https://digital-markets-act.ec.europa.eu/legislation_en",
+            excerpt=(
+                "The main legislative texts for the DMA are Regulation (EU) 2022/1925 of the "
+                "European Parliament and of the Council of 14 September 2022 on contestable and "
+                "fair markets in the digital sector and the Procedural Implementing Regulation."
+            ),
+            source_tool=ToolName.FETCH_URL_TEXT,
+            support_level=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
+        )
+    )
+    state.scratchpad.append(
+        ScratchpadEntry(
+            turn_index=1,
+            plan_step_id="step_1",
+            entry_type=ScratchpadEntryType.OBSERVATION,
+            summary="Observed tool result from 'fetch_url_text': URL text fetched successfully.",
+        )
+    )
+    return state
+
+
+# Build a non-DMA timeline state so the regression covers a different official source task.
+def _build_summary_task_state_with_generic_timeline() -> TaskState:
+    state = TaskState.from_intake(_build_research_intake_result())
+    state.plan_steps = [
+        PlanStep(
+            step_id="step_1",
+            objective="Produce a short summary from official EU sources including the timeline.",
+            rationale="The task only needs a brief grounded summary from official pages and one date fact.",
+            expected_outcome="A short summary grounded in official sources and the regulation timeline.",
+            status=PlanStepStatus.IN_PROGRESS,
+        )
+    ]
+    state.current_plan_step_index = 0
+    state.current_state = RuntimeState.ACTING
+    state.actor_turn_count = 2
+    state.tool_call_count = 1
+    state.last_tool_result = ToolExecutionResult(
+        request=ToolRequest(
+            plan_step_id="step_1",
+            tool_name=ToolName.WEB_SEARCH,
+            reason="Find an official EU source for the AI Act entry-into-force date.",
+            query="AI Act entered into force official EU",
+        ),
+        success=True,
+        summary="Web search executed successfully.",
+        content="The AI Act entered into force on 1 August 2024.",
+        sources=(
+            ToolSource(
+                title="AI Act official EU announcement",
+                locator="https://example.eu/ai-act-entry-into-force",
+                snippet="The AI Act entered into force on 1 August 2024.",
+            ),
+        ),
+    )
+    return state
+
+
+def _build_conservative_replan_summary_task_state() -> TaskState:
+    state = TaskState.from_intake(_build_research_intake_result())
+    state.plan_steps = [
+        PlanStep(
+            step_id="replan_step_1",
+            objective=(
+                "Write the final deliverable using only a conservative, purpose/scope-level "
+                "summary that does not require extracted clause text or obligations-by-number claims."
+            ),
+            rationale=(
+                "Extractability is limited, so the remaining task should use high-level official "
+                "evidence and avoid granular legal claims."
+            ),
+            expected_outcome=(
+                "A short summary framed at a high level plus a references list with official links."
+            ),
+            status=PlanStepStatus.IN_PROGRESS,
+        )
+    ]
+    state.current_plan_step_index = 0
+    state.current_state = RuntimeState.ACTING
+    state.actor_turn_count = 3
+    state.runtime_flags.append(RuntimeFlag.EXTRACTABILITY_LIMITED)
+    state.observed_evidence.append(
+        ObservedEvidence(
+            evidence_id="replan_step_1:tool:5:source:1",
+            plan_step_id="replan_step_1",
+            title="Digital Markets Act",
+            locator="https://digital-markets-act.ec.europa.eu/index_en",
+            excerpt=(
+                "The Digital Markets Act is the EU law to make the markets in the digital sector "
+                "fairer and more contestable and concerns gatekeepers."
+            ),
+            source_tool=ToolName.FETCH_URL_TEXT,
+            support_level=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
+        )
+    )
+    state.scratchpad.append(
+        ScratchpadEntry(
+            turn_index=2,
+            plan_step_id="replan_step_1",
+            entry_type=ScratchpadEntryType.OBSERVATION,
+            summary="Observed tool result from 'fetch_url_text': URL text fetched successfully.",
         )
     )
     return state

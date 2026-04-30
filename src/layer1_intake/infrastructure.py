@@ -76,8 +76,6 @@ class _PolicyProfilePayload(BaseModel):
 
     confidence_threshold: float = Field(..., ge=0.0, le=1.0)
     budget: _PolicyBudgetPayload
-    allowed_tools: list[str] = Field(default_factory=list)
-    disallowed_tools: list[str] = Field(default_factory=list)
     read_only_mode: bool = False
 
 
@@ -294,8 +292,6 @@ class JsonExecutionPolicyRepository(ExecutionPolicyRepositoryPort):
             confidence_threshold=data["confidence_threshold"],
             max_steps=budget["max_steps"],
             max_tool_calls=budget.get("max_tool_calls"),
-            allowed_tools=data.get("allowed_tools", []),
-            disallowed_tools=data.get("disallowed_tools", []),
             read_only_mode=data.get("read_only_mode", False),
         )
 

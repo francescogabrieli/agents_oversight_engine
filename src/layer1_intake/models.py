@@ -73,8 +73,6 @@ class ExecutionPolicy(BaseModel):
     )
     confidence_threshold: float = Field(..., ge=0.0, le=1.0)
     budget: BudgetConfig
-    allowed_tools: list[str] = Field(default_factory=list)
-    disallowed_tools: list[str] = Field(default_factory=list)
     read_only_mode: bool = Field(
         default=False,
         description="If true, only non-mutating actions should be allowed downstream.",
@@ -90,35 +88,6 @@ class ExecutionPolicy(BaseModel):
             raise TypeError("policy_profile_name must be a string.")
         cleaned = " ".join(value.strip().split())
         return cleaned or "default"
-
-    @field_validator("allowed_tools", "disallowed_tools", mode="before")
-    @classmethod
-    def normalize_tool_lists(cls, value: object) -> list[str]:
-        # Clean tool names once here so downstream code never handles duplicates or blanks.
-        if value is None:
-            return []
-        if not isinstance(value, list):
-            raise TypeError("Tool lists must be lists of strings.")
-
-        normalized: list[str] = []
-        for item in value:
-            if not isinstance(item, str):
-                raise TypeError("Each tool name must be a string.")
-            cleaned = item.strip()
-            if cleaned:
-                normalized.append(cleaned)
-
-        return sorted(set(normalized))
-
-    @model_validator(mode="after")
-    def validate_tool_overlap(self) -> "ExecutionPolicy":
-        # The same tool cannot be both explicitly allowed and explicitly denied.
-        overlap = set(self.allowed_tools) & set(self.disallowed_tools)
-        if overlap:
-            raise ValueError(
-                f"Tools cannot be both allowed and disallowed: {sorted(overlap)}"
-            )
-        return self
 
 # TaskSpec is the semantic core extracted from the raw request.
 class TaskSpec(BaseModel):
