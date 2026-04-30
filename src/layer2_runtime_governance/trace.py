@@ -357,9 +357,11 @@ def _build_execution_summary(*, task_state: TaskState) -> TraceExecutionSummary:
 # Build the retained tool request/result trace from TaskState.
 def _build_tool_calls(*, task_state: TaskState) -> tuple[TraceToolCall, ...]:
     calls: list[TraceToolCall] = []
-    if task_state.last_tool_result is not None:
+    for result in task_state.tool_results_history:
+        calls.append(_build_tool_call_from_result(result))
+    if not calls and task_state.last_tool_result is not None:
         calls.append(_build_tool_call_from_result(task_state.last_tool_result))
-    elif task_state.current_tool_request is not None:
+    if task_state.current_tool_request is not None:
         calls.append(_build_tool_call_from_request(task_state.current_tool_request))
     return tuple(calls)
 

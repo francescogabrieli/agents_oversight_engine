@@ -13,7 +13,7 @@ from enum import Enum
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -24,6 +24,11 @@ from .tool_contract import (
     ToolRequest,
     ToolSource,
 )
+
+if TYPE_CHECKING:
+    from openai import OpenAI as OpenAIClient
+else:
+    OpenAIClient = Any
 
 try:
     from openai import OpenAI
@@ -91,7 +96,7 @@ class ToolGatewayConfig:
 
 @dataclass(frozen=True)
 class OpenAIToolGatewaySettings:
-    model: str = "gpt-5.4-mini"
+    model: str = "gpt-5.4-nano"
     api_key: str | None = None
     timeout_seconds: float = 30.0
     fetch_timeout_seconds: float = 20.0
@@ -110,7 +115,7 @@ class OpenAIToolGatewaySettings:
         return cls(
             model=os.getenv(
                 "LAYER2_TOOL_GATEWAY_OPENAI_MODEL",
-                env_file_values.get("LAYER2_TOOL_GATEWAY_OPENAI_MODEL", "gpt-5.4-mini"),
+                env_file_values.get("LAYER2_TOOL_GATEWAY_OPENAI_MODEL", "gpt-5.4-nano"),
             ),
             api_key=os.getenv("OPENAI_API_KEY", env_file_values.get("OPENAI_API_KEY")),
             timeout_seconds=float(
@@ -146,7 +151,7 @@ class OpenAIToolGateway(ToolGatewayPort):
         self._config = config or load_tool_gateway_config(
             config_path=self._settings.config_path,
         )
-        self._client: OpenAI | None = None
+        self._client: OpenAIClient | None = None
 
     # Execute one typed tool request against the configured operational tool surface.
     def execute(self, *, tool_request: ToolRequest) -> ToolExecutionResult:
@@ -258,6 +263,11 @@ class OpenAIToolGateway(ToolGatewayPort):
 
         content = _truncate_text(extracted_text, definition.max_content_chars)
         snippet = _truncate_text(content, 500)
+        if not _is_meaningful_extracted_text(content):
+            return _failure(
+                tool_request,
+                "URL fetch succeeded but extracted readable text was empty.",
+            )
 
         return ToolExecutionResult(
             request=tool_request,
@@ -744,6 +754,13 @@ def _extract_visible_text(html_text: str) -> str:
     parser.feed(html_text)
     parser.close()
     return parser.get_text()
+
+
+# Treat tiny title-only pages as empty extraction for evidence purposes.
+def _is_meaningful_extracted_text(text: str | None) -> bool:
+    if text is None:
+        return False
+    return len(" ".join(text.split())) >= 40
 
 
 # Keep tool content bounded so TaskState stays manageable.

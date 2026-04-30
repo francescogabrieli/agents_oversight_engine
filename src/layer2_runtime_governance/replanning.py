@@ -35,7 +35,7 @@ class ReplannerPort(Protocol):
 
 @dataclass(frozen=True)
 class OpenAIReplannerSettings:
-    model: str = "gpt-5.4-mini"
+    model: str = "gpt-5.4-nano"
     api_key: str | None = None
     timeout_seconds: float = 30.0
 
@@ -47,7 +47,7 @@ class OpenAIReplannerSettings:
         return cls(
             model=os.getenv(
                 "LAYER2_REPLANNER_OPENAI_MODEL",
-                env_file_values.get("LAYER2_REPLANNER_OPENAI_MODEL", "gpt-5.4-mini"),
+                env_file_values.get("LAYER2_REPLANNER_OPENAI_MODEL", "gpt-5.4-nano"),
             ),
             api_key=os.getenv("OPENAI_API_KEY", env_file_values.get("OPENAI_API_KEY")),
             timeout_seconds=float(

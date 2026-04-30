@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
+from collections.abc import Callable
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -50,6 +52,7 @@ def run_layer2_flow(
     tool_gateway_service: ToolGatewayPort | None = None,
     replanner_service: ReplannerPort | None = None,
     policy_engine_service: PolicyEnginePort | None = None,
+    progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     # Run Layer 1 plus the current Layer 2 graph and return the resulting trace.
     runtime_graph = build_runtime_graph(
@@ -69,12 +72,16 @@ def run_layer2_flow(
         )
 
     if demo_intake_profile is not None:
+        if progress_callback is not None:
+            progress_callback("layer1_demo_intake", {})
         intake_result = _build_demo_intake_result(
             profile=demo_intake_profile,
             raw_task_text=raw_task_text,
             context_hint=context_hint,
         )
     else:
+        if progress_callback is not None:
+            progress_callback("layer1_intake", {})
         resolved_intake_service = intake_service or build_intake_service()
         intake_result = resolved_intake_service.execute(
             IntakeCommand(
@@ -84,10 +91,18 @@ def run_layer2_flow(
             )
         )
 
-    final_result = runtime_graph.invoke(
-        {"intake_result": intake_result},
-        config=config,
-    )
+    if progress_callback is None:
+        final_result = runtime_graph.invoke(
+            {"intake_result": intake_result},
+            config=config,
+        )
+    else:
+        final_result = _stream_runtime_graph_with_progress(
+            runtime_graph=runtime_graph,
+            intake_result=intake_result,
+            config=config,
+            progress_callback=progress_callback,
+        )
 
     # Return both layer boundaries so callers can inspect the handoff end to end.
     return {
@@ -95,6 +110,30 @@ def run_layer2_flow(
         "intake_result": intake_result,
         "final_result": final_result,
     }
+
+
+# Stream graph updates so the CLI can show progress during long LLM/tool calls.
+def _stream_runtime_graph_with_progress(
+    *,
+    runtime_graph: Any,
+    intake_result: IntakeResult,
+    config: dict[str, Any],
+    progress_callback: Callable[[str, dict[str, Any]], None],
+) -> dict[str, Any]:
+    final_result: dict[str, Any] = {}
+    for chunk in runtime_graph.stream(
+        {"intake_result": intake_result},
+        config=config,
+        stream_mode="updates",
+    ):
+        if not isinstance(chunk, dict):
+            continue
+        for node_name, update in chunk.items():
+            node_update = update if isinstance(update, dict) else {}
+            progress_callback(str(node_name), node_update)
+            final_result.update(node_update)
+
+    return final_result
 
 
 def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
@@ -123,6 +162,37 @@ def _print_section(title: str, payload: Any) -> None:
     # Print one section of the Layer 2 trace with a stable visual format.
     print(f"\n=== {title} ===")
     print(json.dumps(to_jsonable(payload), indent=2, ensure_ascii=False))
+
+
+# Print compact progress updates while preserving stdout for final traces.
+def _print_progress(node_name: str, update: dict[str, Any]) -> None:
+    task_state = update.get("task_state")
+    details = _format_task_state_progress(task_state)
+    suffix = f" | {details}" if details else ""
+    print(f"[Layer 2] {node_name}{suffix}", file=sys.stderr, flush=True)
+
+
+# Summarize only audit-safe state fields during streaming progress.
+def _format_task_state_progress(task_state: Any) -> str:
+    if task_state is None:
+        return ""
+
+    current_state = getattr(task_state, "current_state", None)
+    actor_turn_count = getattr(task_state, "actor_turn_count", None)
+    tool_call_count = getattr(task_state, "tool_call_count", None)
+    current_plan_step = getattr(task_state, "current_plan_step", None)
+    plan_step_id = getattr(current_plan_step, "step_id", None)
+
+    parts: list[str] = []
+    if current_state is not None:
+        parts.append(f"state={getattr(current_state, 'value', current_state)}")
+    if plan_step_id:
+        parts.append(f"step={plan_step_id}")
+    if actor_turn_count is not None:
+        parts.append(f"actor_turns={actor_turn_count}")
+    if tool_call_count is not None:
+        parts.append(f"tool_calls={tool_call_count}")
+    return ", ".join(parts)
 
 
 def print_layer2_summary(trace: dict[str, Any]) -> None:
@@ -189,6 +259,11 @@ def parse_cli_args() -> argparse.Namespace:
         choices=["research", "clarification"],
         default=None,
         help="Use a local deterministic intake payload instead of invoking Layer 1 via OpenAI.",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Disable streaming progress logs and print only the final trace or summary.",
     )
     return parser.parse_args()
 
@@ -261,6 +336,7 @@ def main() -> None:
         policy_profile=args.policy_profile,
         thread_id=args.thread_id,
         demo_intake_profile=args.demo_intake_profile,
+        progress_callback=None if args.quiet else _print_progress,
     )
 
     if args.full_trace:

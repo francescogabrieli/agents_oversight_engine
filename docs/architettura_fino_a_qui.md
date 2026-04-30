@@ -514,7 +514,7 @@ Ad oggi il progetto copre già in modo consistente:
 - Runtime Layer 2
 - Planner semantico
 - Actor sul passo corrente
-- Backend OpenRouter `openai/gpt-oss-120b:free` per i primi test cloud dell'actor
+- Backend OpenRouter `gpt-oss-120b` per i primi test cloud dell'actor
 - Tool loop read-only
 - Observability
 - Replanning
@@ -536,7 +536,7 @@ Ad oggi il progetto copre già in modo consistente:
 
 ### Cosa non è ancora attivo
 
-Nota sui modelli: nei primi test cloud l'actor usa `openai/gpt-oss-120b:free` via OpenRouter.
+Nota sui modelli: nei primi test cloud l'actor usa `gpt-oss-120b` via OpenRouter.
 Questa resta una scelta temporanea per test gratuiti/intermedi.
 Quando il runtime sara stabile, l'actor verra migrato verso un grande modello cloud stabile.
 Planner e replanner restano separati dall'actor e possono mantenere backend diversi.

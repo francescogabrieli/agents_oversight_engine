@@ -30,7 +30,7 @@ except ImportError:  # pragma: no cover - handled at runtime if dependency is mi
 
 @dataclass(frozen=True)
 class OpenAIActorSettings:
-    model: str = "gpt-5.4-mini"
+    model: str = "gpt-5.4-nano"
     api_key: str | None = None
     timeout_seconds: float = 30.0
 
@@ -42,7 +42,7 @@ class OpenAIActorSettings:
         return cls(
             model=os.getenv(
                 "LAYER2_ACTOR_OPENAI_MODEL",
-                env_file_values.get("LAYER2_ACTOR_OPENAI_MODEL", "gpt-5.4-mini"),
+                env_file_values.get("LAYER2_ACTOR_OPENAI_MODEL", "gpt-5.4-nano"),
             ),
             api_key=os.getenv("OPENAI_API_KEY", env_file_values.get("OPENAI_API_KEY")),
             timeout_seconds=float(
@@ -57,7 +57,7 @@ class OpenAIActorSettings:
 @dataclass(frozen=True)
 class OpenRouterActorSettings:
     # OpenRouterActorSettings selects the temporary cloud actor test model.
-    model: str = "openai/gpt-oss-120b:free"
+    model: str = "gpt-oss-120b"
     api_key: str | None = None
     base_url: str = "https://openrouter.ai/api/v1"
     timeout_seconds: float = 120.0
@@ -294,7 +294,7 @@ class OpenAIActor(ActorPort):
 class OpenRouterActor(ActorPort):
     # OpenRouterActor runs only the actor role on the temporary cloud test backend.
     actor_name = "openrouter_gpt_oss_120b_actor"
-    prompt_version = "actor_v4_openrouter_json_runtime_tool_binding"
+    prompt_version = "actor_v5_openrouter_standard_tool_calling"
 
     def __init__(self, settings: OpenRouterActorSettings | None = None) -> None:
         # Validate OpenRouter actor settings without affecting planner/replanner providers.
@@ -309,15 +309,17 @@ class OpenRouterActor(ActorPort):
             )
         )
 
-    # Ask OpenRouter for one JSON runtime action and convert it into ActorResult.
+    # Ask OpenRouter for one standard tool call and convert it into ActorResult.
     def act(self, *, actor_task: ActorTask) -> ActorResult:
         try:
-            payload = self._client.complete_json(
+            payload = self._client.complete_tool_call(
                 system_prompt=build_actor_system_prompt(),
                 user_prompt=build_actor_user_prompt(actor_task=actor_task),
-                expected_shape=_build_json_actor_output_shape(),
+                tools=_build_actor_runtime_tools(),
             )
         except OpenRouterRuntimeError as exc:
+            if "no tool call and no assistant content" in str(exc):
+                return _build_provider_blocked_result(actor_task=actor_task, detail=str(exc))
             raise ActorExecutionError(f"OpenRouter actor request failed: {exc}") from exc
 
         tool_call = _convert_json_payload_to_tool_call(payload)
@@ -562,10 +564,28 @@ def _build_json_actor_output_shape() -> str:
     )
 
 
+# Convert empty provider responses into a typed blocked actor result instead of crashing the graph.
+def _build_provider_blocked_result(*, actor_task: ActorTask, detail: str) -> ActorResult:
+    blocking_reason = f"Actor provider returned no usable runtime action: {detail}"
+    return ActorResult(
+        plan_step_id=actor_task.current_plan_step.step_id,
+        result_type=ActorResultType.BLOCKED,
+        summary="Actor provider returned no usable runtime action.",
+        capability_mode=CapabilityAccessMode.NONE,
+        blocking_reason=blocking_reason,
+        scratchpad_entry=_build_scratchpad_entry(
+            actor_task=actor_task,
+            entry_type=ScratchpadEntryType.UNCERTAINTY,
+            summary=blocking_reason,
+        ),
+    )
+
+
 # Convert JSON actor output into the same shape used by OpenAI function tool calls.
 def _convert_json_payload_to_tool_call(payload: dict[str, Any]) -> SimpleNamespace:
-    tool_name = payload.get("tool_name")
-    arguments = payload.get("arguments")
+    normalized_payload = _normalize_actor_payload(payload=payload)
+    tool_name = normalized_payload.get("tool_name")
+    arguments = normalized_payload.get("arguments")
     if not isinstance(tool_name, str) or not tool_name.strip():
         raise ActorExecutionError("Actor JSON response must include string 'tool_name'.")
     if not isinstance(arguments, dict):
@@ -576,6 +596,45 @@ def _convert_json_payload_to_tool_call(payload: dict[str, Any]) -> SimpleNamespa
         raise ActorExecutionError(f"Actor emitted an unknown runtime action: {tool_name}")
 
     return SimpleNamespace(name=tool_name, arguments=json.dumps(arguments, ensure_ascii=False))
+
+
+# Normalize provider JSON that ignores the expected actor payload envelope.
+def _normalize_actor_payload(*, payload: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(payload.get("tool_name"), str):
+        return payload
+
+    output_value = _first_string_value(
+        payload,
+        "output_text",
+        "answer",
+        "final_answer",
+        "summary",
+        "content",
+    )
+    if output_value:
+        return {
+            "tool_name": "emit_intermediate_output",
+            "arguments": {
+                "summary": "Actor provider returned JSON without the runtime action envelope.",
+                "output_text": output_value,
+                "progress_note": "Provider JSON was preserved as intermediate output for governance review.",
+                "residual_uncertainty": (
+                    "The actor provider did not use the required tool-calling protocol."
+                ),
+                "confidence": 0.3,
+            },
+        }
+
+    raise ActorExecutionError("Actor JSON response must include string 'tool_name'.")
+
+
+# Return the first non-empty string value for known provider fallback keys.
+def _first_string_value(payload: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 # Extract exactly one function tool call from the model response.
@@ -722,44 +781,46 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
         )
 
     if tool_name == "emit_step_completed":
-        _require_arguments(arguments, "summary", "output_text", "completion_rationale")
+        _require_arguments(arguments, "output_text")
+        completion_arguments = _ensure_completion_arguments(arguments=arguments)
         # Step completion is represented as local output plus positive validation.
         return ActorResult(
             plan_step_id=plan_step_id,
             result_type=ActorResultType.INTERMEDIATE_OUTPUT,
-            summary=arguments["summary"],
+            summary=completion_arguments["summary"],
             capability_mode=CapabilityAccessMode.NONE,
-            output_text=arguments["output_text"],
+            output_text=completion_arguments["output_text"],
             scratchpad_entry=_build_scratchpad_entry(
                 actor_task=actor_task,
                 entry_type=ScratchpadEntryType.COMPLETION_RATIONALE,
-                summary=arguments["completion_rationale"],
+                summary=completion_arguments["completion_rationale"],
             ),
             step_validation=_build_step_validation(
                 actor_task=actor_task,
-                arguments=arguments,
+                arguments=completion_arguments,
                 next_action=StepValidationDecision.COMPLETE_STEP,
                 rationale_key="completion_rationale",
             ),
         )
 
     if tool_name == "emit_final_output":
-        _require_arguments(arguments, "summary", "output_text", "completion_rationale")
+        _require_arguments(arguments, "output_text")
+        completion_arguments = _ensure_completion_arguments(arguments=arguments)
         # Final output is still subject to the same validation contract as normal steps.
         return ActorResult(
             plan_step_id=plan_step_id,
             result_type=ActorResultType.FINAL_OUTPUT,
-            summary=arguments["summary"],
+            summary=completion_arguments["summary"],
             capability_mode=CapabilityAccessMode.NONE,
-            output_text=arguments["output_text"],
+            output_text=completion_arguments["output_text"],
             scratchpad_entry=_build_scratchpad_entry(
                 actor_task=actor_task,
                 entry_type=ScratchpadEntryType.COMPLETION_RATIONALE,
-                summary=arguments["completion_rationale"],
+                summary=completion_arguments["completion_rationale"],
             ),
             step_validation=_build_step_validation(
                 actor_task=actor_task,
-                arguments=arguments,
+                arguments=completion_arguments,
                 next_action=StepValidationDecision.COMPLETE_STEP,
                 rationale_key="completion_rationale",
             ),
@@ -915,6 +976,36 @@ def _require_arguments(arguments: dict[str, object], *required_keys: str) -> Non
         value = arguments.get(key)
         if not isinstance(value, str) or not value.strip():
             raise ActorExecutionError(f"Actor tool call is missing required string argument '{key}'.")
+
+
+# Preserve the internal completion contract when provider tool arguments are incomplete.
+def _ensure_completion_arguments(*, arguments: dict[str, object]) -> dict[str, object]:
+    normalized_arguments = dict(arguments)
+    summary = normalized_arguments.get("summary")
+    output_text = normalized_arguments.get("output_text")
+    rationale = normalized_arguments.get("completion_rationale")
+
+    # Completion summary is audit-facing, so derive it from rationale before user output.
+    if not isinstance(summary, str) or not summary.strip():
+        if isinstance(rationale, str) and rationale.strip():
+            normalized_arguments["summary"] = rationale
+        elif isinstance(output_text, str) and output_text.strip():
+            normalized_arguments["summary"] = output_text
+
+    summary = normalized_arguments.get("summary")
+    if isinstance(rationale, str) and rationale.strip():
+        return normalized_arguments
+
+    # Prefer the normalized summary because it is already intended as an audit-safe explanation.
+    if isinstance(summary, str) and summary.strip():
+        normalized_arguments["completion_rationale"] = summary
+        return normalized_arguments
+
+    if isinstance(output_text, str) and output_text.strip():
+        normalized_arguments["completion_rationale"] = output_text
+        return normalized_arguments
+
+    return normalized_arguments
 
 
 # Build a conservative search query if a JSON actor omits the explicit query field.

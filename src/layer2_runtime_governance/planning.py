@@ -18,7 +18,7 @@ except ImportError:  # pragma: no cover - handled at runtime if dependency is mi
 
 @dataclass(frozen=True)
 class OpenAIPlannerSettings:
-    model: str = "gpt-5.4-mini"
+    model: str = "gpt-5.4-nano"
     api_key: str | None = None
     timeout_seconds: float = 30.0
 

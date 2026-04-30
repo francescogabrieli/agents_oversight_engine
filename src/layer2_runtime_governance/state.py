@@ -163,6 +163,7 @@ class TaskState:
     # Tool loop snapshot.
     current_tool_request: ToolRequest | None = None
     last_tool_result: ToolExecutionResult | None = None
+    tool_results_history: list[ToolExecutionResult] = field(default_factory=list)
     observed_evidence: list[ObservedEvidence] = field(default_factory=list)
     tool_call_count: int = 0
 

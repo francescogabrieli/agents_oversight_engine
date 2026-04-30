@@ -212,7 +212,10 @@ class GatewayMCPTests(unittest.TestCase):
     def test_fetch_url_accepts_mocked_https_response(self) -> None:
         gateway = OpenAIToolGateway()
         response = FakeHTTPResponse(
-            body=b"<html><title>Example</title><body><p>Hello source</p></body></html>",
+            body=(
+                b"<html><title>Example</title><body><p>Hello source with enough readable "
+                b"content to become meaningful evidence for the runtime.</p></body></html>"
+            ),
             content_type="text/html",
         )
 
@@ -230,6 +233,27 @@ class GatewayMCPTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(result.sources[0].title, "Example")
         self.assertIn("Hello source", result.content or "")
+
+    def test_fetch_url_empty_extracted_text_returns_failure(self) -> None:
+        gateway = OpenAIToolGateway()
+        response = FakeHTTPResponse(
+            body=b"<html><title>Empty</title><body><script>hidden()</script></body></html>",
+            content_type="text/html",
+        )
+
+        with patch("layer2_runtime_governance.tool_gateway._is_blocked_host", return_value=False):
+            with patch("layer2_runtime_governance.tool_gateway.urlopen", return_value=response):
+                result = gateway.execute(
+                    tool_request=ToolRequest(
+                        plan_step_id="step_1",
+                        tool_name=ToolName.FETCH_URL_TEXT,
+                        reason="Fetch one mocked empty HTTPS document.",
+                        url="https://example.org/empty",
+                    )
+                )
+
+        self.assertFalse(result.success)
+        self.assertIn("extracted readable text was empty", result.error_message or "")
 
     def test_disabled_tool_returns_structured_failure(self) -> None:
         disabled_config = ToolGatewayConfig(

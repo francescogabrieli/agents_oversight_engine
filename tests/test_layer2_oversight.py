@@ -40,6 +40,7 @@ from layer2_runtime_governance import (
     ReplanDecision,
     ReplannerPort,
     RuntimeState,
+    StepRecord,
     StepValidation,
     StepValidationDecision,
     TaskState,
@@ -204,6 +205,36 @@ class Layer2OversightTests(unittest.TestCase):
         self.assertLess(assessment.score, 0.60)
         self.assertIn(OversightReasonCode.ACTOR_TURNS_EXCEEDED, assessment.reason_codes)
         self.assertIn(OversightReasonCode.NEEDS_REPLAN_SIGNAL, assessment.reason_codes)
+
+    def test_replan_limit_escalates_to_human_review(self) -> None:
+        task_state = _build_task_state_with_actor_result(
+            actor_result_type=ActorResultType.NEEDS_REPLAN,
+            validation=None,
+        )
+        task_state.step_history.append(
+            _step_record(node_name="replanner", summary="First replan.")
+        )
+        task_state.step_history.append(
+            _step_record(node_name="replanner", summary="Second replan.")
+        )
+        policy_input = build_policy_evaluation_input(task_state=task_state)
+
+        oversight = evaluate_confidence_risk_trajectory(
+            task_state=task_state,
+            policy_input=policy_input,
+            tool_gateway_config=_tool_config(),
+        )
+        decision = build_governance_decision(
+            policy_input=policy_input,
+            policy_result=_policy_result(PolicyDecision.ALLOW),
+            oversight_assessment=oversight,
+        )
+
+        self.assertEqual(decision.directive, GovernanceDirective.WAIT_HUMAN_REVIEW)
+        self.assertIn(
+            OversightReasonCode.REPLAN_LIMIT_EXCEEDED,
+            oversight.trajectory_health.reason_codes,
+        )
 
     def test_opa_deny_remains_stop_even_when_oversight_is_healthy(self) -> None:
         task_state = _healthy_completion_state()
@@ -388,6 +419,16 @@ def _healthy_completion_state() -> TaskState:
     return state
 
 
+# Build one runtime step record for oversight history tests.
+def _step_record(*, node_name: str, summary: str) -> StepRecord:
+    return StepRecord(
+        step_index=1,
+        runtime_state=RuntimeState.REPLANNING,
+        node_name=node_name,
+        summary=summary,
+    )
+
+
 # Build a small evidence item with provenance.
 def _evidence() -> ObservedEvidence:
     return ObservedEvidence(
@@ -395,7 +436,7 @@ def _evidence() -> ObservedEvidence:
         plan_step_id="step_1",
         title="MCP text stats",
         locator="mcp://local_test/text_stats",
-        excerpt="Evidence text.",
+        excerpt="Evidence text with enough substance to count as meaningful provenance.",
         source_tool=ToolName.MCP_LOCAL_TEST_TEXT_STATS,
     )
 

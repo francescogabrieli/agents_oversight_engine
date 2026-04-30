@@ -182,6 +182,7 @@ def tool_gateway(state: TaskState, *, tool_gateway_service: ToolGatewayPort) -> 
             summary="Tool call budget exhausted before executing the requested tool.",
             error_message="The runtime exhausted the configured tool call budget.",
         )
+        state.tool_results_history.append(state.last_tool_result)
         state.current_tool_request = None
         state.current_state = RuntimeState.ACTING
 
@@ -192,8 +193,28 @@ def tool_gateway(state: TaskState, *, tool_gateway_service: ToolGatewayPort) -> 
         )
         return state
 
+    duplicate_error = _duplicate_tool_request_error(state=state)
+    if duplicate_error is not None:
+        state.last_tool_result = ToolExecutionResult(
+            request=state.current_tool_request,
+            success=False,
+            summary="Duplicate tool request blocked before execution.",
+            error_message=duplicate_error,
+        )
+        state.tool_results_history.append(state.last_tool_result)
+        state.current_tool_request = None
+        state.current_state = RuntimeState.ACTING
+
+        _append_step_record(
+            state,
+            node_name="tool_gateway",
+            summary="Tool gateway blocked a duplicate request for the current plan step.",
+        )
+        return state
+
     tool_result = tool_gateway_service.execute(tool_request=state.current_tool_request)
     state.last_tool_result = tool_result
+    state.tool_results_history.append(tool_result)
     state.tool_call_count += 1
     state.current_tool_request = None
     state.current_state = RuntimeState.ACTING
@@ -320,6 +341,37 @@ def _tool_call_budget_exhausted(*, state: TaskState) -> bool:
         return False
 
     return state.tool_call_count >= max_tool_calls
+
+
+# Block repeated equivalent tool requests within the same plan step.
+def _duplicate_tool_request_error(*, state: TaskState) -> str | None:
+    request = state.current_tool_request
+    if request is None:
+        return None
+
+    fingerprint = _tool_request_fingerprint(request)
+    if fingerprint is None:
+        return None
+
+    for prior_result in state.tool_results_history:
+        prior_request = prior_result.request
+        if prior_request.plan_step_id != request.plan_step_id:
+            continue
+        if _tool_request_fingerprint(prior_request) == fingerprint:
+            return (
+                "The same tool request was already executed for this plan step; "
+                "the actor must use existing evidence, choose a different source, or finish/replan."
+            )
+    return None
+
+
+# Build a stable duplicate-detection key for requests that should not be repeated.
+def _tool_request_fingerprint(tool_request: ToolRequest) -> tuple[str, str] | None:
+    if tool_request.url:
+        return (tool_request.tool_name.value, tool_request.url.strip().lower())
+    if tool_request.query:
+        return (tool_request.tool_name.value, tool_request.query.strip().lower())
+    return None
 
 
 # Persist the local execution trace for the current step before the graph continues or stops.
@@ -571,10 +623,21 @@ def _build_observed_evidence_from_tool_result(
         return []
 
     evidence_items: list[ObservedEvidence] = []
+    if not tool_result.success:
+        state.scratchpad.append(
+            _build_observation_scratchpad_entry(
+                state=state,
+                tool_result=tool_result,
+                evidence_refs=[],
+            )
+        )
+        return evidence_items
 
     # Preserve source-level provenance whenever the tool returned it.
     for index, source in enumerate(tool_result.sources, start=1):
         excerpt = source.snippet or tool_result.content or tool_result.summary
+        if not _is_meaningful_evidence_excerpt(excerpt):
+            continue
         evidence_items.append(
             ObservedEvidence(
                 evidence_id=f"{current_step.step_id}:tool:{state.tool_call_count}:source:{index}",
@@ -590,6 +653,15 @@ def _build_observed_evidence_from_tool_result(
     if not evidence_items:
         locator = tool_result.request.url or tool_result.request.query or tool_result.request.tool_name.value
         excerpt = tool_result.content or tool_result.error_message or tool_result.summary
+        if not _is_meaningful_evidence_excerpt(excerpt):
+            state.scratchpad.append(
+                _build_observation_scratchpad_entry(
+                    state=state,
+                    tool_result=tool_result,
+                    evidence_refs=[],
+                )
+            )
+            return evidence_items
         evidence_items.append(
             ObservedEvidence(
                 evidence_id=f"{current_step.step_id}:tool:{state.tool_call_count}:fallback",
@@ -610,6 +682,21 @@ def _build_observed_evidence_from_tool_result(
     )
 
     return evidence_items
+
+
+# Exclude empty/status-only strings from evidence used by later actor turns.
+def _is_meaningful_evidence_excerpt(value: str | None) -> bool:
+    if value is None:
+        return False
+    normalized = " ".join(value.split())
+    if len(normalized) < 40:
+        return False
+    status_only = {
+        "url text fetched successfully.",
+        "web search executed successfully.",
+        "tool succeeded.",
+    }
+    return normalized.lower() not in status_only
 
 
 # Record tool observations as audit-safe working memory for later actor turns.

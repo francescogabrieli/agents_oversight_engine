@@ -203,6 +203,54 @@ class StubToolGateway(ToolGatewayPort):
         )
 
 
+class RepeatFetchActor(ActorPort):
+    actor_name = "repeat_fetch_actor"
+    prompt_version = "repeat_fetch_v1"
+
+    # Always repeat the same URL so the gateway duplicate guard can be tested.
+    def act(self, *, actor_task: ActorTask) -> ActorResult:
+        return ActorResult(
+            plan_step_id=actor_task.current_plan_step.step_id,
+            result_type=ActorResultType.PROPOSE_ACTION,
+            summary="Repeat the same fetch request.",
+            capability_mode=CapabilityAccessMode.READ_ONLY,
+            external_impact=False,
+            tool_request=ToolRequest(
+                plan_step_id=actor_task.current_plan_step.step_id,
+                tool_name=ToolName.FETCH_URL_TEXT,
+                reason="Repeat same source.",
+                url="https://example.org/source",
+            ),
+            scratchpad_entry=ScratchpadEntry(
+                turn_index=actor_task.actor_turn_count,
+                plan_step_id=actor_task.current_plan_step.step_id,
+                entry_type=ScratchpadEntryType.TOOL_DECISION,
+                summary="Repeated fetch request.",
+            ),
+        )
+
+
+class SingleStepPlanner:
+    planner_name = "single_step_planner"
+    prompt_version = "single_step_v1"
+
+    # Keep the duplicate-tool test scoped to one step.
+    def plan(self, *, task_state):
+        return PlannerDecision(
+            plan_steps=[
+                PlanStep(
+                    step_id="step_1",
+                    objective="Fetch one source once.",
+                    rationale="The test needs one current step.",
+                    expected_outcome="One source fetched.",
+                )
+            ],
+            rationale="Single-step plan.",
+            planner_name=self.planner_name,
+            prompt_version=self.prompt_version,
+        )
+
+
 class StubPolicyEngine(PolicyEnginePort):
     policy_engine_name = "stub_policy_engine"
     policy_bundle_version = "stub_policy_bundle_v1"
@@ -470,7 +518,7 @@ class FakeReplannerClient:
 
 class _FakeOpenRouterClient:
     # Return one cloud actor JSON action without touching the OpenRouter service.
-    def complete_json(self, **kwargs):
+    def complete_tool_call(self, **kwargs):
         return {
             "tool_name": "emit_final_output",
             "arguments": {
@@ -486,7 +534,7 @@ class _FakeOpenRouterClient:
 
 class _FakeOpenRouterSearchWithoutQueryClient:
     # Return a web-search action missing query to verify runtime fallback behavior.
-    def complete_json(self, **kwargs):
+    def complete_tool_call(self, **kwargs):
         return {
             "tool_name": "request_web_search",
             "arguments": {
@@ -494,6 +542,34 @@ class _FakeOpenRouterSearchWithoutQueryClient:
                 "reason": "The current research step requires authoritative sources.",
             },
         }
+
+
+class _FakeOpenRouterCompletionWithoutRationaleClient:
+    # Return a completion action missing audit fields to verify normalization remains robust.
+    def complete_tool_call(self, **kwargs):
+        return {
+            "tool_name": "emit_final_output",
+            "arguments": {
+                "output_text": "Grounded concise final answer.",
+                "objective_satisfied": True,
+                "evidence_sufficient": True,
+                "confidence": 0.79,
+            },
+        }
+
+
+class _FakeOpenRouterJsonWithoutEnvelopeClient:
+    # Return JSON without the actor envelope to verify fallback normalization.
+    def complete_tool_call(self, **kwargs):
+        return {"answer": "Provider returned an answer without a tool_name envelope."}
+
+
+class _FakeOpenRouterEmptyResponseClient:
+    # Simulate a provider response that contains neither tool calls nor content.
+    def complete_tool_call(self, **kwargs):
+        raise openrouter_client_module.OpenRouterRuntimeError(
+            "OpenRouter returned no tool call and no assistant content. finish_reason='stop'."
+        )
 
 
 class FakeOPAResponse:
@@ -727,6 +803,27 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             ],
         )
 
+    def test_duplicate_fetch_request_is_blocked_before_reexecution(self) -> None:
+        graph = _build_test_graph(
+            planner_service=SingleStepPlanner(),
+            actor_service=RepeatFetchActor(),
+            policy_engine_service=StubPolicyEngine(),
+        )
+        result = graph.invoke(
+            {"intake_result": _build_research_intake_result(max_steps=1, max_tool_calls=10)},
+            config={"configurable": {"thread_id": "layer2-duplicate-fetch-blocked"}},
+        )
+
+        task_state = result["task_state"]
+        self.assertEqual(task_state.tool_call_count, 1)
+        self.assertGreaterEqual(len(task_state.tool_results_history), 2)
+        self.assertTrue(task_state.tool_results_history[0].success)
+        self.assertFalse(task_state.tool_results_history[1].success)
+        self.assertIn(
+            "same tool request",
+            task_state.tool_results_history[1].error_message or "",
+        )
+
     def test_write_action_is_denied_by_governance(self) -> None:
         graph = _build_test_graph(actor_service=WriteActionActor())
         result = graph.invoke(
@@ -931,7 +1028,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
     def test_openrouter_actor_converts_json_action_to_actor_result_without_network(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
-                model="openai/gpt-oss-120b:free",
+                model="gpt-oss-120b",
                 api_key="test-key",
                 base_url="https://openrouter.ai/api/v1",
                 timeout_seconds=1.0,
@@ -951,7 +1048,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
     def test_openrouter_actor_web_search_without_query_uses_step_fallback(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
-                model="openai/gpt-oss-120b:free",
+                model="gpt-oss-120b",
                 api_key="test-key",
                 base_url="https://openrouter.ai/api/v1",
                 timeout_seconds=1.0,
@@ -968,10 +1065,125 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertEqual(result.tool_request.tool_name, ToolName.WEB_SEARCH)
         self.assertIn("Collect the minimum official evidence", result.tool_request.query)
 
+    def test_openrouter_actor_completion_without_rationale_uses_summary(self) -> None:
+        actor = OpenRouterActor(
+            settings=OpenRouterActorSettings(
+                model="gpt-oss-120b",
+                api_key="test-key",
+                base_url="https://openrouter.ai/api/v1",
+                timeout_seconds=1.0,
+            )
+        )
+        actor._client = _FakeOpenRouterCompletionWithoutRationaleClient()  # type: ignore[attr-defined]
+        state = _build_policy_input_task_state()
+        actor_task = build_actor_task(task_state=state)
+
+        result = actor.act(actor_task=actor_task)
+
+        self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
+        self.assertEqual(result.summary, "Grounded concise final answer.")
+        self.assertIsNotNone(result.step_validation)
+        self.assertEqual(
+            result.step_validation.rationale_summary,
+            "Grounded concise final answer.",
+        )
+        self.assertIsNotNone(result.scratchpad_entry)
+        self.assertEqual(
+            result.scratchpad_entry.summary,
+            "Grounded concise final answer.",
+        )
+
+    def test_openrouter_plain_text_response_is_normalized_to_progress_payload(self) -> None:
+        payload = openrouter_client_module._extract_tool_call_payload(  # type: ignore[attr-defined]
+            {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": "Plain text answer from a provider that ignored tool_choice.",
+                        },
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(payload["tool_name"], "emit_intermediate_output")
+        self.assertEqual(payload["arguments"]["confidence"], 0.3)
+        self.assertIn("Plain text answer", payload["arguments"]["output_text"])
+
+    def test_openrouter_rejects_any_configured_model_except_required_actor_model(self) -> None:
+        with self.assertRaisesRegex(
+            openrouter_client_module.OpenRouterRuntimeError,
+            "must be 'gpt-oss-120b'",
+        ):
+            OpenRouterActor(
+                settings=OpenRouterActorSettings(
+                    model="some-other-model",
+                    api_key="test-key",
+                    base_url="https://openrouter.ai/api/v1",
+                    timeout_seconds=1.0,
+                )
+            )
+
+    def test_openrouter_rejects_response_model_different_from_required_actor_model(self) -> None:
+        with self.assertRaisesRegex(
+            openrouter_client_module.OpenRouterRuntimeError,
+            "unexpected model",
+        ):
+            openrouter_client_module._validate_response_model(  # type: ignore[attr-defined]
+                response_payload={"model": "some-other-model"},
+                requested_model="gpt-oss-120b",
+            )
+
+    def test_openrouter_accepts_only_required_actor_model(self) -> None:
+        openrouter_client_module._validate_response_model(  # type: ignore[attr-defined]
+            response_payload={"model": "gpt-oss-120b"},
+            requested_model="gpt-oss-120b",
+        )
+
+    def test_openrouter_json_without_envelope_is_normalized_to_progress(self) -> None:
+        actor = OpenRouterActor(
+            settings=OpenRouterActorSettings(
+                model="gpt-oss-120b",
+                api_key="test-key",
+                base_url="https://openrouter.ai/api/v1",
+                timeout_seconds=1.0,
+            )
+        )
+        actor._client = _FakeOpenRouterJsonWithoutEnvelopeClient()  # type: ignore[attr-defined]
+        state = _build_policy_input_task_state()
+        actor_task = build_actor_task(task_state=state)
+
+        result = actor.act(actor_task=actor_task)
+
+        self.assertEqual(result.result_type, ActorResultType.INTERMEDIATE_OUTPUT)
+        self.assertEqual(result.step_validation.confidence, 0.3)
+        self.assertIn("without a tool_name", result.output_text)
+
+    def test_openrouter_empty_response_becomes_blocked_actor_result(self) -> None:
+        actor = OpenRouterActor(
+            settings=OpenRouterActorSettings(
+                model="gpt-oss-120b",
+                api_key="test-key",
+                base_url="https://openrouter.ai/api/v1",
+                timeout_seconds=1.0,
+            )
+        )
+        actor._client = _FakeOpenRouterEmptyResponseClient()  # type: ignore[attr-defined]
+        state = _build_policy_input_task_state()
+        actor_task = build_actor_task(task_state=state)
+
+        result = actor.act(actor_task=actor_task)
+
+        self.assertEqual(result.result_type, ActorResultType.BLOCKED)
+        self.assertIn("no usable runtime action", result.summary)
+        self.assertIsNotNone(result.blocking_reason)
+
     def test_openrouter_actor_timeout_is_normalized(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
-                model="openai/gpt-oss-120b:free",
+                model="gpt-oss-120b",
                 api_key="test-key",
                 base_url="https://openrouter.ai/api/v1",
                 timeout_seconds=1.0,
@@ -1139,13 +1351,14 @@ def _build_replanning_task_state() -> TaskState:
 # Build a deterministic Layer 2 graph with the stubbed governance stack.
 def _build_test_graph(
     *,
+    planner_service: PlannerPort | None = None,
     actor_service: ActorPort | None = None,
     tool_gateway_service: ToolGatewayPort | None = None,
     replanner_service: ReplannerPort | None = None,
     policy_engine_service: PolicyEnginePort | None = None,
 ):
     return build_runtime_graph(
-        planner_service=StubPlanner(),
+        planner_service=planner_service or StubPlanner(),
         actor_service=actor_service or StubActor(),
         tool_gateway_service=tool_gateway_service or StubToolGateway(),
         replanner_service=replanner_service or StubReplanner(),

@@ -75,6 +75,7 @@ class OversightReasonCode(str, Enum):
     FAILED_TOOL_RESULT_PRESENT = "failed_tool_result_present"
     NO_REPLAN_NEEDED = "no_replan_needed"
     NEEDS_REPLAN_SIGNAL = "needs_replan_signal"
+    REPLAN_LIMIT_EXCEEDED = "replan_limit_exceeded"
     LOW_CONFIDENCE_UNCERTAINTY = "low_confidence_uncertainty"
     RECOMMEND_CONTINUE = "recommend_continue"
     RECOMMEND_MORE_EVIDENCE = "recommend_more_evidence"
@@ -107,6 +108,7 @@ class RiskScores:
 class TrajectoryPenalties:
     # TrajectoryPenalties defines how runtime degradation reduces health.
     max_actor_turns_per_step: int
+    max_replans: int
     actor_turn_overage_penalty: float
     failed_tool_result_penalty: float
     needs_replan_penalty: float
@@ -208,6 +210,7 @@ def load_oversight_policy_config(*, config_path: Path | None = None) -> Oversigh
         ),
         trajectory_penalties=TrajectoryPenalties(
             max_actor_turns_per_step=int(trajectory_penalties.get("max_actor_turns_per_step", 3)),
+            max_replans=int(trajectory_penalties.get("max_replans", 2)),
             actor_turn_overage_penalty=float(
                 trajectory_penalties.get("actor_turn_overage_penalty", 0.15)
             ),
@@ -252,6 +255,7 @@ def build_default_oversight_policy_config() -> OversightPolicyConfig:
         ),
         trajectory_penalties=TrajectoryPenalties(
             max_actor_turns_per_step=3,
+            max_replans=2,
             actor_turn_overage_penalty=0.15,
             failed_tool_result_penalty=0.20,
             needs_replan_penalty=0.25,
@@ -339,13 +343,14 @@ def evaluate_evidence_quality(
         if validation.confidence < config.min_actor_confidence:
             reason_codes.append(OversightReasonCode.ACTOR_CONFIDENCE_BELOW_THRESHOLD)
 
-    if task_state.observed_evidence:
+    meaningful_evidence = _meaningful_observed_evidence(task_state=task_state)
+    if meaningful_evidence:
         score += weights.observed_evidence_present
         reason_codes.append(OversightReasonCode.OBSERVED_EVIDENCE_PRESENT)
     else:
         reason_codes.append(OversightReasonCode.OBSERVED_EVIDENCE_MISSING)
 
-    if any(item.locator.strip() for item in task_state.observed_evidence):
+    if any(item.locator.strip() for item in meaningful_evidence):
         score += weights.source_locator_present
         reason_codes.append(OversightReasonCode.SOURCE_LOCATOR_PRESENT)
     else:
@@ -363,6 +368,15 @@ def evaluate_evidence_quality(
         level=_evidence_level(score=score, config=config),
         reason_codes=tuple(reason_codes),
     )
+
+
+# Keep status-only observations from inflating evidence quality.
+def _meaningful_observed_evidence(*, task_state: TaskState):
+    return [
+        item
+        for item in task_state.observed_evidence
+        if item.excerpt and len(" ".join(item.excerpt.split())) >= 40
+    ]
 
 
 # Score operational risk from actor intent, task sensitivity, and tool registry metadata.
@@ -463,6 +477,10 @@ def evaluate_trajectory_health(
         score -= penalties.low_confidence_uncertainty_penalty
         reason_codes.append(OversightReasonCode.LOW_CONFIDENCE_UNCERTAINTY)
 
+    if _replan_count(task_state=task_state) >= penalties.max_replans:
+        score = 0.0
+        reason_codes.append(OversightReasonCode.REPLAN_LIMIT_EXCEEDED)
+
     score = _clamp(score)
     return TrajectoryHealthAssessment(
         score=score,
@@ -482,6 +500,11 @@ def _latest_relevant_validation(*, task_state: TaskState) -> StepValidation | No
     return task_state.actor_result.step_validation
 
 
+# Count completed replanner passes from the canonical runtime step history.
+def _replan_count(*, task_state: TaskState) -> int:
+    return sum(1 for record in task_state.step_history if record.node_name == "replanner")
+
+
 # Choose the adaptive recommendation without overriding hard OPA decisions.
 def _recommend_directive(
     *,
@@ -493,6 +516,9 @@ def _recommend_directive(
     trajectory_health: TrajectoryHealthAssessment,
 ) -> OversightRecommendedDirective:
     if operational_risk.score > config.max_operational_risk:
+        return OversightRecommendedDirective.WAIT_HUMAN_REVIEW
+
+    if OversightReasonCode.REPLAN_LIMIT_EXCEEDED in trajectory_health.reason_codes:
         return OversightRecommendedDirective.WAIT_HUMAN_REVIEW
 
     if trajectory_health.score < config.min_trajectory_health:

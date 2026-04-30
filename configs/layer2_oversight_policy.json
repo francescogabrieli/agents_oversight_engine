@@ -32,6 +32,7 @@
   },
   "trajectory_penalties": {
     "max_actor_turns_per_step": 3,
+    "max_replans": 2,
     "actor_turn_overage_penalty": 0.15,
     "failed_tool_result_penalty": 0.20,
     "needs_replan_penalty": 0.25,

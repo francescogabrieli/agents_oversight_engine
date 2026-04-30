@@ -77,8 +77,9 @@ class Layer2TraceTests(unittest.TestCase):
         self.assertEqual(len(trace.plan_steps), 2)
         self.assertEqual(trace.actor.result_type, "final_output")
         self.assertEqual(trace.execution.final_output_text, "Final trace answer.")
-        self.assertEqual(len(trace.tool_calls), 1)
+        self.assertEqual(len(trace.tool_calls), 2)
         self.assertEqual(trace.tool_calls[0].tool_name, "mcp.local_test.text_stats")
+        self.assertFalse(trace.tool_calls[1].success)
         self.assertEqual(len(trace.observed_evidence), 1)
         self.assertEqual(trace.observed_evidence[0].locator, "mcp://local_test/text_stats")
         self.assertEqual(len(trace.governance_decisions), 2)
@@ -236,6 +237,7 @@ def _complete_task_state() -> TaskState:
     ]
     state.step_validations = [_validation("step_1"), _validation("step_2")]
     state.last_tool_result = _tool_result()
+    state.tool_results_history = [_tool_result(), _second_tool_result()]
     state.observed_evidence = [_evidence()]
     state.governance_history = [_governance_read_only(), _governance_continue()]
     state.last_governance_decision = state.governance_history[-1]
@@ -290,6 +292,22 @@ def _tool_result() -> ToolExecutionResult:
                 snippet='{"words": 3}',
             ),
         ),
+    )
+
+
+# Build a second retained tool result so trace exports full tool history.
+def _second_tool_result() -> ToolExecutionResult:
+    request = ToolRequest(
+        plan_step_id="step_2",
+        tool_name=ToolName.FETCH_URL_TEXT,
+        reason="Fetch source text.",
+        url="https://example.org/source",
+    )
+    return ToolExecutionResult(
+        request=request,
+        success=False,
+        summary="Duplicate tool request blocked before execution.",
+        error_message="The same tool request was already executed for this plan step.",
     )
 
 
