@@ -726,6 +726,31 @@ class _FakeOpenRouterRecoveredHighLevelStepOneCompletionClient:
         }
 
 
+class _FakeOpenRouterProceduralImplementationSummaryClient:
+    # Return a too-strong implementation-summary draft so the actor can normalize procedural wording.
+    def complete_tool_call(self, **kwargs):
+        return {
+            "tool_name": "emit_final_output",
+            "arguments": {
+                "summary": "Summarize the DMA procedural implementation page.",
+                "output_text": (
+                    "The Digital Markets Act is an EU regulation that aims to make digital markets "
+                    "fairer by setting rules for large online platforms that act as gatekeepers. "
+                    "It defines gatekeeper criteria, outlines their obligations and prohibitions, "
+                    "and establishes enforcement by the European Commission (DG COMP and DG CONNECT). "
+                    "Official information and the full legislative text are available on the European "
+                    "Commission’s DMA website and on EUR-Lex."
+                ),
+                "completion_rationale": (
+                    "The current step uses the official DMA legislation page and Commission portal."
+                ),
+                "objective_satisfied": True,
+                "evidence_sufficient": True,
+                "confidence": 0.88,
+            },
+        }
+
+
 class _FakeOpenRouterCompletionWithInternalRefsClient:
     # Return a completion that leaks internal trace refs so sanitization can strip them.
     def complete_tool_call(self, **kwargs):
@@ -1318,7 +1343,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
     def test_openrouter_actor_converts_json_action_to_actor_result_without_network(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
-                model="gpt-oss-120b",
+                model="openai/gpt-oss-120b:free",
                 api_key="test-key",
                 base_url="https://openrouter.ai/api/v1",
                 timeout_seconds=1.0,
@@ -1338,7 +1363,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
     def test_openrouter_actor_web_search_without_query_uses_step_fallback(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
-                model="gpt-oss-120b",
+                model="openai/gpt-oss-120b:free",
                 api_key="test-key",
                 base_url="https://openrouter.ai/api/v1",
                 timeout_seconds=1.0,
@@ -1358,7 +1383,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
     def test_openrouter_actor_completion_without_rationale_uses_summary(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
-                model="gpt-oss-120b",
+                model="openai/gpt-oss-120b:free",
                 api_key="test-key",
                 base_url="https://openrouter.ai/api/v1",
                 timeout_seconds=1.0,
@@ -1405,7 +1430,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
     def test_openrouter_rejects_any_configured_model_except_required_actor_model(self) -> None:
         with self.assertRaisesRegex(
             openrouter_client_module.OpenRouterRuntimeError,
-            "must be 'gpt-oss-120b'",
+            "must be 'openai/gpt-oss-120b:free'",
         ):
             OpenRouterActor(
                 settings=OpenRouterActorSettings(
@@ -1423,19 +1448,19 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         ):
             openrouter_client_module._validate_response_model(  # type: ignore[attr-defined]
                 response_payload={"model": "some-other-model"},
-                requested_model="gpt-oss-120b",
+                requested_model="openai/gpt-oss-120b:free",
             )
 
     def test_openrouter_accepts_only_required_actor_model(self) -> None:
         openrouter_client_module._validate_response_model(  # type: ignore[attr-defined]
-            response_payload={"model": "gpt-oss-120b"},
-            requested_model="gpt-oss-120b",
+            response_payload={"model": "openai/gpt-oss-120b:free"},
+            requested_model="openai/gpt-oss-120b:free",
         )
 
     def test_openrouter_json_without_envelope_is_blocked_when_not_recoverable(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
-                model="gpt-oss-120b",
+                model="openai/gpt-oss-120b:free",
                 api_key="test-key",
                 base_url="https://openrouter.ai/api/v1",
                 timeout_seconds=1.0,
@@ -1456,7 +1481,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
     def test_openrouter_recovered_high_level_completion_has_no_protocol_uncertainty(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
-                model="gpt-oss-120b",
+                model="openai/gpt-oss-120b:free",
                 api_key="test-key",
                 base_url="https://openrouter.ai/api/v1",
                 timeout_seconds=1.0,
@@ -1565,7 +1590,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
     def test_openrouter_completion_with_unsupported_precision_stays_in_progress(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
-                model="gpt-oss-120b",
+                model="openai/gpt-oss-120b:free",
                 api_key="test-key",
                 base_url="https://openrouter.ai/api/v1",
                 timeout_seconds=1.0,
@@ -1593,7 +1618,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
     def test_openrouter_completion_sanitizes_internal_trace_refs(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
-                model="gpt-oss-120b",
+                model="openai/gpt-oss-120b:free",
                 api_key="test-key",
                 base_url="https://openrouter.ai/api/v1",
                 timeout_seconds=1.0,
@@ -1613,7 +1638,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
     def test_openrouter_source_shortlist_completion_stays_at_source_discovery(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
-                model="gpt-oss-120b",
+                model="openai/gpt-oss-120b:free",
                 api_key="test-key",
                 base_url="https://openrouter.ai/api/v1",
                 timeout_seconds=1.0,
@@ -1635,7 +1660,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
     def test_openrouter_summary_with_regulation_year_stays_supported(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
-                model="gpt-oss-120b",
+                model="openai/gpt-oss-120b:free",
                 api_key="test-key",
                 base_url="https://openrouter.ai/api/v1",
                 timeout_seconds=1.0,
@@ -1653,11 +1678,38 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertTrue(result.step_validation.evidence_sufficient)
         self.assertEqual(result.step_validation.next_action, StepValidationDecision.COMPLETE_STEP)
 
+    # Procedural implementation sources should not be described as if they directly enforce the rules.
+    def test_openrouter_procedural_implementation_summary_softens_enforcement_language(self) -> None:
+        actor = OpenRouterActor(
+            settings=OpenRouterActorSettings(
+                model="openai/gpt-oss-120b:free",
+                api_key="test-key",
+                base_url="https://openrouter.ai/api/v1",
+                timeout_seconds=1.0,
+            )
+        )
+        actor._client = _FakeOpenRouterProceduralImplementationSummaryClient()  # type: ignore[attr-defined]
+        state = _build_summary_task_state_with_year_in_citation()
+        actor_task = build_actor_task(task_state=state)
+
+        result = actor.act(actor_task=actor_task)
+
+        self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
+        self.assertNotIn("enforces the rules", result.output_text.lower())
+        self.assertNotIn(
+            "establishes enforcement by the european commission",
+            result.output_text.lower(),
+        )
+        self.assertIn(
+            "describes implementation and enforcement through the European Commission",
+            result.output_text,
+        )
+
     # Confirm the same precision rule works for a different EU-law timeline fact.
     def test_openrouter_summary_with_generic_timeline_stays_supported(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
-                model="gpt-oss-120b",
+                model="openai/gpt-oss-120b:free",
                 api_key="test-key",
                 base_url="https://openrouter.ai/api/v1",
                 timeout_seconds=1.0,
@@ -1685,7 +1737,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
     def test_openrouter_conservative_summary_after_extractability_limit_completes(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
-                model="gpt-oss-120b",
+                model="openai/gpt-oss-120b:free",
                 api_key="test-key",
                 base_url="https://openrouter.ai/api/v1",
                 timeout_seconds=1.0,
@@ -1707,7 +1759,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
     def test_openrouter_false_no_tool_blocked_recovers_to_web_search(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
-                model="gpt-oss-120b",
+                model="openai/gpt-oss-120b:free",
                 api_key="test-key",
                 base_url="https://openrouter.ai/api/v1",
                 timeout_seconds=1.0,
@@ -1727,7 +1779,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
     def test_openrouter_empty_response_becomes_blocked_actor_result(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
-                model="gpt-oss-120b",
+                model="openai/gpt-oss-120b:free",
                 api_key="test-key",
                 base_url="https://openrouter.ai/api/v1",
                 timeout_seconds=1.0,
@@ -1746,7 +1798,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
     def test_openrouter_actor_timeout_is_normalized(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
-                model="gpt-oss-120b",
+                model="openai/gpt-oss-120b:free",
                 api_key="test-key",
                 base_url="https://openrouter.ai/api/v1",
                 timeout_seconds=1.0,

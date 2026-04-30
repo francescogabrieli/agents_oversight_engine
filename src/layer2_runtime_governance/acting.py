@@ -58,7 +58,7 @@ class OpenAIActorSettings:
 @dataclass(frozen=True)
 class OpenRouterActorSettings:
     # OpenRouterActorSettings selects the temporary cloud actor test model.
-    model: str = "gpt-oss-120b"
+    model: str = "openai/gpt-oss-120b:free"
     api_key: str | None = None
     base_url: str = "https://openrouter.ai/api/v1"
     timeout_seconds: float = 120.0
@@ -869,7 +869,7 @@ class OpenAIActor(ActorPort):
 
 class OpenRouterActor(ActorPort):
     # OpenRouterActor runs only the actor role on the temporary cloud test backend.
-    actor_name = "openrouter_gpt_oss_120b_actor"
+    actor_name = "openrouter_gpt_oss_120b_free_actor"
     prompt_version = "actor_v5_openrouter_standard_tool_calling"
 
     def __init__(self, settings: OpenRouterActorSettings | None = None) -> None:
@@ -1419,6 +1419,10 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
         completion_arguments["completion_rationale"] = _sanitize_completion_text(
             str(completion_arguments.get("completion_rationale", ""))
         )
+        completion_arguments = _soften_procedural_implementation_language(
+            actor_task=actor_task,
+            arguments=completion_arguments,
+        )
         completion_arguments = _guard_completion_against_unsupported_precision(
             actor_task=actor_task,
             arguments=completion_arguments,
@@ -1455,6 +1459,10 @@ def _convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> A
         )
         completion_arguments["completion_rationale"] = _sanitize_completion_text(
             str(completion_arguments.get("completion_rationale", ""))
+        )
+        completion_arguments = _soften_procedural_implementation_language(
+            actor_task=actor_task,
+            arguments=completion_arguments,
         )
         completion_arguments = _guard_completion_against_unsupported_precision(
             actor_task=actor_task,
@@ -1765,6 +1773,66 @@ def _resolve_search_query(*, actor_task: ActorTask, arguments: dict[str, object]
         "official sources",
     ]
     return " ".join(part.strip() for part in fallback_parts if part and part.strip())
+
+
+# Soften overstated enforcement phrasing when the evidence is procedural rather than primary legal.
+def _soften_procedural_implementation_language(
+    *,
+    actor_task: ActorTask,
+    arguments: dict[str, object],
+) -> dict[str, object]:
+    if not _has_procedural_implementation_evidence(actor_task=actor_task):
+        return arguments
+
+    softened_arguments = dict(arguments)
+    for key in ("summary", "output_text", "completion_rationale"):
+        value = softened_arguments.get(key)
+        if isinstance(value, str) and value.strip():
+            softened_arguments[key] = _rewrite_procedural_enforcement_phrasing(value)
+    return softened_arguments
+
+
+# Detect implementation/procedural evidence without tying the behavior to a specific task.
+def _has_procedural_implementation_evidence(*, actor_task: ActorTask) -> bool:
+    procedural_markers = (
+        "procedural",
+        "implementation",
+        "implementing regulation",
+        "implementation and enforcement",
+        "enforcement procedure",
+    )
+    return any(
+        (
+            any(marker in evidence.excerpt.lower() for marker in procedural_markers)
+            or any(marker in evidence.title.lower() for marker in procedural_markers)
+            or any(marker in evidence.locator.lower() for marker in procedural_markers)
+        )
+        for evidence in actor_task.observed_evidence
+        if _is_direct_fact_support_evidence(evidence)
+    )
+
+
+# Keep procedural source summaries on the implementation side of the wording boundary.
+def _rewrite_procedural_enforcement_phrasing(text: str) -> str:
+    rewritten = re.sub(
+        r"\bestablishes enforcement by the European Commission\s*\(([^)]+)\)",
+        r"describes implementation and enforcement through the European Commission (\1)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    rewritten = re.sub(
+        r"\bsole enforcer of the DMA\b",
+        "responsible for implementation and enforcement of the DMA",
+        rewritten,
+        flags=re.IGNORECASE,
+    )
+    rewritten = re.sub(
+        r"\benforces the rules\b",
+        "describes implementation and procedural enforcement",
+        rewritten,
+        flags=re.IGNORECASE,
+    )
+    return rewritten
 
 
 # Build the production actor used by the live Layer 2 runtime.

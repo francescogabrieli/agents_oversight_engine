@@ -9,13 +9,13 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-_REQUIRED_OPENROUTER_MODEL = "gpt-oss-120b"
+_REQUIRED_OPENROUTER_MODEL = "openai/gpt-oss-120b:free"
 
 
 @dataclass(frozen=True)
 class OpenRouterRuntimeSettings:
     # OpenRouterRuntimeSettings keeps the temporary actor test model explicit.
-    model: str = "gpt-oss-120b"
+    model: str = "openai/gpt-oss-120b:free"
     api_key: str | None = None
     base_url: str = "https://openrouter.ai/api/v1"
     timeout_seconds: float = 120.0
@@ -35,7 +35,7 @@ class OpenRouterRuntimeSettings:
                         "LAYER2_OPENROUTER_MODEL",
                         env_file_values.get(
                             "LAYER2_OPENROUTER_MODEL",
-                            "gpt-oss-120b",
+                            "openai/gpt-oss-120b:free",
                         ),
                     ),
                 ),
@@ -199,7 +199,7 @@ def _json_system_prompt(system_prompt: str, expected_shape: str) -> str:
 # Enforce the single actor model selected for the temporary OpenRouter test backend.
 def _validate_required_model(*, model: str) -> None:
     normalized_model = _normalize_model_name(model)
-    if normalized_model != _REQUIRED_OPENROUTER_MODEL:
+    if normalized_model != _normalize_model_name(_REQUIRED_OPENROUTER_MODEL):
         raise OpenRouterRuntimeError(
             f"OpenRouter actor model must be '{_REQUIRED_OPENROUTER_MODEL}', got '{model}'."
         )
@@ -214,7 +214,7 @@ def _validate_response_model(*, response_payload: dict[str, Any], requested_mode
         raise OpenRouterRuntimeError("OpenRouter response field 'model' must be a string.")
 
     normalized_response_model = _normalize_model_name(response_model)
-    if normalized_response_model != _REQUIRED_OPENROUTER_MODEL:
+    if normalized_response_model != _normalize_model_name(_REQUIRED_OPENROUTER_MODEL):
         raise OpenRouterRuntimeError(
             f"OpenRouter served unexpected model '{response_model}' for required model "
             f"'{_REQUIRED_OPENROUTER_MODEL}'."

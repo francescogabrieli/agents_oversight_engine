@@ -278,7 +278,7 @@ Current relevant files:
 - small source-plus-short-summary tasks may be deterministically compacted from an over-decomposed source/extraction/synthesis pipeline into a proportional two-step trajectory
 - actor execution must operate on the current plan step, not on the full task as a second planner
 - actor output must remain typed and compact even when backed by an LLM
-- the current Layer 2 actor backend is OpenRouter with `gpt-oss-120b` for first cloud-based tests; this remains a temporary test choice before moving to a stable large cloud model
+- the current Layer 2 actor backend is OpenRouter with `openai/gpt-oss-120b:free` for first cloud-based tests; this remains a temporary test choice before moving to a stable large cloud model
 - planner and replanner remain OpenAI-backed for now
 - actor provider selection is controlled by `LAYER2_ACTOR_PROVIDER`, with supported values `openrouter` and `openai`
 - malformed provider JSON that omits the runtime action envelope should be recovered only when it is clearly completion-shaped; otherwise it should stop conservatively instead of being treated as normal progress
@@ -423,7 +423,7 @@ The project currently uses:
 - Python in local virtual environment `.venv`
 - OpenAI API for the real Layer 1 parser
 - OpenAI API for the default Layer 2 planner
-- OpenRouter API for the current Layer 2 actor test backend, currently `gpt-oss-120b`
+- OpenRouter API for the current Layer 2 actor test backend, currently `openai/gpt-oss-120b:free`
 - OpenAI API for the default Layer 2 replanner
 - OpenAI API for the `web_search` path in the default Layer 2 tool gateway
 - Python standard library HTTP/HTML extraction for the `fetch_url_text` path in the default Layer 2 tool gateway
@@ -444,7 +444,7 @@ Expected temporary actor runtime for first tests:
 
 - optional overrides:
   - `LAYER2_ACTOR_PROVIDER=openrouter`
-  - `LAYER2_ACTOR_OPENROUTER_MODEL=gpt-oss-120b`
+  - `LAYER2_ACTOR_OPENROUTER_MODEL=openai/gpt-oss-120b:free`
   - `LAYER2_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1`
   - `LAYER2_OPENROUTER_TIMEOUT_SECONDS=120`
 
