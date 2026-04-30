@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
 
@@ -32,6 +33,10 @@ from layer2_runtime_governance.trace import (
     layer2_trace_to_json,
 )
 from layer2_runtime_governance.tool_contract import ToolGatewayPort
+
+
+# Keep the CLI trace output on a stable default file unless the caller overrides it.
+DEFAULT_FULL_TRACE_PATH = Path("full-trace-1.json")
 
 
 class IntakeExecutorPort(Protocol):
@@ -210,16 +215,33 @@ def print_layer2_summary(trace: dict[str, Any]) -> None:
 
 def print_layer2_trace(trace: dict[str, Any]) -> None:
     # Print the typed full runtime trace when compact output hides too much detail.
+    runtime_trace = _build_runtime_trace(trace)
+    print(layer2_trace_to_json(runtime_trace))
+
+
+# Write the typed full runtime trace to disk for later inspection and thesis evidence.
+def write_layer2_trace_file(
+    trace: dict[str, Any],
+    *,
+    output_path: str | Path = DEFAULT_FULL_TRACE_PATH,
+) -> Path:
+    runtime_trace = _build_runtime_trace(trace)
+    resolved_output_path = Path(output_path)
+    resolved_output_path.write_text(layer2_trace_to_json(runtime_trace), encoding="utf-8")
+    return resolved_output_path
+
+
+# Build the canonical typed runtime trace once so printing and file export stay aligned.
+def _build_runtime_trace(trace: dict[str, Any]) -> Any:
     final_task_state = trace["final_result"].get("task_state")
     if final_task_state is None:
-        raise ValueError("Cannot print Layer 2 trace without final task_state.")
+        raise ValueError("Cannot build Layer 2 trace without final task_state.")
 
-    runtime_trace = build_layer2_runtime_trace(
+    return build_layer2_runtime_trace(
         thread_id=trace["thread_id"],
         intake_result=trace["intake_result"],
         task_state=final_task_state,
     )
-    print(layer2_trace_to_json(runtime_trace))
 
 
 def parse_cli_args() -> argparse.Namespace:
@@ -264,6 +286,11 @@ def parse_cli_args() -> argparse.Namespace:
         "--quiet",
         action="store_true",
         help="Disable streaming progress logs and print only the final trace or summary.",
+    )
+    parser.add_argument(
+        "--trace-file",
+        default=str(DEFAULT_FULL_TRACE_PATH),
+        help="Write the full Layer 2 trace JSON to this file.",
     )
     return parser.parse_args()
 
@@ -338,6 +365,7 @@ def main() -> None:
         demo_intake_profile=args.demo_intake_profile,
         progress_callback=None if args.quiet else _print_progress,
     )
+    write_layer2_trace_file(trace, output_path=args.trace_file)
 
     if args.full_trace:
         print_layer2_trace(trace)

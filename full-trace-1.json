@@ -1,0 +1,1606 @@
+{
+  "runtime": {
+    "thread_id": "layer2-09fbecdd-26f6-4d6b-b2d0-c26dec61e05b",
+    "current_state": "waiting_human_review",
+    "bootstrap_completed": true,
+    "runtime_flags": [
+      "extractability_limited"
+    ],
+    "step_history": [
+      {
+        "step_index": 0,
+        "runtime_state": "planning",
+        "node_name": "bootstrap_from_intake",
+        "summary": "Runtime state initialized from layer 1 intake payload."
+      },
+      {
+        "step_index": 1,
+        "runtime_state": "planning",
+        "node_name": "planner",
+        "summary": "Initial semantic full plan created from the current task state."
+      },
+      {
+        "step_index": 2,
+        "runtime_state": "ready_tool_execution",
+        "node_name": "actor",
+        "summary": "Actor executed the current semantic step and returned one typed execution outcome."
+      },
+      {
+        "step_index": 3,
+        "runtime_state": "ready_tool_execution",
+        "node_name": "governance",
+        "summary": "Governance evaluated the actor outcome and produced directive 'continue_read_only'."
+      },
+      {
+        "step_index": 4,
+        "runtime_state": "acting",
+        "node_name": "tool_gateway",
+        "summary": "Tool gateway executed 'web_search'."
+      },
+      {
+        "step_index": 5,
+        "runtime_state": "acting",
+        "node_name": "observe_tool_result",
+        "summary": "Tool result observed and converted into explicit runtime evidence."
+      },
+      {
+        "step_index": 6,
+        "runtime_state": "ready_tool_execution",
+        "node_name": "actor",
+        "summary": "Actor executed the current semantic step and returned one typed execution outcome."
+      },
+      {
+        "step_index": 7,
+        "runtime_state": "ready_tool_execution",
+        "node_name": "governance",
+        "summary": "Governance evaluated the actor outcome and produced directive 'continue_read_only'."
+      },
+      {
+        "step_index": 8,
+        "runtime_state": "acting",
+        "node_name": "tool_gateway",
+        "summary": "Tool gateway executed 'fetch_url_text'."
+      },
+      {
+        "step_index": 9,
+        "runtime_state": "acting",
+        "node_name": "observe_tool_result",
+        "summary": "Tool result observed and converted into explicit runtime evidence."
+      },
+      {
+        "step_index": 10,
+        "runtime_state": "ready_tool_execution",
+        "node_name": "actor",
+        "summary": "Actor executed the current semantic step and returned one typed execution outcome."
+      },
+      {
+        "step_index": 11,
+        "runtime_state": "ready_tool_execution",
+        "node_name": "governance",
+        "summary": "Governance evaluated the actor outcome and produced directive 'continue_read_only'."
+      },
+      {
+        "step_index": 12,
+        "runtime_state": "acting",
+        "node_name": "tool_gateway",
+        "summary": "Tool gateway blocked a duplicate request for the current plan step."
+      },
+      {
+        "step_index": 13,
+        "runtime_state": "acting",
+        "node_name": "observe_tool_result",
+        "summary": "Tool result observed and converted into explicit runtime evidence."
+      },
+      {
+        "step_index": 14,
+        "runtime_state": "ready_tool_execution",
+        "node_name": "actor",
+        "summary": "Actor executed the current semantic step and returned one typed execution outcome."
+      },
+      {
+        "step_index": 15,
+        "runtime_state": "ready_tool_execution",
+        "node_name": "governance",
+        "summary": "Governance evaluated the actor outcome and produced directive 'continue_read_only'."
+      },
+      {
+        "step_index": 16,
+        "runtime_state": "acting",
+        "node_name": "tool_gateway",
+        "summary": "Tool gateway executed 'web_search'."
+      },
+      {
+        "step_index": 17,
+        "runtime_state": "acting",
+        "node_name": "observe_tool_result",
+        "summary": "Tool result observed and converted into explicit runtime evidence."
+      },
+      {
+        "step_index": 18,
+        "runtime_state": "ready_tool_execution",
+        "node_name": "actor",
+        "summary": "Actor executed the current semantic step and returned one typed execution outcome."
+      },
+      {
+        "step_index": 19,
+        "runtime_state": "ready_tool_execution",
+        "node_name": "governance",
+        "summary": "Governance evaluated the actor outcome and produced directive 'continue_read_only'."
+      },
+      {
+        "step_index": 20,
+        "runtime_state": "acting",
+        "node_name": "tool_gateway",
+        "summary": "Tool gateway blocked a duplicate request for the current plan step."
+      },
+      {
+        "step_index": 21,
+        "runtime_state": "acting",
+        "node_name": "observe_tool_result",
+        "summary": "Tool result observed and converted into explicit runtime evidence."
+      },
+      {
+        "step_index": 22,
+        "runtime_state": "ready_tool_execution",
+        "node_name": "actor",
+        "summary": "Actor executed the current semantic step and returned one typed execution outcome."
+      },
+      {
+        "step_index": 23,
+        "runtime_state": "ready_tool_execution",
+        "node_name": "governance",
+        "summary": "Governance evaluated the actor outcome and produced directive 'continue_read_only'."
+      },
+      {
+        "step_index": 24,
+        "runtime_state": "acting",
+        "node_name": "tool_gateway",
+        "summary": "Tool gateway blocked a duplicate request for the current plan step."
+      },
+      {
+        "step_index": 25,
+        "runtime_state": "acting",
+        "node_name": "observe_tool_result",
+        "summary": "Tool result observed and converted into explicit runtime evidence."
+      },
+      {
+        "step_index": 26,
+        "runtime_state": "ready_next_step",
+        "node_name": "actor",
+        "summary": "Actor executed the current semantic step and returned one typed execution outcome."
+      },
+      {
+        "step_index": 27,
+        "runtime_state": "ready_next_step",
+        "node_name": "governance",
+        "summary": "Governance evaluated the actor outcome and produced directive 'continue'."
+      },
+      {
+        "step_index": 28,
+        "runtime_state": "ready_tool_execution",
+        "node_name": "actor",
+        "summary": "Actor executed the current semantic step and returned one typed execution outcome."
+      },
+      {
+        "step_index": 29,
+        "runtime_state": "ready_tool_execution",
+        "node_name": "governance",
+        "summary": "Governance evaluated the actor outcome and produced directive 'continue_read_only'."
+      },
+      {
+        "step_index": 30,
+        "runtime_state": "acting",
+        "node_name": "tool_gateway",
+        "summary": "Tool gateway executed 'web_search'."
+      },
+      {
+        "step_index": 31,
+        "runtime_state": "acting",
+        "node_name": "observe_tool_result",
+        "summary": "Tool result observed and converted into explicit runtime evidence."
+      },
+      {
+        "step_index": 32,
+        "runtime_state": "ready_tool_execution",
+        "node_name": "actor",
+        "summary": "Actor executed the current semantic step and returned one typed execution outcome."
+      },
+      {
+        "step_index": 33,
+        "runtime_state": "ready_tool_execution",
+        "node_name": "governance",
+        "summary": "Governance evaluated the actor outcome and produced directive 'continue_read_only'."
+      },
+      {
+        "step_index": 34,
+        "runtime_state": "acting",
+        "node_name": "tool_gateway",
+        "summary": "Tool gateway executed 'fetch_url_text'."
+      },
+      {
+        "step_index": 35,
+        "runtime_state": "acting",
+        "node_name": "observe_tool_result",
+        "summary": "Tool result observed and converted into explicit runtime evidence."
+      },
+      {
+        "step_index": 36,
+        "runtime_state": "ready_next_step",
+        "node_name": "actor",
+        "summary": "Actor executed the current semantic step and returned one typed execution outcome."
+      },
+      {
+        "step_index": 37,
+        "runtime_state": "ready_next_step",
+        "node_name": "governance",
+        "summary": "Governance evaluated the actor outcome and produced directive 'continue'."
+      },
+      {
+        "step_index": 38,
+        "runtime_state": "ready_tool_execution",
+        "node_name": "actor",
+        "summary": "Actor executed the current semantic step and returned one typed execution outcome."
+      },
+      {
+        "step_index": 39,
+        "runtime_state": "ready_tool_execution",
+        "node_name": "governance",
+        "summary": "Governance evaluated the actor outcome and produced directive 'continue_read_only'."
+      },
+      {
+        "step_index": 40,
+        "runtime_state": "acting",
+        "node_name": "tool_gateway",
+        "summary": "Tool gateway executed 'fetch_url_text'."
+      },
+      {
+        "step_index": 41,
+        "runtime_state": "acting",
+        "node_name": "observe_tool_result",
+        "summary": "Tool result observed and converted into explicit runtime evidence."
+      },
+      {
+        "step_index": 42,
+        "runtime_state": "waiting_human_review",
+        "node_name": "actor",
+        "summary": "Actor executed the current semantic step and returned one typed execution outcome."
+      },
+      {
+        "step_index": 43,
+        "runtime_state": "waiting_human_review",
+        "node_name": "governance",
+        "summary": "Governance evaluated the actor outcome and produced directive 'continue'."
+      },
+      {
+        "step_index": 44,
+        "runtime_state": "waiting_human_review",
+        "node_name": "finalize_bootstrap",
+        "summary": "Layer 2 stopped after the planner/actor/tool loop with actor result 'blocked', runtime state 'waiting_human_review', actor turns 12, and tool calls 6."
+      }
+    ],
+    "actor_turn_count": 12,
+    "tool_call_count": 6
+  },
+  "intake": {
+    "goal": "Identify exactly two official EU sources about the EU Digital Services Act (one primary legal source and one European Commission overview page), then stop and provide a short 3-bullet plain-language summary based only on those sources.",
+    "context": "The task requires finding and using two specific official EU sources: a primary legal document and a European Commission overview page about the EU Digital Services Act.",
+    "domain_type": "research",
+    "domain_label": "EU Digital Services Act: official source identification and constrained summary",
+    "sensitivity": "medium",
+    "success_criteria": [
+      "Two sources are identified and cited: (1) the official primary legal source and (2) a European Commission overview page.",
+      "No other sources are used or searched for beyond these two.",
+      "A 3-bullet plain-language summary is provided that reflects only information visible in the cited sources.",
+      "The summary omits enforcement details, deadlines, and article-level specifics unless they are explicitly present in the source excerpts."
+    ],
+    "constraints": [
+      "Use exactly two sources total.",
+      "One source must be the primary legal source (official legal text).",
+      "One source must be a European Commission overview page.",
+      "Use only those two sources for the summary.",
+      "Do not include enforcement details, deadlines, or article-level specifics unless explicitly visible in the source excerpts.",
+      "Provide a short 3-bullet high-level summary in plain language.",
+      "Stop after the two sources are identified and cited; do not search for additional sources."
+    ],
+    "parse_status": "complete",
+    "parser_name": "openai_task_spec_parser",
+    "prompt_version": "task_spec_v1",
+    "schema_version": "1.0.0",
+    "policy_profile_name": "default",
+    "confidence_threshold": 0.65,
+    "max_steps": 5,
+    "max_tool_calls": 10,
+    "read_only_mode": false
+  },
+  "planner_name": "openai_layer2_planner",
+  "planner_prompt_version": "planner_v2",
+  "planner_rationale": "To meet the constraints, the plan must (1) identify one official primary legal text for the EU Digital Services Act and (2) identify one European Commission overview page about the same law, ensuring no other sources are used. Then it must produce a concise, plain-language 3-bullet summary that reflects only what is visible in those two cited sources, while avoiding enforcement details, deadlines, and article-level specifics unless they appear in the sources.",
+  "planning_source": "planner",
+  "plan_steps": [
+    {
+      "step_id": "step_1",
+      "objective": "Locate the official primary legal source for the EU Digital Services Act (the enacted legal text published by the EU for this specific regulation).",
+      "rationale": "The task requires exactly one primary legal document as one of the two total sources; the legal text is the authoritative basis for any statement in the summary.",
+      "expected_outcome": "A specific, citable official legal-text source is identified and its key non-article-specific, plain-language descriptions (as visible on the page/excerpt) are ready to use.",
+      "status": "completed"
+    },
+    {
+      "step_id": "step_2",
+      "objective": "Locate a European Commission overview page about the EU Digital Services Act (an official Commission explainer describing what the law does).",
+      "rationale": "The task requires exactly one European Commission overview page as the second and final source; this page should provide high-level plain-language context suitable for a 3-bullet summary.",
+      "expected_outcome": "A specific, citable European Commission overview page is identified and its key high-level statements (as visible in the excerpt) are ready to use.",
+      "status": "completed"
+    },
+    {
+      "step_id": "step_3",
+      "objective": "Write a short 3-bullet plain-language summary based only on the two identified sources, omitting enforcement details, deadlines, and article-level specifics unless explicitly visible in the cited excerpts.",
+      "rationale": "The constraints require a constrained summary drawn exclusively from the two sources and prohibit certain categories of detail unless they are directly present in the provided source content.",
+      "expected_outcome": "A final output consisting of exactly two cited sources and a 3-bullet plain-language summary reflecting only information visible in those sources, with prohibited details excluded.",
+      "status": "blocked"
+    }
+  ],
+  "current_plan_step_index": 2,
+  "current_plan_step_id": "step_3",
+  "actor": {
+    "actor_name": "openrouter_gpt_oss_120b_free_actor",
+    "actor_prompt_version": "actor_v5_openrouter_standard_tool_calling",
+    "result_type": "blocked",
+    "plan_step_id": "step_3",
+    "summary": "Actor provider returned no usable runtime action.",
+    "capability_mode": "none",
+    "external_impact": false,
+    "output_text": null,
+    "blocking_reason": "Actor provider returned no usable runtime action: OpenRouter returned no tool call and no assistant content. finish_reason='stop'.",
+    "proposed_tool_name": null
+  },
+  "execution": {
+    "final_output_text": null,
+    "executed_steps": [
+      {
+        "step_id": "step_1",
+        "objective": "Locate the official primary legal source for the EU Digital Services Act (the enacted legal text published by the EU for this specific regulation).",
+        "result_type": "intermediate_output",
+        "summary": "Step 1 completed with identified primary legal source.",
+        "output_text": "Official primary legal source identified: - Regulation (EU) 2022/2065 – Digital Services Act, EUR‑Lex: https://eur-lex.europa.eu/eli/reg/2022/2065/oj"
+      },
+      {
+        "step_id": "step_2",
+        "objective": "Locate a European Commission overview page about the EU Digital Services Act (an official Commission explainer describing what the law does).",
+        "result_type": "intermediate_output",
+        "summary": "Step 2 completed with EC overview page identified.",
+        "output_text": "European Commission overview page identified: https://digital-strategy.ec.europa.eu/en/policies/digital-services-act"
+      }
+    ],
+    "scratchpad": [
+      {
+        "turn_index": 1,
+        "plan_step_id": "step_1",
+        "entry_type": "tool_decision",
+        "summary": "Search for the official EUR-Lex page of the DSA regulation",
+        "evidence_refs": []
+      },
+      {
+        "turn_index": 1,
+        "plan_step_id": "step_1",
+        "entry_type": "observation",
+        "summary": "Observed tool result from 'web_search': Web search executed successfully.",
+        "evidence_refs": [
+          "step_1:tool:1:source:1"
+        ]
+      },
+      {
+        "turn_index": 2,
+        "plan_step_id": "step_1",
+        "entry_type": "tool_decision",
+        "summary": "Fetch the EUR-Lex page for Regulation (EU) 2022/2065.",
+        "evidence_refs": [
+          "step_1:tool:1:source:1"
+        ]
+      },
+      {
+        "turn_index": 2,
+        "plan_step_id": "step_1",
+        "entry_type": "observation",
+        "summary": "Observed tool result from 'fetch_url_text': URL fetch succeeded but extracted readable text was empty.",
+        "evidence_refs": []
+      },
+      {
+        "turn_index": 3,
+        "plan_step_id": "step_1",
+        "entry_type": "tool_decision",
+        "summary": "Fetch the EUR-Lex page to get visible title/description.",
+        "evidence_refs": [
+          "step_1:tool:1:source:1"
+        ]
+      },
+      {
+        "turn_index": 3,
+        "plan_step_id": "step_1",
+        "entry_type": "observation",
+        "summary": "Observed tool result from 'fetch_url_text': Duplicate tool request blocked before execution.",
+        "evidence_refs": []
+      },
+      {
+        "turn_index": 4,
+        "plan_step_id": "step_1",
+        "entry_type": "tool_decision",
+        "summary": "Search for EU Commission DSA overview",
+        "evidence_refs": [
+          "step_1:tool:1:source:1"
+        ]
+      },
+      {
+        "turn_index": 4,
+        "plan_step_id": "step_1",
+        "entry_type": "observation",
+        "summary": "Observed tool result from 'web_search': Web search executed successfully.",
+        "evidence_refs": [
+          "step_1:tool:3:fallback"
+        ]
+      },
+      {
+        "turn_index": 5,
+        "plan_step_id": "step_1",
+        "entry_type": "tool_decision",
+        "summary": "Fetch EUR-Lex page for Regulation (EU) 2022/2065",
+        "evidence_refs": [
+          "step_1:tool:1:source:1",
+          "step_1:tool:3:fallback"
+        ]
+      },
+      {
+        "turn_index": 5,
+        "plan_step_id": "step_1",
+        "entry_type": "observation",
+        "summary": "Observed tool result from 'fetch_url_text': Duplicate tool request blocked before execution.",
+        "evidence_refs": []
+      },
+      {
+        "turn_index": 6,
+        "plan_step_id": "step_1",
+        "entry_type": "tool_decision",
+        "summary": "Fetch EUR-Lex page for DSA regulation",
+        "evidence_refs": [
+          "step_1:tool:1:source:1",
+          "step_1:tool:3:fallback"
+        ]
+      },
+      {
+        "turn_index": 6,
+        "plan_step_id": "step_1",
+        "entry_type": "observation",
+        "summary": "Observed tool result from 'fetch_url_text': Duplicate tool request blocked before execution.",
+        "evidence_refs": []
+      },
+      {
+        "turn_index": 7,
+        "plan_step_id": "step_1",
+        "entry_type": "completion_rationale",
+        "summary": "The web search result provides the official EUR‑Lex URL for Regulation (EU) 2022/2065, the primary legal text of the EU Digital Services Act, satisfying the step objective.",
+        "evidence_refs": [
+          "step_1:tool:1:source:1",
+          "step_1:tool:3:fallback"
+        ]
+      },
+      {
+        "turn_index": 8,
+        "plan_step_id": "step_2",
+        "entry_type": "tool_decision",
+        "summary": "Search for EC overview page about DSA",
+        "evidence_refs": [
+          "step_1:tool:1:source:1",
+          "step_1:tool:3:fallback"
+        ]
+      },
+      {
+        "turn_index": 8,
+        "plan_step_id": "step_2",
+        "entry_type": "observation",
+        "summary": "Observed tool result from 'web_search': Web search executed successfully.",
+        "evidence_refs": [
+          "step_2:tool:4:fallback"
+        ]
+      },
+      {
+        "turn_index": 9,
+        "plan_step_id": "step_2",
+        "entry_type": "tool_decision",
+        "summary": "Fetch the main EC overview page for DSA",
+        "evidence_refs": [
+          "step_1:tool:1:source:1",
+          "step_1:tool:3:fallback",
+          "step_2:tool:4:fallback"
+        ]
+      },
+      {
+        "turn_index": 9,
+        "plan_step_id": "step_2",
+        "entry_type": "observation",
+        "summary": "Observed tool result from 'fetch_url_text': URL text fetched successfully.",
+        "evidence_refs": [
+          "step_2:tool:5:source:1"
+        ]
+      },
+      {
+        "turn_index": 10,
+        "plan_step_id": "step_2",
+        "entry_type": "completion_rationale",
+        "summary": "The fetched European Commission page (https://digital-strategy.ec.europa.eu/en/policies/digital-services-act) is an official Commission overview describing the Digital Services Act, satisfying the step objective.",
+        "evidence_refs": [
+          "step_1:tool:1:source:1",
+          "step_1:tool:3:fallback",
+          "step_2:tool:4:fallback",
+          "step_2:tool:5:source:1"
+        ]
+      },
+      {
+        "turn_index": 11,
+        "plan_step_id": "step_3",
+        "entry_type": "tool_decision",
+        "summary": "fetch EC overview page text",
+        "evidence_refs": [
+          "step_1:tool:1:source:1",
+          "step_1:tool:3:fallback",
+          "step_2:tool:4:fallback",
+          "step_2:tool:5:source:1"
+        ]
+      },
+      {
+        "turn_index": 11,
+        "plan_step_id": "step_3",
+        "entry_type": "observation",
+        "summary": "Observed tool result from 'fetch_url_text': URL text fetched successfully.",
+        "evidence_refs": [
+          "step_3:tool:6:source:1"
+        ]
+      },
+      {
+        "turn_index": 12,
+        "plan_step_id": "step_3",
+        "entry_type": "uncertainty",
+        "summary": "Actor provider returned no usable runtime action: OpenRouter returned no tool call and no assistant content. finish_reason='stop'.",
+        "evidence_refs": [
+          "step_1:tool:1:source:1",
+          "step_1:tool:3:fallback",
+          "step_2:tool:4:fallback",
+          "step_2:tool:5:source:1",
+          "step_3:tool:6:source:1"
+        ]
+      }
+    ],
+    "step_validations": [
+      {
+        "plan_step_id": "step_1",
+        "objective_satisfied": true,
+        "evidence_sufficient": true,
+        "confidence": 0.9,
+        "next_action": "complete_step",
+        "rationale_summary": "The web search result provides the official EUR‑Lex URL for Regulation (EU) 2022/2065, the primary legal text of the EU Digital Services Act, satisfying the step objective.",
+        "residual_uncertainty": null
+      },
+      {
+        "plan_step_id": "step_2",
+        "objective_satisfied": true,
+        "evidence_sufficient": true,
+        "confidence": 0.9,
+        "next_action": "complete_step",
+        "rationale_summary": "The fetched European Commission page (https://digital-strategy.ec.europa.eu/en/policies/digital-services-act) is an official Commission overview describing the Digital Services Act, satisfying the step objective.",
+        "residual_uncertainty": null
+      }
+    ]
+  },
+  "tool_calls": [
+    {
+      "plan_step_id": "step_1",
+      "tool_name": "web_search",
+      "reason": "Find the primary legal source for the EU Digital Services Act",
+      "query": "EU Digital Services Act official legal text EUR-Lex",
+      "url": null,
+      "text": null,
+      "path": null,
+      "expression": null,
+      "timezone": null,
+      "limit": null,
+      "max_results": 5,
+      "extractive_goal": "Identify the URL of the official legal text",
+      "success": true,
+      "summary": "Web search executed successfully.",
+      "content": "The **official legal text of the EU Digital Services Act (DSA)** on **EUR-Lex** is:\n\n- **Regulation (EU) 2022/2065** — *Digital Services Act* (19 October 2022) ([eur-lex.europa.eu](https://eur-lex.europa.eu/eli/reg/2022/2065/oj?utm_source=openai))\n\nYou can open it directly here (EUR-Lex “eli” page):\n```text\nhttps://eur-lex.europa.eu/eli/reg/2022/2065/oj\n```",
+      "error_message": null,
+      "sources": [
+        {
+          "title": "Regulation - 2022/2065 - EN - DSA - EUR-Lex",
+          "locator": "https://eur-lex.europa.eu/eli/reg/2022/2065/oj?utm_source=openai",
+          "snippet": null
+        }
+      ]
+    },
+    {
+      "plan_step_id": "step_1",
+      "tool_name": "fetch_url_text",
+      "reason": "Need concrete excerpt from the primary legal source to cite for step 1.",
+      "query": null,
+      "url": "https://eur-lex.europa.eu/eli/reg/2022/2065/oj",
+      "text": null,
+      "path": null,
+      "expression": null,
+      "timezone": null,
+      "limit": null,
+      "max_results": 5,
+      "extractive_goal": "Obtain a brief description or title from the official legal text page for the EU Digital Services Act.",
+      "success": false,
+      "summary": "URL fetch succeeded but extracted readable text was empty.",
+      "content": null,
+      "error_message": "URL fetch succeeded but extracted readable text was empty.",
+      "sources": []
+    },
+    {
+      "plan_step_id": "step_1",
+      "tool_name": "fetch_url_text",
+      "reason": "Need a citable excerpt confirming the primary legal source.",
+      "query": null,
+      "url": "https://eur-lex.europa.eu/eli/reg/2022/2065/oj",
+      "text": null,
+      "path": null,
+      "expression": null,
+      "timezone": null,
+      "limit": null,
+      "max_results": 5,
+      "extractive_goal": "Obtain a brief description or title from the official EUR-Lex page for Regulation (EU) 2022/2065 (Digital Services Act).",
+      "success": false,
+      "summary": "Duplicate tool request blocked before execution.",
+      "content": null,
+      "error_message": "The same tool request was already executed for this plan step; the actor must use existing evidence, choose a different source, or finish/replan.",
+      "sources": []
+    },
+    {
+      "plan_step_id": "step_1",
+      "tool_name": "web_search",
+      "reason": "Identify official EU Commission overview page for DSA",
+      "query": "European Commission Digital Services Act overview page",
+      "url": null,
+      "text": null,
+      "path": null,
+      "expression": null,
+      "timezone": null,
+      "limit": null,
+      "max_results": 5,
+      "extractive_goal": "high_level_summary",
+      "success": true,
+      "summary": "Web search executed successfully.",
+      "content": "Here are the European Commission “Digital Services Act” overview pages (the main EC sites where the DSA is explained):\n\n- **The Digital Services Act (DSA) – Shaping Europe’s digital future (overview/policy page):** ([digital-strategy.ec.europa.eu](https://digital-strategy.ec.europa.eu/en/policies/digital-services-act?utm_source=openai))  \n- **The Digital Services Act package (European Commission) – overview of the legislative package:** ([digital-strategy.ec.europa.eu](https://digital-strategy.ec.europa.eu/en/policies/digital-services-act-package?utm_source=openai))  \n- **DSA Q&A (clarifications in plain language):** ([digital-strategy.ec.europa.eu](https://digital-strategy.ec.europa.eu/en/faqs/digital-services-act-questions-and-answers?utm_source=openai))  \n\nIf you tell me whether you want a **general summary**, **obligations by platform type** (e.g., VLOPs/VLOSEs), or **key dates/enforcement**, I can point you to the most relevant section(s) on the right page.",
+      "error_message": null,
+      "sources": [
+        {
+          "title": "The Digital Services Act | Shaping Europe’s digital future",
+          "locator": "https://digital-strategy.ec.europa.eu/en/policies/digital-services-act?utm_source=openai",
+          "snippet": null
+        },
+        {
+          "title": "The Digital Services Act | Shaping Europe’s digital future",
+          "locator": "https://digital-strategy.ec.europa.eu/en/policies/digital-services-act-package?utm_source=openai",
+          "snippet": null
+        },
+        {
+          "title": "Digital Services Act: Questions and Answers | Shaping Europe’s digital future",
+          "locator": "https://digital-strategy.ec.europa.eu/en/faqs/digital-services-act-questions-and-answers?utm_source=openai",
+          "snippet": null
+        }
+      ]
+    },
+    {
+      "plan_step_id": "step_1",
+      "tool_name": "fetch_url_text",
+      "reason": "Need a citable excerpt confirming the primary legal source",
+      "query": null,
+      "url": "https://eur-lex.europa.eu/eli/reg/2022/2065/oj",
+      "text": null,
+      "path": null,
+      "expression": null,
+      "timezone": null,
+      "limit": null,
+      "max_results": 5,
+      "extractive_goal": "obtain title and brief description indicating this is the official legal text of the EU Digital Services Act",
+      "success": false,
+      "summary": "Duplicate tool request blocked before execution.",
+      "content": null,
+      "error_message": "The same tool request was already executed for this plan step; the actor must use existing evidence, choose a different source, or finish/replan.",
+      "sources": []
+    },
+    {
+      "plan_step_id": "step_1",
+      "tool_name": "fetch_url_text",
+      "reason": "Need official legal source citation for step 1",
+      "query": null,
+      "url": "https://eur-lex.europa.eu/eli/reg/2022/2065/oj",
+      "text": null,
+      "path": null,
+      "expression": null,
+      "timezone": null,
+      "limit": null,
+      "max_results": 5,
+      "extractive_goal": "obtain title and brief description of Regulation (EU) 2022/2065 DSA",
+      "success": false,
+      "summary": "Duplicate tool request blocked before execution.",
+      "content": null,
+      "error_message": "The same tool request was already executed for this plan step; the actor must use existing evidence, choose a different source, or finish/replan.",
+      "sources": []
+    },
+    {
+      "plan_step_id": "step_2",
+      "tool_name": "web_search",
+      "reason": "Need official Commission overview page for DSA as second source",
+      "query": "European Commission Digital Services Act overview site:ec.europa.eu",
+      "url": null,
+      "text": null,
+      "path": null,
+      "expression": null,
+      "timezone": null,
+      "limit": null,
+      "max_results": 5,
+      "extractive_goal": "Identify URL and high-level description",
+      "success": true,
+      "summary": "Web search executed successfully.",
+      "content": "Here are the main **European Commission (ec.europa.eu) overview pages** for the **Digital Services Act (DSA)**:\n\n- **Digital Services Act (overview / policy page)**: ([digital-strategy.ec.europa.eu](https://digital-strategy.ec.europa.eu/en/policies/digital-services-act?utm_source=openai))  \n- **Digital Services Act package (what it is, what it covers)**: ([digital-strategy.ec.europa.eu](https://digital-strategy.ec.europa.eu/en/policies/digital-services-act-package?utm_source=openai))  \n- **Digital Services Act: Questions & Answers (user rights + enforcement, etc.)**: ([digital-strategy.ec.europa.eu](https://digital-strategy.ec.europa.eu/en/faqs/digital-services-act-questions-and-answers?utm_source=openai))  \n\nIf you tell me what you want the overview for (e.g., *“user rights”*, *“platform obligations”*, *“enforcement timeline”*, or *“VLOPs/VLOSEs”*), I can point you to the most relevant sub-sections.",
+      "error_message": null,
+      "sources": [
+        {
+          "title": "The Digital Services Act | Shaping Europe’s digital future",
+          "locator": "https://digital-strategy.ec.europa.eu/en/policies/digital-services-act?utm_source=openai",
+          "snippet": null
+        },
+        {
+          "title": "The Digital Services Act | Shaping Europe’s digital future",
+          "locator": "https://digital-strategy.ec.europa.eu/en/policies/digital-services-act-package?utm_source=openai",
+          "snippet": null
+        },
+        {
+          "title": "Digital Services Act: Questions and Answers | Shaping Europe’s digital future",
+          "locator": "https://digital-strategy.ec.europa.eu/en/faqs/digital-services-act-questions-and-answers?utm_source=openai",
+          "snippet": null
+        }
+      ]
+    },
+    {
+      "plan_step_id": "step_2",
+      "tool_name": "fetch_url_text",
+      "reason": "Need content to cite for summary",
+      "query": null,
+      "url": "https://digital-strategy.ec.europa.eu/en/policies/digital-services-act?utm_source=openai",
+      "text": null,
+      "path": null,
+      "expression": null,
+      "timezone": null,
+      "limit": null,
+      "max_results": 5,
+      "extractive_goal": "obtain a brief high-level description of the EU Digital Services Act from the European Commission overview page",
+      "success": true,
+      "summary": "URL text fetched successfully.",
+      "content": "The Digital Services Act | Shaping Europe’s digital future Skip to main content en Select your language Close bg български es español cs čeština da dansk de Deutsch et eesti el ελληνικά en English fr français ga Gaeilge hr hrvatski it italiano lv latviešu lt lietuvių hu magyar mt Malti nl Nederlands pl polski pt português ro română sk slovenčina sl slovenščina fi suomi sv svenska Search Search Shaping Europe’s digital future Menu Close Menu Back Previous items Next items Home Policies Activities News Library Funding Calendar Consultations AI Office Home … Policies Online platforms and e-commerce The Digital Services Act The Digital Services Act Page Contents Page Contents What is the Digital Services Act? What does the DSA do for citizens? What does the DSA do for businesses? Which providers are covered? Which authorities ensure companies follow the Digital Services Act? The Digital Services Act helps to make the online environment safe and trustworthy. What is the Digital Services Act? The Digital Services Act (DSA) introduces rules for online services used by European citizens in their everyday life. These services include marketplaces, social media networks, app stores, and online travel and accommodation platforms. Find out more about your rights under DSA The main goal of the DSA is to create a digital space that respects citizens and consumers’ fundamental rights. By establishing a clear set of rules across the EU, the DSA also enables smaller platforms, small and medium enterprises (SMEs) and start-ups to scale up in Europe, fostering innovation, growth and competitiveness. The DSA is complemented by the Digital Markets Act (DMA), which includes rules for gatekeeper online platforms. Gatekeepers function as bottlenecks between businesses and consumers for digital services, affecting competition and the functioning of the EU internal market. Some of these services are also covered in the DSA, but for different reasons and with different types of provisions. Find out more about how the DMA benefits you. What does the DSA do for citizens? The DSA empowers citizens by strengthening the protection of their fundamental rights online and giving them greater control and more choices when they navigate online platforms and search engines. The DSA also requires platforms to minimise the risks of exposing citizens, including children and young people, to illegal and harmful content. With the DSA, your digital rights include: Transparency in content removals - If your content is removed or suspended, platforms must explain why this has been done. Options to appeal to content moderation decisions - If you disagree with a content moderation decision taken by a platform, you can appeal it through the platform itself or an out-of-court dispute settlement body , which is faster and cheaper than going to court. Easy flagging of illegal content - You can report illegal content, goods or services via an easy-to-use mechanism directly on the platform you are using. Platforms must respond to your reports and offer options to appeal their decisions . Enhanced protection for minors - Platforms must take measures to safeguard minors on their services, such as reducing the risks of exposure to age-inappropriate content like gambling or pornography. The DSA also introduces a complete ban on showing targeted advertisements to children. Feed options - On large platforms with over 45 million monthly users in the EU, you can now opt for non-personalised feeds. This way, you decide whether to see content based on the algorithm’s suggestions, sometimes pushing specific content which may be more appealing or even addictive, or other criteria, such as the chronological order. Ad transparency - Ads must be clearly labelled as such and include information like who is placing them and why you are seeing them, while very large online platforms are required to store ad information in a publicly accessible repository. Platforms can no longer show you ads based on your sensitive data, such as sexual orientation, religion, or race. Ban on dark patterns - Deceptive design tactics, such as aggressive pop-ups or confusing and misleading consent buttons, are now prohibited. Verified sellers - Marketplaces must verify and display the contact details of sellers, so you have clear information about whom you’re buying goods or services from. What does the DSA do for businesses? The DSA provides several benefits for your company: One single set of rules across the EU - All online services operating in the European Union are required to comply with the DSA. The DSA replaces 27 different regulations with one unified framework, giving you legal certainty and the ability to scale up across the EU. A proportionate approach - The DSA’s obligations are tailored to each online services’ role, size and impact in the online ecosystem. Micro and small companies have lighter requirements based on their size, to keep them accountable while helping them scale up, while bigger platforms have more responsibilities and therefore, obligations. Simplified reporting of illegal content - You can use a user-friendly mechanism to flag illegal content and goods that infringe your rights, including intellectual property rights. Your company may also become ‘trusted flaggers’, whose notices of illegal content or goods gain priority in platforms’ assessment. Better protection against unfair content moderation decisions - New appealing mechanisms through the platform or through out-of-court dispute settlement bodies allow you to protect your online presence in case you disagree with a content moderation decision by a platform. More transparency on marketplaces - New obligations for marketplaces, such as the requirement to list a seller’s contact information, enhance transparency and trustworthiness in ecommerce. For the same reason, the DSA requires marketplaces to make reasonable efforts to perform random checks on products sold on their service or adopt new technologies for product traceability. Which providers are covered? The DSA applies to all companies proportionally to their size. The DSA recognises that the biggest online platforms – those with over 45 million monthly users in the EU – play a significant role in our societies and democracies. They must therefore follow specific rules to ensure they do not pose unintentional risks to us, such as amplifying illegal content and shaping opinion at scale, and to minimise the possibility of malicious actors using them to inflict harm on Europe. In particular, these large platforms must identify and analyse wide-spread risks. These risks include: The spreading of illegal content, as defined in national or EU laws Threats to fundamental rights, such as freedom of expression Threats to media freedom and pluralism, public security and electoral processes Gender-based violence, public health, protection of minors and physical and mental wellbeing Once these risks are identified, these larger platforms must put measures in place to reduce them. Similarly, these platforms must meet other requirements to enhance transparency and accountability . A full list of these platforms is published on the Commission’s website. Which authorities ensure companies follow the Digital Services Act? The Commission enforces the DSA together with Digital Services Coordinators – national authorities who supervise the compliance of the platforms established in their territory. The Commission is primarily responsible for the monitoring and enforcement of the additional obligations applying to the biggest platforms and search engines, such as the measures to mitigate systemic risks. Digital Services Coordinators supervise and enforce compliance with the DSA in their Member States . If you want to file a complaint about a violation of the DSA, you can contact the Digital Services Coordinator of your Member State . Subscribe to the latest news on this topic and more Explore more What are your rights under the DSA? DSA Questions & Answers DSA's enforcement framework DSA's cooperation framework User rights under the DSA DSA's impact on digital platforms Text of the DSA List of designated very large online platforms and search engines Follow us Digital EU on Instagram Digital EU on Facebook Digital EU on Youtube Digital EU on LinkedIn DigitalEU on X Latest News Press release 29 April 2026 Commission asks Croatia to comply with the Digital Services Act and empower the national authority to enforce it The European Commission decided to send an additional letter of formal notice to Croatia (INFR(2024)2166) for not complying with the Digital Services Act (DSA). Press release 29 April 2026 Commission urges Member States to rollout EU age verification app Today, the Commission adopted a recommendation urging Member States to accelerate the rollout of the EU age verification app and make it available by the end of the year. Press release 29 April 2026 Commission preliminarily finds Meta in breach of Digital Services Act for failing to prevent minors under 13 from using Instagram and Facebook The European Commission has preliminarily found Meta's Instagram and Facebook in breach of the Digital Services Act (DSA) for failing to diligently identify, assess and mitigate the risks of minors under 13 years old accessing their services. Press release 16 April 2026 Second meeting of Special Panel to advise President von der Leyen on child online safety On 16 April 2026, the Special Panel on child online safety advising President von der Leyen on child online safety, convened for a second meeting. Browse DSA - Digital Services Act Related Content Big Picture Online platforms and e-commerce The EU wants to ensure businesses and citizens can use online platforms and e-commerce services no matter where they are in the EU. Dig deeper The impact of the Digital Services Act on digital platforms With the Digital Services Act (DSA) platforms have already changed their systems and interfaces to... DSA: Making the online world safer Find out how the DSA can make the online world safer and protect your fundamental rights. The enforcement framework under the Digital Services Act The enforcement of the Digital Services Act (DSA) includes a full set of investigative and... The cooperation framework under the Digital Services Act The Digital Services Act (DSA) provides a framework for cooperation between the Commission, EU and... How the Digital Services Act enhances transparency online The Digital Services Act (DSA) details a range of actions to promote transparency and accountability... DSA whistleblower tool The DSA (Digital Services Act) whistleblower tool allows employees and other insiders to report... Last update 23 March 2026 Print as PDF Shaping Europe’s digital future This site is managed by: Directorate-General for Communications Networks, Content and Technology Digital EU on Facebook Digital EU on Instagram Digital EU on LinkedIn Digital EU on Youtube Digital EU on X Contact us Contact DG CONNECT About us About Directorate-General CONNECT Accessibility statement Copyright notice Language Policy Privacy statement Follow the European Commission Facebook Instagram X Linkedin Other Contact us Report an IT vulnerability Languages on our websites Cookies Privacy policy Legal notice Accessibility",
+      "error_message": null,
+      "sources": [
+        {
+          "title": "The Digital Services Act | Shaping Europe’s digital future",
+          "locator": "https://digital-strategy.ec.europa.eu/en/policies/digital-services-act?utm_source=openai",
+          "snippet": "The Digital Services Act | Shaping Europe’s digital future Skip to main content en Select your language Close bg български es español cs čeština da dansk de Deutsch et eesti el ελληνικά en English fr français ga Gaeilge hr hrvatski it italiano lv latviešu lt lietuvių hu magyar mt Malti nl Nederlands pl polski pt português ro română sk slovenčina sl slovenščina fi suomi sv svenska Search Search Shaping Europe’s digital future Menu Close Menu Back Previous items Next items Home Policies Activit..."
+        }
+      ]
+    },
+    {
+      "plan_step_id": "step_3",
+      "tool_name": "fetch_url_text",
+      "reason": "need content for high-level summary",
+      "query": null,
+      "url": "https://digital-strategy.ec.europa.eu/en/policies/digital-services-act",
+      "text": null,
+      "path": null,
+      "expression": null,
+      "timezone": null,
+      "limit": null,
+      "max_results": 5,
+      "extractive_goal": "obtain a brief description of the Digital Services Act from the European Commission overview page",
+      "success": true,
+      "summary": "URL text fetched successfully.",
+      "content": "The Digital Services Act | Shaping Europe’s digital future Skip to main content en Select your language Close bg български es español cs čeština da dansk de Deutsch et eesti el ελληνικά en English fr français ga Gaeilge hr hrvatski it italiano lv latviešu lt lietuvių hu magyar mt Malti nl Nederlands pl polski pt português ro română sk slovenčina sl slovenščina fi suomi sv svenska Search Search Shaping Europe’s digital future Menu Close Menu Back Previous items Next items Home Policies Activities News Library Funding Calendar Consultations AI Office Home … Policies Online platforms and e-commerce The Digital Services Act The Digital Services Act Page Contents Page Contents What is the Digital Services Act? What does the DSA do for citizens? What does the DSA do for businesses? Which providers are covered? Which authorities ensure companies follow the Digital Services Act? The Digital Services Act helps to make the online environment safe and trustworthy. What is the Digital Services Act? The Digital Services Act (DSA) introduces rules for online services used by European citizens in their everyday life. These services include marketplaces, social media networks, app stores, and online travel and accommodation platforms. Find out more about your rights under DSA The main goal of the DSA is to create a digital space that respects citizens and consumers’ fundamental rights. By establishing a clear set of rules across the EU, the DSA also enables smaller platforms, small and medium enterprises (SMEs) and start-ups to scale up in Europe, fostering innovation, growth and competitiveness. The DSA is complemented by the Digital Markets Act (DMA), which includes rules for gatekeeper online platforms. Gatekeepers function as bottlenecks between businesses and consumers for digital services, affecting competition and the functioning of the EU internal market. Some of these services are also covered in the DSA, but for different reasons and with different types of provisions. Find out more about how the DMA benefits you. What does the DSA do for citizens? The DSA empowers citizens by strengthening the protection of their fundamental rights online and giving them greater control and more choices when they navigate online platforms and search engines. The DSA also requires platforms to minimise the risks of exposing citizens, including children and young people, to illegal and harmful content. With the DSA, your digital rights include: Transparency in content removals - If your content is removed or suspended, platforms must explain why this has been done. Options to appeal to content moderation decisions - If you disagree with a content moderation decision taken by a platform, you can appeal it through the platform itself or an out-of-court dispute settlement body , which is faster and cheaper than going to court. Easy flagging of illegal content - You can report illegal content, goods or services via an easy-to-use mechanism directly on the platform you are using. Platforms must respond to your reports and offer options to appeal their decisions . Enhanced protection for minors - Platforms must take measures to safeguard minors on their services, such as reducing the risks of exposure to age-inappropriate content like gambling or pornography. The DSA also introduces a complete ban on showing targeted advertisements to children. Feed options - On large platforms with over 45 million monthly users in the EU, you can now opt for non-personalised feeds. This way, you decide whether to see content based on the algorithm’s suggestions, sometimes pushing specific content which may be more appealing or even addictive, or other criteria, such as the chronological order. Ad transparency - Ads must be clearly labelled as such and include information like who is placing them and why you are seeing them, while very large online platforms are required to store ad information in a publicly accessible repository. Platforms can no longer show you ads based on your sensitive data, such as sexual orientation, religion, or race. Ban on dark patterns - Deceptive design tactics, such as aggressive pop-ups or confusing and misleading consent buttons, are now prohibited. Verified sellers - Marketplaces must verify and display the contact details of sellers, so you have clear information about whom you’re buying goods or services from. What does the DSA do for businesses? The DSA provides several benefits for your company: One single set of rules across the EU - All online services operating in the European Union are required to comply with the DSA. The DSA replaces 27 different regulations with one unified framework, giving you legal certainty and the ability to scale up across the EU. A proportionate approach - The DSA’s obligations are tailored to each online services’ role, size and impact in the online ecosystem. Micro and small companies have lighter requirements based on their size, to keep them accountable while helping them scale up, while bigger platforms have more responsibilities and therefore, obligations. Simplified reporting of illegal content - You can use a user-friendly mechanism to flag illegal content and goods that infringe your rights, including intellectual property rights. Your company may also become ‘trusted flaggers’, whose notices of illegal content or goods gain priority in platforms’ assessment. Better protection against unfair content moderation decisions - New appealing mechanisms through the platform or through out-of-court dispute settlement bodies allow you to protect your online presence in case you disagree with a content moderation decision by a platform. More transparency on marketplaces - New obligations for marketplaces, such as the requirement to list a seller’s contact information, enhance transparency and trustworthiness in ecommerce. For the same reason, the DSA requires marketplaces to make reasonable efforts to perform random checks on products sold on their service or adopt new technologies for product traceability. Which providers are covered? The DSA applies to all companies proportionally to their size. The DSA recognises that the biggest online platforms – those with over 45 million monthly users in the EU – play a significant role in our societies and democracies. They must therefore follow specific rules to ensure they do not pose unintentional risks to us, such as amplifying illegal content and shaping opinion at scale, and to minimise the possibility of malicious actors using them to inflict harm on Europe. In particular, these large platforms must identify and analyse wide-spread risks. These risks include: The spreading of illegal content, as defined in national or EU laws Threats to fundamental rights, such as freedom of expression Threats to media freedom and pluralism, public security and electoral processes Gender-based violence, public health, protection of minors and physical and mental wellbeing Once these risks are identified, these larger platforms must put measures in place to reduce them. Similarly, these platforms must meet other requirements to enhance transparency and accountability . A full list of these platforms is published on the Commission’s website. Which authorities ensure companies follow the Digital Services Act? The Commission enforces the DSA together with Digital Services Coordinators – national authorities who supervise the compliance of the platforms established in their territory. The Commission is primarily responsible for the monitoring and enforcement of the additional obligations applying to the biggest platforms and search engines, such as the measures to mitigate systemic risks. Digital Services Coordinators supervise and enforce compliance with the DSA in their Member States . If you want to file a complaint about a violation of the DSA, you can contact the Digital Services Coordinator of your Member State . Subscribe to the latest news on this topic and more Explore more What are your rights under the DSA? DSA Questions & Answers DSA's enforcement framework DSA's cooperation framework User rights under the DSA DSA's impact on digital platforms Text of the DSA List of designated very large online platforms and search engines Follow us Digital EU on Instagram Digital EU on Facebook Digital EU on Youtube Digital EU on LinkedIn DigitalEU on X Latest News Press release 29 April 2026 Commission asks Croatia to comply with the Digital Services Act and empower the national authority to enforce it The European Commission decided to send an additional letter of formal notice to Croatia (INFR(2024)2166) for not complying with the Digital Services Act (DSA). Press release 29 April 2026 Commission urges Member States to rollout EU age verification app Today, the Commission adopted a recommendation urging Member States to accelerate the rollout of the EU age verification app and make it available by the end of the year. Press release 29 April 2026 Commission preliminarily finds Meta in breach of Digital Services Act for failing to prevent minors under 13 from using Instagram and Facebook The European Commission has preliminarily found Meta's Instagram and Facebook in breach of the Digital Services Act (DSA) for failing to diligently identify, assess and mitigate the risks of minors under 13 years old accessing their services. Press release 16 April 2026 Second meeting of Special Panel to advise President von der Leyen on child online safety On 16 April 2026, the Special Panel on child online safety advising President von der Leyen on child online safety, convened for a second meeting. Browse DSA - Digital Services Act Related Content Big Picture Online platforms and e-commerce The EU wants to ensure businesses and citizens can use online platforms and e-commerce services no matter where they are in the EU. Dig deeper The impact of the Digital Services Act on digital platforms With the Digital Services Act (DSA) platforms have already changed their systems and interfaces to... DSA: Making the online world safer Find out how the DSA can make the online world safer and protect your fundamental rights. The enforcement framework under the Digital Services Act The enforcement of the Digital Services Act (DSA) includes a full set of investigative and... The cooperation framework under the Digital Services Act The Digital Services Act (DSA) provides a framework for cooperation between the Commission, EU and... How the Digital Services Act enhances transparency online The Digital Services Act (DSA) details a range of actions to promote transparency and accountability... DSA whistleblower tool The DSA (Digital Services Act) whistleblower tool allows employees and other insiders to report... Last update 23 March 2026 Print as PDF Shaping Europe’s digital future This site is managed by: Directorate-General for Communications Networks, Content and Technology Digital EU on Facebook Digital EU on Instagram Digital EU on LinkedIn Digital EU on Youtube Digital EU on X Contact us Contact DG CONNECT About us About Directorate-General CONNECT Accessibility statement Copyright notice Language Policy Privacy statement Follow the European Commission Facebook Instagram X Linkedin Other Contact us Report an IT vulnerability Languages on our websites Cookies Privacy policy Legal notice Accessibility",
+      "error_message": null,
+      "sources": [
+        {
+          "title": "The Digital Services Act | Shaping Europe’s digital future",
+          "locator": "https://digital-strategy.ec.europa.eu/en/policies/digital-services-act",
+          "snippet": "The Digital Services Act | Shaping Europe’s digital future Skip to main content en Select your language Close bg български es español cs čeština da dansk de Deutsch et eesti el ελληνικά en English fr français ga Gaeilge hr hrvatski it italiano lv latviešu lt lietuvių hu magyar mt Malti nl Nederlands pl polski pt português ro română sk slovenčina sl slovenščina fi suomi sv svenska Search Search Shaping Europe’s digital future Menu Close Menu Back Previous items Next items Home Policies Activit..."
+        }
+      ]
+    }
+  ],
+  "observed_evidence": [
+    {
+      "evidence_id": "step_1:tool:1:source:1",
+      "plan_step_id": "step_1",
+      "title": "Regulation - 2022/2065 - EN - DSA - EUR-Lex",
+      "locator": "https://eur-lex.europa.eu/eli/reg/2022/2065/oj?utm_source=openai",
+      "excerpt": "The **official legal text of the EU Digital Services Act (DSA)** on **EUR-Lex** is:\n\n- **Regulation (EU) 2022/2065** — *Digital Services Act* (19 October 2022) ([eur-lex.europa.eu](https://eur-lex.europa.eu/eli/reg/2022/2065/oj?utm_source=openai))\n\nYou can open it directly here (EUR-Lex “eli” page):\n```text\nhttps://eur-lex.europa.eu/eli/reg/2022/2065/oj\n```",
+      "source_tool": "web_search",
+      "support_level": "high_level_summary"
+    },
+    {
+      "evidence_id": "step_1:tool:3:fallback",
+      "plan_step_id": "step_1",
+      "title": "web_search",
+      "locator": "European Commission Digital Services Act overview page",
+      "excerpt": "Here are the European Commission “Digital Services Act” overview pages (the main EC sites where the DSA is explained):\n\n- **The Digital Services Act (DSA) – Shaping Europe’s digital future (overview/policy page):** ([digital-strategy.ec.europa.eu](https://digital-strategy.ec.europa.eu/en/policies/digital-services-act?utm_source=openai))  \n- **The Digital Services Act package (European Commission) – overview of the legislative package:** ([digital-strategy.ec.europa.eu](https://digital-strategy.ec.europa.eu/en/policies/digital-services-act-package?utm_source=openai))  \n- **DSA Q&A (clarifications in plain language):** ([digital-strategy.ec.europa.eu](https://digital-strategy.ec.europa.eu/en/faqs/digital-services-act-questions-and-answers?utm_source=openai))  \n\nIf you tell me whether you want a **general summary**, **obligations by platform type** (e.g., VLOPs/VLOSEs), or **key dates/enforcement**, I can point you to the most relevant section(s) on the right page.",
+      "source_tool": "web_search",
+      "support_level": "high_level_summary"
+    },
+    {
+      "evidence_id": "step_2:tool:4:fallback",
+      "plan_step_id": "step_2",
+      "title": "web_search",
+      "locator": "European Commission Digital Services Act overview site:ec.europa.eu",
+      "excerpt": "Here are the main **European Commission (ec.europa.eu) overview pages** for the **Digital Services Act (DSA)**:\n\n- **Digital Services Act (overview / policy page)**: ([digital-strategy.ec.europa.eu](https://digital-strategy.ec.europa.eu/en/policies/digital-services-act?utm_source=openai))  \n- **Digital Services Act package (what it is, what it covers)**: ([digital-strategy.ec.europa.eu](https://digital-strategy.ec.europa.eu/en/policies/digital-services-act-package?utm_source=openai))  \n- **Digital Services Act: Questions & Answers (user rights + enforcement, etc.)**: ([digital-strategy.ec.europa.eu](https://digital-strategy.ec.europa.eu/en/faqs/digital-services-act-questions-and-answers?utm_source=openai))  \n\nIf you tell me what you want the overview for (e.g., *“user rights”*, *“platform obligations”*, *“enforcement timeline”*, or *“VLOPs/VLOSEs”*), I can point you to the most relevant sub-sections.",
+      "source_tool": "web_search",
+      "support_level": "high_level_summary"
+    },
+    {
+      "evidence_id": "step_2:tool:5:source:1",
+      "plan_step_id": "step_2",
+      "title": "The Digital Services Act | Shaping Europe’s digital future",
+      "locator": "https://digital-strategy.ec.europa.eu/en/policies/digital-services-act?utm_source=openai",
+      "excerpt": "The Digital Services Act | Shaping Europe’s digital future Skip to main content en Select your language Close bg български es español cs čeština da dansk de Deutsch et eesti el ελληνικά en English fr français ga Gaeilge hr hrvatski it italiano lv latviešu lt lietuvių hu magyar mt Malti nl Nederlands pl polski pt português ro română sk slovenčina sl slovenščina fi suomi sv svenska Search Search Shaping Europe’s digital future Menu Close Menu Back Previous items Next items Home Policies Activit...",
+      "source_tool": "fetch_url_text",
+      "support_level": "high_level_summary"
+    },
+    {
+      "evidence_id": "step_3:tool:6:source:1",
+      "plan_step_id": "step_3",
+      "title": "The Digital Services Act | Shaping Europe’s digital future",
+      "locator": "https://digital-strategy.ec.europa.eu/en/policies/digital-services-act",
+      "excerpt": "The Digital Services Act | Shaping Europe’s digital future Skip to main content en Select your language Close bg български es español cs čeština da dansk de Deutsch et eesti el ελληνικά en English fr français ga Gaeilge hr hrvatski it italiano lv latviešu lt lietuvių hu magyar mt Malti nl Nederlands pl polski pt português ro română sk slovenčina sl slovenščina fi suomi sv svenska Search Search Shaping Europe’s digital future Menu Close Menu Back Previous items Next items Home Policies Activit...",
+      "source_tool": "fetch_url_text",
+      "support_level": "high_level_summary"
+    }
+  ],
+  "governance_decisions": [
+    {
+      "directive": "continue_read_only",
+      "policy_decision": "allow_read_only",
+      "reason_codes": [
+        "read_only_allowed"
+      ],
+      "summary": "Read-only capability use is allowed by the active policy. Adaptive oversight recommended 'continue_read_only' and preserved the policy directive 'continue_read_only'.",
+      "constrains_capability_use": true,
+      "evaluated_actor_result_type": "propose_action",
+      "evaluated_tool_name": "web_search",
+      "policy_engine_name": "opa_http_policy_engine",
+      "policy_bundle_version": "layer2_governance_v1",
+      "policy_directive": "continue_read_only",
+      "oversight_recommended_directive": "continue_read_only",
+      "oversight_summary": "Evidence quality is weak (0.00), operational risk is medium (0.52), and trajectory health is healthy (1.00)."
+    },
+    {
+      "directive": "continue_read_only",
+      "policy_decision": "allow_read_only",
+      "reason_codes": [
+        "read_only_allowed"
+      ],
+      "summary": "Read-only capability use is allowed by the active policy. Adaptive oversight recommended 'continue_read_only' and preserved the policy directive 'continue_read_only'.",
+      "constrains_capability_use": true,
+      "evaluated_actor_result_type": "propose_action",
+      "evaluated_tool_name": "fetch_url_text",
+      "policy_engine_name": "opa_http_policy_engine",
+      "policy_bundle_version": "layer2_governance_v1",
+      "policy_directive": "continue_read_only",
+      "oversight_recommended_directive": "continue_read_only",
+      "oversight_summary": "Evidence quality is weak (0.30), operational risk is medium (0.52), and trajectory health is healthy (1.00)."
+    },
+    {
+      "directive": "continue_read_only",
+      "policy_decision": "allow_read_only",
+      "reason_codes": [
+        "read_only_allowed"
+      ],
+      "summary": "Read-only capability use is allowed by the active policy. Adaptive oversight recommended 'continue_read_only' and preserved the policy directive 'continue_read_only'.",
+      "constrains_capability_use": true,
+      "evaluated_actor_result_type": "propose_action",
+      "evaluated_tool_name": "fetch_url_text",
+      "policy_engine_name": "opa_http_policy_engine",
+      "policy_bundle_version": "layer2_governance_v1",
+      "policy_directive": "continue_read_only",
+      "oversight_recommended_directive": "continue_read_only",
+      "oversight_summary": "Evidence quality is weak (0.25), operational risk is medium (0.52), and trajectory health is healthy (0.80)."
+    },
+    {
+      "directive": "continue_read_only",
+      "policy_decision": "allow_read_only",
+      "reason_codes": [
+        "read_only_allowed"
+      ],
+      "summary": "Read-only capability use is allowed by the active policy. Adaptive oversight recommended 'continue_read_only' and preserved the policy directive 'continue_read_only'.",
+      "constrains_capability_use": true,
+      "evaluated_actor_result_type": "propose_action",
+      "evaluated_tool_name": "web_search",
+      "policy_engine_name": "opa_http_policy_engine",
+      "policy_bundle_version": "layer2_governance_v1",
+      "policy_directive": "continue_read_only",
+      "oversight_recommended_directive": "continue_read_only",
+      "oversight_summary": "Evidence quality is weak (0.25), operational risk is medium (0.52), and trajectory health is healthy (0.80)."
+    },
+    {
+      "directive": "continue_read_only",
+      "policy_decision": "allow_read_only",
+      "reason_codes": [
+        "read_only_allowed"
+      ],
+      "summary": "Read-only capability use is allowed by the active policy. Adaptive oversight recommended 'continue_read_only' and preserved the policy directive 'continue_read_only'.",
+      "constrains_capability_use": true,
+      "evaluated_actor_result_type": "propose_action",
+      "evaluated_tool_name": "fetch_url_text",
+      "policy_engine_name": "opa_http_policy_engine",
+      "policy_bundle_version": "layer2_governance_v1",
+      "policy_directive": "continue_read_only",
+      "oversight_recommended_directive": "continue_read_only",
+      "oversight_summary": "Evidence quality is weak (0.30), operational risk is medium (0.52), and trajectory health is healthy (1.00)."
+    },
+    {
+      "directive": "continue_read_only",
+      "policy_decision": "allow_read_only",
+      "reason_codes": [
+        "read_only_allowed"
+      ],
+      "summary": "Read-only capability use is allowed by the active policy. Adaptive oversight recommended 'continue_read_only' and preserved the policy directive 'continue_read_only'.",
+      "constrains_capability_use": true,
+      "evaluated_actor_result_type": "propose_action",
+      "evaluated_tool_name": "fetch_url_text",
+      "policy_engine_name": "opa_http_policy_engine",
+      "policy_bundle_version": "layer2_governance_v1",
+      "policy_directive": "continue_read_only",
+      "oversight_recommended_directive": "continue_read_only",
+      "oversight_summary": "Evidence quality is weak (0.25), operational risk is medium (0.52), and trajectory health is healthy (0.70)."
+    },
+    {
+      "directive": "continue",
+      "policy_decision": "allow",
+      "reason_codes": [
+        "local_output_allowed"
+      ],
+      "summary": "Local output and replanning remain within policy. Adaptive oversight recommended 'continue' and preserved the policy directive 'continue'.",
+      "constrains_capability_use": false,
+      "evaluated_actor_result_type": "intermediate_output",
+      "evaluated_tool_name": null,
+      "policy_engine_name": "opa_http_policy_engine",
+      "policy_bundle_version": "layer2_governance_v1",
+      "policy_directive": "continue",
+      "oversight_recommended_directive": "continue",
+      "oversight_summary": "Evidence quality is strong (0.93), operational risk is medium (0.52), and trajectory health is healthy (0.70)."
+    },
+    {
+      "directive": "continue_read_only",
+      "policy_decision": "allow_read_only",
+      "reason_codes": [
+        "read_only_allowed"
+      ],
+      "summary": "Read-only capability use is allowed by the active policy. Adaptive oversight recommended 'continue_read_only' and preserved the policy directive 'continue_read_only'.",
+      "constrains_capability_use": true,
+      "evaluated_actor_result_type": "propose_action",
+      "evaluated_tool_name": "web_search",
+      "policy_engine_name": "opa_http_policy_engine",
+      "policy_bundle_version": "layer2_governance_v1",
+      "policy_directive": "continue_read_only",
+      "oversight_recommended_directive": "continue_read_only",
+      "oversight_summary": "Evidence quality is weak (0.25), operational risk is medium (0.52), and trajectory health is healthy (1.00)."
+    },
+    {
+      "directive": "continue_read_only",
+      "policy_decision": "allow_read_only",
+      "reason_codes": [
+        "read_only_allowed"
+      ],
+      "summary": "Read-only capability use is allowed by the active policy. Adaptive oversight recommended 'continue_read_only' and preserved the policy directive 'continue_read_only'.",
+      "constrains_capability_use": true,
+      "evaluated_actor_result_type": "propose_action",
+      "evaluated_tool_name": "fetch_url_text",
+      "policy_engine_name": "opa_http_policy_engine",
+      "policy_bundle_version": "layer2_governance_v1",
+      "policy_directive": "continue_read_only",
+      "oversight_recommended_directive": "continue_read_only",
+      "oversight_summary": "Evidence quality is weak (0.30), operational risk is medium (0.52), and trajectory health is healthy (1.00)."
+    },
+    {
+      "directive": "continue",
+      "policy_decision": "allow",
+      "reason_codes": [
+        "local_output_allowed"
+      ],
+      "summary": "Local output and replanning remain within policy. Adaptive oversight recommended 'continue' and preserved the policy directive 'continue'.",
+      "constrains_capability_use": false,
+      "evaluated_actor_result_type": "intermediate_output",
+      "evaluated_tool_name": null,
+      "policy_engine_name": "opa_http_policy_engine",
+      "policy_bundle_version": "layer2_governance_v1",
+      "policy_directive": "continue",
+      "oversight_recommended_directive": "continue",
+      "oversight_summary": "Evidence quality is strong (0.98), operational risk is medium (0.52), and trajectory health is healthy (1.00)."
+    },
+    {
+      "directive": "continue_read_only",
+      "policy_decision": "allow_read_only",
+      "reason_codes": [
+        "read_only_allowed"
+      ],
+      "summary": "Read-only capability use is allowed by the active policy. Adaptive oversight recommended 'continue_read_only' and preserved the policy directive 'continue_read_only'.",
+      "constrains_capability_use": true,
+      "evaluated_actor_result_type": "propose_action",
+      "evaluated_tool_name": "fetch_url_text",
+      "policy_engine_name": "opa_http_policy_engine",
+      "policy_bundle_version": "layer2_governance_v1",
+      "policy_directive": "continue_read_only",
+      "oversight_recommended_directive": "continue_read_only",
+      "oversight_summary": "Evidence quality is weak (0.25), operational risk is medium (0.52), and trajectory health is healthy (1.00)."
+    },
+    {
+      "directive": "continue",
+      "policy_decision": "allow",
+      "reason_codes": [
+        "local_output_allowed"
+      ],
+      "summary": "Local output and replanning remain within policy. Adaptive oversight recommended 'continue' and preserved the policy directive 'continue'.",
+      "constrains_capability_use": false,
+      "evaluated_actor_result_type": "blocked",
+      "evaluated_tool_name": null,
+      "policy_engine_name": "opa_http_policy_engine",
+      "policy_bundle_version": "layer2_governance_v1",
+      "policy_directive": "continue",
+      "oversight_recommended_directive": "continue",
+      "oversight_summary": "Evidence quality is weak (0.30), operational risk is medium (0.52), and trajectory health is healthy (1.00)."
+    }
+  ],
+  "oversight_assessments": [
+    {
+      "evidence_quality": {
+        "score": 0.0,
+        "level": "weak",
+        "reason_codes": [
+          "observed_evidence_missing",
+          "source_locator_missing",
+          "evidence_support_below_step_need"
+        ]
+      },
+      "operational_risk": {
+        "score": 0.5175,
+        "level": "medium",
+        "reason_codes": [
+          "tool_risk_medium",
+          "task_sensitivity_medium",
+          "read_only_capability"
+        ]
+      },
+      "trajectory_health": {
+        "score": 1.0,
+        "level": "healthy",
+        "reason_codes": [
+          "actor_turns_within_limit",
+          "no_failed_tool_results",
+          "no_replan_needed"
+        ]
+      },
+      "recommended_directive": "continue_read_only",
+      "summary": "Evidence quality is weak (0.00), operational risk is medium (0.52), and trajectory health is healthy (1.00).",
+      "reason_codes": [
+        "observed_evidence_missing",
+        "source_locator_missing",
+        "evidence_support_below_step_need",
+        "tool_risk_medium",
+        "task_sensitivity_medium",
+        "read_only_capability",
+        "actor_turns_within_limit",
+        "no_failed_tool_results",
+        "no_replan_needed",
+        "recommend_continue"
+      ]
+    },
+    {
+      "evidence_quality": {
+        "score": 0.3,
+        "level": "weak",
+        "reason_codes": [
+          "observed_evidence_present",
+          "source_locator_present",
+          "last_tool_success",
+          "evidence_support_matches_step_need"
+        ]
+      },
+      "operational_risk": {
+        "score": 0.5175,
+        "level": "medium",
+        "reason_codes": [
+          "tool_risk_medium",
+          "task_sensitivity_medium",
+          "read_only_capability"
+        ]
+      },
+      "trajectory_health": {
+        "score": 1.0,
+        "level": "healthy",
+        "reason_codes": [
+          "actor_turns_within_limit",
+          "no_failed_tool_results",
+          "no_replan_needed"
+        ]
+      },
+      "recommended_directive": "continue_read_only",
+      "summary": "Evidence quality is weak (0.30), operational risk is medium (0.52), and trajectory health is healthy (1.00).",
+      "reason_codes": [
+        "observed_evidence_present",
+        "source_locator_present",
+        "last_tool_success",
+        "evidence_support_matches_step_need",
+        "tool_risk_medium",
+        "task_sensitivity_medium",
+        "read_only_capability",
+        "actor_turns_within_limit",
+        "no_failed_tool_results",
+        "no_replan_needed",
+        "recommend_continue"
+      ]
+    },
+    {
+      "evidence_quality": {
+        "score": 0.25,
+        "level": "weak",
+        "reason_codes": [
+          "observed_evidence_present",
+          "source_locator_present",
+          "last_tool_failed",
+          "evidence_support_matches_step_need"
+        ]
+      },
+      "operational_risk": {
+        "score": 0.5175,
+        "level": "medium",
+        "reason_codes": [
+          "tool_risk_medium",
+          "task_sensitivity_medium",
+          "read_only_capability"
+        ]
+      },
+      "trajectory_health": {
+        "score": 0.8,
+        "level": "healthy",
+        "reason_codes": [
+          "actor_turns_within_limit",
+          "failed_tool_result_present",
+          "no_replan_needed"
+        ]
+      },
+      "recommended_directive": "continue_read_only",
+      "summary": "Evidence quality is weak (0.25), operational risk is medium (0.52), and trajectory health is healthy (0.80).",
+      "reason_codes": [
+        "observed_evidence_present",
+        "source_locator_present",
+        "last_tool_failed",
+        "evidence_support_matches_step_need",
+        "tool_risk_medium",
+        "task_sensitivity_medium",
+        "read_only_capability",
+        "actor_turns_within_limit",
+        "failed_tool_result_present",
+        "no_replan_needed",
+        "recommend_continue"
+      ]
+    },
+    {
+      "evidence_quality": {
+        "score": 0.25,
+        "level": "weak",
+        "reason_codes": [
+          "observed_evidence_present",
+          "source_locator_present",
+          "last_tool_failed",
+          "evidence_support_matches_step_need"
+        ]
+      },
+      "operational_risk": {
+        "score": 0.5175,
+        "level": "medium",
+        "reason_codes": [
+          "tool_risk_medium",
+          "task_sensitivity_medium",
+          "read_only_capability"
+        ]
+      },
+      "trajectory_health": {
+        "score": 0.8,
+        "level": "healthy",
+        "reason_codes": [
+          "actor_turns_within_limit",
+          "failed_tool_result_present",
+          "no_replan_needed"
+        ]
+      },
+      "recommended_directive": "continue_read_only",
+      "summary": "Evidence quality is weak (0.25), operational risk is medium (0.52), and trajectory health is healthy (0.80).",
+      "reason_codes": [
+        "observed_evidence_present",
+        "source_locator_present",
+        "last_tool_failed",
+        "evidence_support_matches_step_need",
+        "tool_risk_medium",
+        "task_sensitivity_medium",
+        "read_only_capability",
+        "actor_turns_within_limit",
+        "failed_tool_result_present",
+        "no_replan_needed",
+        "recommend_continue"
+      ]
+    },
+    {
+      "evidence_quality": {
+        "score": 0.3,
+        "level": "weak",
+        "reason_codes": [
+          "observed_evidence_present",
+          "source_locator_present",
+          "last_tool_success",
+          "evidence_support_matches_step_need"
+        ]
+      },
+      "operational_risk": {
+        "score": 0.5175,
+        "level": "medium",
+        "reason_codes": [
+          "tool_risk_medium",
+          "task_sensitivity_medium",
+          "read_only_capability"
+        ]
+      },
+      "trajectory_health": {
+        "score": 1.0,
+        "level": "healthy",
+        "reason_codes": [
+          "actor_turns_within_limit",
+          "no_failed_tool_results",
+          "no_replan_needed"
+        ]
+      },
+      "recommended_directive": "continue_read_only",
+      "summary": "Evidence quality is weak (0.30), operational risk is medium (0.52), and trajectory health is healthy (1.00).",
+      "reason_codes": [
+        "observed_evidence_present",
+        "source_locator_present",
+        "last_tool_success",
+        "evidence_support_matches_step_need",
+        "tool_risk_medium",
+        "task_sensitivity_medium",
+        "read_only_capability",
+        "actor_turns_within_limit",
+        "no_failed_tool_results",
+        "no_replan_needed",
+        "recommend_continue"
+      ]
+    },
+    {
+      "evidence_quality": {
+        "score": 0.25,
+        "level": "weak",
+        "reason_codes": [
+          "observed_evidence_present",
+          "source_locator_present",
+          "last_tool_failed",
+          "evidence_support_matches_step_need"
+        ]
+      },
+      "operational_risk": {
+        "score": 0.5175,
+        "level": "medium",
+        "reason_codes": [
+          "tool_risk_medium",
+          "task_sensitivity_medium",
+          "read_only_capability"
+        ]
+      },
+      "trajectory_health": {
+        "score": 0.7,
+        "level": "healthy",
+        "reason_codes": [
+          "actor_turns_exceeded",
+          "failed_tool_result_present",
+          "no_replan_needed"
+        ]
+      },
+      "recommended_directive": "continue_read_only",
+      "summary": "Evidence quality is weak (0.25), operational risk is medium (0.52), and trajectory health is healthy (0.70).",
+      "reason_codes": [
+        "observed_evidence_present",
+        "source_locator_present",
+        "last_tool_failed",
+        "evidence_support_matches_step_need",
+        "tool_risk_medium",
+        "task_sensitivity_medium",
+        "read_only_capability",
+        "actor_turns_exceeded",
+        "failed_tool_result_present",
+        "no_replan_needed",
+        "recommend_continue"
+      ]
+    },
+    {
+      "evidence_quality": {
+        "score": 0.93,
+        "level": "strong",
+        "reason_codes": [
+          "evidence_marked_sufficient",
+          "objective_marked_satisfied",
+          "actor_confidence_contributed",
+          "observed_evidence_present",
+          "source_locator_present",
+          "last_tool_failed",
+          "evidence_support_matches_step_need"
+        ]
+      },
+      "operational_risk": {
+        "score": 0.5175,
+        "level": "medium",
+        "reason_codes": [
+          "tool_risk_medium",
+          "task_sensitivity_medium",
+          "read_only_capability"
+        ]
+      },
+      "trajectory_health": {
+        "score": 0.7,
+        "level": "healthy",
+        "reason_codes": [
+          "completion_attempt_turn_overage_softened",
+          "actor_turns_exceeded",
+          "failed_tool_result_present",
+          "no_replan_needed"
+        ]
+      },
+      "recommended_directive": "continue",
+      "summary": "Evidence quality is strong (0.93), operational risk is medium (0.52), and trajectory health is healthy (0.70).",
+      "reason_codes": [
+        "evidence_marked_sufficient",
+        "objective_marked_satisfied",
+        "actor_confidence_contributed",
+        "observed_evidence_present",
+        "source_locator_present",
+        "last_tool_failed",
+        "evidence_support_matches_step_need",
+        "tool_risk_medium",
+        "task_sensitivity_medium",
+        "read_only_capability",
+        "completion_attempt_turn_overage_softened",
+        "actor_turns_exceeded",
+        "failed_tool_result_present",
+        "no_replan_needed",
+        "recommend_continue"
+      ]
+    },
+    {
+      "evidence_quality": {
+        "score": 0.25,
+        "level": "weak",
+        "reason_codes": [
+          "observed_evidence_present",
+          "source_locator_present",
+          "evidence_support_matches_step_need"
+        ]
+      },
+      "operational_risk": {
+        "score": 0.5175,
+        "level": "medium",
+        "reason_codes": [
+          "tool_risk_medium",
+          "task_sensitivity_medium",
+          "read_only_capability"
+        ]
+      },
+      "trajectory_health": {
+        "score": 1.0,
+        "level": "healthy",
+        "reason_codes": [
+          "actor_turns_within_limit",
+          "no_failed_tool_results",
+          "no_replan_needed"
+        ]
+      },
+      "recommended_directive": "continue_read_only",
+      "summary": "Evidence quality is weak (0.25), operational risk is medium (0.52), and trajectory health is healthy (1.00).",
+      "reason_codes": [
+        "observed_evidence_present",
+        "source_locator_present",
+        "evidence_support_matches_step_need",
+        "tool_risk_medium",
+        "task_sensitivity_medium",
+        "read_only_capability",
+        "actor_turns_within_limit",
+        "no_failed_tool_results",
+        "no_replan_needed",
+        "recommend_continue"
+      ]
+    },
+    {
+      "evidence_quality": {
+        "score": 0.3,
+        "level": "weak",
+        "reason_codes": [
+          "observed_evidence_present",
+          "source_locator_present",
+          "last_tool_success",
+          "evidence_support_matches_step_need"
+        ]
+      },
+      "operational_risk": {
+        "score": 0.5175,
+        "level": "medium",
+        "reason_codes": [
+          "tool_risk_medium",
+          "task_sensitivity_medium",
+          "read_only_capability"
+        ]
+      },
+      "trajectory_health": {
+        "score": 1.0,
+        "level": "healthy",
+        "reason_codes": [
+          "actor_turns_within_limit",
+          "no_failed_tool_results",
+          "no_replan_needed"
+        ]
+      },
+      "recommended_directive": "continue_read_only",
+      "summary": "Evidence quality is weak (0.30), operational risk is medium (0.52), and trajectory health is healthy (1.00).",
+      "reason_codes": [
+        "observed_evidence_present",
+        "source_locator_present",
+        "last_tool_success",
+        "evidence_support_matches_step_need",
+        "tool_risk_medium",
+        "task_sensitivity_medium",
+        "read_only_capability",
+        "actor_turns_within_limit",
+        "no_failed_tool_results",
+        "no_replan_needed",
+        "recommend_continue"
+      ]
+    },
+    {
+      "evidence_quality": {
+        "score": 0.9800000000000001,
+        "level": "strong",
+        "reason_codes": [
+          "evidence_marked_sufficient",
+          "objective_marked_satisfied",
+          "actor_confidence_contributed",
+          "observed_evidence_present",
+          "source_locator_present",
+          "last_tool_success",
+          "evidence_support_matches_step_need"
+        ]
+      },
+      "operational_risk": {
+        "score": 0.5175,
+        "level": "medium",
+        "reason_codes": [
+          "tool_risk_medium",
+          "task_sensitivity_medium",
+          "read_only_capability"
+        ]
+      },
+      "trajectory_health": {
+        "score": 1.0,
+        "level": "healthy",
+        "reason_codes": [
+          "actor_turns_within_limit",
+          "no_failed_tool_results",
+          "no_replan_needed"
+        ]
+      },
+      "recommended_directive": "continue",
+      "summary": "Evidence quality is strong (0.98), operational risk is medium (0.52), and trajectory health is healthy (1.00).",
+      "reason_codes": [
+        "evidence_marked_sufficient",
+        "objective_marked_satisfied",
+        "actor_confidence_contributed",
+        "observed_evidence_present",
+        "source_locator_present",
+        "last_tool_success",
+        "evidence_support_matches_step_need",
+        "tool_risk_medium",
+        "task_sensitivity_medium",
+        "read_only_capability",
+        "actor_turns_within_limit",
+        "no_failed_tool_results",
+        "no_replan_needed",
+        "recommend_continue"
+      ]
+    },
+    {
+      "evidence_quality": {
+        "score": 0.25,
+        "level": "weak",
+        "reason_codes": [
+          "observed_evidence_present",
+          "source_locator_present",
+          "evidence_support_below_step_need"
+        ]
+      },
+      "operational_risk": {
+        "score": 0.5175,
+        "level": "medium",
+        "reason_codes": [
+          "tool_risk_medium",
+          "task_sensitivity_medium",
+          "read_only_capability"
+        ]
+      },
+      "trajectory_health": {
+        "score": 1.0,
+        "level": "healthy",
+        "reason_codes": [
+          "actor_turns_within_limit",
+          "no_failed_tool_results",
+          "no_replan_needed"
+        ]
+      },
+      "recommended_directive": "continue_read_only",
+      "summary": "Evidence quality is weak (0.25), operational risk is medium (0.52), and trajectory health is healthy (1.00).",
+      "reason_codes": [
+        "observed_evidence_present",
+        "source_locator_present",
+        "evidence_support_below_step_need",
+        "tool_risk_medium",
+        "task_sensitivity_medium",
+        "read_only_capability",
+        "actor_turns_within_limit",
+        "no_failed_tool_results",
+        "no_replan_needed",
+        "recommend_continue"
+      ]
+    },
+    {
+      "evidence_quality": {
+        "score": 0.3,
+        "level": "weak",
+        "reason_codes": [
+          "observed_evidence_present",
+          "source_locator_present",
+          "last_tool_success",
+          "evidence_support_below_step_need"
+        ]
+      },
+      "operational_risk": {
+        "score": 0.5175,
+        "level": "medium",
+        "reason_codes": [
+          "tool_risk_medium",
+          "task_sensitivity_medium",
+          "read_only_capability"
+        ]
+      },
+      "trajectory_health": {
+        "score": 1.0,
+        "level": "healthy",
+        "reason_codes": [
+          "actor_turns_within_limit",
+          "no_failed_tool_results",
+          "no_replan_needed"
+        ]
+      },
+      "recommended_directive": "continue",
+      "summary": "Evidence quality is weak (0.30), operational risk is medium (0.52), and trajectory health is healthy (1.00).",
+      "reason_codes": [
+        "observed_evidence_present",
+        "source_locator_present",
+        "last_tool_success",
+        "evidence_support_below_step_need",
+        "tool_risk_medium",
+        "task_sensitivity_medium",
+        "read_only_capability",
+        "actor_turns_within_limit",
+        "no_failed_tool_results",
+        "no_replan_needed",
+        "recommend_continue"
+      ]
+    }
+  ]
+}

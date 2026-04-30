@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import unittest
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -65,7 +66,7 @@ from layer2_runtime_governance import (
     build_runtime_graph,
     replanner,
 )
-from main_layer2 import build_compact_trace
+from main_layer2 import build_compact_trace, write_layer2_trace_file
 from layer2_runtime_governance.replanning import (
     OpenAIReplanner,
     OpenAIReplannerSettings,
@@ -1246,6 +1247,32 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertEqual(compact_trace["planning_snapshot"]["planning_source"], "replanner")
         self.assertEqual(compact_trace["governance_snapshot"]["oversight_pass_count"], 2)
         self.assertIsNotNone(compact_trace["governance_snapshot"]["last_oversight_assessment"])
+
+    def test_full_trace_is_written_to_disk(self) -> None:
+        trace = run_layer2_flow(
+            raw_task_text="Find official sources about the DMA and summarize them.",
+            context_hint="Prefer official EU sources.",
+            thread_id="full-trace-file-test",
+            intake_service=_build_intake_service(
+                _build_research_intake_task_spec()
+            ),
+            planner_service=StubPlanner(),
+            actor_service=StubActor(),
+            tool_gateway_service=StubToolGateway(),
+            replanner_service=StubReplanner(),
+            policy_engine_service=StubPolicyEngine(),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "full-trace-1.json"
+            written_path = write_layer2_trace_file(trace, output_path=output_path)
+
+            self.assertEqual(written_path, output_path)
+            self.assertTrue(written_path.exists())
+
+            payload = json.loads(written_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["runtime"]["thread_id"], "full-trace-file-test")
+            self.assertEqual(payload["runtime"]["current_state"], "completed")
 
     # Verify replanning drops stale live tool context from the replaced step trajectory.
     def test_replanner_clears_stale_live_tool_context(self) -> None:
