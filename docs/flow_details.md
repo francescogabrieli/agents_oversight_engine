@@ -76,8 +76,6 @@ Esempio concettuale:
         "max_steps": 5,
         "max_tool_calls": 10
       },
-      "allowed_tools": [],
-      "disallowed_tools": [],
       "read_only_mode": false
     }
   },

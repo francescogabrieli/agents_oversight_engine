@@ -664,13 +664,13 @@
             <div class="flow-box">Tool Gateway<br />MCP / sola lettura</div>
           </div>
           <div class="card blue">
-            <h3>Baseline corrente e incremento proposto</h3>
+            <h3>Baseline corrente e consolidamento deterministico</h3>
             <p>
               Il repository implementa gia' intake tipizzato di Layer 1, orchestrazione LangGraph
               di Layer 2, output dell'actor, governance basata su OPA, esecuzione tramite Tool Gateway,
-              evidenze osservate, scratchpad audit-safe, validazioni di step e ripianificazione. Il layer
-              <code>confidence_risk_trajectory</code> e' il prossimo passo deterministico di rafforzamento
-              della governance dentro lo stesso percorso runtime.
+              evidenze osservate, scratchpad audit-safe, validazioni di step, oversight deterministico
+              e ripianificazione. Il layer <code>confidence_risk_trajectory</code> e' gia' il
+              consolidamento deterministico di queste metriche dentro lo stesso percorso runtime e nel trace.
             </p>
           </div>
         </div>
@@ -690,34 +690,50 @@
           <div>
             <p class="lead">
               Il layer di oversight dovrebbe essere configurato come dato, non nascosto nei prompt.
-              Questo rende soglie e pesi auditabili, testabili e regolabili durante la futura valutazione.
+              Questo rende soglie, pesi e penalita' auditabili, testabili e regolabili durante la futura valutazione.
             </p>
             <ul class="tight-list">
-              <li>Pesi dei punteggi e soglie sono deterministici.</li>
-              <li>La mappatura del rischio degli strumenti viene letta da metadati controllati.</li>
-              <li>I decision hint sono riproducibili per lo stesso snapshot di stato.</li>
-              <li>Il miglioramento futuro puo' regolare la configurazione senza riscrivere il contratto runtime.</li>
+              <li>Le soglie attuali sono <code>min_actor_confidence</code>, <code>min_evidence_quality</code>, <code>max_operational_risk</code> e <code>min_trajectory_health</code>.</li>
+              <li>I pesi di evidence quality, risk score e trajectory penalties stanno nel JSON e nel fallback Python.</li>
+              <li>La mappatura del rischio degli strumenti viene letta dal Tool Gateway registry.</li>
+              <li>Il comportamento resta riproducibile per lo stesso snapshot di stato e la stessa configurazione.</li>
             </ul>
           </div>
           <pre><code>{
-  "version": "layer2_oversight_v1",
   "thresholds": {
-    "min_evidence_quality": 0.75,
-    "min_trajectory_health": 0.70,
-    "request_more_evidence_below": 0.50,
-    "replan_trajectory_below": 0.45,
-    "human_review_risk_above": 0.75
+    "min_actor_confidence": 0.65,
+    "min_evidence_quality": 0.70,
+    "max_operational_risk": 0.60,
+    "min_trajectory_health": 0.60
   },
-  "risk_weights": {
-    "tool_risk": 0.35,
-    "capability_mode": 0.25,
-    "external_impact": 0.25,
-    "task_sensitivity": 0.15
+  "evidence_quality_weights": {
+    "evidence_sufficient": 0.30,
+    "objective_satisfied": 0.20,
+    "actor_confidence": 0.20,
+    "observed_evidence_present": 0.15,
+    "source_locator_present": 0.10,
+    "last_tool_success": 0.05
+  },
+  "risk_scores": {
+    "tool_risk": {"low": 0.15, "medium": 0.45, "high": 0.75, "critical": 0.95},
+    "sensitivity_multiplier": {"low": 1.0, "medium": 1.15, "high": 1.35, "critical": 1.6},
+    "external_impact_additive": 0.25,
+    "write_capability_additive": 0.30,
+    "requires_human_review_additive": 0.40
+  },
+  "trajectory_penalties": {
+    "max_actor_turns_per_step": 5,
+    "max_replans": 2,
+    "actor_turn_overage_penalty": 0.10,
+    "completion_attempt_turn_overage_scale": 0.50,
+    "failed_tool_result_penalty": 0.20,
+    "needs_replan_penalty": 0.25,
+    "low_confidence_uncertainty_penalty": 0.20
   }
 }</code></pre>
         </div>
         <div class="speaker-note">
-          <strong>Nota di stato:</strong> questo file e' proposto dal deck. Non e' ancora presente nella baseline corrente del repository.
+          <strong>Nota di stato:</strong> questo file e' gia' presente nella baseline corrente del repository e viene letto da <code>load_oversight_policy_config()</code>.
         </div>
       </main>
     </section>
@@ -734,18 +750,18 @@
         <div class="grid">
           <div class="formula">
             <strong>Qualita' delle evidenze</strong>
-            <span>Combina successo delle evidenze, rilevanza rispetto allo step corrente, copertura delle fonti e self-validation dell'actor.</span><br />
-            <code>EQ = 0.35*success + 0.30*relevance + 0.20*coverage + 0.15*validation</code>
+            <span>Combina validazione dell'actor, copertura osservata, locator di provenienza e successo dell'ultimo tool.</span><br />
+            <code>EQ = w_sufficient + w_objective + w_confidence*confidence + w_evidence + w_locator + w_tool_success</code>
           </div>
           <div class="formula">
             <strong>Rischio operativo</strong>
-            <span>Combina rischio dello strumento, modalita' di capacita', impatto esterno, sensibilita' del task e reversibilita' quando disponibile.</span><br />
-            <code>OR = 0.35*tool_risk + 0.25*capability + 0.20*external_impact + 0.15*sensitivity + 0.05*irreversibility</code>
+            <span>Parte dal rischio dello strumento nel registry e lo moltiplica per la sensibilita' del task, poi aggiunge impatto esterno e review richiesta.</span><br />
+            <code>OR = clamp(tool_risk * sensitivity_multiplier + external_impact + write_capability + human_review)</code>
           </div>
           <div class="formula">
             <strong>Salute della traiettoria</strong>
-            <span>Combina progresso, pressione sul budget, fallimenti recenti, pressione di replanning e consistenza delle validazioni.</span><br />
-            <code>TH = 0.30*progress + 0.25*budget_health + 0.20*validation_consistency + 0.15*low_error_rate + 0.10*low_replan_pressure</code>
+            <span>Parte da 1.0 e sottrae pressione da turni, tool falliti, replan e incertezza residua; il limite massimo di replan forza il comportamento conservativo.</span><br />
+            <code>TH = 1.0 - turn_overage - failed_tool_result - needs_replan - low_confidence_uncertainty</code>
           </div>
         </div>
       </main>
@@ -770,29 +786,44 @@
           </thead>
           <tbody>
             <tr>
-              <td><code>EQ &gt;= 0.75</code>, <code>OR &lt;= 0.30</code>, <code>TH &gt;= 0.70</code></td>
-              <td><code>continue</code></td>
-              <td>L'azione e' supportata, a basso rischio e allineata alla traiettoria.</td>
+              <td><code>policy_decision == deny</code></td>
+              <td><code>stop</code></td>
+              <td>L'esecuzione non puo' proseguire.</td>
             </tr>
             <tr>
-              <td><code>EQ &lt; 0.50</code></td>
-              <td><code>request_more_evidence</code></td>
-              <td>L'actor dovrebbe raccogliere o osservare piu' evidenze prima di completare lo step.</td>
-            </tr>
-            <tr>
-              <td><code>TH &lt; 0.45</code></td>
-              <td><code>replan</code></td>
-              <td>Il percorso semantico e' degradato e dovrebbe essere sostituito dallo step corrente in avanti.</td>
-            </tr>
-            <tr>
-              <td><code>OR &gt; 0.75</code></td>
+              <td><code>policy_decision == require_human_review</code> oppure <code>operational_risk &gt; max_operational_risk</code></td>
               <td><code>wait_human_review</code></td>
-              <td>L'azione puo' essere ammissibile, ma l'esecuzione autonoma e' troppo rischiosa.</td>
+              <td>Il runtime si ferma in modo esplicito e chiede revisione umana.</td>
+            </tr>
+            <tr>
+              <td><code>policy_decision == ask_clarification</code></td>
+              <td><code>ask_user_clarification</code></td>
+              <td>La richiesta e' troppo ambigua o incompleta per continuare in sicurezza.</td>
+            </tr>
+            <tr>
+              <td><code>trajectory_health &lt; min_trajectory_health</code> oppure <code>REPLAN_LIMIT_EXCEEDED</code></td>
+              <td><code>replan</code></td>
+              <td>La traiettoria semantica e' degradata e deve essere sostituita dal replanner.</td>
+            </tr>
+            <tr>
+              <td><code>completion attempt</code> con <code>evidence_quality &lt; min_evidence_quality</code> e validazione debole</td>
+              <td><code>request_more_evidence</code></td>
+              <td>Lo step non si puo' completare ancora: servono piu' prove.</td>
+            </tr>
+            <tr>
+              <td><code>actor_result_type == PROPOSE_ACTION</code> e OPA concede <code>allow_read_only</code></td>
+              <td><code>continue_read_only</code></td>
+              <td>La governance preserva la lettura, ma non amplia la capacita' oltre il permesso OPA.</td>
+            </tr>
+            <tr>
+              <td>Altri casi permessi</td>
+              <td><code>continue</code></td>
+              <td>La direttiva rimane la piu' permissiva compatibile con la policy e con l'oversight deterministico.</td>
             </tr>
           </tbody>
         </table>
         <div class="speaker-note">
-          <strong>Nota per il relatore:</strong> il layer non autorizza azioni vietate. Rende soltanto piu' conservative le azioni permesse quando lo stato runtime e' debole.
+          <strong>Nota per il relatore:</strong> l'oversight non rende mai piu' permissiva la policy OPA; puo' solo conservare, restringere o escalare.
         </div>
       </main>
     </section>
@@ -809,7 +840,7 @@
         <div class="hierarchy">
           <div class="layer">
             <strong>1. Policy Engine OPA</strong>
-            <span>Applica il deterministic policy envelope: deny, require human review, ask clarification, allow read-only oppure allow.</span>
+            <span>Applica il deterministic policy envelope: deny, require_human_review, ask_clarification, allow_read_only oppure allow.</span>
             <span class="tag">Confine hard</span>
           </div>
           <div class="layer">
@@ -824,7 +855,7 @@
           </div>
           <div class="layer">
             <strong>4. Decision combiner</strong>
-            <span>Produce una sola direttiva per il grafo: continue, continue_read_only, request_more_evidence, replan, review, clarification oppure stop.</span>
+            <span>Produce una sola direttiva per il grafo: continue, continue_read_only, request_more_evidence, replan, ask_user_clarification, wait_human_review oppure stop.</span>
             <span class="tag">Direttiva unica</span>
           </div>
         </div>
@@ -844,35 +875,30 @@
           <div class="card blue">
             <h3>Campi live compatti</h3>
             <ul class="tight-list">
-              <li><code>last_oversight_snapshot</code></li>
-              <li><code>oversight_history</code> oppure estensione di <code>governance_history</code></li>
-              <li><code>evidence_quality_score</code>, <code>operational_risk_score</code>, <code>trajectory_health_score</code></li>
-              <li><code>decision_hint</code> e <code>triggered_rules</code></li>
-              <li><code>evidence_ids_used</code></li>
+              <li><code>last_oversight_assessment</code></li>
+              <li><code>oversight_history</code> con valutazioni tipizzate</li>
+              <li><code>governance_history</code> per il livello policy</li>
+              <li><code>step_validations</code>, <code>observed_evidence</code>, <code>tool_results_history</code></li>
+              <li><code>actor_turn_count</code> e <code>tool_call_count</code></li>
             </ul>
           </div>
           <div class="card green">
-            <h3>Input esistenti gia' disponibili</h3>
+            <h3>Trace derivato</h3>
             <ul class="tight-list">
-              <li><code>observed_evidence</code> dai risultati degli strumenti</li>
-              <li><code>last_tool_result</code> e <code>tool_call_count</code></li>
-              <li><code>step_validations</code> con confidence dell'actor e sufficienza delle evidenze</li>
-              <li><code>runtime_flags</code> e sensibilita' del task</li>
-              <li><code>plan_steps</code>, <code>executed_steps</code> e cursore dello step corrente</li>
+              <li><code>trace.py</code> costruisce <code>oversight_assessments</code> e <code>governance_decisions</code> dal <code>TaskState</code>.</li>
+              <li>Il trace non inventa un nuovo contratto: serializza in modo leggibile lo stato canonico.</li>
+              <li>I dettagli operativi restano in <code>observed_evidence</code>, <code>scratchpad</code> e <code>step_history</code>.</li>
             </ul>
           </div>
         </div>
         <pre><code>{
-  "oversight_snapshot": {
-    "version": "layer2_oversight_v1",
-    "scores": {
-      "evidence_quality_score": 0.86,
-      "operational_risk_score": 0.18,
-      "trajectory_health_score": 0.82
-    },
-    "decision_hint": "continue",
-    "reason_codes": ["mcp_read_only_low_risk", "evidence_sufficient"],
-    "evidence_ids_used": ["step_1:tool:1:source:1"]
+  "last_oversight_assessment": {
+    "evidence_quality": {"score": 0.30, "level": "weak", "reason_codes": ["evidence_marked_sufficient"]},
+    "operational_risk": {"score": 0.52, "level": "medium", "reason_codes": ["tool_risk_low", "read_only_capability"]},
+    "trajectory_health": {"score": 1.00, "level": "healthy", "reason_codes": ["actor_turns_within_limit", "no_failed_tool_results"]},
+    "recommended_directive": "continue_read_only",
+    "summary": "Evidence quality is weak (0.30), operational risk is medium (0.52), and trajectory health is healthy (1.00).",
+    "reason_codes": ["evidence_marked_sufficient", "tool_risk_low", "read_only_capability"]
   }
 }</code></pre>
       </main>
@@ -908,22 +934,22 @@
           <div>
             <div class="scorebar">
               <strong>Qualita' evidenze</strong>
-              <div class="track"><div class="fill green" style="width: 86%;"></div></div>
-              <strong>0.86</strong>
+              <div class="track"><div class="fill green" style="width: 30%;"></div></div>
+              <strong>0.30</strong>
             </div>
             <div class="scorebar">
               <strong>Rischio operativo</strong>
-              <div class="track"><div class="fill green" style="width: 18%;"></div></div>
-              <strong>0.18</strong>
+              <div class="track"><div class="fill amber" style="width: 52%;"></div></div>
+              <strong>0.52</strong>
             </div>
             <div class="scorebar">
               <strong>Salute traiettoria</strong>
-              <div class="track"><div class="fill blue" style="width: 82%;"></div></div>
-              <strong>0.82</strong>
+              <div class="track"><div class="fill blue" style="width: 100%;"></div></div>
+              <strong>1.00</strong>
             </div>
             <div class="card green">
               <h3>Direttiva di oversight</h3>
-              <p><code>continue_read_only</code> oppure <code>continue</code>, in base all'output del combiner dopo OPA. Non serve human review perche' l'azione e' read-only, a basso rischio e supportata da evidenza diretta del tool.</p>
+              <p><code>continue_read_only</code> oppure <code>continue</code>, in base all'output del combiner dopo OPA. Non serve human review perche' l'azione e' read-only, il rischio resta sotto la soglia massima e il combiner conserva la direttiva piu' permissiva compatibile.</p>
             </div>
           </div>
         </div>
@@ -982,12 +1008,12 @@
             </ul>
           </div>
           <div class="card blue">
-            <h3>Prossimo incremento implementativo</h3>
+            <h3>Incrementi ancora aperti</h3>
             <ul class="tight-list">
-              <li>Aggiungere <code>configs/layer2_oversight_policy.json</code>.</li>
-              <li>Introdurre modelli tipizzati di ingresso/uscita per l'oversight.</li>
-              <li>Calcolare i punteggi dopo l'output dell'actor e prima dell'instradamento finale di governance.</li>
-              <li>Persistire snapshot in <code>TaskState</code> e nella cronologia di trace.</li>
+              <li>Separare <code>WAITING_HUMAN_REVIEW</code> in un futuro flusso <code>interrupt / resume</code> HITL.</li>
+              <li>Introdurre un judge semantico solo dopo aver consolidato il slice deterministico.</li>
+              <li>Ampliare le policy solo quando il comportamento corrente restera' stabile e testabile.</li>
+              <li>Estendere il controllo a write-like o external communication solo con revisione umana esplicita.</li>
             </ul>
           </div>
         </div>

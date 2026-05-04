@@ -4,7 +4,6 @@ import shutil
 import subprocess
 import sys
 import unittest
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -67,6 +66,7 @@ from layer2_runtime_governance import (
     replanner,
 )
 from main_layer2 import build_compact_trace, write_layer2_trace_file
+from main_layer2 import run_layer2_flow
 from layer2_runtime_governance.replanning import (
     OpenAIReplanner,
     OpenAIReplannerSettings,
@@ -1253,9 +1253,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             raw_task_text="Find official sources about the DMA and summarize them.",
             context_hint="Prefer official EU sources.",
             thread_id="full-trace-file-test",
-            intake_service=_build_intake_service(
-                _build_research_intake_task_spec()
-            ),
+            demo_intake_profile="research",
             planner_service=StubPlanner(),
             actor_service=StubActor(),
             tool_gateway_service=StubToolGateway(),
@@ -1263,8 +1261,10 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             policy_engine_service=StubPolicyEngine(),
         )
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            output_path = Path(temp_dir) / "full-trace-1.json"
+        temp_dir = REPO_ROOT / "_layer2_trace_test_output"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            output_path = temp_dir / "full-trace-1.json"
             written_path = write_layer2_trace_file(trace, output_path=output_path)
 
             self.assertEqual(written_path, output_path)
@@ -1273,6 +1273,8 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             payload = json.loads(written_path.read_text(encoding="utf-8"))
             self.assertEqual(payload["runtime"]["thread_id"], "full-trace-file-test")
             self.assertEqual(payload["runtime"]["current_state"], "completed")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     # Verify replanning drops stale live tool context from the replaced step trajectory.
     def test_replanner_clears_stale_live_tool_context(self) -> None:
