@@ -11,10 +11,12 @@ suppress_known_runtime_warnings()
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
+from langchain_core.runnables import RunnableConfig
 from typing_extensions import TypedDict
 
 from layer1_intake import (
     ExecutionPolicy,
+    DomainType,
     IntakeMetadata,
     IntakeResult,
     ParseStatus,
@@ -62,12 +64,16 @@ from .nodes import (
     observe_tool_result,
     planner,
     replanner,
+    human_review,
     tool_gateway,
 )
 from .planning import PlannerPort, build_default_planner
 from .replanning import ReplanDecision, ReplannerPort, build_default_replanner
 from .state import (
     ExecutedPlanStep,
+    HumanReviewDecision,
+    HumanReviewDecisionType,
+    HumanReviewRequest,
     PlanStep,
     PlanStepStatus,
     PlannerDecision,
@@ -94,6 +100,7 @@ from .tool_gateway import build_default_tool_gateway
 class Layer2GraphInput(TypedDict):
     # LangGraph receives the full IntakeResult as the only external input to Layer 2.
     intake_result: IntakeResult
+    thread_id: str | None
 
 
 class Layer2GraphState(Layer2GraphInput, total=False):
@@ -132,6 +139,7 @@ def build_runtime_graph(
     builder.add_node("planner", _build_planner_node(resolved_planner))
     builder.add_node("actor", _build_actor_node(resolved_actor))
     builder.add_node("governance", _build_governance_node(resolved_policy_engine))
+    builder.add_node("human_review", _build_human_review_node())
     builder.add_node("tool_gateway", _build_tool_gateway_node(resolved_tool_gateway))
     builder.add_node("observe_tool_result", _observe_tool_result_node)
     builder.add_node("replanner", _build_replanner_node(resolved_replanner))
@@ -151,6 +159,19 @@ def build_runtime_graph(
             "actor": "actor",
             "tool_gateway": "tool_gateway",
             "replanner": "replanner",
+            "human_review": "human_review",
+            "finalize_bootstrap": "finalize_bootstrap",
+        },
+    )
+
+    builder.add_conditional_edges(
+        "human_review",
+        _route_after_human_review,
+        {
+            "planner": "planner",
+            "actor": "actor",
+            "tool_gateway": "tool_gateway",
+            "replanner": "replanner",
             "finalize_bootstrap": "finalize_bootstrap",
         },
     )
@@ -163,9 +184,11 @@ def build_runtime_graph(
     return builder.compile(checkpointer=checkpointer or _build_default_checkpointer())
 
 
-def _bootstrap_node(state: Layer2GraphInput) -> dict[str, TaskState]:
+def _bootstrap_node(state: Layer2GraphInput, config: RunnableConfig | None = None) -> dict[str, TaskState]:
     # Adapt the graph wrapper state to the domain-level bootstrap function.
-    return {"task_state": bootstrap_from_intake(state["intake_result"])}
+    task_state = bootstrap_from_intake(state["intake_result"])
+    task_state.runtime_thread_id = _extract_bootstrap_thread_id(state, config=config)
+    return {"task_state": task_state}
 
 
 def _build_planner_node(planner_service: PlannerPort):
@@ -196,15 +219,37 @@ def _build_actor_node(actor_service: ActorPort):
 
 # Close over the resolved policy engine so governance stays deterministic in tests.
 def _build_governance_node(policy_engine_service: PolicyEnginePort):
-    def _governance_node(state: Layer2GraphState) -> dict[str, TaskState]:
+    def _governance_node(
+        state: Layer2GraphState,
+        config: RunnableConfig | None = None,
+    ) -> dict[str, TaskState]:
+        thread_id = _extract_thread_id(state, config=config)
         return {
             "task_state": governance(
                 _copy_task_state(state["task_state"]),
                 policy_engine_service=policy_engine_service,
+                thread_id=thread_id,
             )
         }
 
     return _governance_node
+
+
+def _build_human_review_node():
+    # Human review is the LangGraph interrupt/resume node for typed HITL pauses.
+    def _human_review_node(
+        state: Layer2GraphState,
+        config: RunnableConfig | None = None,
+    ) -> dict[str, TaskState]:
+        thread_id = _extract_thread_id(state, config=config)
+        return {
+            "task_state": human_review(
+                _copy_task_state(state["task_state"]),
+                thread_id=thread_id,
+            )
+        }
+
+    return _human_review_node
 
 
 def _build_tool_gateway_node(tool_gateway_service: ToolGatewayPort):
@@ -255,6 +300,13 @@ def _route_after_governance(state: Layer2GraphState) -> str:
         # Replanning is a real branch now, not a terminal stop condition.
         return "replanner"
 
+    if (
+        task_state.current_state == RuntimeState.WAITING_HUMAN_REVIEW
+        and task_state.pending_human_review_request is not None
+    ):
+        # Human review now interrupts the graph instead of ending the runtime slice.
+        return "human_review"
+
     if task_state.current_state == RuntimeState.READY_NEXT_STEP:
         # A completed non-final step advances the cursor and immediately re-enters acting.
         return "actor"
@@ -266,9 +318,91 @@ def _route_after_governance(state: Layer2GraphState) -> str:
     return "finalize_bootstrap"
 
 
+# Route the post-review runtime state back into the appropriate execution branch.
+def _route_after_human_review(state: Layer2GraphState) -> str:
+    task_state = state["task_state"]
+
+    if task_state.current_state == RuntimeState.PLANNING:
+        return "planner"
+
+    if task_state.current_state == RuntimeState.READY_TOOL_EXECUTION:
+        return "tool_gateway"
+
+    if task_state.current_state == RuntimeState.REPLANNING:
+        return "replanner"
+
+    if task_state.current_state == RuntimeState.READY_NEXT_STEP:
+        return "actor"
+
+    if task_state.current_state == RuntimeState.ACTING:
+        return "actor"
+
+    return "finalize_bootstrap"
+
+
 def _copy_task_state(task_state: TaskState) -> TaskState:
     # Keep graph-side transformations explicit by copying domain state before reuse.
     return deepcopy(task_state)
+
+
+# Extract the real LangGraph thread id from the runtime config.
+def _extract_thread_id(state: Layer2GraphState, config: Any | None = None) -> str:
+    task_state = state["task_state"]
+    if task_state.runtime_thread_id:
+        return task_state.runtime_thread_id
+
+    if config is not None:
+        candidate_containers: list[Any] = []
+        if isinstance(config, dict):
+            candidate_containers.extend([config.get("metadata"), config.get("configurable")])
+        else:
+            candidate_containers.extend(
+                [
+                    getattr(config, "metadata", None),
+                    getattr(config, "configurable", None),
+                ]
+            )
+
+        for container in candidate_containers:
+            if not isinstance(container, dict):
+                continue
+            thread_id = container.get("thread_id")
+            if isinstance(thread_id, str) and thread_id.strip():
+                return thread_id
+
+    return task_state.intake_metadata.request_id
+
+
+# Resolve the thread id at bootstrap time without forcing callers to embed it in the input.
+def _extract_bootstrap_thread_id(
+    state: Layer2GraphInput,
+    config: RunnableConfig | None = None,
+) -> str:
+    thread_id = state.get("thread_id")
+    if isinstance(thread_id, str) and thread_id.strip():
+        return thread_id
+
+    if config is not None:
+        if isinstance(config, dict):
+            for container_name in ("metadata", "configurable"):
+                container = config.get(container_name, {})
+                if not isinstance(container, dict):
+                    continue
+                thread_id = container.get("thread_id")
+                if isinstance(thread_id, str) and thread_id.strip():
+                    return thread_id
+        else:
+            for container in (
+                getattr(config, "metadata", None),
+                getattr(config, "configurable", None),
+            ):
+                if not isinstance(container, dict):
+                    continue
+                thread_id = container.get("thread_id")
+                if isinstance(thread_id, str) and thread_id.strip():
+                    return thread_id
+
+    return state["intake_result"].metadata.request_id
 
 
 def _build_default_checkpointer() -> MemorySaver:
@@ -280,8 +414,12 @@ def _build_default_checkpointer() -> MemorySaver:
             CapabilityAccessMode,
             ExecutedPlanStep,
             ExecutionPolicy,
+            DomainType,
             IntakeMetadata,
             IntakeResult,
+            HumanReviewDecision,
+            HumanReviewDecisionType,
+            HumanReviewRequest,
             GovernanceDecision,
             GovernanceDirective,
             GovernanceReasonCode,

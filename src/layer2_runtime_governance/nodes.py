@@ -15,6 +15,8 @@ from .governance import (
 )
 from .oversight import evaluate_confidence_risk_trajectory
 from .planning import PlannerPort
+from .hitl import build_human_review_request
+from .hitl import human_review
 from .state import (
     ExecutedPlanStep,
     PlanStep,
@@ -139,7 +141,12 @@ def actor(state: TaskState, *, actor_service: ActorPort) -> TaskState:
 
 
 # Route the actor outcome through the deterministic governance layer.
-def governance(state: TaskState, *, policy_engine_service: PolicyEnginePort) -> TaskState:
+def governance(
+    state: TaskState,
+    *,
+    policy_engine_service: PolicyEnginePort,
+    thread_id: str | None = None,
+) -> TaskState:
     if state.actor_result is None:
         _append_step_record(
             state,
@@ -169,6 +176,16 @@ def governance(state: TaskState, *, policy_engine_service: PolicyEnginePort) -> 
         governance_decision=governance_decision,
         policy_input=policy_input,
     )
+
+    if state.current_state == RuntimeState.WAITING_HUMAN_REVIEW:
+        resolved_thread_id = thread_id or state.intake_metadata.request_id
+        state.pending_human_review_request = build_human_review_request(
+            state=state,
+            thread_id=resolved_thread_id,
+        )
+    else:
+        state.pending_human_review_request = None
+        state.human_review_resume_state = None
 
     _append_step_record(
         state,
@@ -661,22 +678,31 @@ def _apply_governance_decision(
     if governance_decision.directive == GovernanceDirective.STOP:
         state.current_state = RuntimeState.ABORTED
         state.current_tool_request = None
+        state.pending_human_review_request = None
+        state.human_review_resume_state = None
         return
 
     if governance_decision.directive in {
         GovernanceDirective.WAIT_HUMAN_REVIEW,
         GovernanceDirective.ASK_USER_CLARIFICATION,
     }:
+        state.human_review_resume_state = _infer_human_review_resume_state(
+            state=state,
+            policy_input=policy_input,
+        )
         state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
-        state.current_tool_request = None
         return
 
     if governance_decision.directive == GovernanceDirective.REPLAN:
+        state.pending_human_review_request = None
+        state.human_review_resume_state = None
         state.current_state = RuntimeState.REPLANNING
         state.current_tool_request = None
         return
 
     if governance_decision.directive == GovernanceDirective.REQUEST_MORE_EVIDENCE:
+        state.pending_human_review_request = None
+        state.human_review_resume_state = None
         _restore_actor_step_for_more_evidence(state)
         state.current_state = RuntimeState.ACTING
         state.current_tool_request = None
@@ -687,17 +713,25 @@ def _apply_governance_decision(
         return
 
     if policy_input.actor_result_type == ActorResultType.NEEDS_REPLAN:
+        state.pending_human_review_request = None
+        state.human_review_resume_state = None
         state.current_state = RuntimeState.REPLANNING
         return
 
     if policy_input.actor_result_type == ActorResultType.ASK_CLARIFICATION:
+        state.human_review_resume_state = _infer_human_review_resume_state(
+            state=state,
+            policy_input=policy_input,
+        )
         state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
-        state.current_tool_request = None
         return
 
     if policy_input.actor_result_type == ActorResultType.BLOCKED:
+        state.human_review_resume_state = _infer_human_review_resume_state(
+            state=state,
+            policy_input=policy_input,
+        )
         state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
-        state.current_tool_request = None
         return
 
     if policy_input.actor_result_type in {
@@ -727,6 +761,33 @@ def _restore_actor_step_for_more_evidence(state: TaskState) -> None:
     ]
     if state.final_output_text == actor_result.output_text:
         state.final_output_text = None
+
+
+# Derive the state the runtime should return to after a human review approval.
+def _infer_human_review_resume_state(
+    *,
+    state: TaskState,
+    policy_input: PolicyEvaluationInput,
+) -> RuntimeState:
+    if state.current_tool_request is not None:
+        return RuntimeState.READY_TOOL_EXECUTION
+
+    if policy_input.actor_result_type == ActorResultType.ASK_CLARIFICATION:
+        return RuntimeState.ACTING
+
+    if policy_input.actor_result_type == ActorResultType.BLOCKED:
+        return RuntimeState.ACTING
+
+    if policy_input.actor_result_type == ActorResultType.PROPOSE_ACTION:
+        return RuntimeState.READY_TOOL_EXECUTION
+
+    if state.current_plan_step_index is None:
+        return RuntimeState.COMPLETED if state.executed_steps else RuntimeState.PLANNING
+
+    if state.current_state == RuntimeState.READY_NEXT_STEP:
+        return RuntimeState.READY_NEXT_STEP
+
+    return RuntimeState.ACTING
 
 
 # Convert a tool result into explicit evidence objects that later actor turns can consume.
@@ -987,6 +1048,7 @@ __all__ = [
     "bootstrap_from_intake",
     "finalize_bootstrap",
     "governance",
+    "human_review",
     "observe_tool_result",
     "planner",
     "tool_gateway",

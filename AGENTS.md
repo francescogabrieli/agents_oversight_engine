@@ -38,6 +38,7 @@ It already includes:
 - typed step self-validations
 - an active `replanner` branch for `NEEDS_REPLAN`
 - deterministic `confidence_risk_trajectory` oversight for evidence quality, operational risk, and trajectory health
+- typed human-review requests and decisions with LangGraph `interrupt / resume`
 - typed runtime trace export through `trace.py`, surfaced by `src/main_layer2.py`
 
 These are the folders to treat as the active implementation baseline:
@@ -81,7 +82,7 @@ Important implementation principles:
   - multi-step semantic planner
   - step-bounded executor
   - structured tool binding at the runtime level
-- `HITL`, when activated later, should be implemented through `interrupt / resume`.
+- `HITL` is implemented through `interrupt / resume` and should remain typed and auditable.
 - `external_communication` is handled conservatively:
   - first evidence collection
   - then draft proposal
@@ -150,7 +151,7 @@ Main files:
 Current design:
 
 - `state.py` defines the bootstrap state contract, runtime flags, planner snapshot models, actor execution snapshot, tool loop state, observed evidence, audit-safe scratchpad entries, typed step validations, oversight history, and runtime step outcomes
-- `nodes.py` contains `bootstrap_from_intake`, `planner`, `actor`, `governance`, `tool_gateway`, `observe_tool_result`, `replanner`, and bootstrap closure helpers
+- `nodes.py` contains `bootstrap_from_intake`, `planner`, `actor`, `governance`, `human_review`, `tool_gateway`, `observe_tool_result`, `replanner`, and bootstrap closure helpers
 - `planning.py` defines the planner port, prompt builders, and the default OpenAI-backed planner
 - `acting.py` defines the actor port, prompt builders, the temporary OpenRouter-backed actor, and the optional OpenAI-backed actor using runtime-bound tools instead of a prompt-only tool inventory
 - `replanning.py` defines the replanner port, prompt builders, the default OpenAI-backed replanner, and a local conservative fallback replanner for tests/offline use
@@ -162,11 +163,12 @@ Current design:
 - `governance.py` defines the typed policy input/output contracts, OPA HTTP policy engine, and governance decision mapping used after actor execution
 - `oversight.py` defines deterministic adaptive oversight for `evidence_quality`, `operational_risk`, and `trajectory_health`, plus the combiner recommendation consumed by governance
 - `openrouter_client.py` defines the OpenRouter HTTP adapter used by the temporary Layer 2 actor test backend
-- `trace.py` defines the typed, JSON-exportable Layer 2 runtime trace contract used for debugging, thesis evidence, future HITL payloads, and evaluation
+- `trace.py` defines the typed, JSON-exportable Layer 2 runtime trace contract used for debugging, thesis evidence, HITL payloads, and evaluation
 - `configs/layer2_oversight_policy.json` defines the explicit weights, thresholds, risk scores, sensitivity multipliers, and trajectory penalties used by the oversight layer
 - `runtime_warnings.py` centralizes warning suppression needed before importing selected LangGraph/LangChain dependencies
-- `graph.py` contains the current LangGraph wiring for the planner/actor/governance/tool/replanner loop:
-  `START -> bootstrap_from_intake -> planner -> actor -> governance -> { tool_gateway | replanner | finalize_bootstrap }`
+- `graph.py` contains the current LangGraph wiring for the planner/actor/governance/tool/replanner/human-review loop:
+  `START -> bootstrap_from_intake -> planner -> actor -> governance -> { tool_gateway | replanner | human_review | finalize_bootstrap }`
+  `human_review -> { planner | actor | tool_gateway | replanner | finalize_bootstrap }`
   `tool_gateway -> observe_tool_result -> actor`
   `replanner -> actor`
   `finalize_bootstrap -> END`
@@ -311,7 +313,7 @@ Current relevant files:
 - `replanner` may replace only the current and pending semantic trajectory; completed steps remain immutable history
 - `max_steps` is enforced as a semantic plan-step ceiling in the current runtime
 - `max_tool_calls = null` means the current runtime does not impose a hard tool-call ceiling
-- `WAITING_HUMAN_REVIEW` currently acts as a typed stop/escalation state, not as a full `interrupt / resume` HITL implementation yet
+- `WAITING_HUMAN_REVIEW` is now the typed pause state that feeds the LangGraph `interrupt / resume` HITL path
 - governance is active as an explicit runtime node and uses OPA over HTTP as the deterministic policy engine target
 - adaptive oversight may only preserve or make the policy decision more conservative; it must never make an OPA decision more permissive
 - oversight scoring must remain deterministic, explainable, and configured through `configs/layer2_oversight_policy.json`
@@ -319,7 +321,7 @@ Current relevant files:
 - runtime trace export must be read-only over `TaskState`; it must not mutate runtime state or become a parallel source of truth
 - `main_layer2.py` may print trace views, but reusable trace construction belongs in `trace.py`
 - `ABORTED` is the hard-denial runtime state for governance decisions that must not be conflated with review
-- HITL is still not wired as `interrupt / resume`; governance currently stops in typed states and leaves human continuation for later
+- HITL is wired as `interrupt / resume`; governance now pauses in typed states and resumes from typed human decisions
 
 ### HITL Rules
 
@@ -499,6 +501,6 @@ The current most relevant near-term evolution path is:
 2. keep the Layer 1 -> Layer 2 bootstrap-planner-actor-tool-replanner contract stable
 3. harden the governance contract and policy bundle boundaries before adding more policy dimensions
 4. evolve confidence, risk, and trajectory signals into explicit inputs for governance instead of ad hoc heuristics
-5. separate `WAITING_HUMAN_REVIEW` into a future `interrupt / resume` path rather than only a terminal typed state
+5. extend HITL with the future dashboard and richer operator workflows on top of the existing `interrupt / resume` path
 6. introduce LLM-as-a-judge only after the deterministic governance slice remains stable and testable
 7. strengthen observability and evidence quality assessment before widening the tool surface

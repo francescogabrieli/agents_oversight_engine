@@ -4,8 +4,11 @@ import shutil
 import subprocess
 import sys
 import unittest
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
+
+from langgraph.types import Command
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -60,11 +63,14 @@ from layer2_runtime_governance import (
     OpenRouterActorSettings,
     build_actor_task,
     build_default_actor,
+    HumanReviewDecision,
+    HumanReviewDecisionType,
     build_governance_decision,
     build_policy_evaluation_input,
     build_runtime_graph,
     replanner,
 )
+from layer2_runtime_governance.hitl import _apply_human_review_decision
 from main_layer2 import build_compact_trace, write_layer2_trace_file
 from main_layer2 import run_layer2_flow
 from layer2_runtime_governance.replanning import (
@@ -351,6 +357,30 @@ class StubPolicyEngine(PolicyEnginePort):
             policy_decision=PolicyDecision.ALLOW,
             reason_codes=(GovernanceReasonCode.LOCAL_OUTPUT_ALLOWED,),
             summary="Local-only output is allowed by the policy stub.",
+            policy_engine_name=self.policy_engine_name,
+            policy_bundle_version=self.policy_bundle_version,
+        )
+
+
+class ReviewPolicyEngine(PolicyEnginePort):
+    policy_engine_name = "review_policy_engine"
+    policy_bundle_version = "review_policy_bundle_v1"
+
+    # Force a human review pause when the actor proposes an external action.
+    def evaluate(self, *, policy_input: PolicyEvaluationInput) -> PolicyEvaluationResult:
+        if policy_input.actor_result_type == ActorResultType.PROPOSE_ACTION:
+            return PolicyEvaluationResult(
+                policy_decision=PolicyDecision.REQUIRE_HUMAN_REVIEW,
+                reason_codes=(GovernanceReasonCode.HUMAN_REVIEW_REQUIRED,),
+                summary="The proposed action requires human review before execution.",
+                policy_engine_name=self.policy_engine_name,
+                policy_bundle_version=self.policy_bundle_version,
+            )
+
+        return PolicyEvaluationResult(
+            policy_decision=PolicyDecision.ALLOW,
+            reason_codes=(GovernanceReasonCode.ALLOWED_BY_POLICY,),
+            summary="The action is allowed by the review policy engine.",
             policy_engine_name=self.policy_engine_name,
             policy_bundle_version=self.policy_bundle_version,
         )
@@ -817,6 +847,29 @@ class FakeOPAResponse:
         return False
 
 
+class _ThreadIdInjectingGraph:
+    # Keep the existing tests stable while the runtime input contract adds thread_id.
+    def __init__(self, graph) -> None:
+        self._graph = graph
+
+    def invoke(self, input, config=None, *args, **kwargs):
+        if isinstance(input, dict) and "thread_id" not in input:
+            thread_id = None
+            if isinstance(config, dict):
+                configurable = config.get("configurable", {})
+                metadata = config.get("metadata", {})
+                if isinstance(configurable, dict):
+                    thread_id = configurable.get("thread_id")
+                if thread_id is None and isinstance(metadata, dict):
+                    thread_id = metadata.get("thread_id")
+            input = dict(input)
+            input["thread_id"] = thread_id or "test-thread-id"
+        return self._graph.invoke(input, config=config, *args, **kwargs)
+
+    def __getattr__(self, item):
+        return getattr(self._graph, item)
+
+
 class Layer2RuntimeGraphTests(unittest.TestCase):
     # These tests verify the bootstrap-plus-planner-plus-actor/tool behavior.
     def test_complete_intake_reaches_completed_state(self) -> None:
@@ -1137,6 +1190,13 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
 
         task_state = result["task_state"]
         self.assertEqual(task_state.current_state, RuntimeState.WAITING_HUMAN_REVIEW)
+        self.assertIsNotNone(task_state.pending_human_review_request)
+        self.assertIsNone(task_state.last_human_review_decision)
+        self.assertIn("__interrupt__", result)
+        interrupt_payload = result["__interrupt__"][0].value
+        self.assertEqual(interrupt_payload["current_state"], "waiting_human_review")
+        self.assertEqual(interrupt_payload["resume_state"], "acting")
+        self.assertIn("ask_clarification", interrupt_payload["allowed_decisions"])
         self.assertEqual(
             task_state.last_governance_decision.policy_decision,
             PolicyDecision.ASK_CLARIFICATION,
@@ -1157,9 +1217,114 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
                 "planner",
                 "actor",
                 "governance",
-                "finalize_bootstrap",
             ],
         )
+
+    def test_human_review_interrupts_and_resumes_with_approval(self) -> None:
+        graph = _build_test_graph(policy_engine_service=ReviewPolicyEngine())
+        thread_id = "layer2-hitl-approval"
+        initial = graph.invoke(
+            {"intake_result": _build_research_intake_result()},
+            config={"configurable": {"thread_id": thread_id}},
+        )
+
+        task_state = initial["task_state"]
+        interrupt_payload = initial["__interrupt__"][0].value
+        self.assertEqual(task_state.current_state, RuntimeState.WAITING_HUMAN_REVIEW)
+        self.assertIsNotNone(task_state.pending_human_review_request)
+        self.assertIsNone(task_state.last_human_review_decision)
+        self.assertEqual(interrupt_payload["thread_id"], thread_id)
+        self.assertEqual(interrupt_payload["current_state"], "waiting_human_review")
+        self.assertEqual(interrupt_payload["resume_state"], "ready_tool_execution")
+        self.assertIn("approve_continue", interrupt_payload["allowed_decisions"])
+
+        resumed = graph.invoke(
+            Command(
+                resume={
+                    "request_id": interrupt_payload["request_id"],
+                    "decision_type": "approve_continue",
+                    "note": "Approved to continue.",
+                }
+            ),
+            config={"configurable": {"thread_id": thread_id}},
+        )
+
+        resumed_state = resumed["task_state"]
+        self.assertEqual(resumed_state.current_state, RuntimeState.COMPLETED)
+        self.assertEqual(
+            resumed_state.last_human_review_decision.decision_type,
+            HumanReviewDecisionType.APPROVE_CONTINUE,
+        )
+        self.assertEqual(
+            resumed_state.last_human_review_request.request_id,
+            interrupt_payload["request_id"],
+        )
+        self.assertEqual(len(resumed_state.human_review_history), 1)
+        self.assertTrue(resumed_state.bootstrap_completed)
+
+    def test_human_review_decision_routes_are_typed_and_request_id_is_checked(self) -> None:
+        graph = _build_test_graph(policy_engine_service=ReviewPolicyEngine())
+        thread_id = "layer2-hitl-routing"
+        initial = graph.invoke(
+            {"intake_result": _build_research_intake_result()},
+            config={"configurable": {"thread_id": thread_id}},
+        )
+
+        task_state = initial["task_state"]
+        pending_request = task_state.pending_human_review_request
+        assert pending_request is not None
+
+        evidence_state = deepcopy(task_state)
+        _apply_human_review_decision(
+            evidence_state,
+            HumanReviewDecision(
+                request_id=pending_request.request_id,
+                decision_type=HumanReviewDecisionType.REQUEST_MORE_EVIDENCE,
+            ),
+        )
+        self.assertEqual(evidence_state.current_state, RuntimeState.ACTING)
+
+        replan_state = deepcopy(task_state)
+        _apply_human_review_decision(
+            replan_state,
+            HumanReviewDecision(
+                request_id=pending_request.request_id,
+                decision_type=HumanReviewDecisionType.REPLAN,
+            ),
+        )
+        self.assertEqual(replan_state.current_state, RuntimeState.REPLANNING)
+
+        abort_state = deepcopy(task_state)
+        _apply_human_review_decision(
+            abort_state,
+            HumanReviewDecision(
+                request_id=pending_request.request_id,
+                decision_type=HumanReviewDecisionType.ABORT,
+            ),
+        )
+        self.assertEqual(abort_state.current_state, RuntimeState.ABORTED)
+
+        read_only_state = deepcopy(task_state)
+        _apply_human_review_decision(
+            read_only_state,
+            HumanReviewDecision(
+                request_id=pending_request.request_id,
+                decision_type=HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY,
+            ),
+        )
+        self.assertEqual(read_only_state.current_state, RuntimeState.READY_TOOL_EXECUTION)
+        self.assertTrue(read_only_state.execution_policy.read_only_mode)
+
+        with self.assertRaises(ValueError):
+            graph.invoke(
+                Command(
+                    resume={
+                        "request_id": "wrong-request-id",
+                        "decision_type": "approve_continue",
+                    }
+                ),
+                config={"configurable": {"thread_id": thread_id}},
+            )
 
     def test_intermediate_output_does_not_complete_step_without_validation(self) -> None:
         graph = _build_test_graph(actor_service=ProgressThenCompleteActor())
@@ -2354,12 +2519,14 @@ def _build_test_graph(
     replanner_service: ReplannerPort | None = None,
     policy_engine_service: PolicyEnginePort | None = None,
 ):
-    return build_runtime_graph(
+    return _ThreadIdInjectingGraph(
+        build_runtime_graph(
         planner_service=planner_service or StubPlanner(),
         actor_service=actor_service or StubActor(),
         tool_gateway_service=tool_gateway_service or StubToolGateway(),
         replanner_service=replanner_service or StubReplanner(),
         policy_engine_service=policy_engine_service or StubPolicyEngine(),
+        )
     )
 
 

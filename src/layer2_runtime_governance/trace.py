@@ -20,6 +20,7 @@ from .oversight import (
     TrajectoryHealthAssessment,
 )
 from .state import ExecutedPlanStep, ScratchpadEntry, StepRecord, StepValidation, TaskState
+from .state import HumanReviewDecision, HumanReviewRequest
 from .tool_contract import ObservedEvidence, ToolExecutionResult, ToolRequest, ToolSource
 
 
@@ -152,6 +153,44 @@ class TraceOversightAssessment:
 
 
 @dataclass(frozen=True)
+class TraceHumanReviewRequest:
+    # TraceHumanReviewRequest captures the pending HITL payload in JSON-safe form.
+    request_id: str
+    thread_id: str
+    current_state: str
+    resume_state: str
+    current_plan_step_id: str | None
+    current_plan_step_objective: str | None
+    actor_result_type: str | None
+    current_tool_request: dict[str, Any] | None
+    governance_directive: str | None
+    governance_summary: str | None
+    oversight_summary: str | None
+    reason_codes: tuple[str, ...]
+    allowed_decisions: tuple[str, ...]
+    review_summary: str | None
+
+
+@dataclass(frozen=True)
+class TraceHumanReviewDecision:
+    # TraceHumanReviewDecision captures the human resume payload and history.
+    request_id: str
+    decision_type: str
+    note: str | None
+    clarification_text: str | None
+    reviewer_id: str | None
+
+
+@dataclass(frozen=True)
+class TraceHumanReviewSummary:
+    # TraceHumanReviewSummary keeps the pending review and history easy to inspect.
+    pending_request: TraceHumanReviewRequest | None
+    last_request: TraceHumanReviewRequest | None
+    last_decision: TraceHumanReviewDecision | None
+    decision_history: tuple[TraceHumanReviewDecision, ...]
+
+
+@dataclass(frozen=True)
 class TraceExecutionSummary:
     # TraceExecutionSummary gathers final output and audit-safe execution history.
     final_output_text: str | None
@@ -178,6 +217,7 @@ class Layer2RuntimeTrace:
     observed_evidence: tuple[TraceObservedEvidence, ...]
     governance_decisions: tuple[TraceGovernanceDecision, ...]
     oversight_assessments: tuple[TraceOversightAssessment, ...]
+    human_review: TraceHumanReviewSummary
 
 
 # Build the stable Layer 2 trace from the canonical runtime state.
@@ -211,6 +251,7 @@ def build_layer2_runtime_trace(
             _build_oversight_assessment(assessment)
             for assessment in task_state.oversight_history
         ),
+        human_review=_build_human_review_summary(task_state=task_state),
     )
 
 
@@ -259,6 +300,7 @@ def build_compact_trace_from_runtime_trace(trace: Layer2RuntimeTrace) -> dict[st
                 asdict(trace.oversight_assessments[-1]) if trace.oversight_assessments else None
             ),
         },
+        "human_review_snapshot": asdict(trace.human_review),
         "bootstrap_state": {
             "current_state": trace.runtime.current_state,
             "step_count": len(trace.runtime.step_history),
@@ -464,6 +506,73 @@ def _build_oversight_assessment(assessment: OversightAssessment) -> TraceOversig
     )
 
 
+# Convert the HITL request/decision history into trace form.
+def _build_human_review_summary(*, task_state: TaskState) -> TraceHumanReviewSummary:
+    return TraceHumanReviewSummary(
+        pending_request=(
+            _build_human_review_request(task_state.pending_human_review_request)
+            if task_state.pending_human_review_request is not None
+            else None
+        ),
+        last_request=(
+            _build_human_review_request(task_state.last_human_review_request)
+            if task_state.last_human_review_request is not None
+            else None
+        ),
+        last_decision=(
+            _build_human_review_decision(task_state.last_human_review_decision)
+            if task_state.last_human_review_decision is not None
+            else None
+        ),
+        decision_history=tuple(
+            _build_human_review_decision(decision) for decision in task_state.human_review_history
+        ),
+    )
+
+
+# Convert one human review request into the trace representation.
+def _build_human_review_request(
+    request: HumanReviewRequest,
+) -> TraceHumanReviewRequest:
+    return TraceHumanReviewRequest(
+        request_id=request.request_id,
+        thread_id=request.thread_id,
+        current_state=request.current_state.value,
+        resume_state=request.resume_state.value,
+        current_plan_step_id=request.current_plan_step_id,
+        current_plan_step_objective=request.current_plan_step_objective,
+        actor_result_type=(
+            request.actor_result_type.value if request.actor_result_type is not None else None
+        ),
+        current_tool_request=(
+            _to_jsonable(request.current_tool_request)
+            if request.current_tool_request is not None
+            else None
+        ),
+        governance_directive=(
+            request.governance_directive.value if request.governance_directive is not None else None
+        ),
+        governance_summary=request.governance_summary,
+        oversight_summary=request.oversight_summary,
+        reason_codes=tuple(request.reason_codes),
+        allowed_decisions=tuple(decision.value for decision in request.allowed_decisions),
+        review_summary=request.review_summary,
+    )
+
+
+# Convert one human review decision into the trace representation.
+def _build_human_review_decision(
+    decision: HumanReviewDecision,
+) -> TraceHumanReviewDecision:
+    return TraceHumanReviewDecision(
+        request_id=decision.request_id,
+        decision_type=decision.decision_type.value,
+        note=decision.note,
+        clarification_text=decision.clarification_text,
+        reviewer_id=decision.reviewer_id,
+    )
+
+
 # Convert any oversight signal score into trace form.
 def _build_oversight_signal(
     signal: EvidenceQualityAssessment | OperationalRiskAssessment | TrajectoryHealthAssessment,
@@ -602,6 +711,9 @@ __all__ = [
     "Layer2RuntimeTrace",
     "TraceActorTurn",
     "TraceExecutionSummary",
+    "TraceHumanReviewDecision",
+    "TraceHumanReviewRequest",
+    "TraceHumanReviewSummary",
     "TraceGovernanceDecision",
     "TraceIntakeSummary",
     "TraceObservedEvidence",

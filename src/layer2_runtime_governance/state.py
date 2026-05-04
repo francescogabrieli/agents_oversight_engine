@@ -17,7 +17,7 @@ from .tool_contract import ObservedEvidence, ToolExecutionResult, ToolRequest
 
 if TYPE_CHECKING:
     from .actor_contract import ActorResult, ActorResultType
-    from .governance import GovernanceDecision
+    from .governance import GovernanceDecision, GovernanceDirective
     from .oversight import OversightAssessment
 
 
@@ -65,6 +65,16 @@ class StepValidationDecision(str, Enum):
     REQUEST_MORE_EVIDENCE = "request_more_evidence"
     ASK_CLARIFICATION = "ask_clarification"
     NEEDS_REPLAN = "needs_replan"
+
+
+class HumanReviewDecisionType(str, Enum):
+    # Human review stays typed so the runtime can pause and resume deterministically.
+    APPROVE_CONTINUE = "approve_continue"
+    APPROVE_CONTINUE_READ_ONLY = "approve_continue_read_only"
+    REQUEST_MORE_EVIDENCE = "request_more_evidence"
+    REPLAN = "replan"
+    ASK_CLARIFICATION = "ask_clarification"
+    ABORT = "abort"
 
 
 @dataclass
@@ -127,6 +137,35 @@ class StepValidation:
     residual_uncertainty: str | None = None
 
 
+@dataclass(frozen=True)
+class HumanReviewRequest:
+    # Human review requests are persisted so interrupts can resume on the same checkpoint.
+    request_id: str
+    thread_id: str
+    current_state: RuntimeState
+    resume_state: RuntimeState
+    current_plan_step_id: str | None
+    current_plan_step_objective: str | None
+    actor_result_type: ActorResultType | None
+    current_tool_request: ToolRequest | None
+    governance_directive: GovernanceDirective | None
+    governance_summary: str | None
+    oversight_summary: str | None
+    reason_codes: tuple[str, ...] = field(default_factory=tuple)
+    allowed_decisions: tuple[HumanReviewDecisionType, ...] = field(default_factory=tuple)
+    review_summary: str | None = None
+
+
+@dataclass(frozen=True)
+class HumanReviewDecision:
+    # Human review decisions are canonical and typed for audit-safe resume.
+    request_id: str
+    decision_type: HumanReviewDecisionType
+    note: str | None = None
+    clarification_text: str | None = None
+    reviewer_id: str | None = None
+
+
 @dataclass
 class TaskState:
     # Direct handoff from Layer 1.
@@ -137,10 +176,12 @@ class TaskState:
 
     # Bootstrap outcome.
     current_state: RuntimeState
+    runtime_thread_id: str | None = None
     step_index: int = 0
     step_history: list[StepRecord] = field(default_factory=list)
     runtime_flags: list[RuntimeFlag] = field(default_factory=list)
     bootstrap_completed: bool = False
+    human_review_resume_state: RuntimeState | None = None
 
     # Planner snapshot.
     plan_steps: list[PlanStep] = field(default_factory=list)
@@ -173,6 +214,12 @@ class TaskState:
     governance_history: list[GovernanceDecision] = field(default_factory=list)
     last_oversight_assessment: OversightAssessment | None = None
     oversight_history: list[OversightAssessment] = field(default_factory=list)
+
+    # Human-in-the-loop snapshot.
+    pending_human_review_request: HumanReviewRequest | None = None
+    last_human_review_request: HumanReviewRequest | None = None
+    human_review_history: list[HumanReviewDecision] = field(default_factory=list)
+    last_human_review_decision: HumanReviewDecision | None = None
 
     @property
     def current_plan_step(self) -> PlanStep | None:
@@ -218,11 +265,19 @@ class TaskState:
             intake_metadata=intake_result.metadata,
             current_state=current_state,
             runtime_flags=runtime_flags,
+            human_review_resume_state=(
+                RuntimeState.PLANNING
+                if current_state == RuntimeState.WAITING_HUMAN_REVIEW
+                else None
+            ),
         )
 
 
 __all__ = [
     "ExecutedPlanStep",
+    "HumanReviewDecision",
+    "HumanReviewDecisionType",
+    "HumanReviewRequest",
     "PlanStep",
     "PlanStepStatus",
     "PlannerDecision",

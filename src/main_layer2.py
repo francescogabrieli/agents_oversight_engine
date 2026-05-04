@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
 
+from langgraph.types import Command
+
 from layer1_intake import (
     BudgetConfig,
     DomainType,
@@ -22,6 +24,7 @@ from layer1_intake import (
 )
 from layer1_intake.infrastructure import build_intake_service
 from layer2_runtime_governance import build_runtime_graph
+from layer2_runtime_governance import HumanReviewDecision
 from layer2_runtime_governance.actor_contract import ActorPort
 from layer2_runtime_governance.governance import PolicyEnginePort
 from layer2_runtime_governance.planning import PlannerPort
@@ -57,6 +60,7 @@ def run_layer2_flow(
     tool_gateway_service: ToolGatewayPort | None = None,
     replanner_service: ReplannerPort | None = None,
     policy_engine_service: PolicyEnginePort | None = None,
+    checkpointer: Any | None = None,
     progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     # Run Layer 1 plus the current Layer 2 graph and return the resulting trace.
@@ -66,6 +70,7 @@ def run_layer2_flow(
         tool_gateway_service=tool_gateway_service,
         replanner_service=replanner_service,
         policy_engine_service=policy_engine_service,
+        checkpointer=checkpointer,
     )
 
     resolved_thread_id = thread_id or f"layer2-{uuid4()}"
@@ -98,13 +103,14 @@ def run_layer2_flow(
 
     if progress_callback is None:
         final_result = runtime_graph.invoke(
-            {"intake_result": intake_result},
+            {"intake_result": intake_result, "thread_id": resolved_thread_id},
             config=config,
         )
     else:
         final_result = _stream_runtime_graph_with_progress(
             runtime_graph=runtime_graph,
             intake_result=intake_result,
+            thread_id=resolved_thread_id,
             config=config,
             progress_callback=progress_callback,
         )
@@ -117,17 +123,47 @@ def run_layer2_flow(
     }
 
 
+# Resume a paused Layer 2 run using the same thread id and a typed human decision.
+def resume_layer2_flow(
+    *,
+    thread_id: str,
+    human_review_decision: dict[str, Any] | HumanReviewDecision,
+    planner_service: PlannerPort | None = None,
+    actor_service: ActorPort | None = None,
+    tool_gateway_service: ToolGatewayPort | None = None,
+    replanner_service: ReplannerPort | None = None,
+    policy_engine_service: PolicyEnginePort | None = None,
+    checkpointer: Any | None = None,
+) -> dict[str, Any]:
+    runtime_graph = build_runtime_graph(
+        planner_service=planner_service,
+        actor_service=actor_service,
+        tool_gateway_service=tool_gateway_service,
+        replanner_service=replanner_service,
+        policy_engine_service=policy_engine_service,
+        checkpointer=checkpointer,
+    )
+
+    config = {"configurable": {"thread_id": thread_id}}
+    final_result = runtime_graph.invoke(Command(resume=human_review_decision), config=config)
+    return {
+        "thread_id": thread_id,
+        "final_result": final_result,
+    }
+
+
 # Stream graph updates so the CLI can show progress during long LLM/tool calls.
 def _stream_runtime_graph_with_progress(
     *,
     runtime_graph: Any,
     intake_result: IntakeResult,
+    thread_id: str,
     config: dict[str, Any],
     progress_callback: Callable[[str, dict[str, Any]], None],
 ) -> dict[str, Any]:
     final_result: dict[str, Any] = {}
     for chunk in runtime_graph.stream(
-        {"intake_result": intake_result},
+        {"intake_result": intake_result, "thread_id": thread_id},
         config=config,
         stream_mode="updates",
     ):
@@ -137,6 +173,13 @@ def _stream_runtime_graph_with_progress(
             node_update = update if isinstance(update, dict) else {}
             progress_callback(str(node_name), node_update)
             final_result.update(node_update)
+
+    snapshot = runtime_graph.get_state(config)
+    snapshot_values = snapshot.values if snapshot is not None else {}
+    if isinstance(snapshot_values, dict):
+        final_result = dict(snapshot_values)
+    if snapshot is not None and getattr(snapshot, "interrupts", None):
+        final_result["__interrupt__"] = list(snapshot.interrupts)
 
     return final_result
 
@@ -209,6 +252,7 @@ def print_layer2_summary(trace: dict[str, Any]) -> None:
     _print_section("ACTOR SNAPSHOT", compact_trace["actor_snapshot"])
     _print_section("EXECUTION SNAPSHOT", compact_trace["execution_snapshot"])
     _print_section("GOVERNANCE SNAPSHOT", compact_trace["governance_snapshot"])
+    _print_section("HITL SNAPSHOT", compact_trace["human_review_snapshot"])
     _print_section("TOOL SNAPSHOT", compact_trace["tool_snapshot"])
     _print_section("BOOTSTRAP STATE", compact_trace["bootstrap_state"])
 
