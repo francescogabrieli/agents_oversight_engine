@@ -1,0 +1,345 @@
+:root {
+  color-scheme: light;
+  --bg: #0f172a;
+  --bg-soft: #111827;
+  --panel: rgba(17, 24, 39, 0.92);
+  --panel-2: rgba(30, 41, 59, 0.96);
+  --text: #e5eef9;
+  --muted: #9ca3af;
+  --border: #334155;
+  --accent: #60a5fa;
+  --accent-soft: rgba(96, 165, 250, 0.12);
+  --accent-2: #f59e0b;
+  --danger: #f87171;
+  --success: #34d399;
+  --surface-shadow: 0 14px 32px rgba(0, 0, 0, 0.18);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(96, 165, 250, 0.16), transparent 28%),
+    radial-gradient(circle at top right, rgba(245, 158, 11, 0.12), transparent 24%),
+    linear-gradient(180deg, #020617 0%, #0f172a 100%);
+  color: var(--text);
+}
+
+.shell {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 28px 20px 48px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: #bfdbfe;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.hero-copy h2 {
+  margin: 0 0 8px;
+  font-size: 1.85rem;
+  line-height: 1.15;
+}
+
+.lede {
+  margin: 0;
+  color: #cbd5e1;
+  line-height: 1.55;
+  max-width: 80ch;
+}
+
+.status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 18px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.9);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.status-pill-live {
+  border-color: rgba(96, 165, 250, 0.8);
+  color: #bfdbfe;
+}
+
+.status-pill-paused {
+  border-color: rgba(245, 158, 11, 0.85);
+  color: #fde68a;
+}
+
+.status-pill-terminal {
+  border-color: rgba(248, 113, 113, 0.9);
+  color: #fecaca;
+}
+
+.status-meta {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.fact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.fact-chip {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(51, 65, 85, 0.9);
+  background: rgba(15, 23, 42, 0.72);
+  display: grid;
+  gap: 4px;
+}
+
+.fact-chip span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.fact-chip strong {
+  font-size: 0.96rem;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+  align-items: start;
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 18px;
+  background: var(--panel);
+  box-shadow: var(--surface-shadow);
+}
+
+.card-hero {
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.96), rgba(17, 24, 39, 0.96));
+}
+
+.card-wide {
+  grid-column: 1 / -1;
+}
+
+.card-muted {
+  background: var(--panel-2);
+}
+
+.card h2 {
+  margin: 0 0 14px;
+  font-size: 1.1rem;
+}
+
+.callout {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.72);
+  margin: 0 0 14px;
+}
+
+.callout strong {
+  white-space: nowrap;
+}
+
+.callout span {
+  color: #dbe4f0;
+  line-height: 1.5;
+}
+
+.callout-warning {
+  border-color: rgba(245, 158, 11, 0.42);
+  background: rgba(245, 158, 11, 0.10);
+}
+
+.subsection {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.subsection h3 {
+  margin: 0 0 10px;
+  font-size: 0.98rem;
+  color: var(--accent);
+}
+
+.kv-table {
+  width: 100%;
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+
+.kv-table th,
+.kv-table td {
+  vertical-align: top;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.7);
+  text-align: left;
+}
+
+.kv-table th {
+  width: 36%;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.kv-table td {
+  word-break: break-word;
+}
+
+.kv-table tr:last-child th,
+.kv-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.json-block {
+  margin-top: 14px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(15, 23, 42, 0.48);
+}
+
+.json-block summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.json-block pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 12px 0 0;
+  color: var(--text);
+  font-size: 0.84rem;
+}
+
+.resume-form {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 10px;
+}
+
+.resume-note {
+  margin: 0;
+}
+
+.resume-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.resume-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.resume-form input,
+.resume-form textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #0b1120;
+  color: var(--text);
+  font: inherit;
+  min-height: 44px;
+}
+
+.resume-form textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
+.decision-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.decision-button {
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 10px 14px;
+  background: var(--accent-soft);
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.decision-button:hover {
+  background: rgba(96, 165, 250, 0.22);
+}
+
+.note {
+  color: var(--muted);
+}
+
+.error {
+  border-color: var(--danger);
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.3);
+  padding: 14px 16px;
+  border-radius: 14px;
+}
+
+@media (max-width: 800px) {
+  .shell {
+    padding: 18px 14px 32px;
+  }
+
+  .hero-copy h2 {
+    font-size: 1.45rem;
+  }
+
+  .kv-table th,
+  .kv-table td {
+    display: block;
+    width: 100%;
+    padding: 8px 0;
+  }
+
+  .kv-table th {
+    padding-bottom: 2px;
+  }
+}

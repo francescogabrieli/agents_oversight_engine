@@ -62,6 +62,10 @@ class DashboardLaunchHandle:
 
 _DASHBOARD_LAUNCH_LOCK = threading.Lock()
 _DASHBOARD_LAUNCHES: dict[str, DashboardLaunchHandle] = {}
+_DASHBOARD_ASSETS_DIR = Path(__file__).resolve().parent / "dashboard_assets"
+_DASHBOARD_HTML_TEMPLATE = (_DASHBOARD_ASSETS_DIR / "dashboard.html").read_text(encoding="utf-8")
+_DASHBOARD_CSS = (_DASHBOARD_ASSETS_DIR / "dashboard.css").read_text(encoding="utf-8")
+_DASHBOARD_JS = (_DASHBOARD_ASSETS_DIR / "dashboard.js").read_text(encoding="utf-8")
 
 
 # Create an initial dashboard session by running Layer 2 once.
@@ -157,11 +161,11 @@ def render_dashboard_page(session: DashboardSession) -> str:
         dashboard_mode=dashboard_mode,
         auto_refresh_enabled=auto_refresh_enabled,
         rendered_at=rendered_at,
+        snapshot_json=snapshot_json if auto_refresh_enabled else None,
         body=_render_dashboard_body(
             session=session,
             snapshot=snapshot,
             snapshot_dict=snapshot_dict,
-            snapshot_json=snapshot_json,
             actor_turn_count=actor_turn_count,
             tool_call_count=tool_call_count,
             dashboard_mode=dashboard_mode,
@@ -266,6 +270,12 @@ def _build_request_handler(*, session: DashboardSession):
             if parsed.path in {"/", "/index.html"}:
                 self._write_html(render_dashboard_page(self.dashboard_session))
                 return
+            if parsed.path == "/assets/dashboard.css":
+                self._write_text(_DASHBOARD_CSS, content_type="text/css; charset=utf-8")
+                return
+            if parsed.path == "/assets/dashboard.js":
+                self._write_text(_DASHBOARD_JS, content_type="application/javascript; charset=utf-8")
+                return
             if parsed.path == "/snapshot.json":
                 self._write_json(render_dashboard_snapshot_json(self.dashboard_session))
                 return
@@ -295,6 +305,10 @@ def _build_request_handler(*, session: DashboardSession):
                     _render_html_document(
                         title="Resume error",
                         body=_render_error_message(str(exc)),
+                        dashboard_mode="terminal",
+                        auto_refresh_enabled=False,
+                        rendered_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        snapshot_json=None,
                     ),
                     status=HTTPStatus.BAD_REQUEST,
                 )
@@ -308,11 +322,19 @@ def _build_request_handler(*, session: DashboardSession):
 
         # Write one HTML response body.
         def _write_html(self, body: str, *, status: HTTPStatus = HTTPStatus.OK) -> None:
+            self._write_text(body, content_type="text/html; charset=utf-8", status=status)
+
+        # Write one text-based response body for HTML, JS, and CSS.
+        def _write_text(
+            self,
+            body: str,
+            *,
+            content_type: str,
+            status: HTTPStatus = HTTPStatus.OK,
+        ) -> None:
             encoded = body.encode("utf-8")
             self.send_response(status)
-            for header_name, header_value in _build_response_headers(
-                "text/html; charset=utf-8"
-            ).items():
+            for header_name, header_value in _build_response_headers(content_type).items():
                 self.send_header(header_name, header_value)
             self.send_header("Content-Length", str(len(encoded)))
             self.end_headers()
@@ -406,7 +428,6 @@ def _render_dashboard_body(
     session: DashboardSession,
     snapshot,
     snapshot_dict: dict[str, Any],
-    snapshot_json: str,
     actor_turn_count: int,
     tool_call_count: int,
     dashboard_mode: str,
@@ -415,11 +436,14 @@ def _render_dashboard_body(
 ) -> str:
     task_spec = session.intake_result.structured_task.task_spec
     metadata = session.intake_result.metadata
+    focus_title, focus_summary = _describe_dashboard_focus(snapshot, auto_refresh_enabled)
 
     sections = [
         _render_dashboard_banner(
             session=session,
             snapshot=snapshot,
+            focus_title=focus_title,
+            focus_summary=focus_summary,
             task_spec_goal=task_spec.goal,
             task_spec_context=task_spec.context,
             policy_profile=session.intake_result.structured_task.execution_policy.policy_profile_name,
@@ -430,21 +454,18 @@ def _render_dashboard_body(
             auto_refresh_enabled=auto_refresh_enabled,
             rendered_at=rendered_at,
         ),
-        _render_plan_card(snapshot.current_plan_step),
-        _render_governance_card(snapshot.governance),
-        _render_oversight_card(snapshot.oversight),
-        _render_human_review_card(snapshot, snapshot_dict, session),
-        _render_snapshot_card(snapshot_dict),
+        """
+        <div class="dashboard-grid">
+        """
+        + _render_plan_card(snapshot.current_plan_step)
+        + _render_governance_card(snapshot.governance)
+        + _render_oversight_card(snapshot.oversight)
+        + _render_human_review_card(snapshot, snapshot_dict, session)
+        + _render_snapshot_card(snapshot_dict)
+        + """
+        </div>
+        """,
     ]
-
-    if auto_refresh_enabled:
-        sections.append(
-            _render_live_refresh_script(
-                snapshot_json=snapshot_json,
-                dashboard_mode=dashboard_mode,
-                rendered_at=rendered_at,
-            )
-        )
 
     return "\n".join(section for section in sections if section)
 
@@ -454,6 +475,8 @@ def _render_dashboard_banner(
     *,
     session: DashboardSession,
     snapshot,
+    focus_title: str,
+    focus_summary: str,
     task_spec_goal: str,
     task_spec_context: str,
     policy_profile: str,
@@ -471,27 +494,48 @@ def _render_dashboard_banner(
         <span class="status-meta">Last checked: <time id="dashboard-last-checked">{html.escape(rendered_at)}</time></span>
       </div>
     """
-    rows = [
-        ("Thread", session.thread_id),
-        ("Focus", snapshot.focus.value),
-        ("Runtime state", snapshot.runtime_state),
-        ("Resume state", snapshot.resume_state or "n/a"),
-        ("Terminal state", snapshot.terminal_state or "n/a"),
-        ("Pending review", "yes" if snapshot.has_pending_review else "no"),
+    fact_grid = _render_fact_grid(
+        [
+            ("Thread", session.thread_id),
+            ("Focus", snapshot.focus.value),
+            ("Runtime state", snapshot.runtime_state),
+            ("Resume state", snapshot.resume_state or "n/a"),
+            ("Pending review", "yes" if snapshot.has_pending_review else "no"),
+            ("Actor turns", str(actor_turn_count)),
+            ("Tool calls", str(tool_call_count)),
+        ]
+    )
+    metadata_rows = [
         ("Task goal", task_spec_goal),
         ("Task context", task_spec_context or "n/a"),
         ("Policy profile", policy_profile),
         ("Parse status", parse_status),
-        ("Actor turns", str(actor_turn_count)),
-        ("Tool calls", str(tool_call_count)),
+        ("Terminal state", snapshot.terminal_state or "n/a"),
     ]
-    return _render_card("Overview", status_strip + _render_rows(rows))
+
+    return _render_card(
+        "Overview",
+        f"""
+        <div class="hero-copy">
+          <p class="eyebrow">Layer 2 HITL control plane</p>
+          <h2>{html.escape(focus_title)}</h2>
+          <p class="lede">{html.escape(focus_summary)}</p>
+        </div>
+        {status_strip}
+        {fact_grid}
+        <div class="subsection">
+          <h3>Task summary</h3>
+          {_render_rows(metadata_rows)}
+        </div>
+        """,
+        class_name="card card-hero card-wide",
+    )
 
 
 # Render the current plan step card.
 def _render_plan_card(current_plan_step) -> str:
     if current_plan_step is None:
-        return _render_card("Current Plan Step", "<p>No current step is available.</p>")
+        return _render_card("Current Plan Step", "<p class=\"note\">No current step is available.</p>")
 
     rows = [
         ("Step ID", current_plan_step.step_id),
@@ -506,7 +550,7 @@ def _render_plan_card(current_plan_step) -> str:
 # Render the governance panel card.
 def _render_governance_card(governance_panel) -> str:
     if governance_panel is None:
-        return _render_card("Governance", "<p>No governance decision has been recorded yet.</p>")
+        return _render_card("Governance", "<p class=\"note\">No governance decision has been recorded yet.</p>")
 
     rows = [
         ("Directive", governance_panel.directive),
@@ -528,7 +572,7 @@ def _render_governance_card(governance_panel) -> str:
 # Render the oversight panel card.
 def _render_oversight_card(oversight_panel) -> str:
     if oversight_panel is None:
-        return _render_card("Oversight", "<p>No oversight assessment has been recorded yet.</p>")
+        return _render_card("Oversight", "<p class=\"note\">No oversight assessment has been recorded yet.</p>")
 
     rows = [
         ("Evidence quality", _format_score(oversight_panel.evidence_quality_score)),
@@ -551,9 +595,19 @@ def _render_oversight_card(oversight_panel) -> str:
 def _render_human_review_card(snapshot, snapshot_dict: dict[str, Any], session: DashboardSession) -> str:
     human_review = snapshot.human_review
     if human_review is None:
-        return _render_card("Human Review", "<p>No human review is pending.</p>")
+        return _render_card(
+            "Human Review",
+            "<p class=\"note\">No human review is pending.</p>",
+            class_name="card card-wide",
+        )
 
     pending_request = human_review.pending_request
+    callout = """
+      <div class="callout callout-warning">
+        <strong>Human review required.</strong>
+        <span>The runtime is paused and will resume only after a typed decision is submitted.</span>
+      </div>
+    """
     request_rows = [
         ("Resume state", human_review.resume_state or "n/a"),
         ("Allowed decisions", ", ".join(decision.value for decision in human_review.allowed_decisions)),
@@ -563,13 +617,13 @@ def _render_human_review_card(snapshot, snapshot_dict: dict[str, Any], session: 
         ("Decision history", str(len(human_review.decision_history))),
     ]
 
-    payload_html = _render_rows(request_rows)
+    payload_html = callout + _render_rows(request_rows)
     if pending_request is not None:
         payload_html += _render_pending_request_block(pending_request)
         payload_html += _render_resume_form(pending_request, human_review.allowed_decisions)
 
     payload_html += _render_small_json_block("Pending snapshot", snapshot_dict.get("human_review", {}))
-    return _render_card("Human Review", payload_html)
+    return _render_card("Human Review", payload_html, class_name="card card-wide")
 
 
 # Render the pending review request details.
@@ -611,8 +665,10 @@ def _render_resume_form(
     buttons = "".join(button_html)
     return f"""
       <form class="resume-form" method="post" action="/resume">
-        <input type="hidden" name="request_id" value="{html.escape(pending_request.request_id)}" />
-        <input type="hidden" name="thread_id" value="{html.escape(pending_request.thread_id)}" />
+        <p class="note resume-note">Choose one typed decision to resume the runtime from the paused checkpoint.</p>
+        <div class="resume-fields">
+          <input type="hidden" name="request_id" value="{html.escape(pending_request.request_id)}" />
+          <input type="hidden" name="thread_id" value="{html.escape(pending_request.thread_id)}" />
         <label>
           Reviewer ID
           <input type="text" name="reviewer_id" placeholder="operator-1" />
@@ -625,6 +681,7 @@ def _render_resume_form(
           Clarification text
           <textarea name="clarification_text" rows="3" placeholder="Optional clarification payload"></textarea>
         </label>
+        </div>
         <div class="decision-row">{buttons}</div>
       </form>
     """
@@ -634,90 +691,18 @@ def _render_resume_form(
 def _render_snapshot_card(snapshot_dict: dict[str, Any]) -> str:
     return _render_card(
         "Raw Snapshot",
-        _render_small_json_block("Governance HITL snapshot", snapshot_dict),
+        """
+        <p class="note">Full JSON snapshot for audit, debugging, and trace alignment.</p>
+        """
+        + _render_small_json_block("Governance HITL snapshot", snapshot_dict),
+        class_name="card card-wide card-muted",
     )
 
 
-# Render the client-side polling script used by the live refresh loop.
-def _render_live_refresh_script(
-    *,
-    snapshot_json: str,
-    dashboard_mode: str,
-    rendered_at: str,
-) -> str:
+# Render one card wrapper with a title, body, and optional layout modifier.
+def _render_card(title: str, body: str, *, class_name: str = "card") -> str:
     return f"""
-      <textarea id="dashboard-snapshot-data" hidden>{html.escape(snapshot_json)}</textarea>
-      <script>
-        (() => {{
-          const root = document.getElementById("dashboard-root");
-          const snapshotNode = document.getElementById("dashboard-snapshot-data");
-          const lastCheckedNode = document.getElementById("dashboard-last-checked");
-          if (!root || !snapshotNode) {{
-            return;
-          }}
-
-          const autoRefreshEnabled = root.dataset.autoRefreshEnabled === "true";
-          const dashboardMode = root.dataset.dashboardMode || "{html.escape(dashboard_mode)}";
-          if (!autoRefreshEnabled || dashboardMode === "terminal") {{
-            return;
-          }}
-
-          const canonicalizeSnapshot = (payload) => {{
-            try {{
-              return JSON.stringify(JSON.parse(payload));
-            }} catch (error) {{
-              return payload;
-            }}
-          }};
-
-          let currentSnapshot = canonicalizeSnapshot(snapshotNode.value || snapshotNode.textContent || "");
-          const refreshIntervalMs = 2000;
-
-          const updateLastChecked = () => {{
-            if (lastCheckedNode) {{
-              lastCheckedNode.textContent = new Date().toLocaleTimeString();
-            }}
-          }};
-
-          const pollSnapshot = async () => {{
-            try {{
-              const response = await fetch("/snapshot.json", {{
-                cache: "no-store",
-                headers: {{
-                  Accept: "application/json",
-                }},
-              }});
-              if (!response.ok) {{
-                return;
-              }}
-
-              const nextSnapshot = await response.text();
-              if (canonicalizeSnapshot(nextSnapshot) !== currentSnapshot) {{
-                window.location.reload();
-                return;
-              }}
-
-              updateLastChecked();
-            }} catch (error) {{
-              // Keep polling on transient network issues.
-            }}
-          }};
-
-          if (lastCheckedNode && !lastCheckedNode.textContent) {{
-            lastCheckedNode.textContent = "{html.escape(rendered_at)}";
-          }}
-
-          pollSnapshot();
-          window.setInterval(pollSnapshot, refreshIntervalMs);
-        }})();
-      </script>
-    """
-
-
-# Render one card wrapper with a title and body.
-def _render_card(title: str, body: str) -> str:
-    return f"""
-      <section class="card">
+      <section class="{html.escape(class_name)}">
         <h2>{html.escape(title)}</h2>
         {body}
       </section>
@@ -755,6 +740,49 @@ def _render_small_json_block(title: str, payload: Any) -> str:
     """
 
 
+# Render a compact grid of key facts for the dashboard header and review panels.
+def _render_fact_grid(rows: list[tuple[str, str]]) -> str:
+    chips = []
+    for label, value in rows:
+        chips.append(
+            f"""
+            <div class="fact-chip">
+              <span>{html.escape(label)}</span>
+              <strong>{html.escape(str(value))}</strong>
+            </div>
+            """
+        )
+    return f'<div class="fact-grid">{"".join(chips)}</div>'
+
+
+# Describe the current dashboard focus in one operator-friendly sentence.
+def _describe_dashboard_focus(snapshot, auto_refresh_enabled: bool) -> tuple[str, str]:
+    if snapshot.focus.value == "waiting_human_review":
+        return (
+            "Paused for human review",
+            "The runtime has stopped at a typed review gate. Review the pending request and choose an allowed decision to resume the run.",
+        )
+    if snapshot.focus.value == "completed":
+        return (
+            "Run completed",
+            "The runtime reached a terminal completion state. The page stays read-only and no longer polls for updates.",
+        )
+    if snapshot.focus.value == "aborted":
+        return (
+            "Run aborted",
+            "The runtime reached a terminal denial state. The page stays read-only and no longer polls for updates.",
+        )
+    if auto_refresh_enabled:
+        return (
+            "Running normally",
+            "The runtime is actively progressing. The dashboard is polling the current snapshot and will refresh when the state changes.",
+        )
+    return (
+        "Runtime snapshot",
+        "The current session is visible below. Refreshing is disabled for this state.",
+    )
+
+
 # Render the full HTML shell around the dashboard body.
 def _render_html_document(
     *,
@@ -763,215 +791,22 @@ def _render_html_document(
     dashboard_mode: str,
     auto_refresh_enabled: bool,
     rendered_at: str,
+    snapshot_json: str | None,
 ) -> str:
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{html.escape(title)}</title>
-  <style>
-    :root {{
-      color-scheme: light;
-      --bg: #0f172a;
-      --panel: #111827;
-      --panel-2: #1f2937;
-      --text: #e5eef9;
-      --muted: #9ca3af;
-      --border: #334155;
-      --accent: #60a5fa;
-      --accent-2: #f59e0b;
-      --danger: #f87171;
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: linear-gradient(180deg, #020617 0%, #0f172a 100%);
-      color: var(--text);
-    }}
-    .shell {{
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 32px 20px 48px;
-    }}
-    .header {{
-      margin-bottom: 20px;
-      padding: 24px;
-      border: 1px solid var(--border);
-      border-radius: 18px;
-      background: rgba(15, 23, 42, 0.86);
-      backdrop-filter: blur(8px);
-    }}
-    .header h1 {{
-      margin: 0 0 8px;
-      font-size: 2rem;
-    }}
-    .header p {{
-      margin: 4px 0;
-      color: var(--muted);
-    }}
-    .status-strip {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
-      margin-bottom: 12px;
-    }}
-    .status-pill {{
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 5px 10px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: rgba(15, 23, 42, 0.9);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      font-size: 0.74rem;
-      font-weight: 700;
-    }}
-    .status-pill-live {{
-      border-color: rgba(96, 165, 250, 0.8);
-      color: #bfdbfe;
-    }}
-    .status-pill-paused {{
-      border-color: rgba(245, 158, 11, 0.85);
-      color: #fde68a;
-    }}
-    .status-pill-terminal {{
-      border-color: rgba(248, 113, 113, 0.9);
-      color: #fecaca;
-    }}
-    .status-meta {{
-      color: var(--muted);
-      font-size: 0.88rem;
-    }}
-    .grid {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 16px;
-    }}
-    .card {{
-      border: 1px solid var(--border);
-      border-radius: 18px;
-      padding: 18px;
-      background: rgba(17, 24, 39, 0.92);
-      box-shadow: 0 14px 32px rgba(0, 0, 0, 0.18);
-    }}
-    .card h2 {{
-      margin: 0 0 14px;
-      font-size: 1.1rem;
-    }}
-    .subsection {{
-      margin-top: 14px;
-      padding-top: 14px;
-      border-top: 1px solid var(--border);
-    }}
-    .subsection h3 {{
-      margin: 0 0 10px;
-      font-size: 0.98rem;
-      color: var(--accent);
-    }}
-    .kv-table {{
-      width: 100%;
-      border-collapse: collapse;
-    }}
-    .kv-table th,
-    .kv-table td {{
-      vertical-align: top;
-      padding: 8px 10px;
-      border-bottom: 1px solid rgba(51, 65, 85, 0.7);
-      text-align: left;
-    }}
-    .kv-table th {{
-      width: 32%;
-      color: var(--muted);
-      font-weight: 600;
-    }}
-    .kv-table td {{
-      word-break: break-word;
-    }}
-    .json-block {{
-      margin-top: 14px;
-      border: 1px dashed var(--border);
-      border-radius: 12px;
-      padding: 10px 12px;
-      background: rgba(15, 23, 42, 0.48);
-    }}
-    .json-block summary {{
-      cursor: pointer;
-      color: var(--accent);
-      font-weight: 600;
-    }}
-    .json-block pre {{
-      white-space: pre-wrap;
-      word-break: break-word;
-      margin: 12px 0 0;
-      color: var(--text);
-      font-size: 0.84rem;
-    }}
-    .resume-form {{
-      margin-top: 14px;
-      padding-top: 14px;
-      border-top: 1px solid var(--border);
-      display: grid;
-      gap: 10px;
-    }}
-    .resume-form label {{
-      display: grid;
-      gap: 6px;
-      color: var(--muted);
-      font-size: 0.92rem;
-    }}
-    .resume-form input,
-    .resume-form textarea {{
-      width: 100%;
-      padding: 10px 12px;
-      border-radius: 10px;
-      border: 1px solid var(--border);
-      background: #0b1120;
-      color: var(--text);
-      font: inherit;
-    }}
-    .decision-row {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 4px;
-    }}
-    .decision-button {{
-      border: 1px solid var(--accent);
-      border-radius: 999px;
-      padding: 10px 14px;
-      background: rgba(96, 165, 250, 0.12);
-      color: var(--text);
-      cursor: pointer;
-      font-weight: 600;
-    }}
-    .decision-button:hover {{
-      background: rgba(96, 165, 250, 0.22);
-    }}
-    .note {{
-      color: var(--muted);
-    }}
-    .error {{
-      border-color: var(--danger);
-      color: #fecaca;
-      background: rgba(127, 29, 29, 0.3);
-      padding: 14px 16px;
-      border-radius: 14px;
-    }}
-  </style>
-</head>
-<body>
-  <main class="shell">
-    <div id="dashboard-root" data-dashboard-mode="{html.escape(dashboard_mode)}" data-auto-refresh-enabled="{'true' if auto_refresh_enabled else 'false'}" data-rendered-at="{html.escape(rendered_at)}">
-    {body}
-    </div>
-  </main>
-</body>
-</html>"""
+    snapshot_node = ""
+    if snapshot_json is not None:
+        snapshot_node = (
+            f'<textarea id="dashboard-snapshot-data" hidden>{html.escape(snapshot_json)}</textarea>'
+        )
+    return (
+        _DASHBOARD_HTML_TEMPLATE
+        .replace("__TITLE__", html.escape(title))
+        .replace("__DASHBOARD_MODE__", html.escape(dashboard_mode))
+        .replace("__AUTO_REFRESH_ENABLED__", "true" if auto_refresh_enabled else "false")
+        .replace("__RENDERED_AT__", html.escape(rendered_at))
+        .replace("__BODY__", body)
+        .replace("__SNAPSHOT_NODE__", snapshot_node)
+    )
 
 
 # Render a compact error message card.

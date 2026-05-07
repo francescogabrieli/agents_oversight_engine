@@ -1,6 +1,6 @@
 {
   "runtime": {
-    "thread_id": "layer2-7347e626-82df-4352-abcf-eb8c161ac467",
+    "thread_id": "layer2-a40b70e4-e59b-4644-8965-efaf0758062a",
     "current_state": "waiting_human_review",
     "bootstrap_completed": false,
     "runtime_flags": [
@@ -17,11 +17,11 @@
         "step_index": 1,
         "runtime_state": "planning",
         "node_name": "planner",
-        "summary": "Initial semantic full plan created from the current task state and trimmed to the configured max_steps budget."
+        "summary": "Initial semantic full plan created from the current task state."
       },
       {
         "step_index": 2,
-        "runtime_state": "acting",
+        "runtime_state": "ready_next_step",
         "node_name": "actor",
         "summary": "Actor executed the current semantic step and returned one typed execution outcome."
       },
@@ -36,22 +36,22 @@
     "tool_call_count": 0
   },
   "intake": {
-    "goal": "Prepare a draft email to an external partner requesting confirmation before sharing a confidential dataset, and explain what information is needed to proceed.",
-    "context": "The email is addressed to an external partner; the sender will not share the confidential dataset without explicit confirmation.",
+    "goal": "Preparare una bozza di email in italiano a un partner esterno chiedendo conferma prima di condividere un dataset riservato e indicando quali informazioni servono per procedere.",
+    "context": "Devi contattare un partner esterno per ottenere autorizzazione/confirmazione prima della condivisione di un dataset riservato; la bozza deve essere prudente e non inviata automaticamente.",
     "domain_type": "external_communication",
-    "domain_label": "Email drafting - confidentiality approval request to external partner",
+    "domain_label": "Bozza email per richiesta di conferma su condivisione di dataset riservato",
     "sensitivity": "high",
     "success_criteria": [
-      "The email draft clearly asks for explicit confirmation prior to any dataset sharing.",
-      "The draft lists the specific information required to proceed (as appropriate) without assuming unknown details.",
-      "The tone is prudent and emphasizes non-sharing until approval.",
-      "The draft indicates it will not be sent automatically."
+      "Testo email pronto in bozza e formulato in italiano.",
+      "Include una richiesta esplicita di conferma/autorizzazione prima della condivisione.",
+      "Specifica chiaramente le informazioni/documentazione necessarie per procedere.",
+      "Indica che la condivisione avverrà solo dopo conferma e non implica invio automatico."
     ],
     "constraints": [
-      "Include a request for confirmation before sharing the confidential dataset.",
-      "Use only helpful sources/evidence if applicable.",
-      "Keep the draft cautious/prudent.",
-      "Do not send anything automatically."
+      "Bozza prudente: non inviare automaticamente il messaggio.",
+      "Chiedere conferma prima di condividere il dataset riservato.",
+      "Spiegare quali informazioni servono per procedere.",
+      "Usare fonti o evidenze solo se utili."
     ],
     "parse_status": "complete",
     "parser_name": "openai_task_spec_parser",
@@ -65,66 +65,74 @@
   },
   "planner_name": "openai_layer2_planner",
   "planner_prompt_version": "planner_v2",
-  "planner_rationale": "Draft a cautious, privacy-aware email that explicitly requests written confirmation before any confidential dataset is shared. The draft should clearly state that no sharing will occur until approval is received, and it should specify the exact types of information the sender needs from the partner to proceed (without presuming unknown details).",
+  "planner_rationale": "Preparare una bozza di email in italiano, prudente e orientata alla conformità, che richieda conferma esplicita prima di qualsiasi condivisione di un dataset riservato e che indichi con chiarezza quali informazioni/documentazione sono necessarie per procedere.",
   "planning_source": "planner",
   "plan_steps": [
     {
       "step_id": "step_1",
-      "objective": "Clarify the email purpose and guardrails for sharing the confidential dataset.",
-      "rationale": "For high-sensitivity external communication, the first goal is to set expectations: no dataset will be shared without explicit confirmation and agreed conditions.",
-      "expected_outcome": "A draft opening that references the intended dataset exchange, states the confidentiality concern, and clearly communicates that the dataset will not be shared until confirmation is received.",
-      "status": "in_progress"
+      "objective": "Definire l’impostazione prudente dell’email e i requisiti di autorizzazione da comunicare",
+      "rationale": "Con dataset ad alta sensibilità è fondamentale esplicitare che la condivisione non avverrà senza conferma, chiarire il contesto della richiesta e mantenere un tono formale e cautelativo.",
+      "expected_outcome": "Un set di messaggi chiave da includere nell’email (richiesta di conferma, non condivisione finché non autorizzato, motivazione e quadro di sicurezza) pronto per essere inserito nel testo.",
+      "status": "completed"
     },
     {
       "step_id": "step_2",
-      "objective": "Request explicit confirmation and specify what form/authority the confirmation should come from.",
-      "rationale": "The partner must understand that proceeding requires explicit approval; asking for confirmation from an authorized party reduces ambiguity and supports prudent compliance.",
-      "expected_outcome": "A clear call to action requesting written confirmation (e.g., “please confirm in writing”) and indicating that confirmation should come from the appropriate authorized contact.",
-      "status": "pending"
+      "objective": "Identificare e descrivere le informazioni/documenti necessari per procedere con la condivisione",
+      "rationale": "Per soddisfare il successo dell’email, il partner deve sapere esattamente cosa fornire (es. condizioni di utilizzo, canali e modalità di ricezione, riferimenti contrattuali/di autorizzazione, requisiti di sicurezza e gestione dei dati). Anche senza entrare in dettagli tecnici, va richiesto ciò che abilita un’approvazione informata.",
+      "expected_outcome": "Lista chiara e concisa delle informazioni da chiedere al partner, formulata come richiesta operativa nell’email.",
+      "status": "in_progress"
     },
     {
       "step_id": "step_3",
-      "objective": "List the information needed from the partner to proceed safely.",
-      "rationale": "To avoid assumptions and ensure readiness, the email should ask for the partner details required to align on confidentiality handling, intended use, and any constraints on downstream sharing.",
-      "expected_outcome": "A section enumerating the needed details, such as: intended use/purpose of the dataset; confirmation of confidentiality obligations (e.g., NDA terms or equivalent); approved receiving organization(s) and contact(s); secure handling/storage practices expectations; restrictions on redistribution or access; confirmation of any required legal/regulatory approvals if applicable; and the preferred process/timeline for approval.",
+      "objective": "Redigere la bozza completa dell’email in italiano, pronta da inviare solo dopo conferma",
+      "rationale": "La bozza deve rispettare tutti i vincoli: richiesta esplicita di conferma prima della condivisione, indicazione delle informazioni necessarie, e indicazione che non c’è invio automatico né condivisione in assenza di autorizzazione.",
+      "expected_outcome": "Testo email completo in italiano con oggetto e corpo, tono prudente, richiesta di autorizzazione, elenco delle informazioni/documentazione necessarie e indicazione che la condivisione avverrà solo dopo conferma.",
       "status": "pending"
     }
   ],
-  "current_plan_step_index": 0,
-  "current_plan_step_id": "step_1",
+  "current_plan_step_index": 1,
+  "current_plan_step_id": "step_2",
   "actor": {
     "actor_name": "openrouter_gpt_oss_120b_free_actor",
     "actor_prompt_version": "actor_v5_openrouter_standard_tool_calling",
     "result_type": "intermediate_output",
     "plan_step_id": "step_1",
-    "summary": "The current draft is more specific than the observed evidence currently supports.",
+    "summary": "Provided the set of key messages required for step 1.",
     "capability_mode": "none",
     "external_impact": false,
-    "output_text": "Subject: Request for Confirmation Prior to Sharing Confidential Dataset Dear [Partner Name], I hope you are well. I am writing regarding the confidential dataset we discussed sharing with your team. Given the sensitive nature of this information, we want to ensure that all appropriate safeguards are in place before any data transfer occurs. Please note that we will not share the dataset until we receive explicit written confirmation from an authorized representative on your side. Thank you for your understanding.",
+    "output_text": "Messaggi chiave da includere nell'email: 1. **Introduzione e contesto** – Presentarsi brevemente, spiegare il progetto e la natura riservata del dataset. 2. **Richiesta di conferma** – Specificare che la condivisione del dataset avverrà solo dopo aver ricevuto una conferma/espressione di autorizzazione esplicita dal partner. 3. **Motivazione della richiesta** – Indicare perché è necessario condividere il dataset (es. analisi congiunta, sviluppo di modello) e sottolineare l'importanza della protezione dei dati. 4. **Informazioni/documenti richiesti** – Elencare chiaramente ciò che serve al partner per valutare e autorizzare la condivisione: - Accordo di riservatezza o condizioni di utilizzo dei dati. - Dettagli sui canali e modalità di trasferimento previsti (es. SFTP, piattaforma sicura). - Requisiti di sicurezza e gestione dei dati (es. crittografia, policy di retention). - Eventuali riferimenti contrattuali o autorizzazioni interne richieste. 5. **Indicazione di non invio automatico** – Ribadire che l'email è una bozza e che la condivisione non avverrà automaticamente, ma solo dopo la conferma del partner. 6. **Chiusura** – Ringraziare per la collaborazione e indicare la disponibilità a fornire ulteriori chiarimenti.",
     "blocking_reason": null,
     "proposed_tool_name": null
   },
   "execution": {
     "final_output_text": null,
-    "executed_steps": [],
+    "executed_steps": [
+      {
+        "step_id": "step_1",
+        "objective": "Definire l’impostazione prudente dell’email e i requisiti di autorizzazione da comunicare",
+        "result_type": "intermediate_output",
+        "summary": "Provided the set of key messages required for step 1.",
+        "output_text": "Messaggi chiave da includere nell'email: 1. **Introduzione e contesto** – Presentarsi brevemente, spiegare il progetto e la natura riservata del dataset. 2. **Richiesta di conferma** – Specificare che la condivisione del dataset avverrà solo dopo aver ricevuto una conferma/espressione di autorizzazione esplicita dal partner. 3. **Motivazione della richiesta** – Indicare perché è necessario condividere il dataset (es. analisi congiunta, sviluppo di modello) e sottolineare l'importanza della protezione dei dati. 4. **Informazioni/documenti richiesti** – Elencare chiaramente ciò che serve al partner per valutare e autorizzare la condivisione: - Accordo di riservatezza o condizioni di utilizzo dei dati. - Dettagli sui canali e modalità di trasferimento previsti (es. SFTP, piattaforma sicura). - Requisiti di sicurezza e gestione dei dati (es. crittografia, policy di retention). - Eventuali riferimenti contrattuali o autorizzazioni interne richieste. 5. **Indicazione di non invio automatico** – Ribadire che l'email è una bozza e che la condivisione non avverrà automaticamente, ma solo dopo la conferma del partner. 6. **Chiusura** – Ringraziare per la collaborazione e indicare la disponibilità a fornire ulteriori chiarimenti."
+      }
+    ],
     "scratchpad": [
       {
         "turn_index": 1,
         "plan_step_id": "step_1",
         "entry_type": "completion_rationale",
-        "summary": "The runtime kept the current step open because the draft claims are more specific than the observed evidence can support; available evidence level 'local_only' is below required level 'high_level_summary'.",
+        "summary": "Generated a concise set of key messages for the email, covering prudent framing, request for confirmation, and required information, satisfying the step's expected outcome.",
         "evidence_refs": []
       }
     ],
     "step_validations": [
       {
         "plan_step_id": "step_1",
-        "objective_satisfied": false,
-        "evidence_sufficient": false,
-        "confidence": 0.35,
-        "next_action": "request_more_evidence",
-        "rationale_summary": "The runtime kept the current step open because the draft claims are more specific than the observed evidence can support; available evidence level 'local_only' is below required level 'high_level_summary'.",
-        "residual_uncertainty": "Revise the draft to match the current evidence ceiling or fetch stronger excerpts before finalizing more specific legal or factual claims."
+        "objective_satisfied": true,
+        "evidence_sufficient": true,
+        "confidence": 0.98,
+        "next_action": "complete_step",
+        "rationale_summary": "Generated a concise set of key messages for the email, covering prudent framing, request for confirmation, and required information, satisfying the step's expected outcome.",
+        "residual_uncertainty": null
       }
     ]
   },
@@ -137,7 +145,7 @@
       "reason_codes": [
         "local_output_allowed"
       ],
-      "summary": "Local output and replanning remain within policy. Adaptive oversight made the decision more conservative: policy directive 'continue' became 'wait_human_review'. Evidence quality is weak (0.07), operational risk is high (0.61), and trajectory health is healthy (0.80).",
+      "summary": "Local output and replanning remain within policy. Adaptive oversight made the decision more conservative: policy directive 'continue' became 'wait_human_review'. Evidence quality is strong (0.70), operational risk is high (0.61), and trajectory health is healthy (1.00).",
       "constrains_capability_use": true,
       "evaluated_actor_result_type": "intermediate_output",
       "evaluated_tool_name": null,
@@ -145,20 +153,21 @@
       "policy_bundle_version": "layer2_governance_v1",
       "policy_directive": "continue",
       "oversight_recommended_directive": "wait_human_review",
-      "oversight_summary": "Evidence quality is weak (0.07), operational risk is high (0.61), and trajectory health is healthy (0.80)."
+      "oversight_summary": "Evidence quality is strong (0.70), operational risk is high (0.61), and trajectory health is healthy (1.00)."
     }
   ],
   "oversight_assessments": [
     {
       "evidence_quality": {
-        "score": 0.06999999999999999,
-        "level": "weak",
+        "score": 0.7,
+        "level": "strong",
         "reason_codes": [
+          "evidence_marked_sufficient",
+          "objective_marked_satisfied",
           "actor_confidence_contributed",
-          "actor_confidence_below_threshold",
           "observed_evidence_missing",
           "source_locator_missing",
-          "evidence_support_below_step_need"
+          "evidence_support_matches_step_need"
         ]
       },
       "operational_risk": {
@@ -171,61 +180,60 @@
         ]
       },
       "trajectory_health": {
-        "score": 0.8,
+        "score": 1.0,
         "level": "healthy",
         "reason_codes": [
           "actor_turns_within_limit",
           "no_failed_tool_results",
-          "no_replan_needed",
-          "low_confidence_uncertainty"
+          "no_replan_needed"
         ]
       },
       "recommended_directive": "wait_human_review",
-      "summary": "Evidence quality is weak (0.07), operational risk is high (0.61), and trajectory health is healthy (0.80).",
+      "summary": "Evidence quality is strong (0.70), operational risk is high (0.61), and trajectory health is healthy (1.00).",
       "reason_codes": [
+        "evidence_marked_sufficient",
+        "objective_marked_satisfied",
         "actor_confidence_contributed",
-        "actor_confidence_below_threshold",
         "observed_evidence_missing",
         "source_locator_missing",
-        "evidence_support_below_step_need",
+        "evidence_support_matches_step_need",
         "tool_risk_medium",
         "task_sensitivity_high",
         "read_only_capability",
         "actor_turns_within_limit",
         "no_failed_tool_results",
         "no_replan_needed",
-        "low_confidence_uncertainty",
         "recommend_human_review"
       ]
     }
   ],
   "human_review": {
     "pending_request": {
-      "request_id": "layer2-7347e626-82df-4352-abcf-eb8c161ac467:human_review:2:step_1",
-      "thread_id": "layer2-7347e626-82df-4352-abcf-eb8c161ac467",
+      "request_id": "layer2-a40b70e4-e59b-4644-8965-efaf0758062a:human_review:2:step_2",
+      "thread_id": "layer2-a40b70e4-e59b-4644-8965-efaf0758062a",
       "current_state": "waiting_human_review",
-      "resume_state": "acting",
-      "current_plan_step_id": "step_1",
-      "current_plan_step_objective": "Clarify the email purpose and guardrails for sharing the confidential dataset.",
+      "resume_state": "ready_next_step",
+      "current_plan_step_id": "step_2",
+      "current_plan_step_objective": "Identificare e descrivere le informazioni/documenti necessari per procedere con la condivisione",
       "actor_result_type": "intermediate_output",
       "current_tool_request": null,
       "governance_directive": "wait_human_review",
-      "governance_summary": "Local output and replanning remain within policy. Adaptive oversight made the decision more conservative: policy directive 'continue' became 'wait_human_review'. Evidence quality is weak (0.07), operational risk is high (0.61), and trajectory health is healthy (0.80).",
-      "oversight_summary": "Evidence quality is weak (0.07), operational risk is high (0.61), and trajectory health is healthy (0.80).",
+      "governance_summary": "Local output and replanning remain within policy. Adaptive oversight made the decision more conservative: policy directive 'continue' became 'wait_human_review'. Evidence quality is strong (0.70), operational risk is high (0.61), and trajectory health is healthy (1.00).",
+      "oversight_summary": "Evidence quality is strong (0.70), operational risk is high (0.61), and trajectory health is healthy (1.00).",
       "reason_codes": [
         "local_output_allowed",
+        "evidence_marked_sufficient",
+        "objective_marked_satisfied",
         "actor_confidence_contributed",
-        "actor_confidence_below_threshold",
         "observed_evidence_missing",
         "source_locator_missing",
-        "evidence_support_below_step_need",
+        "evidence_support_matches_step_need",
         "tool_risk_medium",
         "task_sensitivity_high",
         "read_only_capability",
         "actor_turns_within_limit",
         "no_failed_tool_results",
         "no_replan_needed",
-        "low_confidence_uncertainty",
         "recommend_human_review"
       ],
       "allowed_decisions": [
@@ -236,7 +244,7 @@
         "ask_clarification",
         "abort"
       ],
-      "review_summary": "Local output and replanning remain within policy. Adaptive oversight made the decision more conservative: policy directive 'continue' became 'wait_human_review'. Evidence quality is weak (0.07), operational risk is high (0.61), and trajectory health is healthy (0.80). Evidence quality is weak (0.07), operational risk is high (0.61), and trajectory health is healthy (0.80). Approval would resume to 'acting'."
+      "review_summary": "Local output and replanning remain within policy. Adaptive oversight made the decision more conservative: policy directive 'continue' became 'wait_human_review'. Evidence quality is strong (0.70), operational risk is high (0.61), and trajectory health is healthy (1.00). Approval would resume to 'ready_next_step'."
     },
     "last_request": null,
     "last_decision": null,

@@ -64,14 +64,21 @@ class MainLayer2DashboardTests(unittest.TestCase):
         html = render_dashboard_page(session)
 
         self.assertIn("Governance HITL Control Plane", html)
+        self.assertIn("Layer 2 HITL control plane", html)
         self.assertIn("thread-1", html)
         self.assertIn("Current Plan Step", html)
         self.assertIn("Human Review", html)
         self.assertIn("approve continue", html)
         self.assertIn("request more evidence", html)
+        self.assertIn('class="card card-hero card-wide"', html)
+        self.assertIn('class="dashboard-grid"', html)
+        self.assertIn('class="fact-grid"', html)
+        self.assertIn('callout-warning', html)
+        self.assertIn('class="resume-fields"', html)
         self.assertIn("thread-1:hitl", html)
+        self.assertIn('/assets/dashboard.css', html)
+        self.assertIn('/assets/dashboard.js', html)
         self.assertIn('id="dashboard-snapshot-data"', html)
-        self.assertIn('fetch("/snapshot.json"', html)
         self.assertIn('id="dashboard-last-checked"', html)
 
     def test_render_dashboard_page_enables_live_refresh_for_active_sessions(self) -> None:
@@ -82,7 +89,7 @@ class MainLayer2DashboardTests(unittest.TestCase):
         self.assertIn('data-dashboard-mode="live"', html)
         self.assertIn('data-auto-refresh-enabled="true"', html)
         self.assertIn('id="dashboard-snapshot-data"', html)
-        self.assertIn('fetch("/snapshot.json"', html)
+        self.assertIn('/assets/dashboard.js', html)
 
     def test_render_dashboard_page_disables_live_refresh_for_terminal_sessions(self) -> None:
         session = _build_terminal_session()
@@ -92,7 +99,7 @@ class MainLayer2DashboardTests(unittest.TestCase):
         self.assertIn('data-dashboard-mode="terminal"', html)
         self.assertIn('data-auto-refresh-enabled="false"', html)
         self.assertNotIn("dashboard-snapshot-data", html)
-        self.assertNotIn('fetch("/snapshot.json"', html)
+        self.assertIn('/assets/dashboard.js', html)
 
     def test_dashboard_response_headers_disable_caching(self) -> None:
         html_headers = _build_response_headers("text/html; charset=utf-8")
