@@ -35,10 +35,22 @@ from .governance import (
     constrains_capability_use,
     derive_governance_directive,
 )
+from .hitl_dashboard import (
+    DashboardFocus,
+    DashboardGovernancePanel,
+    DashboardHumanReviewPanel,
+    DashboardOversightPanel,
+    DashboardPlanStep,
+    GovernanceHitlDashboardSnapshot,
+    build_governance_hitl_dashboard_snapshot,
+    governance_hitl_dashboard_snapshot_to_dict,
+    governance_hitl_dashboard_snapshot_to_json,
+)
 from .graph import (
     Layer2GraphInput,
     Layer2GraphOutput,
     Layer2GraphState,
+    build_default_checkpointer,
     build_runtime_graph,
 )
 from .nodes import (
@@ -165,6 +177,12 @@ __all__ = [
     "GovernanceDecision",
     "GovernanceDirective",
     "GovernanceReasonCode",
+    "DashboardFocus",
+    "DashboardGovernancePanel",
+    "DashboardHumanReviewPanel",
+    "DashboardOversightPanel",
+    "DashboardPlanStep",
+    "GovernanceHitlDashboardSnapshot",
     "ExecutedPlanStep",
     "HumanReviewDecision",
     "HumanReviewDecisionType",
@@ -243,6 +261,8 @@ __all__ = [
     "PolicyEvaluationResult",
     "build_default_policy_engine",
     "build_governance_decision",
+    "build_governance_hitl_dashboard_snapshot",
+    "build_default_checkpointer",
     "build_opa_input_document",
     "build_policy_evaluation_input",
     "combine_governance_directives",
@@ -257,6 +277,8 @@ __all__ = [
     "build_default_tool_gateway_config",
     "build_compact_trace_from_runtime_trace",
     "build_layer2_runtime_trace",
+    "governance_hitl_dashboard_snapshot_to_dict",
+    "governance_hitl_dashboard_snapshot_to_json",
     "get_default_tool_gateway_config_path",
     "load_tool_gateway_config",
     "layer2_trace_to_dict",

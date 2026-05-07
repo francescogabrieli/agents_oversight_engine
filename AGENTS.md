@@ -26,6 +26,7 @@ At the moment, the repository mainly covers:
 
 - `Layer 1 - Task Intake`
 - `Layer 2 - Bootstrap + Planner + Actor/Tool Loop + Replanner + Governance`
+- offline evaluation over exported Layer 2 traces
 
 The currently implemented Layer 2 slice is not just a single planner/executor pass.
 It already includes:
@@ -40,6 +41,7 @@ It already includes:
 - deterministic `confidence_risk_trajectory` oversight for evidence quality, operational risk, and trajectory health
 - typed human-review requests and decisions with LangGraph `interrupt / resume`
 - typed runtime trace export through `trace.py`, surfaced by `src/main_layer2.py`
+- offline trace evaluation and reporting through `evaluation.py`, surfaced by `src/main_layer2_evaluation.py`
 
 These are the folders to treat as the active implementation baseline:
 
@@ -47,6 +49,8 @@ These are the folders to treat as the active implementation baseline:
 - `src/layer2_runtime_governance`
 - `src/main_layer1.py`
 - `src/main_layer2.py`
+- `src/main_layer2_dashboard.py`
+- `src/main_layer2_evaluation.py`
 
 Supporting material lives in:
 
@@ -144,6 +148,7 @@ Main files:
 - `tool_gateway.py`
 - `governance.py`
 - `oversight.py`
+- `evaluation.py`
 - `openrouter_client.py`
 - `trace.py`
 - `runtime_warnings.py`
@@ -164,6 +169,8 @@ Current design:
 - `oversight.py` defines deterministic adaptive oversight for `evidence_quality`, `operational_risk`, and `trajectory_health`, plus the combiner recommendation consumed by governance
 - `openrouter_client.py` defines the OpenRouter HTTP adapter used by the temporary Layer 2 actor test backend
 - `trace.py` defines the typed, JSON-exportable Layer 2 runtime trace contract used for debugging, thesis evidence, HITL payloads, and evaluation
+- `evaluation.py` defines the offline trace evaluation pipeline that reads exported trace JSON and produces JSON and Markdown reports
+- `hitl_dashboard.py` defines the dashboard-facing snapshot model derived from `TaskState`, governance, oversight, and HITL review payloads
 - `configs/layer2_oversight_policy.json` defines the explicit weights, thresholds, risk scores, sensitivity multipliers, and trajectory penalties used by the oversight layer
 - `runtime_warnings.py` centralizes warning suppression needed before importing selected LangGraph/LangChain dependencies
 - `graph.py` contains the current LangGraph wiring for the planner/actor/governance/tool/replanner/human-review loop:
@@ -201,6 +208,7 @@ Current relevant files:
 - `docs/plan-and-execute.jpg`
 - `docs/planner_use_cases.html`
 - `docs/confidence_risk_trajectory_deck.html`
+- `docs/governance_hitl_contract.md`
 - `docs/tool_gateway_strategy.md`
 
 
@@ -320,8 +328,10 @@ Current relevant files:
 - trajectory-health turn pressure should stay forgiving enough that short source-plus-summary tasks can make a few recovery turns without being forced into replanning
 - runtime trace export must be read-only over `TaskState`; it must not mutate runtime state or become a parallel source of truth
 - `main_layer2.py` may print trace views, but reusable trace construction belongs in `trace.py`
+- `main_layer2_evaluation.py` is the offline, trace-only evaluation entrypoint and must stay decoupled from the live runtime CLI
 - `ABORTED` is the hard-denial runtime state for governance decisions that must not be conflated with review
 - HITL is wired as `interrupt / resume`; governance now pauses in typed states and resumes from typed human decisions
+- the local Layer 2 CLI auto-launches the HITL control plane on the first `WAITING_HUMAN_REVIEW` transition for a thread, reusing the same dashboard session and checkpoint store
 
 ### HITL Rules
 
@@ -388,6 +398,12 @@ Run Layer 2 bootstrap, planner, actor, tool loop, and replanner with determinist
 
 ```powershell
 .\.venv\Scripts\python.exe src\main_layer2.py --demo-intake-profile research --task "Find official sources about the Digital Markets Act and produce a short summary."
+```
+
+Run the local HITL control plane dashboard:
+
+```powershell
+.\.venv\Scripts\python.exe src\main_layer2_dashboard.py --demo-intake-profile clarification --task "Find official sources about the Digital Markets Act and produce a short summary."
 ```
 
 

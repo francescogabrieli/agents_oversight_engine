@@ -492,7 +492,7 @@ Il modulo legge `TaskState` in modo read-only e produce un artefatto tipizzato, 
 ### Perché è utile
 
 Permette di vedere la pipeline completa senza dover aprire subito ogni singolo modulo.
-Lo stesso contratto puo diventare base per payload HITL, evaluation harness e judge semantico.
+Lo stesso contratto puo diventare base per payload HITL, per la pipeline offline di evaluation già presente in `evaluation.py` e per un judge semantico futuro.
 
 ### Cosa controllare quando si debuga
 
@@ -521,6 +521,7 @@ Ad oggi il progetto copre già in modo consistente:
 - Governance tipizzata
 - Oversight deterministico `confidence_risk_trajectory`
 - Runtime trace exporter tipizzato
+- Offline evaluation pipeline sui trace esportati
 - Test deterministici
 
 ### Cosa è stabile

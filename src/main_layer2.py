@@ -23,12 +23,13 @@ from layer1_intake import (
     TaskSpec,
 )
 from layer1_intake.infrastructure import build_intake_service
-from layer2_runtime_governance import build_runtime_graph
+from layer2_runtime_governance import build_default_checkpointer, build_runtime_graph
 from layer2_runtime_governance import HumanReviewDecision
 from layer2_runtime_governance.actor_contract import ActorPort
 from layer2_runtime_governance.governance import PolicyEnginePort
 from layer2_runtime_governance.planning import PlannerPort
 from layer2_runtime_governance.replanning import ReplannerPort
+from layer2_runtime_governance.state import RuntimeState, TaskState
 from layer2_runtime_governance.trace import (
     build_compact_trace_from_runtime_trace,
     build_layer2_runtime_trace,
@@ -62,6 +63,7 @@ def run_layer2_flow(
     policy_engine_service: PolicyEnginePort | None = None,
     checkpointer: Any | None = None,
     progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
+    hitl_event_callback: Callable[[TaskState], None] | None = None,
 ) -> dict[str, Any]:
     # Run Layer 1 plus the current Layer 2 graph and return the resulting trace.
     runtime_graph = build_runtime_graph(
@@ -71,6 +73,7 @@ def run_layer2_flow(
         replanner_service=replanner_service,
         policy_engine_service=policy_engine_service,
         checkpointer=checkpointer,
+        hitl_event_callback=hitl_event_callback,
     )
 
     resolved_thread_id = thread_id or f"layer2-{uuid4()}"
@@ -401,20 +404,82 @@ def _build_demo_intake_result(
 def main() -> None:
     # Run the current Layer 2 slice from the command line.
     args = parse_cli_args()
+    checkpointer = build_default_checkpointer()
+    hitl_tracker = _HitlLaunchTracker()
     trace = run_layer2_flow(
         raw_task_text=args.task,
         context_hint=args.context,
         policy_profile=args.policy_profile,
         thread_id=args.thread_id,
         demo_intake_profile=args.demo_intake_profile,
+        checkpointer=checkpointer,
         progress_callback=None if args.quiet else _print_progress,
+        hitl_event_callback=hitl_tracker.record,
     )
     write_layer2_trace_file(trace, output_path=args.trace_file)
+
+    if hitl_tracker.triggered:
+        _maybe_launch_hitl_dashboard_from_trace(
+            trace,
+            checkpointer=checkpointer,
+            open_browser=True,
+        )
 
     if args.full_trace:
         print_layer2_trace(trace)
     else:
         print_layer2_summary(trace)
+
+
+# Track whether the runtime has requested human review during the current CLI run.
+class _HitlLaunchTracker:
+    def __init__(self) -> None:
+        self.request_ids: set[str] = set()
+
+    # Record a review request exactly once per request id.
+    def record(self, task_state: TaskState) -> None:
+        pending_review = getattr(task_state, "pending_human_review_request", None)
+        request_id = getattr(pending_review, "request_id", None)
+        if isinstance(request_id, str) and request_id.strip():
+            self.request_ids.add(request_id)
+
+    # Expose whether the runtime ever requested human review during this run.
+    @property
+    def triggered(self) -> bool:
+        return bool(self.request_ids)
+
+
+# Build a dashboard session from a trace and launch it only when the runtime paused for HITL.
+def _maybe_launch_hitl_dashboard_from_trace(
+    trace: dict[str, Any],
+    *,
+    checkpointer: Any,
+    open_browser: bool,
+) -> None:
+    task_state = trace["final_result"].get("task_state")
+    if not isinstance(task_state, TaskState):
+        return
+    if task_state.current_state != RuntimeState.WAITING_HUMAN_REVIEW:
+        return
+
+    from main_layer2_dashboard import (
+        build_dashboard_session_from_trace,
+        launch_dashboard_session,
+    )
+
+    session = build_dashboard_session_from_trace(
+        trace,
+        checkpointer=checkpointer,
+    )
+    handle = launch_dashboard_session(
+        session=session,
+        open_browser=open_browser,
+    )
+    print(
+        f"[Layer 2] HITL dashboard auto-launched at http://{handle.host}:{handle.port}",
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

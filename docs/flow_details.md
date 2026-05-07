@@ -1,33 +1,33 @@
 # Runtime Flow Details
 
-Questo documento descrive un esempio debug-level del flusso attuale del runtime.
-Non rappresenta ciò che vede l'utente finale: mostra invece cosa succede internamente tra Layer 1, Layer 2, governance, Tool Gateway e backend MCP.
+This document describes the current debug-level flow of the repository.
+It is not the user-facing view. It shows what happens internally across Layer 1, Layer 2, governance, HITL, the Tool Gateway, trace export, and the local dashboard.
 
-## Esempio Di Task
+## Example Task
 
-Input utente:
+Input:
 
 ```json
 {
-  "raw_task_text": "Analizza questo testo e dimmi quali parole ricorrono di più: 'agent agent governance MCP evidence evidence evidence'.",
+  "raw_task_text": "Analizza questo testo e dimmi quali parole ricorrono di piu: 'agent agent governance MCP evidence evidence evidence'.",
   "context_hint": "Usa strumenti read-only se utili."
 }
 ```
 
-Output atteso lato utente:
+Expected user-facing result:
 
 ```text
-Nel testo fornito, la parola più frequente è "evidence" con 3 occorrenze.
+Nel testo fornito, la parola piu frequente e "evidence" con 3 occorrenze.
 Segue "agent" con 2 occorrenze.
 Le parole "governance" e "MCP" compaiono una volta ciascuna.
 ```
 
-L'utente non vede planner, governance, Tool Gateway o chiamate MCP.
-Questi passaggi sono interni e servono per controllo, audit, evidenza e debugging.
+The user does not see planner internals, governance scoring, Tool Gateway details, or MCP transport.
+Those parts are internal and exist for control, evidence, auditability, and debugging.
 
-## Flusso Interno
+## Current Runtime Shape
 
-Sequenza del grafo:
+The current Layer 2 slice is:
 
 ```text
 START
@@ -35,38 +35,48 @@ START
   -> planner
   -> actor
   -> governance
-  -> tool_gateway
+  -> { tool_gateway | replanner | human_review | finalize_bootstrap }
   -> observe_tool_result
   -> actor
   -> governance
-  -> actor
-  -> governance
+  -> { tool_gateway | replanner | human_review | finalize_bootstrap }
   -> finalize_bootstrap
   -> END
 ```
 
+Important points:
+
+- planner output is semantic and typed
+- actor output is typed and step-bounded
+- tool use is read-only and routed through the Tool Gateway
+- governance is the hard control point after actor execution
+- oversight can only make the decision more conservative
+- HITL uses typed `interrupt / resume`
+- the dashboard is a read-only control plane over the same contract
+
 ## 1. Layer 1 Intake
 
-Il testo libero entra nel Layer 1 e viene trasformato in un `IntakeResult` canonico.
+Layer 1 converts the raw task into a canonical `IntakeResult`.
+The runtime no longer works directly on the free-form user text after this step.
 
-Esempio concettuale:
+Conceptual intake payload:
 
 ```json
 {
   "structured_task": {
     "task_spec": {
-      "goal": "Analizza il testo fornito e identifica le parole più ricorrenti.",
-      "context": "Usa strumenti read-only se utili.",
+      "goal": "Analyze the supplied text and identify the most frequent words.",
+      "context": "Use read-only tools if useful.",
       "constraints": [
-        "Non modificare file o sistemi esterni.",
-        "Usa solo strumenti read-only."
+        "Do not modify files or external systems.",
+        "Use read-only tools only."
       ],
       "domain_type": "analysis",
       "domain_label": "text_analysis",
       "sensitivity": "low",
       "success_criteria": [
-        "Restituire le parole più frequenti.",
-        "Basare il risultato sul testo fornito."
+        "Return the most frequent words.",
+        "Base the result on the supplied text."
       ]
     },
     "execution_policy": {
@@ -90,13 +100,12 @@ Esempio concettuale:
 }
 ```
 
-Da questo punto in avanti il runtime non lavora più sul testo libero originale, ma su un contratto strutturato.
+## 2. Bootstrap Into Layer 2
 
-## 2. Bootstrap Layer 2
+`bootstrap_from_intake` converts `IntakeResult` into `TaskState`.
+This initializes runtime state, plan cursor, counters, governance history, oversight history, and HITL bookkeeping.
 
-Il nodo `bootstrap_from_intake` converte `IntakeResult` in `TaskState`.
-
-Stato iniziale semplificato:
+Conceptual bootstrap state:
 
 ```json
 {
@@ -109,25 +118,19 @@ Stato iniziale semplificato:
   "scratchpad": [],
   "step_validations": [],
   "governance_history": [],
+  "oversight_history": [],
+  "human_review_history": [],
   "tool_call_count": 0,
-  "actor_turn_count": 0,
-  "step_history": [
-    {
-      "step_index": 0,
-      "runtime_state": "planning",
-      "node_name": "bootstrap_from_intake",
-      "summary": "Runtime state initialized from layer 1 intake payload."
-    }
-  ]
+  "actor_turn_count": 0
 }
 ```
 
 ## 3. Planner
 
-Il planner produce un piano semantico.
-Non produce tool calls, payload eseguibili o istruzioni MCP.
+The planner produces a semantic plan.
+It does not emit concrete tool calls or execution payloads.
 
-Esempio:
+Example plan:
 
 ```json
 {
@@ -147,35 +150,22 @@ Esempio:
       "status": "pending"
     }
   ],
-  "current_plan_step_index": 0,
-  "planner_name": "openai_layer2_planner",
-  "planner_prompt_version": "planner_v1"
+  "current_plan_step_index": 0
 }
 ```
 
-## 4. Actor: Prima Azione
+## 4. Actor
 
-L'actor riceve il piano completo come contesto, ma può agire solo sul current step.
+The actor receives the full plan as context, but it can act only on the current step.
+It may:
 
-Input rilevante:
+- propose a read-only tool request
+- produce local output
+- request clarification
+- signal replan
+- complete the step when evidence is sufficient
 
-```json
-{
-  "current_plan_step": {
-    "step_id": "step_1",
-    "objective": "Compute text statistics for the supplied text.",
-    "status": "in_progress"
-  },
-  "observed_evidence": [],
-  "last_tool_result": null,
-  "tool_call_count": 0,
-  "remaining_tool_calls": 10
-}
-```
-
-L'actor decide che serve un tool read-only.
-Non chiama MCP direttamente.
-Produce invece un `ActorResult` con `ToolRequest`.
+Example actor output for the first step:
 
 ```json
 {
@@ -200,25 +190,21 @@ Produce invece un `ActorResult` con `ToolRequest`.
 }
 ```
 
-Stato aggiornato:
+At this point the runtime transitions to a tool-execution state and sends the request to governance.
 
-```json
-{
-  "current_state": "ready_tool_execution",
-  "actor_turn_count": 1,
-  "current_tool_request": {
-    "tool_name": "mcp.local_test.text_stats",
-    "text": "agent agent governance MCP evidence evidence evidence",
-    "limit": 5
-  }
-}
-```
+## 5. Governance and Oversight
 
-## 5. Governance
+Governance evaluates the actor result and the current runtime context.
+It combines:
 
-Prima dell'esecuzione del tool, il runtime passa dalla governance.
+- OPA policy
+- deterministic oversight
+- runtime evidence and trajectory context
 
-Input di policy semplificato:
+Oversight can only preserve or tighten the policy decision.
+It cannot make the runtime more permissive.
+
+Simplified governance input:
 
 ```json
 {
@@ -238,42 +224,7 @@ Input di policy semplificato:
 }
 ```
 
-Output `confidence_risk_trajectory`:
-
-```json
-{
-  "evidence_quality": {
-    "score": 0.0,
-    "level": "weak",
-    "reason_codes": [
-      "observed_evidence_missing",
-      "source_locator_missing"
-    ]
-  },
-  "operational_risk": {
-    "score": 0.15,
-    "level": "low",
-    "reason_codes": [
-      "tool_risk_low",
-      "task_sensitivity_low",
-      "read_only_capability"
-    ]
-  },
-  "trajectory_health": {
-    "score": 1.0,
-    "level": "healthy",
-    "reason_codes": [
-      "actor_turns_within_limit",
-      "no_failed_tool_results",
-      "no_replan_needed"
-    ]
-  },
-  "recommended_directive": "continue",
-  "summary": "Evidence quality is weak (0.00), operational risk is low (0.15), and trajectory health is healthy (1.00)."
-}
-```
-
-Decisione tipica dopo `decision_combiner`:
+Typical outcome:
 
 ```json
 {
@@ -281,18 +232,27 @@ Decisione tipica dopo `decision_combiner`:
   "directive": "continue_read_only",
   "policy_directive": "continue_read_only",
   "oversight_recommended_directive": "continue",
-  "oversight_summary": "Evidence quality is weak (0.00), operational risk is low (0.15), and trajectory health is healthy (1.00).",
-  "reason_codes": ["read_only_allowed"],
-  "summary": "Read-only tool use is allowed. Adaptive oversight recommended 'continue' and preserved the policy directive 'continue_read_only'.",
+  "summary": "Read-only tool use is allowed. Oversight recommended continue and preserved the policy directive continue_read_only.",
   "evaluated_tool_name": "mcp.local_test.text_stats"
 }
 ```
 
-Solo dopo questa decisione il grafo instrada verso `tool_gateway`.
+If the policy requires human review, the runtime enters `WAITING_HUMAN_REVIEW`.
+If the policy denies the action, the runtime enters `ABORTED`.
 
 ## 6. Tool Gateway
 
-Il Tool Gateway riceve la `ToolRequest`:
+When governance allows the read-only action, the request goes through the Tool Gateway.
+The actor never calls MCP directly.
+
+The gateway:
+
+- checks registry configuration
+- validates the tool capability
+- maps typed request fields to backend arguments
+- normalizes backend results into `ToolExecutionResult`
+
+Example normalized MCP call:
 
 ```json
 {
@@ -303,203 +263,33 @@ Il Tool Gateway riceve la `ToolRequest`:
 }
 ```
 
-Legge la definizione del tool da `configs/layer2_tool_gateway.json`:
+The backend response is normalized into structured tool output and stored in runtime state.
+
+## 7. Observe Tool Result
+
+`observe_tool_result` converts the tool result into explicit evidence.
+It also appends audit-safe scratchpad entries.
+
+Example evidence:
 
 ```json
 {
-  "tool_name": "mcp.local_test.text_stats",
-  "backend": "mcp",
-  "capability": "read",
-  "risk_level": "low",
-  "enabled": true,
-  "requires_human_review": false,
-  "required_fields": ["text"],
-  "mcp_server_id": "local_test",
-  "mcp_tool_name": "text_stats"
-}
-```
-
-Controlla anche il server MCP configurato:
-
-```json
-{
-  "local_test": {
-    "enabled": true,
-    "command": "{python}",
-    "args": ["{repo_root}\\tests\\fixtures\\mcp_local_test_server.py"],
-    "allowed_tools": [
-      "echo",
-      "read_fixture",
-      "text_stats",
-      "calculate_expression"
-    ]
-  }
-}
-```
-
-Validazioni eseguite:
-
-```text
-tool registrato: sì
-tool abilitato: sì
-backend MCP: sì
-server MCP registrato: sì
-server MCP abilitato: sì
-mcp_tool_name allowlisted: sì
-capability read: sì
-required field text presente: sì
-```
-
-Il gateway costruisce gli argomenti MCP partendo solo dai campi tipizzati della `ToolRequest`:
-
-```json
-{
-  "text": "agent agent governance MCP evidence evidence evidence",
-  "limit": 5
-}
-```
-
-## 7. Chiamata MCP
-
-Il gateway chiama il server MCP locale configurato.
-
-Richiesta concettuale:
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 2,
-  "method": "tools/call",
-  "params": {
-    "name": "text_stats",
-    "arguments": {
-      "text": "agent agent governance MCP evidence evidence evidence",
-      "limit": 5
-    }
-  }
-}
-```
-
-Risposta concettuale:
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 2,
-  "result": {
-    "content": [
-      {
-        "type": "text",
-        "text": "{\"characters\": 53, \"lines\": 1, \"top_words\": [[\"evidence\", 3], [\"agent\", 2], [\"governance\", 1], [\"mcp\", 1]], \"words\": 7}"
-      }
-    ]
-  }
-}
-```
-
-## 8. Normalizzazione Tool Result
-
-Il gateway non passa l'output MCP grezzo all'actor.
-Lo converte in `ToolExecutionResult`.
-
-```json
-{
-  "request": {
-    "plan_step_id": "step_1",
-    "tool_name": "mcp.local_test.text_stats",
-    "reason": "The current step requires deterministic word frequency statistics.",
-    "text": "agent agent governance MCP evidence evidence evidence",
-    "limit": 5
-  },
-  "success": true,
-  "summary": "MCP tool 'text_stats' executed successfully.",
-  "content": "{\"characters\": 53, \"lines\": 1, \"top_words\": [[\"evidence\", 3], [\"agent\", 2], [\"governance\", 1], [\"mcp\", 1]], \"words\": 7}",
-  "sources": [
-    {
-      "title": "mcp.local_test.text_stats",
-      "locator": "mcp://local_test/text_stats",
-      "snippet": "{\"characters\": 53, \"lines\": 1, \"top_words\": [[\"evidence\", 3], [\"agent\", 2], [\"governance\", 1], [\"mcp\", 1]], \"words\": 7}"
-    }
-  ],
-  "error_message": null
-}
-```
-
-Stato aggiornato:
-
-```json
-{
-  "last_tool_result": {
-    "success": true,
-    "summary": "MCP tool 'text_stats' executed successfully."
-  },
-  "tool_call_count": 1,
-  "current_tool_request": null,
-  "current_state": "acting"
-}
-```
-
-## 9. Observe Tool Result
-
-Il nodo `observe_tool_result` converte il `ToolExecutionResult` in evidenza osservabile.
-
-```json
-{
-  "observed_evidence": [
-    {
-      "evidence_id": "step_1:tool:1:source:1",
-      "plan_step_id": "step_1",
-      "title": "mcp.local_test.text_stats",
-      "locator": "mcp://local_test/text_stats",
-      "excerpt": "{\"characters\": 53, \"lines\": 1, \"top_words\": [[\"evidence\", 3], [\"agent\", 2], [\"governance\", 1], [\"mcp\", 1]], \"words\": 7}",
-      "source_tool": "mcp.local_test.text_stats"
-    }
-  ]
-}
-```
-
-Registra anche una scratchpad entry audit-safe:
-
-```json
-{
-  "turn_index": 1,
+  "evidence_id": "step_1:tool:1:source:1",
   "plan_step_id": "step_1",
-  "entry_type": "observation",
-  "summary": "Observed tool result from 'mcp.local_test.text_stats': MCP tool 'text_stats' executed successfully.",
-  "evidence_refs": [
-    "step_1:tool:1:source:1"
-  ]
+  "title": "mcp.local_test.text_stats",
+  "locator": "mcp://local_test/text_stats",
+  "excerpt": "{\"characters\": 53, \"lines\": 1, \"top_words\": [[\"evidence\", 3], [\"agent\", 2], [\"governance\", 1], [\"mcp\", 1]], \"words\": 7}",
+  "source_tool": "mcp.local_test.text_stats"
 }
 ```
 
-Il grafo torna quindi all'actor.
+The graph then returns to the actor with the new evidence attached.
 
-## 10. Actor Dopo Evidenza
+## 8. Actor Completes the Step
 
-L'actor ora riceve evidenza e ultimo tool result.
+The actor sees the evidence and produces a validated step result.
 
-```json
-{
-  "current_plan_step": {
-    "step_id": "step_1",
-    "objective": "Compute text statistics for the supplied text.",
-    "status": "in_progress"
-  },
-  "observed_evidence": [
-    {
-      "evidence_id": "step_1:tool:1:source:1",
-      "title": "mcp.local_test.text_stats",
-      "excerpt": "{\"characters\": 53, \"lines\": 1, \"top_words\": [[\"evidence\", 3], [\"agent\", 2], [\"governance\", 1], [\"mcp\", 1]], \"words\": 7}"
-    }
-  ],
-  "last_tool_result": {
-    "success": true,
-    "content": "{\"characters\": 53, \"lines\": 1, \"top_words\": [[\"evidence\", 3], [\"agent\", 2], [\"governance\", 1], [\"mcp\", 1]], \"words\": 7}"
-  }
-}
-```
-
-L'actor completa il primo step:
+Example validated output:
 
 ```json
 {
@@ -520,105 +310,13 @@ L'actor completa il primo step:
 }
 ```
 
-Il runtime registra lo step completato:
+The runtime marks the step completed and advances the plan cursor.
 
-```json
-{
-  "executed_steps": [
-    {
-      "step_id": "step_1",
-      "objective": "Compute text statistics for the supplied text.",
-      "result_type": "intermediate_output",
-      "summary": "Text statistics were computed successfully.",
-      "output_text": "The most frequent word is evidence, followed by agent."
-    }
-  ],
-  "plan_steps": [
-    {
-      "step_id": "step_1",
-      "status": "completed"
-    },
-    {
-      "step_id": "step_2",
-      "status": "in_progress"
-    }
-  ],
-  "current_plan_step_index": 1
-}
-```
+## 9. Final Step
 
-## 11. Governance Sullo Step Completato
+The actor performs the synthesis step and emits the final output.
 
-Il secondo passaggio in governance valuta un output locale, non una tool call.
-
-```json
-{
-  "actor_result_type": "intermediate_output",
-  "capability_mode": "none",
-  "external_impact": false,
-  "tool_name": null,
-  "observed_evidence_count": 1,
-  "current_plan_step_id": "step_1"
-}
-```
-
-Output `confidence_risk_trajectory`:
-
-```json
-{
-  "evidence_quality": {
-    "score": 0.98,
-    "level": "strong",
-    "reason_codes": [
-      "evidence_marked_sufficient",
-      "objective_marked_satisfied",
-      "actor_confidence_contributed",
-      "observed_evidence_present",
-      "source_locator_present",
-      "last_tool_success"
-    ]
-  },
-  "operational_risk": {
-    "score": 0.15,
-    "level": "low"
-  },
-  "trajectory_health": {
-    "score": 1.0,
-    "level": "healthy"
-  },
-  "recommended_directive": "continue",
-  "summary": "Evidence quality is strong (0.98), operational risk is low (0.15), and trajectory health is healthy (1.00)."
-}
-```
-
-Decisione tipica dopo `decision_combiner`:
-
-```json
-{
-  "policy_decision": "allow",
-  "directive": "continue",
-  "policy_directive": "continue",
-  "oversight_recommended_directive": "continue",
-  "reason_codes": ["local_output_allowed"],
-  "summary": "Local-only output is allowed. Adaptive oversight recommended 'continue' and preserved the policy directive 'continue'."
-}
-```
-
-Il grafo torna all'actor per lo step finale.
-
-## 12. Actor Finale
-
-Current step:
-
-```json
-{
-  "step_id": "step_2",
-  "objective": "Synthesize the final answer from the computed statistics.",
-  "status": "in_progress"
-}
-```
-
-Output finale:
+Example final output:
 
 ```json
 {
@@ -627,7 +325,7 @@ Output finale:
   "summary": "Final answer produced from MCP text statistics.",
   "capability_mode": "none",
   "external_impact": false,
-  "output_text": "Nel testo fornito, la parola più frequente è 'evidence' con 3 occorrenze. Segue 'agent' con 2 occorrenze. Le parole 'governance' e 'MCP' compaiono una volta ciascuna.",
+  "output_text": "Nel testo fornito, la parola piu frequente e 'evidence' con 3 occorrenze. Segue 'agent' con 2 occorrenze. Le parole 'governance' e 'MCP' compaiono una volta ciascuna.",
   "step_validation": {
     "plan_step_id": "step_2",
     "objective_satisfied": true,
@@ -639,197 +337,48 @@ Output finale:
 }
 ```
 
-Stato aggiornato:
+After governance accepts the final local output, the runtime reaches `finalize_bootstrap` and terminates.
 
-```json
-{
-  "final_output_text": "Nel testo fornito, la parola più frequente è 'evidence' con 3 occorrenze. Segue 'agent' con 2 occorrenze. Le parole 'governance' e 'MCP' compaiono una volta ciascuna.",
-  "current_plan_step_index": null,
-  "current_state": "completed"
-}
-```
+## 10. HITL Branch
 
-## 13. Governance Finale E Finalize
+If governance routes to `WAITING_HUMAN_REVIEW`, the runtime pauses and exposes a typed human review request.
 
-La governance finale valuta l'output finale locale.
+The active contract is:
 
-```json
-{
-  "actor_result_type": "final_output",
-  "capability_mode": "none",
-  "external_impact": false,
-  "tool_name": null,
-  "observed_evidence_count": 1,
-  "current_plan_step_id": "step_2"
-}
-```
+- `governance` decides whether a pause is required
+- `oversight` can only tighten the decision
+- `human_review` resumes through typed decisions
 
-Decisione:
+Canonical human review decisions:
 
-```json
-{
-  "policy_decision": "allow",
-  "directive": "continue",
-  "policy_directive": "continue",
-  "oversight_recommended_directive": "continue",
-  "oversight_summary": "Evidence quality is strong (0.98), operational risk is low (0.15), and trajectory health is healthy (1.00).",
-  "summary": "Final local output is allowed. Adaptive oversight recommended 'continue' and preserved the policy directive 'continue'."
-}
-```
+- `approve_continue`
+- `approve_continue_read_only`
+- `request_more_evidence`
+- `replan`
+- `ask_clarification`
+- `abort`
 
-Il grafo arriva a `finalize_bootstrap` e termina.
+The local dashboard renders this snapshot as a read-only HTML control plane.
+It also exposes live refresh through client-side polling of `/snapshot.json`.
+When the CLI sees the first `WAITING_HUMAN_REVIEW` transition for a thread, it auto-launches the same dashboard session in a background server thread so the operator does not need to open it manually.
 
-## Stato Finale
+## 11. Trace Export
 
-`TaskState` finale semplificato:
+At the end of a run, `src/layer2_runtime_governance/trace.py` builds a typed, JSON-safe trace from `TaskState`.
+The trace is read-only. It is not a second runtime state.
 
-```json
-{
-  "current_state": "completed",
-  "bootstrap_completed": true,
-  "tool_call_count": 1,
-  "actor_turn_count": 3,
-  "final_output_text": "Nel testo fornito, la parola più frequente è 'evidence' con 3 occorrenze. Segue 'agent' con 2 occorrenze. Le parole 'governance' e 'MCP' compaiono una volta ciascuna.",
-  "plan_steps": [
-    {
-      "step_id": "step_1",
-      "status": "completed"
-    },
-    {
-      "step_id": "step_2",
-      "status": "completed"
-    }
-  ],
-  "observed_evidence": [
-    {
-      "evidence_id": "step_1:tool:1:source:1",
-      "title": "mcp.local_test.text_stats",
-      "locator": "mcp://local_test/text_stats",
-      "source_tool": "mcp.local_test.text_stats"
-    }
-  ],
-  "governance_history": [
-    {
-      "policy_decision": "allow_read_only",
-      "directive": "continue_read_only",
-      "evaluated_tool_name": "mcp.local_test.text_stats"
-    },
-    {
-      "policy_decision": "allow",
-      "directive": "continue"
-    },
-    {
-      "policy_decision": "allow",
-      "directive": "continue"
-    }
-  ],
-  "oversight_history": [
-    {
-      "evidence_quality": {"score": 0.0, "level": "weak"},
-      "operational_risk": {"score": 0.15, "level": "low"},
-      "trajectory_health": {"score": 1.0, "level": "healthy"},
-      "recommended_directive": "continue"
-    },
-    {
-      "evidence_quality": {"score": 0.98, "level": "strong"},
-      "operational_risk": {"score": 0.15, "level": "low"},
-      "trajectory_health": {"score": 1.0, "level": "healthy"},
-      "recommended_directive": "continue"
-    }
-  ]
-}
-```
+It is used for:
 
-## Runtime Trace Export
+- debug output
+- thesis evidence
+- dashboard payloads
+- offline evaluation
 
-Alla fine della run, `src/layer2_runtime_governance/trace.py` costruisce un artefatto tipizzato a partire da `TaskState`.
-Il trace non Ã¨ un secondo stato runtime: Ã¨ una vista read-only e JSON-safe per debug, tesi, valutazione futura e payload HITL.
+The CLI can print the trace, but the trace itself remains derived from the runtime state.
 
-Forma semplificata:
+## Current Thesis Reading
 
-```json
-{
-  "runtime": {
-    "thread_id": "layer2-demo",
-    "current_state": "completed",
-    "bootstrap_completed": true,
-    "actor_turn_count": 3,
-    "tool_call_count": 1
-  },
-  "intake": {
-    "goal": "Analizza questo testo...",
-    "domain_type": "analysis",
-    "sensitivity": "low",
-    "policy_profile_name": "default"
-  },
-  "plan_steps": [
-    {
-      "step_id": "step_1",
-      "objective": "Compute word frequency statistics.",
-      "status": "completed"
-    }
-  ],
-  "tool_calls": [
-    {
-      "tool_name": "mcp.local_test.text_stats",
-      "success": true,
-      "summary": "Computed text statistics.",
-      "sources": [
-        {
-          "locator": "mcp://local_test/text_stats"
-        }
-      ]
-    }
-  ],
-  "observed_evidence": [
-    {
-      "evidence_id": "step_1:tool:1:source:1",
-      "locator": "mcp://local_test/text_stats",
-      "source_tool": "mcp.local_test.text_stats"
-    }
-  ],
-  "governance_decisions": [
-    {
-      "policy_decision": "allow_read_only",
-      "policy_directive": "continue_read_only",
-      "oversight_recommended_directive": "continue",
-      "directive": "continue_read_only"
-    }
-  ],
-  "oversight_assessments": [
-    {
-      "evidence_quality": {"score": 0.98, "level": "strong"},
-      "operational_risk": {"score": 0.15, "level": "low"},
-      "trajectory_health": {"score": 1.0, "level": "healthy"},
-      "recommended_directive": "continue"
-    }
-  ],
-  "execution": {
-    "final_output_text": "Nel testo fornito...",
-    "scratchpad": [],
-    "step_validations": []
-  }
-}
-```
-
-`src/main_layer2.py --full-trace` stampa questo trace completo.
-Il compact trace della CLI resta disponibile, ma viene derivato dallo stesso exporter tipizzato.
-
-## Sintesi Architetturale
-
-Il flusso dimostra la distinzione centrale della tesi:
-
-```text
-Autonomia esterna:
-  l'utente assegna un task e riceve un risultato.
-
-Governance interna:
-  ogni uso di capacità esterne passa da contratti tipizzati,
-  OPA policy, oversight deterministico, Tool Gateway,
-  normalizzazione evidenze e trace.
-```
-
-Formula sintetica:
+The current architecture demonstrates this split:
 
 ```text
 User task
@@ -839,12 +388,18 @@ User task
   -> Actor
   -> Governance
      -> OPA policy
-     -> confidence_risk_trajectory
-     -> decision_combiner
+     -> deterministic oversight
+     -> decision combiner
   -> Tool Gateway
   -> MCP backend
   -> ToolExecutionResult
   -> ObservedEvidence
   -> Actor
+  -> HITL if needed
   -> Final output
+  -> Trace export
+  -> Dashboard snapshot
 ```
+
+The important constraint is that the dashboard and the trace are views over the same runtime contract.
+They must not become parallel sources of truth.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Callable
 from typing import Any
 
 # Install targeted warning filters before importing langgraph and langchain_core dependencies.
@@ -121,6 +122,7 @@ def build_runtime_graph(
     tool_gateway_service: ToolGatewayPort | None = None,
     replanner_service: ReplannerPort | None = None,
     policy_engine_service: PolicyEnginePort | None = None,
+    hitl_event_callback: Callable[[TaskState], None] | None = None,
 ):
     # Wire the current Layer 2 graph and compile it into an executable LangGraph.
     resolved_planner = planner_service or build_default_planner()
@@ -138,7 +140,13 @@ def build_runtime_graph(
     builder.add_node("bootstrap_from_intake", _bootstrap_node)
     builder.add_node("planner", _build_planner_node(resolved_planner))
     builder.add_node("actor", _build_actor_node(resolved_actor))
-    builder.add_node("governance", _build_governance_node(resolved_policy_engine))
+    builder.add_node(
+        "governance",
+        _build_governance_node(
+            resolved_policy_engine,
+            hitl_event_callback=hitl_event_callback,
+        ),
+    )
     builder.add_node("human_review", _build_human_review_node())
     builder.add_node("tool_gateway", _build_tool_gateway_node(resolved_tool_gateway))
     builder.add_node("observe_tool_result", _observe_tool_result_node)
@@ -218,7 +226,11 @@ def _build_actor_node(actor_service: ActorPort):
 
 
 # Close over the resolved policy engine so governance stays deterministic in tests.
-def _build_governance_node(policy_engine_service: PolicyEnginePort):
+def _build_governance_node(
+    policy_engine_service: PolicyEnginePort,
+    *,
+    hitl_event_callback: Callable[[TaskState], None] | None = None,
+):
     def _governance_node(
         state: Layer2GraphState,
         config: RunnableConfig | None = None,
@@ -229,6 +241,7 @@ def _build_governance_node(policy_engine_service: PolicyEnginePort):
                 _copy_task_state(state["task_state"]),
                 policy_engine_service=policy_engine_service,
                 thread_id=thread_id,
+                hitl_event_callback=hitl_event_callback,
             )
         }
 
@@ -464,9 +477,15 @@ def _build_default_checkpointer() -> MemorySaver:
     return MemorySaver(serde=serializer)
 
 
+# Expose the default checkpointer so local tools can share the same resume-safe serializer.
+def build_default_checkpointer() -> MemorySaver:
+    return _build_default_checkpointer()
+
+
 __all__ = [
     "Layer2GraphInput",
     "Layer2GraphOutput",
     "Layer2GraphState",
     "build_runtime_graph",
+    "build_default_checkpointer",
 ]

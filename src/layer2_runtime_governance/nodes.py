@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Callable
 
 from layer1_intake import IntakeResult
 
@@ -146,6 +147,7 @@ def governance(
     *,
     policy_engine_service: PolicyEnginePort,
     thread_id: str | None = None,
+    hitl_event_callback: Callable[[TaskState], None] | None = None,
 ) -> TaskState:
     if state.actor_result is None:
         _append_step_record(
@@ -183,6 +185,9 @@ def governance(
             state=state,
             thread_id=resolved_thread_id,
         )
+        if hitl_event_callback is not None:
+            # Emit the HITL event before the graph pauses so the control plane can surface it.
+            hitl_event_callback(deepcopy(state))
     else:
         state.pending_human_review_request = None
         state.human_review_resume_state = None

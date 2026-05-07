@@ -229,12 +229,42 @@ def _build_review_summary(
     resume_state: RuntimeState,
 ) -> str | None:
     parts: list[str] = []
+    normalized_parts: list[str] = []
     if governance_decision is not None:
-        parts.append(governance_decision.summary)
+        _append_unique_review_part(
+            parts,
+            normalized_parts,
+            governance_decision.summary,
+        )
     if oversight_assessment is not None and oversight_assessment.summary:
-        parts.append(oversight_assessment.summary)
-    parts.append(f"Approval would resume to '{resume_state.value}'.")
+        _append_unique_review_part(
+            parts,
+            normalized_parts,
+            oversight_assessment.summary,
+        )
+    _append_unique_review_part(parts, normalized_parts, f"Approval would resume to '{resume_state.value}'.")
     return " ".join(parts) if parts else None
+
+
+# Append one review summary fragment only when it does not already appear in the summary body.
+def _append_unique_review_part(
+    parts: list[str],
+    normalized_parts: list[str],
+    part: str | None,
+) -> None:
+    if part is None:
+        return
+
+    normalized_part = " ".join(part.split()).strip()
+    if not normalized_part:
+        return
+
+    joined_parts = " ".join(normalized_parts)
+    if normalized_part in joined_parts:
+        return
+
+    parts.append(normalized_part)
+    normalized_parts.append(normalized_part)
 
 
 # Convert a review payload into JSON-safe primitives for interrupt() and tracing.
