@@ -27,6 +27,7 @@ from layer2_runtime_governance import build_default_checkpointer, build_runtime_
 from layer2_runtime_governance import HumanReviewDecision
 from layer2_runtime_governance.actor_contract import ActorPort
 from layer2_runtime_governance.governance import PolicyEnginePort
+from layer2_runtime_governance.persistence import RuntimeArtifactStore, persist_runtime_artifacts
 from layer2_runtime_governance.planning import PlannerPort
 from layer2_runtime_governance.replanning import ReplannerPort
 from layer2_runtime_governance.state import RuntimeState, TaskState
@@ -62,6 +63,7 @@ def run_layer2_flow(
     replanner_service: ReplannerPort | None = None,
     policy_engine_service: PolicyEnginePort | None = None,
     checkpointer: Any | None = None,
+    artifact_store: RuntimeArtifactStore | None = None,
     progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
     hitl_event_callback: Callable[[TaskState], None] | None = None,
 ) -> dict[str, Any]:
@@ -119,11 +121,13 @@ def run_layer2_flow(
         )
 
     # Return both layer boundaries so callers can inspect the handoff end to end.
-    return {
+    trace = {
         "thread_id": resolved_thread_id,
         "intake_result": intake_result,
         "final_result": final_result,
     }
+    _persist_runtime_artifacts_from_trace(trace, artifact_store=artifact_store)
+    return trace
 
 
 # Resume a paused Layer 2 run using the same thread id and a typed human decision.
@@ -137,6 +141,7 @@ def resume_layer2_flow(
     replanner_service: ReplannerPort | None = None,
     policy_engine_service: PolicyEnginePort | None = None,
     checkpointer: Any | None = None,
+    artifact_store: RuntimeArtifactStore | None = None,
 ) -> dict[str, Any]:
     runtime_graph = build_runtime_graph(
         planner_service=planner_service,
@@ -149,10 +154,18 @@ def resume_layer2_flow(
 
     config = {"configurable": {"thread_id": thread_id}}
     final_result = runtime_graph.invoke(Command(resume=human_review_decision), config=config)
-    return {
+    intake_result = _load_intake_result_from_checkpoint(
+        thread_id=thread_id,
+        runtime_graph=runtime_graph,
+    )
+    trace = {
         "thread_id": thread_id,
         "final_result": final_result,
     }
+    if intake_result is not None:
+        trace["intake_result"] = intake_result
+        _persist_runtime_artifacts_from_trace(trace, artifact_store=artifact_store)
+    return trace
 
 
 # Stream graph updates so the CLI can show progress during long LLM/tool calls.
@@ -289,6 +302,43 @@ def _build_runtime_trace(trace: dict[str, Any]) -> Any:
         intake_result=trace["intake_result"],
         task_state=final_task_state,
     )
+
+
+# Persist the canonical runtime artifacts whenever a full task_state is available.
+def _persist_runtime_artifacts_from_trace(
+    trace: dict[str, Any],
+    *,
+    artifact_store: RuntimeArtifactStore | None,
+) -> None:
+    intake_result = trace.get("intake_result")
+    final_result = trace.get("final_result", {})
+    task_state = final_result.get("task_state") if isinstance(final_result, dict) else None
+    if not isinstance(intake_result, IntakeResult):
+        return
+    if not isinstance(task_state, TaskState):
+        return
+    persist_runtime_artifacts(
+        thread_id=trace["thread_id"],
+        intake_result=intake_result,
+        task_state=task_state,
+        artifact_store=artifact_store,
+    )
+
+
+# Recover the canonical intake payload from the persisted checkpoint snapshot after resume.
+def _load_intake_result_from_checkpoint(
+    *,
+    thread_id: str,
+    runtime_graph: Any,
+) -> IntakeResult | None:
+    snapshot = runtime_graph.get_state({"configurable": {"thread_id": thread_id}})
+    snapshot_values = snapshot.values if snapshot is not None else {}
+    if not isinstance(snapshot_values, dict):
+        return None
+    task_state = snapshot_values.get("task_state")
+    if not isinstance(task_state, TaskState):
+        return None
+    return task_state.intake_payload
 
 
 def parse_cli_args() -> argparse.Namespace:

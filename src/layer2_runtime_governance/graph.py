@@ -9,7 +9,6 @@ from .runtime_warnings import suppress_known_runtime_warnings
 
 suppress_known_runtime_warnings()
 
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
 from langchain_core.runnables import RunnableConfig
@@ -68,10 +67,13 @@ from .nodes import (
     human_review,
     tool_gateway,
 )
+from .persistence import DiskBackedMemorySaver
 from .planning import PlannerPort, build_default_planner
 from .replanning import ReplanDecision, ReplannerPort, build_default_replanner
 from .state import (
     ExecutedPlanStep,
+    ExternalCommunicationPhase,
+    ExternalCommunicationState,
     HumanReviewDecision,
     HumanReviewDecisionType,
     HumanReviewRequest,
@@ -88,6 +90,7 @@ from .state import (
     TaskState,
 )
 from .tool_contract import (
+    EvidenceSupportLevel,
     ObservedEvidence,
     ToolExecutionResult,
     ToolGatewayPort,
@@ -418,8 +421,8 @@ def _extract_bootstrap_thread_id(
     return state["intake_result"].metadata.request_id
 
 
-def _build_default_checkpointer() -> MemorySaver:
-    # Register the custom runtime models so in-memory checkpointing can serialize them safely.
+def _build_default_checkpointer(*, storage_path: Any | None = None) -> DiskBackedMemorySaver:
+    # Register the custom runtime models so checkpoint persistence can serialize them safely.
     serializer = JsonPlusSerializer(
         allowed_msgpack_modules=[
             ActorResult,
@@ -430,6 +433,8 @@ def _build_default_checkpointer() -> MemorySaver:
             DomainType,
             IntakeMetadata,
             IntakeResult,
+            ExternalCommunicationPhase,
+            ExternalCommunicationState,
             HumanReviewDecision,
             HumanReviewDecisionType,
             HumanReviewRequest,
@@ -438,6 +443,7 @@ def _build_default_checkpointer() -> MemorySaver:
             GovernanceReasonCode,
             EvidenceQualityAssessment,
             EvidenceQualityWeights,
+            EvidenceSupportLevel,
             ObservedEvidence,
             OperationalRiskAssessment,
             ParseStatus,
@@ -474,12 +480,12 @@ def _build_default_checkpointer() -> MemorySaver:
             ToolSource,
         ]
     )
-    return MemorySaver(serde=serializer)
+    return DiskBackedMemorySaver(serde=serializer, storage_path=storage_path)
 
 
 # Expose the default checkpointer so local tools can share the same resume-safe serializer.
-def build_default_checkpointer() -> MemorySaver:
-    return _build_default_checkpointer()
+def build_default_checkpointer(*, storage_path: Any | None = None) -> DiskBackedMemorySaver:
+    return _build_default_checkpointer(storage_path=storage_path)
 
 
 __all__ = [

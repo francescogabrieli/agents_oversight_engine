@@ -16,7 +16,7 @@ from .oversight import (
     OversightAssessment,
     OversightRecommendedDirective,
 )
-from .state import RuntimeFlag, RuntimeState, TaskState
+from .state import ExternalCommunicationPhase, RuntimeFlag, RuntimeState, TaskState
 from .tool_contract import ToolName
 
 
@@ -53,6 +53,7 @@ class GovernanceReasonCode(str, Enum):
     DENIED_BY_POLICY = "denied_by_policy"
     NO_TOOL_REQUEST = "no_tool_request"
     EXTERNAL_CAPABILITY_REQUESTED = "external_capability_requested"
+    EXTERNAL_COMMUNICATION_REVIEW_REQUIRED = "external_communication_review_required"
 
 
 # PolicyEvaluationInput is the compact snapshot sent to OPA.
@@ -74,12 +75,14 @@ class PolicyEvaluationInput:
     capability_mode: CapabilityAccessMode
     external_impact: bool
     blocking_reason: str | None
+    actor_has_output_text: bool
     tool_name: ToolName | None
     tool_has_query: bool
     tool_has_url: bool
     tool_call_count: int
     observed_evidence_count: int
     actor_turn_count: int
+    external_communication_phase: ExternalCommunicationPhase | None
 
 
 # PolicyEvaluationResult mirrors the typed output returned by OPA.
@@ -181,12 +184,18 @@ def build_policy_evaluation_input(*, task_state: TaskState) -> PolicyEvaluationI
         capability_mode=actor_result.capability_mode,
         external_impact=actor_result.external_impact,
         blocking_reason=actor_result.blocking_reason,
+        actor_has_output_text=bool(actor_result.output_text and actor_result.output_text.strip()),
         tool_name=current_tool_request.tool_name if current_tool_request is not None else None,
         tool_has_query=bool(current_tool_request and current_tool_request.query),
         tool_has_url=bool(current_tool_request and current_tool_request.url),
         tool_call_count=task_state.tool_call_count,
         observed_evidence_count=len(task_state.observed_evidence),
         actor_turn_count=task_state.actor_turn_count,
+        external_communication_phase=(
+            task_state.external_communication.phase
+            if task_state.external_communication is not None
+            else None
+        ),
     )
 
 
@@ -223,11 +232,19 @@ def build_opa_input_document(*, policy_input: PolicyEvaluationInput) -> dict[str
             "capability_mode": policy_input.capability_mode.value,
             "external_impact": policy_input.external_impact,
             "blocking_reason": policy_input.blocking_reason,
+            "has_output_text": policy_input.actor_has_output_text,
         },
         "tool": {
             "name": policy_input.tool_name.value if policy_input.tool_name is not None else None,
             "has_query": policy_input.tool_has_query,
             "has_url": policy_input.tool_has_url,
+        },
+        "external_communication": {
+            "phase": (
+                policy_input.external_communication_phase.value
+                if policy_input.external_communication_phase is not None
+                else None
+            ),
         },
     }
 

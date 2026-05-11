@@ -29,6 +29,7 @@ from layer2_runtime_governance import (
     CapabilityAccessMode,
     DashboardFocus,
     EvidenceQualityAssessment,
+    ExternalCommunicationPhase,
     GovernanceDecision,
     GovernanceDirective,
     GovernanceHitlDashboardSnapshot,
@@ -96,7 +97,7 @@ class Layer2HitlDashboardTests(unittest.TestCase):
         self.assertEqual(payload["focus"], "waiting_human_review")
         self.assertEqual(decoded["human_review"]["pending_request"]["request_id"], "thread-1:hitl")
         self.assertEqual(decoded["reason_codes"], ["human_review_required", "tool_requires_human_review"])
-        self.assertEqual(snapshot.external_communication_state, "not_implemented")
+        self.assertIsNone(snapshot.external_communication)
 
     def test_dashboard_snapshot_marks_terminal_states_explicitly(self) -> None:
         task_state = TaskState.from_intake(_intake_result())
@@ -122,6 +123,19 @@ class Layer2HitlDashboardTests(unittest.TestCase):
         self.assertEqual(snapshot.human_review.last_decision.decision_type, HumanReviewDecisionType.ABORT)
         self.assertEqual(snapshot.reason_codes, ("denied_by_policy",))
 
+    def test_dashboard_snapshot_exposes_external_communication_phase(self) -> None:
+        task_state = TaskState.from_intake(_external_communication_intake_result())
+        task_state.external_communication.phase = ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
+        task_state.external_communication.last_transition_summary = (
+            "A draft proposal reached the governed review gate."
+        )
+
+        snapshot = build_governance_hitl_dashboard_snapshot(task_state)
+
+        self.assertIsNotNone(snapshot.external_communication)
+        self.assertEqual(snapshot.external_communication.phase, "human_review_required")
+        self.assertIn("governed review gate", snapshot.external_communication.last_transition_summary)
+
 
 # Build a canonical IntakeResult for dashboard tests.
 def _intake_result() -> IntakeResult:
@@ -140,6 +154,36 @@ def _intake_result() -> IntakeResult:
                 confidence_threshold=0.65,
                 budget=BudgetConfig(max_steps=4, max_tool_calls=3),
                 policy_profile_name="dashboard_profile",
+            ),
+        ),
+        metadata=IntakeMetadata(
+            parse_status=ParseStatus.COMPLETE,
+            parser_name="dashboard_test_intake",
+            prompt_version="dashboard_test_v1",
+            schema_version="1.0.0",
+            warnings=[],
+            missing_information=[],
+        ),
+    )
+
+
+# Build an external communication intake so the snapshot can expose the typed branch.
+def _external_communication_intake_result() -> IntakeResult:
+    return IntakeResult(
+        structured_task=StructuredTask(
+            task_spec=TaskSpec(
+                goal="Prepare a cautious external email draft.",
+                context="Do not send anything automatically.",
+                constraints=["Keep the draft local."],
+                domain_type=DomainType.EXTERNAL_COMMUNICATION,
+                domain_label="external_comm_dashboard_test",
+                sensitivity=SensitivityLevel.HIGH,
+                success_criteria=["Pause before any outward-facing execution."],
+            ),
+            execution_policy=ExecutionPolicy(
+                confidence_threshold=0.75,
+                budget=BudgetConfig(max_steps=4, max_tool_calls=3),
+                policy_profile_name="external_comm_profile",
             ),
         ),
         metadata=IntakeMetadata(

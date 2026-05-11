@@ -19,7 +19,14 @@ from .oversight import (
     OversightAssessment,
     TrajectoryHealthAssessment,
 )
-from .state import ExecutedPlanStep, ScratchpadEntry, StepRecord, StepValidation, TaskState
+from .state import (
+    ExecutedPlanStep,
+    ExternalCommunicationState,
+    ScratchpadEntry,
+    StepRecord,
+    StepValidation,
+    TaskState,
+)
 from .state import HumanReviewDecision, HumanReviewRequest
 from .tool_contract import ObservedEvidence, ToolExecutionResult, ToolRequest, ToolSource
 
@@ -200,6 +207,13 @@ class TraceExecutionSummary:
 
 
 @dataclass(frozen=True)
+class TraceExternalCommunicationSummary:
+    # Keep the current external communication phase visible in runtime artifacts and evaluation.
+    phase: str
+    last_transition_summary: str | None
+
+
+@dataclass(frozen=True)
 class Layer2RuntimeTrace:
     # Layer2RuntimeTrace is the stable JSON-exportable audit artifact for Layer 2.
     runtime: TraceRuntimeSummary
@@ -218,6 +232,7 @@ class Layer2RuntimeTrace:
     governance_decisions: tuple[TraceGovernanceDecision, ...]
     oversight_assessments: tuple[TraceOversightAssessment, ...]
     human_review: TraceHumanReviewSummary
+    external_communication: TraceExternalCommunicationSummary | None
 
 
 # Build the stable Layer 2 trace from the canonical runtime state.
@@ -252,6 +267,9 @@ def build_layer2_runtime_trace(
             for assessment in task_state.oversight_history
         ),
         human_review=_build_human_review_summary(task_state=task_state),
+        external_communication=_build_external_communication_summary(
+            task_state.external_communication
+        ),
     )
 
 
@@ -301,6 +319,11 @@ def build_compact_trace_from_runtime_trace(trace: Layer2RuntimeTrace) -> dict[st
             ),
         },
         "human_review_snapshot": asdict(trace.human_review),
+        "external_communication_snapshot": (
+            asdict(trace.external_communication)
+            if trace.external_communication is not None
+            else None
+        ),
         "bootstrap_state": {
             "current_state": trace.runtime.current_state,
             "step_count": len(trace.runtime.step_history),
@@ -573,6 +596,18 @@ def _build_human_review_decision(
     )
 
 
+# Convert the typed external communication subflow into trace form.
+def _build_external_communication_summary(
+    external_communication: ExternalCommunicationState | None,
+) -> TraceExternalCommunicationSummary | None:
+    if external_communication is None:
+        return None
+    return TraceExternalCommunicationSummary(
+        phase=external_communication.phase.value,
+        last_transition_summary=external_communication.last_transition_summary,
+    )
+
+
 # Convert any oversight signal score into trace form.
 def _build_oversight_signal(
     signal: EvidenceQualityAssessment | OperationalRiskAssessment | TrajectoryHealthAssessment,
@@ -711,6 +746,7 @@ __all__ = [
     "Layer2RuntimeTrace",
     "TraceActorTurn",
     "TraceExecutionSummary",
+    "TraceExternalCommunicationSummary",
     "TraceHumanReviewDecision",
     "TraceHumanReviewRequest",
     "TraceHumanReviewSummary",

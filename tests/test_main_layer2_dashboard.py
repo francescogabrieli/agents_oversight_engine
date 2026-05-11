@@ -26,6 +26,7 @@ from layer1_intake import (
 from layer2_runtime_governance import (
     ActorResultType,
     CapabilityAccessMode,
+    ExternalCommunicationPhase,
     GovernanceDecision,
     GovernanceDirective,
     GovernanceReasonCode,
@@ -46,9 +47,11 @@ from layer2_runtime_governance import (
     ToolRequest,
     TrajectoryHealthAssessment,
     build_governance_hitl_dashboard_snapshot,
+    build_default_checkpointer,
 )
 from main_layer2_dashboard import (
     DashboardSession,
+    build_dashboard_session_from_thread_id,
     create_dashboard_session,
     _build_response_headers,
     render_dashboard_page,
@@ -68,6 +71,7 @@ class MainLayer2DashboardTests(unittest.TestCase):
         self.assertIn("thread-1", html)
         self.assertIn("Current Plan Step", html)
         self.assertIn("Human Review", html)
+        self.assertIn("External Communication", html)
         self.assertIn("approve continue", html)
         self.assertIn("request more evidence", html)
         self.assertIn('class="card card-hero card-wide"', html)
@@ -144,6 +148,35 @@ class MainLayer2DashboardTests(unittest.TestCase):
         self.assertEqual(session.final_result["task_state"].current_state, RuntimeState.WAITING_HUMAN_REVIEW)
         self.assertIsInstance(build_governance_hitl_dashboard_snapshot(session.final_result["task_state"]).focus.value, str)
 
+    def test_dashboard_session_can_be_rebuilt_from_persisted_thread(self) -> None:
+        with self.subTest("persisted thread reload"):
+            temp_checkpoint = REPO_ROOT / "artifacts" / "test-temp-dashboard-checkpoints.pkl"
+            if temp_checkpoint.exists():
+                temp_checkpoint.unlink()
+            checkpointer = build_default_checkpointer(storage_path=temp_checkpoint)
+            session = create_dashboard_session(
+                raw_task_text="Reload this external communication dashboard thread.",
+                context_hint="Keep the draft local.",
+                demo_intake_profile="clarification",
+                resume_flow=_fake_resume_flow({}),
+                checkpointer=checkpointer,
+            )
+
+            reloaded = build_dashboard_session_from_thread_id(
+                session.thread_id,
+                checkpointer=checkpointer,
+                resume_flow=_fake_resume_flow({}),
+            )
+
+            self.assertEqual(reloaded.thread_id, session.thread_id)
+            self.assertEqual(
+                reloaded.final_result["task_state"].current_state,
+                RuntimeState.WAITING_HUMAN_REVIEW,
+            )
+
+            if temp_checkpoint.exists():
+                temp_checkpoint.unlink()
+
 
 # Build a paused session with a review payload and a controllable resume runner.
 def _build_paused_session(*, resume_flow=None) -> DashboardSession:
@@ -165,6 +198,10 @@ def _build_paused_session(*, resume_flow=None) -> DashboardSession:
     task_state.last_oversight_assessment = _oversight_assessment()
     task_state.pending_human_review_request = _human_review_request()
     task_state.last_human_review_request = task_state.pending_human_review_request
+    task_state.external_communication.phase = ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
+    task_state.external_communication.last_transition_summary = (
+        "A local draft proposal is waiting for human review."
+    )
 
     return DashboardSession(
         thread_id="thread-1",
@@ -224,12 +261,12 @@ def _intake_result() -> IntakeResult:
     return IntakeResult(
         structured_task=StructuredTask(
             task_spec=TaskSpec(
-                goal="Inspect the HITL dashboard contract.",
-                context="Use deterministic fixtures.",
+                goal="Prepare a cautious external communication draft.",
+                context="Use deterministic fixtures and keep the draft local.",
                 constraints=["Stay read-only."],
-                domain_type=DomainType.ANALYSIS,
-                domain_label="dashboard_test",
-                sensitivity=SensitivityLevel.MEDIUM,
+                domain_type=DomainType.EXTERNAL_COMMUNICATION,
+                domain_label="dashboard_test_external_comm",
+                sensitivity=SensitivityLevel.HIGH,
                 success_criteria=["Expose a typed dashboard snapshot."],
             ),
             execution_policy=ExecutionPolicy(

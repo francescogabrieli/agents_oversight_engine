@@ -40,6 +40,8 @@ It already includes:
 - an active `replanner` branch for `NEEDS_REPLAN`
 - deterministic `confidence_risk_trajectory` oversight for evidence quality, operational risk, and trajectory health
 - typed human-review requests and decisions with LangGraph `interrupt / resume`
+- durable local LangGraph checkpoint persistence and per-thread runtime artifacts on disk
+- typed `external_communication` phase tracking for evidence, draft, review, approval, and blocked states
 - typed runtime trace export through `trace.py`, surfaced by `src/main_layer2.py`
 - offline trace evaluation and reporting through `evaluation.py`, surfaced by `src/main_layer2_evaluation.py`
 
@@ -150,12 +152,13 @@ Main files:
 - `oversight.py`
 - `evaluation.py`
 - `openrouter_client.py`
+- `persistence.py`
 - `trace.py`
 - `runtime_warnings.py`
 
 Current design:
 
-- `state.py` defines the bootstrap state contract, runtime flags, planner snapshot models, actor execution snapshot, tool loop state, observed evidence, audit-safe scratchpad entries, typed step validations, oversight history, and runtime step outcomes
+- `state.py` defines the bootstrap state contract, runtime flags, planner snapshot models, actor execution snapshot, tool loop state, observed evidence, audit-safe scratchpad entries, typed step validations, oversight history, runtime step outcomes, and the typed `external_communication` subflow state
 - `nodes.py` contains `bootstrap_from_intake`, `planner`, `actor`, `governance`, `human_review`, `tool_gateway`, `observe_tool_result`, `replanner`, and bootstrap closure helpers
 - `planning.py` defines the planner port, prompt builders, and the default OpenAI-backed planner
 - `acting.py` defines the actor port, prompt builders, the temporary OpenRouter-backed actor, and the optional OpenAI-backed actor using runtime-bound tools instead of a prompt-only tool inventory
@@ -168,6 +171,7 @@ Current design:
 - `governance.py` defines the typed policy input/output contracts, OPA HTTP policy engine, and governance decision mapping used after actor execution
 - `oversight.py` defines deterministic adaptive oversight for `evidence_quality`, `operational_risk`, and `trajectory_health`, plus the combiner recommendation consumed by governance
 - `openrouter_client.py` defines the OpenRouter HTTP adapter used by the temporary Layer 2 actor test backend
+- `persistence.py` defines the durable disk-backed LangGraph saver plus the per-thread runtime artifact store used for trace, dashboard, and HITL persistence
 - `trace.py` defines the typed, JSON-exportable Layer 2 runtime trace contract used for debugging, thesis evidence, HITL payloads, and evaluation
 - `evaluation.py` defines the offline trace evaluation pipeline that reads exported trace JSON and produces JSON and Markdown reports
 - `hitl_dashboard.py` defines the dashboard-facing snapshot model derived from `TaskState`, governance, oversight, and HITL review payloads
@@ -282,6 +286,7 @@ Current relevant files:
 - the active baseline also includes the real `replanner` branch triggered by `NEEDS_REPLAN`
 - the active baseline also includes a typed governance branch after `actor` that can continue, replan, escalate, or abort
 - governance now combines OPA hard policy with deterministic `confidence_risk_trajectory` oversight; OPA denials, required review, and clarification decisions remain non-negotiable
+- external communication drafts are now explicit runtime state, and policy may require review based on the typed `external_communication` phase
 - the planner/executor split should remain aligned with `docs/plan-and-execute.ipynb` unless there is a clear thesis-driven reason to diverge
 - planner output must remain semantic and typed
 - planner output must not contain concrete tool calls, executable payloads, or framework-specific actions
@@ -324,6 +329,8 @@ Current relevant files:
 - `WAITING_HUMAN_REVIEW` is now the typed pause state that feeds the LangGraph `interrupt / resume` HITL path
 - governance is active as an explicit runtime node and uses OPA over HTTP as the deterministic policy engine target
 - adaptive oversight may only preserve or make the policy decision more conservative; it must never make an OPA decision more permissive
+- the default LangGraph checkpointer is now a durable local disk-backed saver rather than a process-local in-memory saver
+- the runtime persists per-thread artifacts under `artifacts/runtime/<thread_id>/`, including trace, compact trace, dashboard snapshot, runtime summary, and pending HITL payload when present
 - oversight scoring must remain deterministic, explainable, and configured through `configs/layer2_oversight_policy.json`
 - trajectory-health turn pressure should stay forgiving enough that short source-plus-summary tasks can make a few recovery turns without being forced into replanning
 - runtime trace export must be read-only over `TaskState`; it must not mutate runtime state or become a parallel source of truth
@@ -406,6 +413,12 @@ Run the local HITL control plane dashboard:
 .\.venv\Scripts\python.exe src\main_layer2_dashboard.py --demo-intake-profile clarification --task "Find official sources about the Digital Markets Act and produce a short summary."
 ```
 
+Reload the local HITL control plane dashboard from a persisted thread:
+
+```powershell
+.\.venv\Scripts\python.exe src\main_layer2_dashboard.py --load-thread-id <thread_id>
+```
+
 
 ## Testing
 
@@ -446,7 +459,7 @@ The project currently uses:
 - OpenAI API for the `web_search` path in the default Layer 2 tool gateway
 - Python standard library HTTP/HTML extraction for the `fetch_url_text` path in the default Layer 2 tool gateway
 - LangGraph for Layer 2 runtime orchestration
-- in-memory LangGraph checkpointing for the current local runtime graph
+- durable local disk-backed LangGraph checkpoint persistence for the current local runtime graph
 
 Environment variables may be loaded from:
 

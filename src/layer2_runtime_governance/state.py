@@ -5,6 +5,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from layer1_intake import (
+    DomainType,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeResult,
@@ -75,6 +76,15 @@ class HumanReviewDecisionType(str, Enum):
     REPLAN = "replan"
     ASK_CLARIFICATION = "ask_clarification"
     ABORT = "abort"
+
+
+class ExternalCommunicationPhase(str, Enum):
+    # External communication remains a gated subflow, even before real execution is added.
+    EVIDENCE_COLLECTION = "evidence_collection"
+    DRAFT_PROPOSAL = "draft_proposal"
+    HUMAN_REVIEW_REQUIRED = "human_review_required"
+    APPROVED_FOR_EXECUTION = "approved_for_execution"
+    BLOCKED = "blocked"
 
 
 @dataclass
@@ -167,6 +177,13 @@ class HumanReviewDecision:
 
 
 @dataclass
+class ExternalCommunicationState:
+    # Keep the externally impactful draft/review boundary explicit in TaskState.
+    phase: ExternalCommunicationPhase
+    last_transition_summary: str | None = None
+
+
+@dataclass
 class TaskState:
     # Direct handoff from Layer 1.
     intake_payload: IntakeResult
@@ -182,6 +199,7 @@ class TaskState:
     runtime_flags: list[RuntimeFlag] = field(default_factory=list)
     bootstrap_completed: bool = False
     human_review_resume_state: RuntimeState | None = None
+    external_communication: ExternalCommunicationState | None = None
 
     # Planner snapshot.
     plan_steps: list[PlanStep] = field(default_factory=list)
@@ -270,11 +288,25 @@ class TaskState:
                 if current_state == RuntimeState.WAITING_HUMAN_REVIEW
                 else None
             ),
+            external_communication=(
+                ExternalCommunicationState(
+                    phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
+                    last_transition_summary=(
+                        "External communication tasks start in evidence collection until a draft "
+                        "and typed review gate are reached."
+                    ),
+                )
+                if intake_result.structured_task.task_spec.domain_type
+                == DomainType.EXTERNAL_COMMUNICATION
+                else None
+            ),
         )
 
 
 __all__ = [
     "ExecutedPlanStep",
+    "ExternalCommunicationPhase",
+    "ExternalCommunicationState",
     "HumanReviewDecision",
     "HumanReviewDecisionType",
     "HumanReviewRequest",

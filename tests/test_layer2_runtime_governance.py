@@ -36,6 +36,7 @@ from layer2_runtime_governance import (
     ActorResultType,
     ActorTask,
     CapabilityAccessMode,
+    ExternalCommunicationPhase,
     GovernanceDecision,
     GovernanceDirective,
     GovernanceReasonCode,
@@ -61,6 +62,7 @@ from layer2_runtime_governance import (
     ToolSource,
     OpenRouterActor,
     OpenRouterActorSettings,
+    build_default_checkpointer,
     build_actor_task,
     build_default_actor,
     HumanReviewDecision,
@@ -70,6 +72,7 @@ from layer2_runtime_governance import (
     build_runtime_graph,
     replanner,
 )
+from layer2_runtime_governance.persistence import RuntimeArtifactStore
 from layer2_runtime_governance.hitl import _apply_human_review_decision
 from main_layer2 import build_compact_trace, write_layer2_trace_file
 from main_layer2 import run_layer2_flow
@@ -1181,6 +1184,36 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertEqual(decision["policy_decision"], "deny")
         self.assertIn("write_capability_blocked", decision["reason_codes"])
 
+    def test_opa_input_marks_external_communication_draft_phase(self) -> None:
+        task_state = TaskState.from_intake(_build_external_communication_intake_result())
+        task_state.external_communication.phase = ExternalCommunicationPhase.DRAFT_PROPOSAL
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Draft the cautious external email.",
+                rationale="Keep the draft local before review.",
+                expected_outcome="A local draft proposal.",
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        task_state.current_plan_step_index = 0
+        task_state.actor_turn_count = 1
+        task_state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+            summary="A local external communication draft is ready for review.",
+            capability_mode=CapabilityAccessMode.NONE,
+            external_impact=False,
+            output_text="Draft email body.",
+        )
+
+        opa_input = build_opa_input_document(
+            policy_input=build_policy_evaluation_input(task_state=task_state)
+        )
+
+        self.assertEqual(opa_input["external_communication"]["phase"], "draft_proposal")
+        self.assertTrue(opa_input["actor"]["has_output_text"])
+
     def test_actor_asks_for_clarification_routes_to_waiting_review(self) -> None:
         graph = _build_test_graph(actor_service=ClarificationActor())
         result = graph.invoke(
@@ -1438,6 +1471,41 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             payload = json.loads(written_path.read_text(encoding="utf-8"))
             self.assertEqual(payload["runtime"]["thread_id"], "full-trace-file-test")
             self.assertEqual(payload["runtime"]["current_state"], "completed")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_run_layer2_flow_persists_runtime_artifacts(self) -> None:
+        temp_dir = REPO_ROOT / "_layer2_runtime_artifacts_test"
+        artifact_store = RuntimeArtifactStore(root_path=temp_dir)
+        checkpoint_path = temp_dir / "checkpoints.pkl"
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+        try:
+            trace = run_layer2_flow(
+                raw_task_text="Find official sources about the DMA and summarize them.",
+                context_hint="Prefer official EU sources.",
+                thread_id="persisted-runtime-test",
+                demo_intake_profile="research",
+                planner_service=StubPlanner(),
+                actor_service=StubActor(),
+                tool_gateway_service=StubToolGateway(),
+                replanner_service=StubReplanner(),
+                policy_engine_service=StubPolicyEngine(),
+                artifact_store=artifact_store,
+                checkpointer=build_default_checkpointer(storage_path=checkpoint_path),
+            )
+
+            paths = artifact_store.build_paths(trace["thread_id"])
+            self.assertTrue(paths.full_trace_path.exists())
+            self.assertTrue(paths.compact_trace_path.exists())
+            self.assertTrue(paths.dashboard_snapshot_path.exists())
+            self.assertTrue(paths.runtime_summary_path.exists())
+
+            dashboard_payload = json.loads(paths.dashboard_snapshot_path.read_text(encoding="utf-8"))
+            runtime_summary = json.loads(paths.runtime_summary_path.read_text(encoding="utf-8"))
+            self.assertEqual(dashboard_payload["runtime_state"], "completed")
+            self.assertEqual(runtime_summary["thread_id"], "persisted-runtime-test")
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -2182,6 +2250,33 @@ def _build_research_intake_result(
                 confidence_threshold=0.65,
                 budget=BudgetConfig(max_steps=max_steps, max_tool_calls=max_tool_calls),
                 read_only_mode=read_only_mode,
+            ),
+        ),
+        metadata=IntakeMetadata(
+            parse_status=ParseStatus.COMPLETE,
+            parser_name="stub_parser",
+            prompt_version="test_v1",
+            schema_version="1.0.0",
+        ),
+    )
+
+
+def _build_external_communication_intake_result() -> IntakeResult:
+    return IntakeResult(
+        structured_task=StructuredTask(
+            task_spec=TaskSpec(
+                goal="Prepare a cautious external communication draft.",
+                context="Do not send anything automatically.",
+                constraints=["Keep the draft local until review."],
+                domain_type=DomainType.EXTERNAL_COMMUNICATION,
+                domain_label="external_communication_test",
+                sensitivity=SensitivityLevel.HIGH,
+                success_criteria=["Pause before any outward-facing execution."],
+            ),
+            execution_policy=ExecutionPolicy(
+                confidence_threshold=0.75,
+                budget=BudgetConfig(max_steps=4, max_tool_calls=4),
+                read_only_mode=False,
             ),
         ),
         metadata=IntakeMetadata(

@@ -5,7 +5,7 @@ This document extracts the current runtime boundary between:
 - `governance`
 - `oversight`
 - `human_review` / `interrupt-resume`
-- the future `external_communication` branch
+- the typed `external_communication` subflow and its still-future execution branch
 
 It is intentionally operational, not aspirational: the goal is to make the current control contract explicit so a future dashboard can expose it without inventing new behavior.
 
@@ -26,7 +26,7 @@ The table below separates what the code already implements from what is only a d
 | `governance` is the hard control point after actor execution | Implemented | `src/layer2_runtime_governance/governance.py`, `src/layer2_runtime_governance/nodes.py` |
 | `oversight` can only make the runtime more conservative | Implemented | `src/layer2_runtime_governance/governance.py`, `src/layer2_runtime_governance/oversight.py` |
 | `human_review` is the only pause/resume path for typed operator intervention | Implemented | `src/layer2_runtime_governance/hitl.py`, `src/layer2_runtime_governance/graph.py` |
-| `external_communication` stays gated behind evidence, draft, and human review | Future slot | `docs/governance_hitl_contract.md` only for now |
+| `external_communication` stays gated behind evidence, draft, and human review | Partially implemented typed phase model | `src/layer2_runtime_governance/state.py`, `src/layer2_runtime_governance/nodes.py`, `src/layer2_runtime_governance/governance.py`, `src/layer2_runtime_governance/hitl.py` |
 | The dashboard is a view and decision surface over this contract | Implemented local HTML control plane | `src/main_layer2_dashboard.py`, `src/layer2_runtime_governance/hitl_dashboard.py` |
 
 ## Dashboard Data Model
@@ -53,6 +53,8 @@ Already typed in the runtime:
 - `HumanReviewRequest`
 - `HumanReviewDecision`
 - `HumanReviewDecisionType`
+- `ExternalCommunicationState`
+- `ExternalCommunicationPhase`
 
 ## Decision Matrix
 
@@ -98,6 +100,7 @@ Minimum display fields:
 - allowed human review decisions
 - resume state
 - final or aborted state, if terminal
+- external communication phase, when the task uses that branch
 
 ## What the Dashboard Should Not Do
 
@@ -116,19 +119,24 @@ These parts of the contract are already directly reflected in code:
 - typed HITL interrupt/resume request and decision handling
 - explicit runtime states for `WAITING_HUMAN_REVIEW`, `REPLANNING`, `ABORTED`, and normal progression
 - persisted governance, oversight, and human review history in `TaskState`
+- durable checkpoint persistence and thread-level runtime artifacts on disk
+- typed `external_communication` phase tracking for evidence, draft, review, approval, and blocked states
 
 These parts still need a UI or an execution branch:
 
-- an `external_communication` workflow with evidence, draft, and execution phases
+- the externally impactful execution step for `external_communication`
 
-## Future `external_communication` Slot
+## Current `external_communication` Slot
 
-The next safe extension point is not direct execution. It is a typed flow with at least these phases:
+The current runtime now tracks a typed flow with these phases:
 
 1. evidence collection
 2. draft proposal
 3. human review
-4. externally impactful execution
+4. approved for execution
+5. blocked
+
+What is still missing is the final externally impactful execution step.
 
 That branch should reuse the same boundary logic as the rest of Layer 2:
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Callable
 
-from layer1_intake import IntakeResult
+from layer1_intake import DomainType, IntakeResult
 
 from .actor_contract import ActorPort, ActorResult, ActorResultType, build_actor_task
 from .governance import (
@@ -20,6 +20,7 @@ from .hitl import build_human_review_request
 from .hitl import human_review
 from .state import (
     ExecutedPlanStep,
+    ExternalCommunicationPhase,
     PlanStep,
     PlanStepStatus,
     RuntimeFlag,
@@ -519,6 +520,8 @@ def _record_actor_execution(state: TaskState, *, actor_result: ActorResult) -> N
     if actor_result.plan_step_id != current_step.step_id:
         raise ValueError("actor_result.plan_step_id does not match the current plan step.")
 
+    _update_external_communication_after_actor_result(state, actor_result=actor_result)
+
     if actor_result.scratchpad_entry is not None:
         # Store summarized working memory before any routing decision changes the state.
         state.scratchpad.append(actor_result.scratchpad_entry)
@@ -604,6 +607,55 @@ def _record_actor_execution(state: TaskState, *, actor_result: ActorResult) -> N
         state.final_output_text = actor_result.output_text
 
 
+# Keep the external communication subflow explicit even before outbound execution exists.
+def _update_external_communication_after_actor_result(
+    state: TaskState,
+    *,
+    actor_result: ActorResult,
+) -> None:
+    if state.task_spec.domain_type != DomainType.EXTERNAL_COMMUNICATION:
+        return
+
+    if actor_result.result_type in {
+        ActorResultType.ASK_CLARIFICATION,
+        ActorResultType.NEEDS_REPLAN,
+    }:
+        _set_external_communication_phase(
+            state,
+            phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
+            summary="The external communication branch needs more evidence or a revised plan before drafting.",
+        )
+        return
+
+    if actor_result.result_type == ActorResultType.BLOCKED:
+        _set_external_communication_phase(
+            state,
+            phase=ExternalCommunicationPhase.BLOCKED,
+            summary="The external communication branch is blocked pending operator resolution.",
+        )
+        return
+
+    if actor_result.output_text and actor_result.output_text.strip():
+        _set_external_communication_phase(
+            state,
+            phase=ExternalCommunicationPhase.DRAFT_PROPOSAL,
+            summary="A local draft proposal exists and remains inside the runtime boundary.",
+        )
+
+
+# Update the external communication phase only for tasks that actually use that branch.
+def _set_external_communication_phase(
+    state: TaskState,
+    *,
+    phase: ExternalCommunicationPhase,
+    summary: str,
+) -> None:
+    if state.external_communication is None:
+        return
+    state.external_communication.phase = phase
+    state.external_communication.last_transition_summary = summary
+
+
 # Advance the runtime cursor to the next semantic step after a completed execution.
 def _advance_to_next_plan_step(state: TaskState) -> None:
     current_index = state.current_plan_step_index
@@ -681,6 +733,11 @@ def _apply_governance_decision(
     policy_input: PolicyEvaluationInput,
 ) -> None:
     if governance_decision.directive == GovernanceDirective.STOP:
+        _set_external_communication_phase(
+            state,
+            phase=ExternalCommunicationPhase.BLOCKED,
+            summary="Governance denied the external communication branch.",
+        )
         state.current_state = RuntimeState.ABORTED
         state.current_tool_request = None
         state.pending_human_review_request = None
@@ -691,6 +748,11 @@ def _apply_governance_decision(
         GovernanceDirective.WAIT_HUMAN_REVIEW,
         GovernanceDirective.ASK_USER_CLARIFICATION,
     }:
+        _set_external_communication_phase(
+            state,
+            phase=ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED,
+            summary="The draft proposal reached a typed human review gate before any external execution.",
+        )
         state.human_review_resume_state = _infer_human_review_resume_state(
             state=state,
             policy_input=policy_input,
@@ -699,6 +761,11 @@ def _apply_governance_decision(
         return
 
     if governance_decision.directive == GovernanceDirective.REPLAN:
+        _set_external_communication_phase(
+            state,
+            phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
+            summary="Governance redirected the external communication branch back to replanning.",
+        )
         state.pending_human_review_request = None
         state.human_review_resume_state = None
         state.current_state = RuntimeState.REPLANNING
@@ -706,6 +773,11 @@ def _apply_governance_decision(
         return
 
     if governance_decision.directive == GovernanceDirective.REQUEST_MORE_EVIDENCE:
+        _set_external_communication_phase(
+            state,
+            phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
+            summary="Governance required more evidence before the external communication draft can progress.",
+        )
         state.pending_human_review_request = None
         state.human_review_resume_state = None
         _restore_actor_step_for_more_evidence(state)

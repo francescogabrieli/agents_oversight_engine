@@ -80,6 +80,13 @@ class DashboardHumanReviewPanel:
     review_summary: str | None
 
 
+@dataclass(frozen=True)
+class DashboardExternalCommunicationPanel:
+    # Expose the governed external communication phase without inventing new UI logic.
+    phase: str
+    last_transition_summary: str | None
+
+
 # GovernanceHitlDashboardSnapshot is the UI-facing contract derived from TaskState.
 @dataclass(frozen=True)
 class GovernanceHitlDashboardSnapshot:
@@ -96,7 +103,7 @@ class GovernanceHitlDashboardSnapshot:
     terminal_state: str | None
     has_pending_review: bool
     is_terminal: bool
-    external_communication_state: str
+    external_communication: DashboardExternalCommunicationPanel | None
 
 
 # Build the dashboard snapshot from the canonical TaskState.
@@ -130,7 +137,7 @@ def build_governance_hitl_dashboard_snapshot(
         terminal_state=_resolve_terminal_state(task_state=current_state),
         has_pending_review=task_state.pending_human_review_request is not None,
         is_terminal=current_state in {RuntimeState.COMPLETED, RuntimeState.ABORTED},
-        external_communication_state="not_implemented",
+        external_communication=_build_external_communication_panel(task_state=task_state),
     )
 
 
@@ -257,6 +264,19 @@ def _build_human_review_panel(*, task_state: TaskState) -> DashboardHumanReviewP
     )
 
 
+# Build the external communication phase panel when the task uses that branch.
+def _build_external_communication_panel(
+    *,
+    task_state: TaskState,
+) -> DashboardExternalCommunicationPanel | None:
+    if task_state.external_communication is None:
+        return None
+    return DashboardExternalCommunicationPanel(
+        phase=task_state.external_communication.phase.value,
+        last_transition_summary=task_state.external_communication.last_transition_summary,
+    )
+
+
 # Resolve the dashboard focus from the current runtime state.
 def _resolve_dashboard_focus(*, task_state: RuntimeState) -> DashboardFocus:
     if task_state == RuntimeState.ABORTED:
@@ -326,4 +346,3 @@ def _to_jsonable(value: Any) -> Any:
     if isinstance(value, Enum):
         return value.value
     return value
-

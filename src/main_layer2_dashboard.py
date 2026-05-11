@@ -18,6 +18,7 @@ from layer2_runtime_governance import (
     HumanReviewDecision,
     HumanReviewDecisionType,
     build_default_checkpointer,
+    build_runtime_graph,
     build_governance_hitl_dashboard_snapshot,
     governance_hitl_dashboard_snapshot_to_dict,
     governance_hitl_dashboard_snapshot_to_json,
@@ -113,6 +114,33 @@ def build_dashboard_session_from_trace(
         intake_result=trace["intake_result"],
         final_result=trace["final_result"],
         checkpointer=checkpointer,
+        resume_flow=resume_flow,
+    )
+
+
+# Rebuild a dashboard session from a persisted checkpointed thread id.
+def build_dashboard_session_from_thread_id(
+    thread_id: str,
+    *,
+    checkpointer: Any | None = None,
+    resume_flow: DashboardRunner = resume_layer2_flow,
+) -> DashboardSession:
+    resolved_checkpointer = checkpointer or build_default_checkpointer()
+    runtime_graph = build_runtime_graph(checkpointer=resolved_checkpointer)
+    snapshot = runtime_graph.get_state({"configurable": {"thread_id": thread_id}})
+    snapshot_values = snapshot.values if snapshot is not None else {}
+    if not isinstance(snapshot_values, dict):
+        raise ValueError(f"No persisted runtime state is available for thread '{thread_id}'.")
+
+    task_state = snapshot_values.get("task_state")
+    if not isinstance(task_state, TaskState):
+        raise ValueError(f"Persisted thread '{thread_id}' does not contain a canonical task_state.")
+
+    return DashboardSession(
+        thread_id=thread_id,
+        intake_result=task_state.intake_payload,
+        final_result=dict(snapshot_values),
+        checkpointer=resolved_checkpointer,
         resume_flow=resume_flow,
     )
 
@@ -385,6 +413,11 @@ def parse_cli_args() -> argparse.Namespace:
         help="Optional LangGraph thread identifier.",
     )
     parser.add_argument(
+        "--load-thread-id",
+        default=None,
+        help="Reload an existing persisted thread instead of starting a new run.",
+    )
+    parser.add_argument(
         "--demo-intake-profile",
         choices=["research", "clarification"],
         default=None,
@@ -412,13 +445,16 @@ def parse_cli_args() -> argparse.Namespace:
 # Start the dashboard from command line arguments.
 def main() -> None:
     args = parse_cli_args()
-    session = create_dashboard_session(
-        raw_task_text=args.task,
-        context_hint=args.context,
-        policy_profile=args.policy_profile,
-        thread_id=args.thread_id,
-        demo_intake_profile=args.demo_intake_profile,
-    )
+    if args.load_thread_id:
+        session = build_dashboard_session_from_thread_id(args.load_thread_id)
+    else:
+        session = create_dashboard_session(
+            raw_task_text=args.task,
+            context_hint=args.context,
+            policy_profile=args.policy_profile,
+            thread_id=args.thread_id,
+            demo_intake_profile=args.demo_intake_profile,
+        )
     serve_dashboard(session=session, host=args.host, port=args.port, open_browser=args.open_browser)
 
 
@@ -460,6 +496,7 @@ def _render_dashboard_body(
         + _render_plan_card(snapshot.current_plan_step)
         + _render_governance_card(snapshot.governance)
         + _render_oversight_card(snapshot.oversight)
+        + _render_external_communication_card(snapshot.external_communication)
         + _render_human_review_card(snapshot, snapshot_dict, session)
         + _render_snapshot_card(snapshot_dict)
         + """
@@ -589,6 +626,24 @@ def _render_oversight_card(oversight_panel) -> str:
         ("Reason codes", ", ".join(oversight_panel.reason_codes) or "n/a"),
     ]
     return _render_card("Oversight", _render_rows(rows))
+
+
+# Render the external communication phase when the task uses that governed branch.
+def _render_external_communication_card(external_communication_panel) -> str:
+    if external_communication_panel is None:
+        return _render_card(
+            "External Communication",
+            "<p class=\"note\">This task does not use the external communication branch.</p>",
+        )
+
+    rows = [
+        ("Phase", external_communication_panel.phase),
+        (
+            "Last transition",
+            external_communication_panel.last_transition_summary or "n/a",
+        ),
+    ]
+    return _render_card("External Communication", _render_rows(rows))
 
 
 # Render the human review panel and action form.

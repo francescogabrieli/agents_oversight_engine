@@ -53,6 +53,9 @@ Important points:
 - oversight can only make the decision more conservative
 - HITL uses typed `interrupt / resume`
 - the dashboard is a read-only control plane over the same contract
+- LangGraph checkpoints are now persisted on disk through a durable local saver
+- runtime artifacts are persisted under `artifacts/runtime/<thread_id>/`
+- `external_communication` now has a typed phase model inside `TaskState`
 
 ## 1. Layer 1 Intake
 
@@ -103,7 +106,7 @@ Conceptual intake payload:
 ## 2. Bootstrap Into Layer 2
 
 `bootstrap_from_intake` converts `IntakeResult` into `TaskState`.
-This initializes runtime state, plan cursor, counters, governance history, oversight history, and HITL bookkeeping.
+This initializes runtime state, plan cursor, counters, governance history, oversight history, HITL bookkeeping, and the typed external-communication subflow when relevant.
 
 Conceptual bootstrap state:
 
@@ -120,6 +123,7 @@ Conceptual bootstrap state:
   "governance_history": [],
   "oversight_history": [],
   "human_review_history": [],
+  "external_communication": null,
   "tool_call_count": 0,
   "actor_turn_count": 0
 }
@@ -200,6 +204,7 @@ It combines:
 - OPA policy
 - deterministic oversight
 - runtime evidence and trajectory context
+- external communication phase context when the task is outward-facing
 
 Oversight can only preserve or tighten the policy decision.
 It cannot make the runtime more permissive.
@@ -239,6 +244,7 @@ Typical outcome:
 
 If the policy requires human review, the runtime enters `WAITING_HUMAN_REVIEW`.
 If the policy denies the action, the runtime enters `ABORTED`.
+For `external_communication` tasks, OPA now explicitly requires human review when a local draft proposal exists.
 
 ## 6. Tool Gateway
 
@@ -361,8 +367,30 @@ Canonical human review decisions:
 The local dashboard renders this snapshot as a read-only HTML control plane.
 It also exposes live refresh through client-side polling of `/snapshot.json`.
 When the CLI sees the first `WAITING_HUMAN_REVIEW` transition for a thread, it auto-launches the same dashboard session in a background server thread so the operator does not need to open it manually.
+The dashboard can also reload a persisted thread directly through `--load-thread-id`, using the same checkpoint store instead of requiring the original in-process session.
 
-## 11. Trace Export
+## 11. Persistence and Runtime Artifacts
+
+The runtime no longer depends on a process-local checkpoint only.
+
+Current persistence surfaces:
+
+- durable LangGraph checkpoint store on disk
+- typed runtime trace JSON
+- compact runtime trace JSON
+- dashboard snapshot JSON
+- pending HITL payload JSON when a review is active
+- runtime summary JSON
+
+Default artifact location:
+
+```text
+artifacts/runtime/<thread_id>/
+```
+
+This keeps resumability, dashboard reload, and audit material aligned on the same thread-level runtime identity.
+
+## 12. Trace Export
 
 At the end of a run, `src/layer2_runtime_governance/trace.py` builds a typed, JSON-safe trace from `TaskState`.
 The trace is read-only. It is not a second runtime state.
@@ -373,8 +401,35 @@ It is used for:
 - thesis evidence
 - dashboard payloads
 - offline evaluation
+- persisted runtime artifacts for replay and inspection
 
 The CLI can print the trace, but the trace itself remains derived from the runtime state.
+
+## 13. External Communication Branch
+
+`external_communication` is no longer only a documentation placeholder.
+The current runtime now tracks a typed phase inside `TaskState`:
+
+- `evidence_collection`
+- `draft_proposal`
+- `human_review_required`
+- `approved_for_execution`
+- `blocked`
+
+This does not yet mean externally impactful execution is implemented.
+It means the runtime can already distinguish:
+
+- evidence gathering
+- local draft creation
+- mandatory review gate
+- approved-but-not-yet-executed state
+
+That typed phase is visible in:
+
+- `TaskState`
+- the dashboard snapshot
+- the exported trace
+- persisted runtime artifacts
 
 ## Current Thesis Reading
 
@@ -398,6 +453,7 @@ User task
   -> HITL if needed
   -> Final output
   -> Trace export
+  -> Persisted runtime artifacts
   -> Dashboard snapshot
 ```
 

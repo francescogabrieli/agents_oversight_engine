@@ -28,12 +28,22 @@ decision := {
 }
 
 decision := {
+  "policy_decision": "require_human_review",
+  "reason_codes": ["external_communication_review_required"],
+  "summary": "External communication drafts must reach typed human review before any outward-facing progression."
+} if {
+  not write_capability_blocked
+  external_communication_review_required
+}
+
+decision := {
   "policy_decision": "ask_clarification",
   "reason_codes": ["ask_clarification_required"],
   "summary": "The actor requested clarification."
 } if {
   not write_capability_blocked
   not read_only_tool_request
+  not external_communication_review_required
   clarification_requested
 }
 
@@ -45,6 +55,7 @@ decision := {
   not write_capability_blocked
   input.tool.name == null
   not read_only_tool_request
+  not external_communication_review_required
   not clarification_requested
 }
 
@@ -62,4 +73,18 @@ read_only_tool_request if {
 
 clarification_requested if {
   input.actor.result_type == "ask_clarification"
+}
+
+external_communication_review_required if {
+  input.task.domain_type == "external_communication"
+  input.external_communication.phase == "draft_proposal"
+  input.actor.has_output_text == true
+  input.actor.result_type == "intermediate_output"
+}
+
+external_communication_review_required if {
+  input.task.domain_type == "external_communication"
+  input.external_communication.phase == "draft_proposal"
+  input.actor.has_output_text == true
+  input.actor.result_type == "final_output"
 }

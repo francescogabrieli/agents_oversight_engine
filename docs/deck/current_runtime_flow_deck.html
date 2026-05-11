@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flow Runtime Attuale - Deck Layer 2</title>
+  <style>
+    :root {
+      --bg: #edf1f5;
+      --paper: #ffffff;
+      --ink: #142033;
+      --muted: #5a6676;
+      --line: #d7dee7;
+      --soft: #f6f8fb;
+      --blue: #1f4f86;
+      --blue-soft: #eaf1f9;
+      --green: #2d6a57;
+      --green-soft: #ebf4f0;
+      --amber: #87621b;
+      --amber-soft: #faf3e3;
+      --red: #8b3b3b;
+      --red-soft: #f7ebeb;
+      --shadow: 0 18px 42px rgba(20, 32, 51, 0.10);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Segoe UI", Arial, sans-serif;
+    }
+
+    .deck {
+      min-height: 100vh;
+      padding: 22px;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      max-width: 1180px;
+      margin: 0 auto 18px;
+      padding: 12px 14px;
+      background: rgba(255, 255, 255, 0.94);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: 0 8px 22px rgba(20, 32, 51, 0.05);
+      backdrop-filter: blur(8px);
+    }
+
+    .topbar strong {
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .topbar nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .topbar a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 30px;
+      min-height: 30px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      font-size: 12px;
+      text-decoration: none;
+    }
+
+    .topbar a:hover,
+    .topbar a:focus {
+      border-color: var(--blue);
+      outline: none;
+    }
+
+    .slide {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      width: min(1180px, calc(100vw - 44px));
+      min-height: min(720px, calc(100vh - 120px));
+      margin: 0 auto 22px;
+      padding: 44px 52px 34px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .slide-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 20px;
+      padding-bottom: 22px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .kicker {
+      margin: 0 0 10px;
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      font-family: Cambria, Georgia, "Times New Roman", serif;
+      font-weight: 700;
+    }
+
+    h1 {
+      max-width: 900px;
+      font-size: 52px;
+      line-height: 1.06;
+    }
+
+    h2 {
+      max-width: 850px;
+      font-size: 36px;
+      line-height: 1.12;
+    }
+
+    h3 {
+      font-size: 21px;
+      line-height: 1.2;
+    }
+
+    .slide-no {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .slide-body {
+      align-content: center;
+      padding: 28px 0;
+    }
+
+    p,
+    li {
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.55;
+    }
+
+    .lead {
+      max-width: 940px;
+      color: #3a4657;
+      font-size: 24px;
+      line-height: 1.4;
+    }
+
+    .statement {
+      max-width: 980px;
+      padding: 22px 26px;
+      border-left: 5px solid var(--blue);
+      background: var(--blue-soft);
+      color: var(--ink);
+      font-size: 26px;
+      line-height: 1.36;
+      font-family: Cambria, Georgia, "Times New Roman", serif;
+    }
+
+    .grid {
+      display: grid;
+      gap: 18px;
+    }
+
+    .cols-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .cols-3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .card {
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+    }
+
+    .card.soft {
+      background: var(--soft);
+    }
+
+    .card.blue {
+      background: var(--blue-soft);
+      border-color: #c7d8ea;
+    }
+
+    .card.green {
+      background: var(--green-soft);
+      border-color: #c9ddd4;
+    }
+
+    .card.amber {
+      background: var(--amber-soft);
+      border-color: #ead8b1;
+    }
+
+    .card.red {
+      background: var(--red-soft);
+      border-color: #e8cccc;
+    }
+
+    .card p {
+      margin: 10px 0 0;
+      font-size: 16px;
+    }
+
+    .tight-list {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .tight-list li {
+      margin: 8px 0;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--blue-soft);
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .flow-stack {
+      display: grid;
+      gap: 14px;
+    }
+
+    .flow-row {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .flow-box {
+      position: relative;
+      display: flex;
+      min-height: 94px;
+      align-items: center;
+      justify-content: center;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .flow-box:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      right: -13px;
+      top: 50%;
+      width: 13px;
+      border-top: 2px solid #aab6c6;
+    }
+
+    .flow-box.blue {
+      background: var(--blue-soft);
+      border-color: #c7d8ea;
+    }
+
+    .flow-box.green {
+      background: var(--green-soft);
+      border-color: #c9ddd4;
+    }
+
+    .flow-box.amber {
+      background: var(--amber-soft);
+      border-color: #ead8b1;
+    }
+
+    .flow-box.red {
+      background: var(--red-soft);
+      border-color: #e8cccc;
+    }
+
+    .subflow {
+      display: grid;
+      grid-template-columns: 1.3fr 0.9fr;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .path {
+      display: grid;
+      gap: 10px;
+    }
+
+    .path-step {
+      display: grid;
+      grid-template-columns: 64px minmax(0, 1fr);
+      gap: 14px;
+      align-items: start;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+    }
+
+    .path-step strong {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: var(--soft);
+      font-size: 15px;
+    }
+
+    .path-step p {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .status-table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      font-size: 15px;
+    }
+
+    .status-table th,
+    .status-table td {
+      padding: 12px 13px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .status-table th {
+      background: #f5f8fb;
+      color: var(--ink);
+      font-size: 13px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .status-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    code,
+    pre {
+      font-family: Consolas, "Courier New", monospace;
+    }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 5px;
+      background: #f0f4f8;
+      color: #23405d;
+      font-size: 0.9em;
+    }
+
+    pre {
+      margin: 0;
+      padding: 18px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #101827;
+      color: #e5e7eb;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .note {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border: 1px dashed #b9c3d0;
+      border-radius: 10px;
+      background: #fafcff;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.45;
+    }
+
+    .mini {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .center {
+      text-align: center;
+    }
+
+    @media (max-width: 920px) {
+      .slide {
+        width: calc(100vw - 24px);
+        min-height: auto;
+        padding: 28px 24px;
+      }
+
+      h1 {
+        font-size: 38px;
+      }
+
+      h2 {
+        font-size: 30px;
+      }
+
+      .lead,
+      .statement {
+        font-size: 20px;
+      }
+
+      .cols-2,
+      .cols-3,
+      .flow-row,
+      .subflow {
+        grid-template-columns: 1fr;
+      }
+
+      .flow-box:not(:last-child)::after {
+        display: none;
+      }
+
+      .topbar {
+        position: static;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+
+    @media print {
+      body {
+        background: #fff;
+      }
+
+      .deck {
+        padding: 0;
+      }
+
+      .topbar {
+        display: none;
+      }
+
+      .slide {
+        width: 100%;
+        min-height: 100vh;
+        margin: 0;
+        padding: 34px 42px;
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+        page-break-after: always;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="deck">
+    <header class="topbar" aria-label="Navigazione deck">
+      <strong>Flow Runtime Attuale</strong>
+      <nav>
+        <a href="#s1">1</a>
+        <a href="#s2">2</a>
+        <a href="#s3">3</a>
+        <a href="#s4">4</a>
+        <a href="#s5">5</a>
+        <a href="#s6">6</a>
+        <a href="#s7">7</a>
+        <a href="#s8">8</a>
+        <a href="#s9">9</a>
+        <a href="#s10">10</a>
+        <a href="#s11">11</a>
+      </nav>
+    </header>
+
+    <section class="slide" id="s1">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Deck di Tesi</p>
+          <h1>Flow Runtime Attuale di Layer 2</h1>
+        </div>
+        <div class="slide-no">01 / 11</div>
+      </header>
+      <main class="slide-body">
+        <p class="lead">
+          Questo deck spiega la porzione di runtime oggi implementata nel repository: come un task
+          passa dall'intake di Layer 1 a un loop di esecuzione governato in Layer 2, come vengono
+          raccolte le evidenze, dove la review umana puo interrompere il run e quali artifact
+          vengono persistiti per audit e valutazione.
+        </p>
+        <div class="statement">
+          Il punto chiave e la disciplina architetturale: planner, actor, governance, esecuzione
+          dei tool, osservazione delle evidenze, HITL e trace export sono contratti separati sopra
+          un unico stato runtime canonico.
+        </div>
+      </main>
+    </section>
+
+    <section class="slide" id="s2">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Forma del Runtime</p>
+          <h2>Cosa e implementato oggi</h2>
+        </div>
+        <div class="slide-no">02 / 11</div>
+      </header>
+      <main class="slide-body">
+        <div class="flow-stack">
+          <div class="flow-row">
+            <div class="flow-box blue">Intake di<br />Layer 1</div>
+            <div class="flow-box blue">Bootstrap<br />TaskState</div>
+            <div class="flow-box green">Planner</div>
+            <div class="flow-box green">Actor</div>
+            <div class="flow-box amber">Governance</div>
+          </div>
+          <div class="flow-row">
+            <div class="flow-box soft">Tool Gateway</div>
+            <div class="flow-box soft">Osserva<br />Evidenza</div>
+            <div class="flow-box soft">Replanner</div>
+            <div class="flow-box red">Review Umana</div>
+            <div class="flow-box blue">Finalizza<br />Trace</div>
+          </div>
+        </div>
+        <div class="grid cols-3" style="margin-top: 20px;">
+          <div class="card green">
+            <h3>Implementato</h3>
+            <p>Output tipizzato del planner, output tipizzato dell'actor, governance dopo l'actor, instradamento read-only dei tool, observed evidence, replanning, HITL interrupt/resume, persistenza e trace export.</p>
+          </div>
+          <div class="card amber">
+            <h3>Deliberatamente vincolato</h3>
+            <p>L'uso dei tool e controllato tramite gateway. L'actor non chiama MCP direttamente e non ha autorita di esecuzione libera.</p>
+          </div>
+          <div class="card red">
+            <h3>Non implementato</h3>
+            <p>Nessuna esecuzione esterna reale per `external_communication`, nessun layer di autenticazione MCP per principal e nessun futuro nodo di giudizio semantico.</p>
+          </div>
+        </div>
+      </main>
+    </section>
+
+    <section class="slide" id="s3">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Punto di Ingresso</p>
+          <h2>L'intake di Layer 1 definisce il contratto del runtime</h2>
+        </div>
+        <div class="slide-no">03 / 11</div>
+      </header>
+      <main class="slide-body">
+        <div class="subflow">
+          <div>
+            <p class="lead">
+              Layer 2 non parte dal testo utente grezzo. Parte da un `IntakeResult` canonico
+              prodotto da Layer 1, che include semantica del task, execution policy e metadata
+              di intake.
+            </p>
+            <ul class="tight-list">
+              <li>`task_spec` porta goal, context, vincoli, dominio, sensitivity e success criteria.</li>
+              <li>`execution_policy` porta confidence threshold, budget e modalita read-only.</li>
+              <li>`metadata` porta parse status, versioning del parser, warning e missing information.</li>
+            </ul>
+          </div>
+          <pre><code>{
+  "structured_task": {
+    "task_spec": {
+      "goal": "...",
+      "domain_type": "research",
+      "sensitivity": "medium"
+    },
+    "execution_policy": {
+      "confidence_threshold": 0.65,
+      "budget": {"max_steps": 5},
+      "read_only_mode": false
+    }
+  },
+  "metadata": {
+    "parse_status": "complete"
+  }
+}</code></pre>
+        </div>
+        <div class="note">
+          L'intake e esterno a LangGraph. Questo preserva un handoff pulito tra interpretazione
+          controllata del task e orchestrazione runtime live.
+        </div>
+      </main>
+    </section>
+
+    <section class="slide" id="s4">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Inizializzazione dello Stato</p>
+          <h2>Il bootstrap converte l'intake in `TaskState`</h2>
+        </div>
+        <div class="slide-no">04 / 11</div>
+      </header>
+      <main class="slide-body">
+        <div class="grid cols-2">
+          <div class="card soft">
+            <h3>Cosa inizializza il bootstrap</h3>
+            <ul class="tight-list">
+              <li>Stato runtime corrente e cursore del piano.</li>
+              <li>Contenitori per evidenze, scratchpad e step validation.</li>
+              <li>Storici di governance, oversight e human review.</li>
+              <li>Contatori di tool call e actor turn.</li>
+              <li>Stato tipizzato di `external_communication` quando il dominio di intake lo richiede.</li>
+            </ul>
+          </div>
+          <div class="card blue">
+            <h3>Perche conta</h3>
+            <p>`TaskState` e l'unico contratto runtime. Grafo, dashboard, trace export e layer di persistenza derivano tutti dallo stesso stato invece di mantenere rappresentazioni parallele.</p>
+          </div>
+        </div>
+        <table class="status-table" style="margin-top: 18px;">
+          <thead>
+            <tr>
+              <th>Parse Status</th>
+              <th>Effetto iniziale in Layer 2</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>complete</code></td>
+              <td>Il runtime parte in planning.</td>
+            </tr>
+            <tr>
+              <td><code>partial</code></td>
+              <td>Il runtime parte comunque in planning, ma mantiene flag di intake incompleto.</td>
+            </tr>
+            <tr>
+              <td><code>needs_clarification</code></td>
+              <td>Il runtime parte in `WAITING_HUMAN_REVIEW` con un percorso di chiarimento tipizzato.</td>
+            </tr>
+          </tbody>
+        </table>
+      </main>
+    </section>
+
+    <section class="slide" id="s5">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Core Agente</p>
+          <h2>Planner e actor sono separati intenzionalmente</h2>
+        </div>
+        <div class="slide-no">05 / 11</div>
+      </header>
+      <main class="slide-body">
+        <div class="grid cols-2">
+          <div class="card green">
+            <span class="tag">Planner</span>
+            <h3>Traiettoria semantica</h3>
+            <ul class="tight-list">
+              <li>Produce plan step tipizzati.</li>
+              <li>Imposta il cursore del plan step corrente.</li>
+              <li>Non emette payload concreti per i tool.</li>
+              <li>Rimane la fonte della traiettoria prevista.</li>
+            </ul>
+          </div>
+          <div class="card green">
+            <span class="tag">Actor</span>
+            <h3>Esecuzione limitata allo step</h3>
+            <ul class="tight-list">
+              <li>Riceve l'intero piano come contesto.</li>
+              <li>Puo agire solo sullo step corrente.</li>
+              <li>Puo richiedere tool read-only, produrre output locale, chiedere chiarimenti o segnalare replan.</li>
+              <li>Non puo riscrivere il piano da solo.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="note">
+          Questa separazione mantiene leggibili tre traiettorie: traiettoria prevista dal planner,
+          traiettoria eseguita dall'actor e traiettoria osservata dal loop delle evidenze.
+        </div>
+      </main>
+    </section>
+
+    <section class="slide" id="s6">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Punto di Controllo</p>
+          <h2>La governance combina policy e oversight deterministico</h2>
+        </div>
+        <div class="slide-no">06 / 11</div>
+      </header>
+      <main class="slide-body">
+        <div class="grid cols-3">
+          <div class="card amber">
+            <h3>Policy OPA</h3>
+            <p>Applica decisioni hard come `allow`, `allow_read_only`, `ask_clarification`, `require_human_review` o `deny`.</p>
+          </div>
+          <div class="card amber">
+            <h3>Oversight deterministico</h3>
+            <p>Valuta evidence quality, operational risk e trajectory health usando configurazione esplicita e stato runtime.</p>
+          </div>
+          <div class="card blue">
+            <h3>Decision combiner</h3>
+            <p>Produce una singola runtime directive come `continue`, `continue_read_only`, `request_more_evidence`, `replan`, `wait_human_review` o `stop`.</p>
+          </div>
+        </div>
+        <div class="grid cols-2" style="margin-top: 18px;">
+          <div class="card soft">
+            <h3>Vincolo implementato</h3>
+            <p>L'oversight puo preservare o irrigidire la policy. Non puo rendere una decisione OPA piu permissiva.</p>
+          </div>
+          <div class="card red">
+            <h3>Limite esplicito attuale</h3>
+            <p>Il futuro semantic judge non fa parte della baseline corrente. Oggi la governance e OPA piu oversight deterministico, non OPA piu judge.</p>
+          </div>
+        </div>
+      </main>
+    </section>
+
+    <section class="slide" id="s7">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Loop di Esecuzione</p>
+          <h2>Tool gateway e observed evidence chiudono il loop</h2>
+        </div>
+        <div class="slide-no">07 / 11</div>
+      </header>
+      <main class="slide-body">
+        <div class="path">
+          <div class="path-step">
+            <strong>1</strong>
+            <p>L'actor emette un `ToolRequest` tipizzato solo dopo il planning e prima di qualunque capability call esterna.</p>
+          </div>
+          <div class="path-step">
+            <strong>2</strong>
+            <p>La governance decide se la richiesta puo continuare, se deve restare read-only o se deve fermarsi, ripianificare o fare escalation.</p>
+          </div>
+          <div class="path-step">
+            <strong>3</strong>
+            <p>Il Tool Gateway valida la configurazione del registry, risolve il backend, esegue la richiesta read-only e normalizza il risultato in `ToolExecutionResult`.</p>
+          </div>
+          <div class="path-step">
+            <strong>4</strong>
+            <p>`observe_tool_result` converte il risultato del tool in `ObservedEvidence` esplicita, preservando provenienza e support level per il reasoning successivo.</p>
+          </div>
+          <div class="path-step">
+            <strong>5</strong>
+            <p>L'actor riceve l'evidenza e continua lo step, lo completa con validation oppure segnala che la traiettoria deve cambiare.</p>
+          </div>
+        </div>
+        <div class="note">
+          MCP e utilizzabile solo come backend governato dietro il gateway. L'actor non diventa mai un client MCP aperto.
+        </div>
+      </main>
+    </section>
+
+    <section class="slide" id="s8">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Percorso di Escalation</p>
+          <h2>HITL e selettivo, tipizzato e resumable</h2>
+        </div>
+        <div class="slide-no">08 / 11</div>
+      </header>
+      <main class="slide-body">
+        <div class="grid cols-2">
+          <div class="card red">
+            <h3>Quando il runtime si ferma</h3>
+            <ul class="tight-list">
+              <li>La policy richiede esplicitamente human review.</li>
+              <li>E richiesto un chiarimento prima di una continuazione sicura.</li>
+              <li>L'operational risk e troppo alto per una continuazione autonoma.</li>
+              <li>`external_communication` raggiunge una fase gated da review.</li>
+            </ul>
+          </div>
+          <div class="card blue">
+            <h3>Cosa esiste oggi</h3>
+            <ul class="tight-list">
+              <li>Richieste e decisioni di human review tipizzate.</li>
+              <li>Percorso LangGraph `interrupt / resume` tramite `human_review`.</li>
+              <li>Dashboard snapshot sullo stesso contratto di review.</li>
+              <li>Auto-launch della dashboard locale al primo pause di review.</li>
+            </ul>
+          </div>
+        </div>
+        <table class="status-table" style="margin-top: 18px;">
+          <thead>
+            <tr>
+              <th>Decisione Canonica</th>
+              <th>Significato</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>approve_continue</code> / <code>approve_continue_read_only</code></td>
+              <td>Riprende il runtime nella modalita approvata.</td>
+            </tr>
+            <tr>
+              <td><code>request_more_evidence</code> / <code>replan</code></td>
+              <td>Riprende, ma con un branch successivo piu conservativo.</td>
+            </tr>
+            <tr>
+              <td><code>ask_clarification</code></td>
+              <td>Mantiene il run in pausa finche l'ambiguita non viene risolta.</td>
+            </tr>
+            <tr>
+              <td><code>abort</code></td>
+              <td>Termina il run in `ABORTED`.</td>
+            </tr>
+          </tbody>
+        </table>
+      </main>
+    </section>
+
+    <section class="slide" id="s9">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Stato e Artifact</p>
+          <h2>Persistenza, stato dashboard e trace restano allineati</h2>
+        </div>
+        <div class="slide-no">09 / 11</div>
+      </header>
+      <main class="slide-body">
+        <div class="grid cols-2">
+          <div class="card soft">
+            <h3>Persistito a runtime</h3>
+            <ul class="tight-list">
+              <li>Checkpoint LangGraph locali e durevoli su disco.</li>
+              <li>Runtime artifact per thread sotto <code>artifacts/runtime/&lt;thread_id&gt;/</code>.</li>
+              <li>Payload HITL pendenti e dashboard snapshot.</li>
+              <li>Runtime summary e trace JSON esportate.</li>
+            </ul>
+          </div>
+          <div class="card green">
+            <h3>Disciplina architetturale</h3>
+            <p>La dashboard e un piano di controllo read-only sopra `TaskState`. La trace e un artifact di audit derivato. Nessuno dei due deve diventare una seconda fonte di verita.</p>
+          </div>
+        </div>
+        <div class="grid cols-3" style="margin-top: 18px;">
+          <div class="card blue">
+            <h3>Storici di stato</h3>
+            <p>`governance_history`, `oversight_history`, `human_review_history`, `step_history`.</p>
+          </div>
+          <div class="card blue">
+            <h3>Record di esecuzione</h3>
+            <p>`executed_steps`, `step_validations`, `scratchpad`, `tool_results_history`, `observed_evidence`.</p>
+          </div>
+          <div class="card blue">
+            <h3>Contatori operativi</h3>
+            <p>`actor_turn_count`, `tool_call_count`, current plan-step cursor, and runtime flags.</p>
+          </div>
+        </div>
+      </main>
+    </section>
+
+    <section class="slide" id="s10">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Superficie di Trace</p>
+          <h2>Il trace export rende il runtime ispezionabile dopo il run</h2>
+        </div>
+        <div class="slide-no">10 / 11</div>
+      </header>
+      <main class="slide-body">
+        <div class="subflow">
+          <div>
+            <p class="lead">
+              `trace.py` costruisce una trace di runtime tipizzata e JSON-safe a partire da `TaskState`.
+              Viene usata per debugging, evidenza di tesi, payload dashboard, artifact persistiti e
+              valutazione offline.
+            </p>
+            <ul class="tight-list">
+              <li>Include intake summary, plan steps, actor snapshot, tool calls, evidence, governance decisions, oversight assessments, dati HITL e summary di `external_communication`.</li>
+              <li>Preserva una separazione esplicita tra stato runtime live e viste di audit post-run.</li>
+              <li>Supporta il compact trace export senza ridefinire il contratto runtime.</li>
+            </ul>
+          </div>
+          <pre><code>{
+  "runtime": {"thread_id": "...", "current_state": "completed"},
+  "plan_steps": [...],
+  "tool_calls": [...],
+  "observed_evidence": [...],
+  "governance_decisions": [...],
+  "oversight_assessments": [...],
+  "human_review": {...},
+  "external_communication": {
+    "phase": "draft_proposal",
+    "last_transition_summary": "..."
+  }
+}</code></pre>
+        </div>
+      </main>
+    </section>
+
+    <section class="slide" id="s11">
+      <header class="slide-header">
+        <div>
+          <p class="kicker">Condizioni al Contorno</p>
+          <h2>`external_communication` esiste come stato, non come esecuzione esterna live</h2>
+        </div>
+        <div class="slide-no">11 / 11</div>
+      </header>
+      <main class="slide-body">
+        <div class="grid cols-2">
+          <div class="card amber">
+            <h3>Significato attuale</h3>
+            <ul class="tight-list">
+              <li>Il runtime traccia fasi tipizzate come `evidence_collection`, `draft_proposal`, `human_review_required`, `approved_for_execution` e `blocked`.</li>
+              <li>Queste fasi sono visibili in `TaskState`, nel dashboard snapshot, negli artifact persistiti e nella trace esportata.</li>
+              <li>OPA puo richiedere review quando esiste una draft proposal locale.</li>
+            </ul>
+          </div>
+          <div class="card red">
+            <h3>Limite attuale</h3>
+            <ul class="tight-list">
+              <li>Nessuna external send o write execution reale e ancora implementata.</li>
+              <li>`approved_for_execution` significa tracking di stato approvato, non consegna automatica.</li>
+              <li>Il boundary di review e implementato prima di qualunque futura superficie di azione outward.</li>
+            </ul>
+          </div>
+        </div>
+        <div class="statement" style="margin-top: 22px;">
+          In termini di tesi, il repository dimostra gia una preparazione governata per azioni
+          outward, ma si ferma intenzionalmente prima della vera esecuzione esterna.
+        </div>
+      </main>
+    </section>
+  </div>
+
+  <script>
+    const slides = Array.from(document.querySelectorAll(".slide"));
+
+    function activeSlideIndex() {
+      const midpoint = window.scrollY + window.innerHeight / 2;
+      let index = 0;
+      slides.forEach((slide, candidate) => {
+        if (slide.offsetTop <= midpoint) {
+          index = candidate;
+        }
+      });
+      return index;
+    }
+
+    function goToSlide(index) {
+      const bounded = Math.max(0, Math.min(slides.length - 1, index));
+      slides[bounded].scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowRight" || event.key === "PageDown") {
+        event.preventDefault();
+        goToSlide(activeSlideIndex() + 1);
+      }
+
+      if (event.key === "ArrowLeft" || event.key === "PageUp") {
+        event.preventDefault();
+        goToSlide(activeSlideIndex() - 1);
+      }
+
+      if (event.key === "Home") {
+        event.preventDefault();
+        goToSlide(0);
+      }
+
+      if (event.key === "End") {
+        event.preventDefault();
+        goToSlide(slides.length - 1);
+      }
+    });
+  </script>
+</body>
+</html>

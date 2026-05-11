@@ -10,6 +10,7 @@ from langgraph.types import interrupt
 from .actor_contract import ActorResultType
 from .oversight import OversightAssessment
 from .state import (
+    ExternalCommunicationPhase,
     HumanReviewDecision,
     HumanReviewDecisionType,
     HumanReviewRequest,
@@ -150,6 +151,11 @@ def _apply_human_review_decision(
         raise ValueError("Human review decision request_id does not match the pending request.")
 
     if human_review_decision.decision_type == HumanReviewDecisionType.APPROVE_CONTINUE:
+        _set_external_communication_phase(
+            state,
+            phase=ExternalCommunicationPhase.APPROVED_FOR_EXECUTION,
+            summary="Human review approved the external communication draft for the next governed step.",
+        )
         state.current_state = pending_request.resume_state
         return
 
@@ -160,16 +166,31 @@ def _apply_human_review_decision(
             )
         if RuntimeFlag.READ_ONLY_EXECUTION not in state.runtime_flags:
             state.runtime_flags.append(RuntimeFlag.READ_ONLY_EXECUTION)
+        _set_external_communication_phase(
+            state,
+            phase=ExternalCommunicationPhase.APPROVED_FOR_EXECUTION,
+            summary="Human review approved the external communication draft under a read-only runtime envelope.",
+        )
         state.current_state = pending_request.resume_state
         return
 
     if human_review_decision.decision_type == HumanReviewDecisionType.REQUEST_MORE_EVIDENCE:
+        _set_external_communication_phase(
+            state,
+            phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
+            summary="Human review sent the external communication branch back for more evidence.",
+        )
         _restore_actor_step_for_more_evidence(state)
         state.current_tool_request = None
         state.current_state = RuntimeState.ACTING
         return
 
     if human_review_decision.decision_type == HumanReviewDecisionType.REPLAN:
+        _set_external_communication_phase(
+            state,
+            phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
+            summary="Human review invalidated the current external communication trajectory and requested replanning.",
+        )
         state.current_tool_request = None
         state.current_state = RuntimeState.REPLANNING
         return
@@ -177,11 +198,21 @@ def _apply_human_review_decision(
     if human_review_decision.decision_type == HumanReviewDecisionType.ASK_CLARIFICATION:
         if RuntimeFlag.CLARIFICATION_REQUIRED not in state.runtime_flags:
             state.runtime_flags.append(RuntimeFlag.CLARIFICATION_REQUIRED)
+        _set_external_communication_phase(
+            state,
+            phase=ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED,
+            summary="Human review requested clarification before the external communication branch can continue.",
+        )
         state.current_tool_request = None
         state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
         return
 
     if human_review_decision.decision_type == HumanReviewDecisionType.ABORT:
+        _set_external_communication_phase(
+            state,
+            phase=ExternalCommunicationPhase.BLOCKED,
+            summary="Human review aborted the external communication branch.",
+        )
         state.current_tool_request = None
         state.last_tool_result = None
         state.current_state = RuntimeState.ABORTED
@@ -331,3 +362,16 @@ def _restore_actor_step_for_more_evidence(state: TaskState) -> None:
     ]
     if state.final_output_text == actor_result.output_text:
         state.final_output_text = None
+
+
+# Keep external communication phase updates local to the typed HITL resume logic.
+def _set_external_communication_phase(
+    state: TaskState,
+    *,
+    phase: ExternalCommunicationPhase,
+    summary: str,
+) -> None:
+    if state.external_communication is None:
+        return
+    state.external_communication.phase = phase
+    state.external_communication.last_transition_summary = summary
