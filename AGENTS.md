@@ -38,7 +38,9 @@ It already includes:
 - audit-safe scratchpad entries
 - typed step self-validations
 - an active `replanner` branch for `NEEDS_REPLAN`
-- deterministic `confidence_risk_trajectory` oversight for evidence quality, operational risk, and trajectory health
+- deterministic dynamic policy assessment for evidence quality, operational risk, and trajectory health
+- explicit separation of static policy, dynamic policy, behavioural foundation, and final decision combining inside governance
+- local SQLite behavioural memory as a non-authoritative read model for historical run features
 - typed human-review requests and decisions with LangGraph `interrupt / resume`
 - durable local LangGraph checkpoint persistence and per-thread runtime artifacts on disk
 - typed `external_communication` phase tracking for evidence, draft, review, approval, and blocked states
@@ -131,7 +133,7 @@ Purpose:
 - observe tool results and feed them back into the actor loop
 - replace the current and pending semantic trajectory through `replanner` when the actor signals `NEEDS_REPLAN`
 - evaluate actor outcomes through a typed governance node backed by an OPA policy engine
-- combine OPA hard policy decisions with deterministic adaptive oversight signals
+- combine OPA hard policy decisions with deterministic dynamic policy signals and non-blocking behavioural context
 - persist governance decisions in `TaskState` with an explicit `ABORTED` stop state for hard denials
 - persist oversight assessments in `TaskState` for audit and thesis traceability
 - maintain an audit-safe scratchpad and typed step self-validations during actor execution
@@ -149,6 +151,7 @@ Main files:
 - `tool_contract.py`
 - `tool_gateway.py`
 - `governance.py`
+- `behavioral.py`
 - `oversight.py`
 - `evaluation.py`
 - `openrouter_client.py`
@@ -168,14 +171,15 @@ Current design:
 - `tool_gateway.py` contains the read-only operational tool surface currently available to the runtime, including `web_search`, `fetch_url_text`, and configured read-only MCP test tools behind the gateway registry
 - `configs/layer2_tool_gateway.json` is the active Tool Gateway registry for configured native, HTTP, OpenAI, and MCP-backed tools
 - MCP is usable as a governed backend behind the Tool Gateway; the actor must never call MCP servers directly
-- `governance.py` defines the typed policy input/output contracts, OPA HTTP policy engine, and governance decision mapping used after actor execution
-- `oversight.py` defines deterministic adaptive oversight for `evidence_quality`, `operational_risk`, and `trajectory_health`, plus the combiner recommendation consumed by governance
+- `governance.py` defines the typed static-policy contracts, OPA HTTP policy engine, decision combiner, and final governance decision trace used after actor execution
+- `behavioral.py` defines the behavioural foundation contract plus the SQLite-backed historical read model used to materialize non-blocking behavioural assessments
+- `oversight.py` defines deterministic dynamic policy assessment for `evidence_quality`, `operational_risk`, and `trajectory_health`, plus the recommendation consumed by governance
 - `openrouter_client.py` defines the OpenRouter HTTP adapter used by the temporary Layer 2 actor test backend
 - `persistence.py` defines the durable disk-backed LangGraph saver plus the per-thread runtime artifact store used for trace, dashboard, and HITL persistence
 - `trace.py` defines the typed, JSON-exportable Layer 2 runtime trace contract used for debugging, thesis evidence, HITL payloads, and evaluation
 - `evaluation.py` defines the offline trace evaluation pipeline that reads exported trace JSON and produces JSON and Markdown reports
 - `hitl_dashboard.py` defines the dashboard-facing snapshot model derived from `TaskState`, governance, oversight, and HITL review payloads
-- `configs/layer2_oversight_policy.json` defines the explicit weights, thresholds, risk scores, sensitivity multipliers, and trajectory penalties used by the oversight layer
+- `configs/layer2_oversight_policy.json` defines the explicit weights, thresholds, risk scores, sensitivity multipliers, and trajectory penalties used by the dynamic policy layer
 - `runtime_warnings.py` centralizes warning suppression needed before importing selected LangGraph/LangChain dependencies
 - `graph.py` contains the current LangGraph wiring for the planner/actor/governance/tool/replanner/human-review loop:
   `START -> bootstrap_from_intake -> planner -> actor -> governance -> { tool_gateway | replanner | human_review | finalize_bootstrap }`
@@ -285,7 +289,7 @@ Current relevant files:
 - the active baseline includes `bootstrap_from_intake -> planner -> actor -> governance -> tool_gateway -> observe_tool_result -> actor`
 - the active baseline also includes the real `replanner` branch triggered by `NEEDS_REPLAN`
 - the active baseline also includes a typed governance branch after `actor` that can continue, replan, escalate, or abort
-- governance now combines OPA hard policy with deterministic `confidence_risk_trajectory` oversight; OPA denials, required review, and clarification decisions remain non-negotiable
+- governance now combines four explicit internal layers: static policy, deterministic dynamic policy, behavioural foundation, and a deterministic decision combiner; OPA denials, required review, and clarification decisions remain non-negotiable
 - external communication drafts are now explicit runtime state, and policy may require review based on the typed `external_communication` phase
 - the planner/executor split should remain aligned with `docs/plan-and-execute.ipynb` unless there is a clear thesis-driven reason to diverge
 - planner output must remain semantic and typed
@@ -309,7 +313,7 @@ Current relevant files:
 - governance guardrails must remain proportional: multiple safe-by-design checks should not combine into an execution-degrading loop when the task can be completed by lowering precision to the available evidence level
 - source discovery alone is not factual support; simple URL discovery is weaker than extracted content and should not justify detailed factual completion by itself
 - actor completion outputs that are more specific than the available evidence support level should remain in-progress rather than complete the step, even when the LLM self-reports `objective_satisfied=true` and `evidence_sufficient=true`
-- adaptive oversight may request more evidence when the evaluated step/output requires a stronger evidence support level than the observed evidence currently provides
+- deterministic dynamic policy may request more evidence when the evaluated step/output requires a stronger evidence support level than the observed evidence currently provides
 - `INTERMEDIATE_OUTPUT` is a progress/local-output outcome and must not automatically complete the current plan step without positive validation
 - when the last semantic step completes with positive validation, its output should be promoted into canonical `final_output_text` even if the actor result type is `INTERMEDIATE_OUTPUT`
 - executed step history and current plan step cursor must remain explicit in `TaskState`
@@ -327,11 +331,12 @@ Current relevant files:
 - `max_steps` is enforced as a semantic plan-step ceiling in the current runtime
 - `max_tool_calls = null` means the current runtime does not impose a hard tool-call ceiling
 - `WAITING_HUMAN_REVIEW` is now the typed pause state that feeds the LangGraph `interrupt / resume` HITL path
-- governance is active as an explicit runtime node and uses OPA over HTTP as the deterministic policy engine target
-- adaptive oversight may only preserve or make the policy decision more conservative; it must never make an OPA decision more permissive
+- governance is active as an explicit runtime node and uses OPA over HTTP as the deterministic static policy engine target
+- deterministic dynamic policy may only preserve or make the static policy decision more conservative; it must never make an OPA decision more permissive
 - the default LangGraph checkpointer is now a durable local disk-backed saver rather than a process-local in-memory saver
 - the runtime persists per-thread artifacts under `artifacts/runtime/<thread_id>/`, including trace, compact trace, dashboard snapshot, runtime summary, and pending HITL payload when present
-- oversight scoring must remain deterministic, explainable, and configured through `configs/layer2_oversight_policy.json`
+- the behavioural SQLite store lives under `artifacts/runtime/behavioral/behavioral.sqlite3` by default and must remain a read model rather than the primary runtime source of truth
+- dynamic policy scoring must remain deterministic, explainable, and configured through `configs/layer2_oversight_policy.json`
 - trajectory-health turn pressure should stay forgiving enough that short source-plus-summary tasks can make a few recovery turns without being forced into replanning
 - runtime trace export must be read-only over `TaskState`; it must not mutate runtime state or become a parallel source of truth
 - `main_layer2.py` may print trace views, but reusable trace construction belongs in `trace.py`

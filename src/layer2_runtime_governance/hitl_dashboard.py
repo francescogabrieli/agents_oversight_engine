@@ -5,8 +5,9 @@ from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
 from typing import Any
 
+from .behavioral import BehavioralAssessment
 from .governance import GovernanceDecision
-from .oversight import OversightAssessment
+from .oversight import DynamicPolicyAssessment, OversightAssessment
 from .state import (
     HumanReviewDecision,
     HumanReviewDecisionType,
@@ -48,6 +49,9 @@ class DashboardGovernancePanel:
     evaluated_tool_name: str | None
     policy_engine_name: str
     policy_bundle_version: str
+    static_policy_summary: str | None
+    dynamic_policy_summary: str | None
+    behavioral_summary: str | None
     oversight_summary: str | None
 
 
@@ -66,6 +70,16 @@ class DashboardOversightPanel:
     recommended_directive: str
     summary: str
     reason_codes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class DashboardBehavioralPanel:
+    # DashboardBehavioralPanel exposes the v1 behavioural foundation without making it authoritative.
+    history_available: bool
+    historical_run_count: int
+    feature_snapshot_version: str
+    summary: str
+    notes: tuple[str, ...]
 
 
 # DashboardHumanReviewPanel captures the review payload and resume path.
@@ -97,6 +111,7 @@ class GovernanceHitlDashboardSnapshot:
     current_plan_step: DashboardPlanStep | None
     governance: DashboardGovernancePanel | None
     oversight: DashboardOversightPanel | None
+    behavioral: DashboardBehavioralPanel | None
     human_review: DashboardHumanReviewPanel | None
     reason_codes: tuple[str, ...]
     resume_state: str | None
@@ -113,7 +128,10 @@ def build_governance_hitl_dashboard_snapshot(
     current_state = task_state.current_state
     focus = _resolve_dashboard_focus(task_state=current_state)
     governance_panel = _build_governance_panel(task_state.last_governance_decision)
-    oversight_panel = _build_oversight_panel(task_state.last_oversight_assessment)
+    oversight_panel = _build_oversight_panel(
+        task_state.last_dynamic_policy_assessment or task_state.last_oversight_assessment
+    )
+    behavioral_panel = _build_behavioral_panel(task_state.last_behavioral_assessment)
     human_review_panel = _build_human_review_panel(task_state=task_state)
     current_plan_step = task_state.current_plan_step
 
@@ -127,6 +145,7 @@ def build_governance_hitl_dashboard_snapshot(
         ),
         governance=governance_panel,
         oversight=oversight_panel,
+        behavioral=behavioral_panel,
         human_review=human_review_panel,
         reason_codes=_resolve_reason_codes(task_state=task_state),
         resume_state=(
@@ -189,13 +208,16 @@ def _build_governance_panel(
         ),
         policy_engine_name=governance_decision.policy_engine_name,
         policy_bundle_version=governance_decision.policy_bundle_version,
+        static_policy_summary=governance_decision.static_policy_summary,
+        dynamic_policy_summary=governance_decision.dynamic_policy_summary,
+        behavioral_summary=governance_decision.behavioral_summary,
         oversight_summary=governance_decision.oversight_summary,
     )
 
 
 # Build the latest deterministic oversight panel if one exists.
 def _build_oversight_panel(
-    oversight_assessment: OversightAssessment | None,
+    oversight_assessment: DynamicPolicyAssessment | OversightAssessment | None,
 ) -> DashboardOversightPanel | None:
     if oversight_assessment is None:
         return None
@@ -219,6 +241,22 @@ def _build_oversight_panel(
         recommended_directive=oversight_assessment.recommended_directive.value,
         summary=oversight_assessment.summary,
         reason_codes=tuple(code.value for code in oversight_assessment.reason_codes),
+    )
+
+
+# Build the latest behavioural panel if a foundation assessment exists.
+def _build_behavioral_panel(
+    behavioral_assessment: BehavioralAssessment | None,
+) -> DashboardBehavioralPanel | None:
+    if behavioral_assessment is None:
+        return None
+
+    return DashboardBehavioralPanel(
+        history_available=behavioral_assessment.history_available,
+        historical_run_count=behavioral_assessment.historical_run_count,
+        feature_snapshot_version=behavioral_assessment.feature_snapshot_version,
+        summary=behavioral_assessment.summary,
+        notes=behavioral_assessment.notes,
     )
 
 
@@ -305,9 +343,13 @@ def _resolve_reason_codes(*, task_state: TaskState) -> tuple[str, ...]:
     if governance_decision is not None:
         return tuple(code.value for code in governance_decision.reason_codes)
 
-    oversight_assessment = task_state.last_oversight_assessment
+    oversight_assessment = task_state.last_dynamic_policy_assessment or task_state.last_oversight_assessment
     if oversight_assessment is not None:
         return tuple(code.value for code in oversight_assessment.reason_codes)
+
+    behavioral_assessment = task_state.last_behavioral_assessment
+    if behavioral_assessment is not None:
+        return behavioral_assessment.notes
 
     return tuple()
 

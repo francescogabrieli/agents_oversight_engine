@@ -8,7 +8,8 @@ from typing import Any
 from langgraph.types import interrupt
 
 from .actor_contract import ActorResultType
-from .oversight import OversightAssessment
+from .behavioral import BehavioralAssessment
+from .oversight import DynamicPolicyAssessment, OversightAssessment
 from .state import (
     ExternalCommunicationPhase,
     HumanReviewDecision,
@@ -26,14 +27,15 @@ from .state import (
 def build_human_review_request(*, state: TaskState, thread_id: str) -> HumanReviewRequest:
     current_plan_step = state.current_plan_step
     governance_decision = state.last_governance_decision
-    oversight_assessment = state.last_oversight_assessment
+    dynamic_policy_assessment = state.last_dynamic_policy_assessment or state.last_oversight_assessment
+    behavioral_assessment = state.last_behavioral_assessment
     resume_state = _resolve_resume_state(state)
 
     reason_codes: list[str] = []
     if governance_decision is not None:
         reason_codes.extend(code.value for code in governance_decision.reason_codes)
-    if oversight_assessment is not None:
-        reason_codes.extend(code.value for code in oversight_assessment.reason_codes)
+    if dynamic_policy_assessment is not None:
+        reason_codes.extend(code.value for code in dynamic_policy_assessment.reason_codes)
     if not reason_codes:
         reason_codes.append("human_review_required")
 
@@ -52,14 +54,28 @@ def build_human_review_request(*, state: TaskState, thread_id: str) -> HumanRevi
             governance_decision.directive if governance_decision is not None else None
         ),
         governance_summary=governance_decision.summary if governance_decision is not None else None,
+        static_policy_summary=(
+            getattr(governance_decision, "static_policy_summary", None)
+            if governance_decision is not None
+            else None
+        ),
+        dynamic_policy_summary=(
+            getattr(governance_decision, "dynamic_policy_summary", None)
+            if governance_decision is not None
+            else None
+        ),
+        behavioral_summary=(
+            behavioral_assessment.summary if behavioral_assessment is not None else None
+        ),
         oversight_summary=(
-            oversight_assessment.summary if oversight_assessment is not None else None
+            dynamic_policy_assessment.summary if dynamic_policy_assessment is not None else None
         ),
         reason_codes=tuple(reason_codes),
         allowed_decisions=tuple(HumanReviewDecisionType),
         review_summary=_build_review_summary(
             governance_decision=governance_decision,
-            oversight_assessment=oversight_assessment,
+            dynamic_policy_assessment=dynamic_policy_assessment,
+            behavioral_assessment=behavioral_assessment,
             resume_state=resume_state,
         ),
     )
@@ -256,7 +272,8 @@ def _resolve_resume_state(state: TaskState) -> RuntimeState:
 def _build_review_summary(
     *,
     governance_decision: Any,
-    oversight_assessment: OversightAssessment | None,
+    dynamic_policy_assessment: DynamicPolicyAssessment | OversightAssessment | None,
+    behavioral_assessment: BehavioralAssessment | None,
     resume_state: RuntimeState,
 ) -> str | None:
     parts: list[str] = []
@@ -267,12 +284,14 @@ def _build_review_summary(
             normalized_parts,
             governance_decision.summary,
         )
-    if oversight_assessment is not None and oversight_assessment.summary:
+    if dynamic_policy_assessment is not None and dynamic_policy_assessment.summary:
         _append_unique_review_part(
             parts,
             normalized_parts,
-            oversight_assessment.summary,
+            dynamic_policy_assessment.summary,
         )
+    if behavioral_assessment is not None and behavioral_assessment.summary:
+        _append_unique_review_part(parts, normalized_parts, behavioral_assessment.summary)
     _append_unique_review_part(parts, normalized_parts, f"Approval would resume to '{resume_state.value}'.")
     return " ".join(parts) if parts else None
 

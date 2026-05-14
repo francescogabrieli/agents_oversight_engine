@@ -27,6 +27,7 @@ from layer1_intake import (
 from layer2_runtime_governance import (
     ActorResult,
     ActorResultType,
+    BehavioralAssessment,
     CapabilityAccessMode,
     EvidenceQualityAssessment,
     GovernanceDecision,
@@ -43,6 +44,7 @@ from layer2_runtime_governance import (
     RuntimeState,
     ScratchpadEntry,
     ScratchpadEntryType,
+    StaticPolicyAssessment,
     StepRecord,
     StepValidation,
     StepValidationDecision,
@@ -87,6 +89,10 @@ class Layer2TraceTests(unittest.TestCase):
         self.assertEqual(len(trace.oversight_assessments), 2)
         self.assertIsInstance(trace.oversight_assessments[0], TraceOversightAssessment)
         self.assertEqual(trace.oversight_assessments[0].evidence_quality.level, "strong")
+        self.assertEqual(len(trace.static_policy_assessments), 2)
+        self.assertEqual(len(trace.dynamic_policy_assessments), 2)
+        self.assertEqual(len(trace.behavioral_assessments), 1)
+        self.assertTrue(trace.behavioral_assessments[0].history_available)
 
     def test_trace_dict_and_json_are_json_safe(self) -> None:
         state = _complete_task_state()
@@ -120,6 +126,9 @@ class Layer2TraceTests(unittest.TestCase):
         self.assertEqual(compact["planning_snapshot"]["plan_step_count"], 2)
         self.assertEqual(compact["governance_snapshot"]["governance_pass_count"], 2)
         self.assertEqual(compact["governance_snapshot"]["oversight_pass_count"], 2)
+        self.assertEqual(compact["governance_snapshot"]["static_policy_pass_count"], 2)
+        self.assertEqual(compact["governance_snapshot"]["dynamic_policy_pass_count"], 2)
+        self.assertEqual(compact["governance_snapshot"]["behavioral_pass_count"], 1)
         self.assertEqual(
             compact["governance_snapshot"]["last_oversight_assessment"]["trajectory_health"][
                 "level"
@@ -242,8 +251,14 @@ def _complete_task_state() -> TaskState:
     state.observed_evidence = [_evidence()]
     state.governance_history = [_governance_read_only(), _governance_continue()]
     state.last_governance_decision = state.governance_history[-1]
+    state.static_policy_history = [_static_policy_read_only(), _static_policy_allow()]
+    state.last_static_policy_assessment = state.static_policy_history[-1]
+    state.dynamic_policy_history = [_oversight(), _oversight()]
+    state.last_dynamic_policy_assessment = state.dynamic_policy_history[-1]
     state.oversight_history = [_oversight(), _oversight()]
     state.last_oversight_assessment = state.oversight_history[-1]
+    state.behavioral_history = [_behavioral()]
+    state.last_behavioral_assessment = state.behavioral_history[-1]
     return state
 
 
@@ -381,6 +396,41 @@ def _oversight() -> OversightAssessment:
         recommended_directive=OversightRecommendedDirective.CONTINUE,
         summary="Evidence strong, risk low, trajectory healthy.",
         reason_codes=(OversightReasonCode.RECOMMEND_CONTINUE,),
+    )
+
+
+# Build one static policy assessment.
+def _static_policy_read_only() -> StaticPolicyAssessment:
+    return StaticPolicyAssessment(
+        policy_decision=PolicyDecision.ALLOW_READ_ONLY,
+        reason_codes=(GovernanceReasonCode.READ_ONLY_ALLOWED,),
+        summary="Read-only tool use allowed.",
+        policy_engine_name="test_policy",
+        policy_bundle_version="test_v1",
+        policy_directive=GovernanceDirective.CONTINUE_READ_ONLY,
+    )
+
+
+# Build one local-output static policy assessment.
+def _static_policy_allow() -> StaticPolicyAssessment:
+    return StaticPolicyAssessment(
+        policy_decision=PolicyDecision.ALLOW,
+        reason_codes=(GovernanceReasonCode.LOCAL_OUTPUT_ALLOWED,),
+        summary="Local output allowed.",
+        policy_engine_name="test_policy",
+        policy_bundle_version="test_v1",
+        policy_directive=GovernanceDirective.CONTINUE,
+    )
+
+
+# Build one behavioural foundation assessment.
+def _behavioral() -> BehavioralAssessment:
+    return BehavioralAssessment(
+        history_available=True,
+        historical_run_count=3,
+        feature_snapshot_version="behavioral_features_v1",
+        summary="Behavioral foundation found 3 historical runs in SQLite.",
+        notes=("behavioral_foundation_only", "sqlite_history_available"),
     )
 
 

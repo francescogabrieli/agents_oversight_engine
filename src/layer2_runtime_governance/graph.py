@@ -25,6 +25,12 @@ from layer1_intake import (
     TaskSpec,
 )
 
+from .behavioral import (
+    BehavioralAssessment,
+    BehavioralStorePort,
+    BehavioralStoreSettings,
+    SQLiteBehavioralStore,
+)
 from .acting import build_default_actor
 from .actor_contract import (
     ActorPort,
@@ -34,6 +40,7 @@ from .actor_contract import (
 )
 from .governance import (
     GovernanceDecision,
+    GovernanceDecisionTrace,
     GovernanceDirective,
     GovernanceReasonCode,
     OPAHttpPolicyEngineSettings,
@@ -41,9 +48,12 @@ from .governance import (
     PolicyEnginePort,
     PolicyEvaluationInput,
     PolicyEvaluationResult,
+    StaticPolicyAssessment,
     build_default_policy_engine,
 )
 from .oversight import (
+    DynamicPolicyAssessment,
+    DynamicPolicyRecommendedDirective,
     EvidenceQualityAssessment,
     EvidenceQualityWeights,
     OperationalRiskAssessment,
@@ -125,6 +135,7 @@ def build_runtime_graph(
     tool_gateway_service: ToolGatewayPort | None = None,
     replanner_service: ReplannerPort | None = None,
     policy_engine_service: PolicyEnginePort | None = None,
+    behavioral_store_service: BehavioralStorePort | None = None,
     hitl_event_callback: Callable[[TaskState], None] | None = None,
 ):
     # Wire the current Layer 2 graph and compile it into an executable LangGraph.
@@ -147,6 +158,7 @@ def build_runtime_graph(
         "governance",
         _build_governance_node(
             resolved_policy_engine,
+            behavioral_store_service=behavioral_store_service,
             hitl_event_callback=hitl_event_callback,
         ),
     )
@@ -232,6 +244,7 @@ def _build_actor_node(actor_service: ActorPort):
 def _build_governance_node(
     policy_engine_service: PolicyEnginePort,
     *,
+    behavioral_store_service: BehavioralStorePort | None = None,
     hitl_event_callback: Callable[[TaskState], None] | None = None,
 ):
     def _governance_node(
@@ -243,6 +256,7 @@ def _build_governance_node(
             "task_state": governance(
                 _copy_task_state(state["task_state"]),
                 policy_engine_service=policy_engine_service,
+                behavioral_store_service=behavioral_store_service,
                 thread_id=thread_id,
                 hitl_event_callback=hitl_event_callback,
             )
@@ -439,8 +453,15 @@ def _build_default_checkpointer(*, storage_path: Any | None = None) -> DiskBacke
             HumanReviewDecisionType,
             HumanReviewRequest,
             GovernanceDecision,
+            GovernanceDecisionTrace,
             GovernanceDirective,
             GovernanceReasonCode,
+            BehavioralAssessment,
+            BehavioralStoreSettings,
+            SQLiteBehavioralStore,
+            StaticPolicyAssessment,
+            DynamicPolicyAssessment,
+            DynamicPolicyRecommendedDirective,
             EvidenceQualityAssessment,
             EvidenceQualityWeights,
             EvidenceSupportLevel,

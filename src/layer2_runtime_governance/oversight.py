@@ -25,13 +25,17 @@ if TYPE_CHECKING:
     from .governance import PolicyEvaluationInput
 
 
-class OversightRecommendedDirective(str, Enum):
-    # Oversight recommendations mirror governance directives without importing governance.py.
+class DynamicPolicyRecommendedDirective(str, Enum):
+    # Dynamic recommendations mirror governance directives without importing governance.py.
     CONTINUE = "continue"
     CONTINUE_READ_ONLY = "continue_read_only"
     REQUEST_MORE_EVIDENCE = "request_more_evidence"
     REPLAN = "replan"
     WAIT_HUMAN_REVIEW = "wait_human_review"
+
+
+# Keep the legacy public name stable while the dynamic policy layer is renamed explicitly.
+OversightRecommendedDirective = DynamicPolicyRecommendedDirective
 
 
 # OversightSignalLevel keeps score interpretation explicit and compact.
@@ -158,14 +162,18 @@ class TrajectoryHealthAssessment:
 
 
 @dataclass(frozen=True)
-class OversightAssessment:
-    # OversightAssessment is the adaptive governance record stored in TaskState.
+class DynamicPolicyAssessment:
+    # DynamicPolicyAssessment is the deterministic adaptive governance record stored in TaskState.
     evidence_quality: EvidenceQualityAssessment
     operational_risk: OperationalRiskAssessment
     trajectory_health: TrajectoryHealthAssessment
-    recommended_directive: OversightRecommendedDirective
+    recommended_directive: DynamicPolicyRecommendedDirective
     summary: str
     reason_codes: tuple[OversightReasonCode, ...]
+
+
+# Keep the legacy public name stable while the dynamic policy layer is renamed explicitly.
+OversightAssessment = DynamicPolicyAssessment
 
 
 # Load deterministic oversight scoring settings from repository configuration.
@@ -284,7 +292,7 @@ def evaluate_confidence_risk_trajectory(
     policy_input: "PolicyEvaluationInput",
     config: OversightPolicyConfig | None = None,
     tool_gateway_config: ToolGatewayConfig | None = None,
-) -> OversightAssessment:
+) -> DynamicPolicyAssessment:
     resolved_config = config or load_oversight_policy_config()
     resolved_tool_config = tool_gateway_config or _load_tool_gateway_config_safely()
 
@@ -317,7 +325,7 @@ def evaluate_confidence_risk_trajectory(
         (_recommendation_reason_code(recommended_directive),),
     )
 
-    return OversightAssessment(
+    return DynamicPolicyAssessment(
         evidence_quality=evidence_quality,
         operational_risk=operational_risk,
         trajectory_health=trajectory_health,
@@ -328,6 +336,22 @@ def evaluate_confidence_risk_trajectory(
             f"and trajectory health is {trajectory_health.level.value} ({trajectory_health.score:.2f})."
         ),
         reason_codes=reason_codes,
+    )
+
+
+# Keep the new naming explicit while preserving the old evaluation entrypoint.
+def evaluate_dynamic_policy(
+    *,
+    task_state: TaskState,
+    policy_input: "PolicyEvaluationInput",
+    config: OversightPolicyConfig | None = None,
+    tool_gateway_config: ToolGatewayConfig | None = None,
+) -> DynamicPolicyAssessment:
+    return evaluate_confidence_risk_trajectory(
+        task_state=task_state,
+        policy_input=policy_input,
+        config=config,
+        tool_gateway_config=tool_gateway_config,
     )
 
 
@@ -616,27 +640,27 @@ def _recommend_directive(
     evidence_quality: EvidenceQualityAssessment,
     operational_risk: OperationalRiskAssessment,
     trajectory_health: TrajectoryHealthAssessment,
-) -> OversightRecommendedDirective:
+) -> DynamicPolicyRecommendedDirective:
     if operational_risk.score > config.max_operational_risk:
-        return OversightRecommendedDirective.WAIT_HUMAN_REVIEW
+        return DynamicPolicyRecommendedDirective.WAIT_HUMAN_REVIEW
 
     if OversightReasonCode.REPLAN_LIMIT_EXCEEDED in trajectory_health.reason_codes:
-        return OversightRecommendedDirective.WAIT_HUMAN_REVIEW
+        return DynamicPolicyRecommendedDirective.WAIT_HUMAN_REVIEW
 
     if trajectory_health.score < config.min_trajectory_health:
-        return OversightRecommendedDirective.REPLAN
+        return DynamicPolicyRecommendedDirective.REPLAN
 
     if (
         _is_completion_attempt(policy_input=policy_input)
         and evidence_quality.score < config.min_evidence_quality
         and _validation_signals_weak_evidence(task_state=task_state, config=config)
     ):
-        return OversightRecommendedDirective.REQUEST_MORE_EVIDENCE
+        return DynamicPolicyRecommendedDirective.REQUEST_MORE_EVIDENCE
 
     if policy_input.actor_result_type == ActorResultType.PROPOSE_ACTION:
-        return OversightRecommendedDirective.CONTINUE_READ_ONLY
+        return DynamicPolicyRecommendedDirective.CONTINUE_READ_ONLY
 
-    return OversightRecommendedDirective.CONTINUE
+    return DynamicPolicyRecommendedDirective.CONTINUE
 
 
 # Identify actor outcomes that attempt to complete or finalize a semantic step.
@@ -1074,15 +1098,15 @@ def _evidence_support_level_rank(level: EvidenceSupportLevel) -> int:
 
 # Map one recommendation to a compact reason code.
 def _recommendation_reason_code(
-    recommended_directive: OversightRecommendedDirective,
+    recommended_directive: DynamicPolicyRecommendedDirective,
 ) -> OversightReasonCode:
-    if recommended_directive == OversightRecommendedDirective.WAIT_HUMAN_REVIEW:
+    if recommended_directive == DynamicPolicyRecommendedDirective.WAIT_HUMAN_REVIEW:
         return OversightReasonCode.RECOMMEND_HUMAN_REVIEW
-    if recommended_directive == OversightRecommendedDirective.REPLAN:
+    if recommended_directive == DynamicPolicyRecommendedDirective.REPLAN:
         return OversightReasonCode.RECOMMEND_REPLAN
-    if recommended_directive == OversightRecommendedDirective.REQUEST_MORE_EVIDENCE:
+    if recommended_directive == DynamicPolicyRecommendedDirective.REQUEST_MORE_EVIDENCE:
         return OversightReasonCode.RECOMMEND_MORE_EVIDENCE
-    if recommended_directive == OversightRecommendedDirective.CONTINUE_READ_ONLY:
+    if recommended_directive == DynamicPolicyRecommendedDirective.CONTINUE_READ_ONLY:
         return OversightReasonCode.RECOMMEND_CONTINUE
     return OversightReasonCode.RECOMMEND_CONTINUE
 
@@ -1158,6 +1182,8 @@ def _clamp(value: float) -> float:
 
 
 __all__ = [
+    "DynamicPolicyAssessment",
+    "DynamicPolicyRecommendedDirective",
     "EvidenceQualityAssessment",
     "EvidenceQualityWeights",
     "OperationalRiskAssessment",
@@ -1171,6 +1197,7 @@ __all__ = [
     "TrajectoryPenalties",
     "build_default_oversight_policy_config",
     "evaluate_confidence_risk_trajectory",
+    "evaluate_dynamic_policy",
     "evaluate_evidence_quality",
     "evaluate_operational_risk",
     "evaluate_trajectory_health",

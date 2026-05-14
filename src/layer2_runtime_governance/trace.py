@@ -12,8 +12,10 @@ from pydantic import BaseModel
 from layer1_intake import IntakeResult
 
 from .actor_contract import ActorResult
-from .governance import GovernanceDecision
+from .behavioral import BehavioralAssessment
+from .governance import GovernanceDecision, StaticPolicyAssessment
 from .oversight import (
+    DynamicPolicyAssessment,
     EvidenceQualityAssessment,
     OperationalRiskAssessment,
     OversightAssessment,
@@ -137,6 +139,9 @@ class TraceGovernanceDecision:
     policy_bundle_version: str
     policy_directive: str
     oversight_recommended_directive: str
+    static_policy_summary: str | None
+    dynamic_policy_summary: str | None
+    behavioral_summary: str | None
     oversight_summary: str | None
 
 
@@ -160,6 +165,27 @@ class TraceOversightAssessment:
 
 
 @dataclass(frozen=True)
+class TraceStaticPolicyAssessment:
+    # TraceStaticPolicyAssessment keeps the OPA hard decision separate from later layers.
+    policy_decision: str
+    reason_codes: tuple[str, ...]
+    summary: str
+    policy_engine_name: str
+    policy_bundle_version: str
+    policy_directive: str
+
+
+@dataclass(frozen=True)
+class TraceBehavioralAssessment:
+    # TraceBehavioralAssessment exposes the behavioural foundation history summary.
+    history_available: bool
+    historical_run_count: int
+    feature_snapshot_version: str
+    summary: str
+    notes: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class TraceHumanReviewRequest:
     # TraceHumanReviewRequest captures the pending HITL payload in JSON-safe form.
     request_id: str
@@ -172,6 +198,9 @@ class TraceHumanReviewRequest:
     current_tool_request: dict[str, Any] | None
     governance_directive: str | None
     governance_summary: str | None
+    static_policy_summary: str | None
+    dynamic_policy_summary: str | None
+    behavioral_summary: str | None
     oversight_summary: str | None
     reason_codes: tuple[str, ...]
     allowed_decisions: tuple[str, ...]
@@ -229,6 +258,9 @@ class Layer2RuntimeTrace:
     execution: TraceExecutionSummary
     tool_calls: tuple[TraceToolCall, ...]
     observed_evidence: tuple[TraceObservedEvidence, ...]
+    static_policy_assessments: tuple[TraceStaticPolicyAssessment, ...]
+    dynamic_policy_assessments: tuple[TraceOversightAssessment, ...]
+    behavioral_assessments: tuple[TraceBehavioralAssessment, ...]
     governance_decisions: tuple[TraceGovernanceDecision, ...]
     oversight_assessments: tuple[TraceOversightAssessment, ...]
     human_review: TraceHumanReviewSummary
@@ -258,6 +290,15 @@ def build_layer2_runtime_trace(
         tool_calls=_build_tool_calls(task_state=task_state),
         observed_evidence=tuple(
             _build_observed_evidence(evidence) for evidence in task_state.observed_evidence
+        ),
+        static_policy_assessments=tuple(
+            _build_static_policy_assessment(assessment) for assessment in task_state.static_policy_history
+        ),
+        dynamic_policy_assessments=tuple(
+            _build_oversight_assessment(assessment) for assessment in task_state.dynamic_policy_history
+        ),
+        behavioral_assessments=tuple(
+            _build_behavioral_assessment(assessment) for assessment in task_state.behavioral_history
         ),
         governance_decisions=tuple(
             _build_governance_decision(decision) for decision in task_state.governance_history
@@ -309,6 +350,18 @@ def build_compact_trace_from_runtime_trace(trace: Layer2RuntimeTrace) -> dict[st
         "actor_snapshot": asdict(trace.actor),
         "execution_snapshot": asdict(trace.execution),
         "governance_snapshot": {
+            "static_policy_pass_count": len(trace.static_policy_assessments),
+            "last_static_policy_assessment": (
+                asdict(trace.static_policy_assessments[-1]) if trace.static_policy_assessments else None
+            ),
+            "dynamic_policy_pass_count": len(trace.dynamic_policy_assessments),
+            "last_dynamic_policy_assessment": (
+                asdict(trace.dynamic_policy_assessments[-1]) if trace.dynamic_policy_assessments else None
+            ),
+            "behavioral_pass_count": len(trace.behavioral_assessments),
+            "last_behavioral_assessment": (
+                asdict(trace.behavioral_assessments[-1]) if trace.behavioral_assessments else None
+            ),
             "governance_pass_count": len(trace.governance_decisions),
             "last_governance_decision": (
                 asdict(trace.governance_decisions[-1]) if trace.governance_decisions else None
@@ -513,7 +566,24 @@ def _build_governance_decision(decision: GovernanceDecision) -> TraceGovernanceD
         policy_bundle_version=decision.policy_bundle_version,
         policy_directive=decision.policy_directive.value,
         oversight_recommended_directive=decision.oversight_recommended_directive.value,
+        static_policy_summary=decision.static_policy_summary,
+        dynamic_policy_summary=decision.dynamic_policy_summary,
+        behavioral_summary=decision.behavioral_summary,
         oversight_summary=decision.oversight_summary,
+    )
+
+
+# Convert one static policy assessment into the trace representation.
+def _build_static_policy_assessment(
+    assessment: StaticPolicyAssessment,
+) -> TraceStaticPolicyAssessment:
+    return TraceStaticPolicyAssessment(
+        policy_decision=assessment.policy_decision.value,
+        reason_codes=tuple(code.value for code in assessment.reason_codes),
+        summary=assessment.summary,
+        policy_engine_name=assessment.policy_engine_name,
+        policy_bundle_version=assessment.policy_bundle_version,
+        policy_directive=assessment.policy_directive.value,
     )
 
 
@@ -526,6 +596,19 @@ def _build_oversight_assessment(assessment: OversightAssessment) -> TraceOversig
         recommended_directive=assessment.recommended_directive.value,
         summary=assessment.summary,
         reason_codes=tuple(code.value for code in assessment.reason_codes),
+    )
+
+
+# Convert one behavioural assessment into the trace representation.
+def _build_behavioral_assessment(
+    assessment: BehavioralAssessment,
+) -> TraceBehavioralAssessment:
+    return TraceBehavioralAssessment(
+        history_available=assessment.history_available,
+        historical_run_count=assessment.historical_run_count,
+        feature_snapshot_version=assessment.feature_snapshot_version,
+        summary=assessment.summary,
+        notes=assessment.notes,
     )
 
 
@@ -576,6 +659,9 @@ def _build_human_review_request(
             request.governance_directive.value if request.governance_directive is not None else None
         ),
         governance_summary=request.governance_summary,
+        static_policy_summary=request.static_policy_summary,
+        dynamic_policy_summary=request.dynamic_policy_summary,
+        behavioral_summary=request.behavioral_summary,
         oversight_summary=request.oversight_summary,
         reason_codes=tuple(request.reason_codes),
         allowed_decisions=tuple(decision.value for decision in request.allowed_decisions),
@@ -747,12 +833,14 @@ __all__ = [
     "TraceActorTurn",
     "TraceExecutionSummary",
     "TraceExternalCommunicationSummary",
+    "TraceBehavioralAssessment",
     "TraceHumanReviewDecision",
     "TraceHumanReviewRequest",
     "TraceHumanReviewSummary",
     "TraceGovernanceDecision",
     "TraceIntakeSummary",
     "TraceObservedEvidence",
+    "TraceStaticPolicyAssessment",
     "TraceOversightAssessment",
     "TracePlanStep",
     "TraceRuntimeSummary",

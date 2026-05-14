@@ -5,16 +5,19 @@ from typing import Callable
 
 from layer1_intake import DomainType, IntakeResult
 
+from .behavioral import BehavioralStorePort, build_behavioral_assessment, persist_behavioral_snapshot
 from .actor_contract import ActorPort, ActorResult, ActorResultType, build_actor_task
 from .governance import (
     GovernanceDecision,
     GovernanceDirective,
     PolicyEnginePort,
     PolicyEvaluationInput,
+    combine_governance_assessments,
     build_governance_decision,
     build_policy_evaluation_input,
+    evaluate_static_policy,
 )
-from .oversight import evaluate_confidence_risk_trajectory
+from .oversight import evaluate_dynamic_policy
 from .planning import PlannerPort
 from .hitl import build_human_review_request
 from .hitl import human_review
@@ -147,6 +150,7 @@ def governance(
     state: TaskState,
     *,
     policy_engine_service: PolicyEnginePort,
+    behavioral_store_service: BehavioralStorePort | None = None,
     thread_id: str | None = None,
     hitl_event_callback: Callable[[TaskState], None] | None = None,
 ) -> TaskState:
@@ -159,19 +163,35 @@ def governance(
         return state
 
     policy_input = build_policy_evaluation_input(task_state=state)
-    policy_result = policy_engine_service.evaluate(policy_input=policy_input)
-    oversight_assessment = evaluate_confidence_risk_trajectory(
+    static_policy_assessment = evaluate_static_policy(
+        policy_engine_service=policy_engine_service,
+        policy_input=policy_input,
+    )
+    dynamic_policy_assessment = evaluate_dynamic_policy(
         task_state=state,
         policy_input=policy_input,
     )
-    governance_decision = build_governance_decision(
+    resolved_thread_id = thread_id or state.runtime_thread_id or state.intake_metadata.request_id
+    behavioral_assessment = build_behavioral_assessment(
+        thread_id=resolved_thread_id,
+        task_state=state,
+        behavioral_store=behavioral_store_service,
+    )
+    governance_decision = combine_governance_assessments(
         policy_input=policy_input,
-        policy_result=policy_result,
-        oversight_assessment=oversight_assessment,
+        static_policy_assessment=static_policy_assessment,
+        dynamic_policy_assessment=dynamic_policy_assessment,
+        behavioral_assessment=behavioral_assessment,
     )
 
-    state.last_oversight_assessment = oversight_assessment
-    state.oversight_history.append(oversight_assessment)
+    state.last_static_policy_assessment = static_policy_assessment
+    state.static_policy_history.append(static_policy_assessment)
+    state.last_dynamic_policy_assessment = dynamic_policy_assessment
+    state.dynamic_policy_history.append(dynamic_policy_assessment)
+    state.last_behavioral_assessment = behavioral_assessment
+    state.behavioral_history.append(behavioral_assessment)
+    state.last_oversight_assessment = dynamic_policy_assessment
+    state.oversight_history.append(dynamic_policy_assessment)
     state.last_governance_decision = governance_decision
     state.governance_history.append(governance_decision)
     _apply_governance_decision(
@@ -181,7 +201,6 @@ def governance(
     )
 
     if state.current_state == RuntimeState.WAITING_HUMAN_REVIEW:
-        resolved_thread_id = thread_id or state.intake_metadata.request_id
         state.pending_human_review_request = build_human_review_request(
             state=state,
             thread_id=resolved_thread_id,
@@ -192,6 +211,17 @@ def governance(
     else:
         state.pending_human_review_request = None
         state.human_review_resume_state = None
+
+    # Persist the behavioural read model after each governance pass without affecting the decision path.
+    try:
+        persist_behavioral_snapshot(
+            thread_id=resolved_thread_id,
+            intake_result=state.intake_payload,
+            task_state=state,
+            behavioral_store=behavioral_store_service,
+        )
+    except Exception:
+        pass
 
     _append_step_record(
         state,

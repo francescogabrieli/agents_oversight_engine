@@ -12,9 +12,10 @@ from urllib.request import Request, urlopen
 from layer1_intake import DomainType, SensitivityLevel
 
 from .actor_contract import ActorResult, ActorResultType, CapabilityAccessMode
+from .behavioral import BehavioralAssessment
 from .oversight import (
-    OversightAssessment,
-    OversightRecommendedDirective,
+    DynamicPolicyAssessment,
+    DynamicPolicyRecommendedDirective,
 )
 from .state import ExternalCommunicationPhase, RuntimeFlag, RuntimeState, TaskState
 from .tool_contract import ToolName
@@ -56,9 +57,9 @@ class GovernanceReasonCode(str, Enum):
     EXTERNAL_COMMUNICATION_REVIEW_REQUIRED = "external_communication_review_required"
 
 
-# PolicyEvaluationInput is the compact snapshot sent to OPA.
 @dataclass(frozen=True)
 class PolicyEvaluationInput:
+    # PolicyEvaluationInput is the compact runtime snapshot sent to governance layers.
     task_domain_type: DomainType
     task_domain_label: str
     task_sensitivity: SensitivityLevel
@@ -85,9 +86,9 @@ class PolicyEvaluationInput:
     external_communication_phase: ExternalCommunicationPhase | None
 
 
-# PolicyEvaluationResult mirrors the typed output returned by OPA.
 @dataclass(frozen=True)
 class PolicyEvaluationResult:
+    # PolicyEvaluationResult mirrors the raw typed output returned by OPA.
     policy_decision: PolicyDecision
     reason_codes: tuple[GovernanceReasonCode, ...]
     summary: str
@@ -95,9 +96,20 @@ class PolicyEvaluationResult:
     policy_bundle_version: str
 
 
-# GovernanceDecision is the canonical governance record stored in TaskState.
 @dataclass(frozen=True)
-class GovernanceDecision:
+class StaticPolicyAssessment:
+    # StaticPolicyAssessment is the hard deterministic result produced by OPA.
+    policy_decision: PolicyDecision
+    reason_codes: tuple[GovernanceReasonCode, ...]
+    summary: str
+    policy_engine_name: str
+    policy_bundle_version: str
+    policy_directive: GovernanceDirective
+
+
+@dataclass(frozen=True)
+class GovernanceDecisionTrace:
+    # GovernanceDecisionTrace is the canonical combined governance record stored in TaskState.
     directive: GovernanceDirective
     policy_decision: PolicyDecision
     reason_codes: tuple[GovernanceReasonCode, ...]
@@ -109,7 +121,14 @@ class GovernanceDecision:
     policy_bundle_version: str
     policy_directive: GovernanceDirective
     oversight_recommended_directive: GovernanceDirective
+    static_policy_summary: str | None = None
+    dynamic_policy_summary: str | None = None
+    behavioral_summary: str | None = None
     oversight_summary: str | None = None
+
+
+# Keep the legacy public name stable while the internal model becomes more explicit.
+GovernanceDecision = GovernanceDecisionTrace
 
 
 # PolicyEnginePort keeps the runtime decoupled from the policy engine backend.
@@ -120,9 +139,9 @@ class PolicyEnginePort(Protocol):
     def evaluate(self, *, policy_input: PolicyEvaluationInput) -> PolicyEvaluationResult: ...
 
 
-# Settings for the HTTP OPA adapter.
 @dataclass(frozen=True)
 class OPAHttpPolicyEngineSettings:
+    # Settings for the HTTP OPA adapter.
     base_url: str = "http://127.0.0.1:8181"
     decision_path: str = "/v1/data/layer2/governance/decision"
     timeout_seconds: float = 5.0
@@ -131,7 +150,6 @@ class OPAHttpPolicyEngineSettings:
     def from_env(cls) -> "OPAHttpPolicyEngineSettings":
         # Merge process env and local .env files into one policy engine settings object.
         env_file_values = _load_env_file_values()
-
         return cls(
             base_url=os.getenv(
                 "LAYER2_GOVERNANCE_OPA_BASE_URL",
@@ -166,7 +184,6 @@ def build_policy_evaluation_input(*, task_state: TaskState) -> PolicyEvaluationI
 
     evaluated_step = _resolve_evaluated_plan_step(task_state=task_state, actor_result=actor_result)
     current_tool_request = task_state.current_tool_request or actor_result.tool_request
-
     return PolicyEvaluationInput(
         task_domain_type=task_state.task_spec.domain_type,
         task_domain_label=task_state.task_spec.domain_label,
@@ -192,9 +209,7 @@ def build_policy_evaluation_input(*, task_state: TaskState) -> PolicyEvaluationI
         observed_evidence_count=len(task_state.observed_evidence),
         actor_turn_count=task_state.actor_turn_count,
         external_communication_phase=(
-            task_state.external_communication.phase
-            if task_state.external_communication is not None
-            else None
+            task_state.external_communication.phase if task_state.external_communication is not None else None
         ),
     )
 
@@ -249,29 +264,55 @@ def build_opa_input_document(*, policy_input: PolicyEvaluationInput) -> dict[str
     }
 
 
+# Evaluate the hard static policy layer through the configured OPA-backed engine.
+def evaluate_static_policy(
+    *,
+    policy_engine_service: PolicyEnginePort,
+    policy_input: PolicyEvaluationInput,
+) -> StaticPolicyAssessment:
+    policy_result = policy_engine_service.evaluate(policy_input=policy_input)
+    return StaticPolicyAssessment(
+        policy_decision=policy_result.policy_decision,
+        reason_codes=policy_result.reason_codes,
+        summary=policy_result.summary,
+        policy_engine_name=policy_result.policy_engine_name,
+        policy_bundle_version=policy_result.policy_bundle_version,
+        policy_directive=derive_governance_directive(
+            policy_input=policy_input,
+            policy_result=policy_result,
+        ),
+    )
+
+
 # Map the policy outcome and actor intent into a runtime directive.
 def derive_governance_directive(
     *,
     policy_input: PolicyEvaluationInput,
-    policy_result: PolicyEvaluationResult,
+    policy_result: PolicyEvaluationResult | None = None,
+    static_policy_assessment: StaticPolicyAssessment | None = None,
 ) -> GovernanceDirective:
-    if policy_result.policy_decision == PolicyDecision.DENY:
+    resolved_policy_decision = (
+        static_policy_assessment.policy_decision
+        if static_policy_assessment is not None
+        else policy_result.policy_decision
+        if policy_result is not None
+        else None
+    )
+    if resolved_policy_decision is None:
+        raise ValueError("derive_governance_directive requires a policy result or static policy assessment.")
+
+    if resolved_policy_decision == PolicyDecision.DENY:
         return GovernanceDirective.STOP
-
-    if policy_result.policy_decision == PolicyDecision.REQUIRE_HUMAN_REVIEW:
+    if resolved_policy_decision == PolicyDecision.REQUIRE_HUMAN_REVIEW:
         return GovernanceDirective.WAIT_HUMAN_REVIEW
-
-    if policy_result.policy_decision == PolicyDecision.ASK_CLARIFICATION:
+    if resolved_policy_decision == PolicyDecision.ASK_CLARIFICATION:
         return GovernanceDirective.ASK_USER_CLARIFICATION
-
     if policy_input.actor_result_type == ActorResultType.NEEDS_REPLAN:
         return GovernanceDirective.REPLAN
-
     if policy_input.actor_result_type == ActorResultType.PROPOSE_ACTION:
-        if policy_result.policy_decision == PolicyDecision.ALLOW_READ_ONLY:
+        if resolved_policy_decision == PolicyDecision.ALLOW_READ_ONLY:
             return GovernanceDirective.CONTINUE_READ_ONLY
         return GovernanceDirective.CONTINUE
-
     return GovernanceDirective.CONTINUE
 
 
@@ -279,141 +320,180 @@ def derive_governance_directive(
 def constrains_capability_use(
     *,
     policy_input: PolicyEvaluationInput,
-    policy_result: PolicyEvaluationResult,
+    static_policy_assessment: StaticPolicyAssessment,
 ) -> bool:
-    if policy_result.policy_decision in {
+    if static_policy_assessment.policy_decision in {
         PolicyDecision.ALLOW_READ_ONLY,
         PolicyDecision.REQUIRE_HUMAN_REVIEW,
         PolicyDecision.DENY,
     }:
         return True
-
     if (
         policy_input.actor_result_type == ActorResultType.PROPOSE_ACTION
         and policy_input.capability_mode == CapabilityAccessMode.WRITE
     ):
         return True
-
     return False
 
 
-# Build a full governance decision record from the policy evaluation.
+# Combine all governance assessments into the one canonical runtime decision record.
+def combine_governance_assessments(
+    *,
+    policy_input: PolicyEvaluationInput,
+    static_policy_assessment: StaticPolicyAssessment,
+    dynamic_policy_assessment: DynamicPolicyAssessment | None = None,
+    behavioral_assessment: BehavioralAssessment | None = None,
+) -> GovernanceDecisionTrace:
+    final_directive = combine_governance_directives(
+        static_policy_assessment=static_policy_assessment,
+        dynamic_policy_assessment=dynamic_policy_assessment,
+    )
+    dynamic_directive = _map_dynamic_directive(
+        dynamic_policy_assessment.recommended_directive
+        if dynamic_policy_assessment is not None
+        else DynamicPolicyRecommendedDirective.CONTINUE
+    )
+    return GovernanceDecisionTrace(
+        directive=final_directive,
+        policy_decision=static_policy_assessment.policy_decision,
+        reason_codes=static_policy_assessment.reason_codes,
+        summary=_build_combined_summary(
+            static_policy_assessment=static_policy_assessment,
+            final_directive=final_directive,
+            dynamic_policy_assessment=dynamic_policy_assessment,
+            behavioral_assessment=behavioral_assessment,
+        ),
+        constrains_capability_use=constrains_capability_use(
+            policy_input=policy_input,
+            static_policy_assessment=static_policy_assessment,
+        )
+        or final_directive != static_policy_assessment.policy_directive,
+        evaluated_actor_result_type=policy_input.actor_result_type,
+        evaluated_tool_name=policy_input.tool_name,
+        policy_engine_name=static_policy_assessment.policy_engine_name,
+        policy_bundle_version=static_policy_assessment.policy_bundle_version,
+        policy_directive=static_policy_assessment.policy_directive,
+        oversight_recommended_directive=dynamic_directive,
+        static_policy_summary=static_policy_assessment.summary,
+        dynamic_policy_summary=(
+            dynamic_policy_assessment.summary if dynamic_policy_assessment is not None else None
+        ),
+        behavioral_summary=behavioral_assessment.summary if behavioral_assessment is not None else None,
+        oversight_summary=(
+            dynamic_policy_assessment.summary if dynamic_policy_assessment is not None else None
+        ),
+    )
+
+
+# Keep the old public builder alive while internally delegating to the new layered combiner.
 def build_governance_decision(
     *,
     policy_input: PolicyEvaluationInput,
     policy_result: PolicyEvaluationResult,
-    oversight_assessment: OversightAssessment | None = None,
-) -> GovernanceDecision:
-    policy_directive = derive_governance_directive(
-        policy_input=policy_input,
-        policy_result=policy_result,
-    )
-    final_directive = combine_governance_directives(
-        policy_result=policy_result,
-        policy_directive=policy_directive,
-        oversight_assessment=oversight_assessment,
-    )
-    oversight_directive = _map_oversight_directive(
-        oversight_assessment.recommended_directive
-        if oversight_assessment is not None
-        else OversightRecommendedDirective.CONTINUE
-    )
-
-    return GovernanceDecision(
-        directive=final_directive,
+    oversight_assessment: DynamicPolicyAssessment | None = None,
+    behavioral_assessment: BehavioralAssessment | None = None,
+) -> GovernanceDecisionTrace:
+    static_policy_assessment = StaticPolicyAssessment(
         policy_decision=policy_result.policy_decision,
         reason_codes=policy_result.reason_codes,
-        summary=_build_combined_summary(
-            policy_summary=policy_result.summary,
-            policy_directive=policy_directive,
-            final_directive=final_directive,
-            oversight_assessment=oversight_assessment,
-        ),
-        constrains_capability_use=constrains_capability_use(
-            policy_input=policy_input,
-            policy_result=policy_result,
-        )
-        or final_directive != policy_directive,
-        evaluated_actor_result_type=policy_input.actor_result_type,
-        evaluated_tool_name=policy_input.tool_name,
+        summary=policy_result.summary,
         policy_engine_name=policy_result.policy_engine_name,
         policy_bundle_version=policy_result.policy_bundle_version,
-        policy_directive=policy_directive,
-        oversight_recommended_directive=oversight_directive,
-        oversight_summary=oversight_assessment.summary if oversight_assessment is not None else None,
+        policy_directive=derive_governance_directive(
+            policy_input=policy_input,
+            policy_result=policy_result,
+        ),
+    )
+    return combine_governance_assessments(
+        policy_input=policy_input,
+        static_policy_assessment=static_policy_assessment,
+        dynamic_policy_assessment=oversight_assessment,
+        behavioral_assessment=behavioral_assessment,
     )
 
 
-# Combine hard policy with adaptive oversight without making policy more permissive.
+# Combine hard policy with adaptive dynamic policy without making policy more permissive.
 def combine_governance_directives(
     *,
-    policy_result: PolicyEvaluationResult,
-    policy_directive: GovernanceDirective,
-    oversight_assessment: OversightAssessment | None,
+    static_policy_assessment: StaticPolicyAssessment | None = None,
+    dynamic_policy_assessment: DynamicPolicyAssessment | None = None,
+    policy_result: PolicyEvaluationResult | None = None,
+    policy_directive: GovernanceDirective | None = None,
+    oversight_assessment: DynamicPolicyAssessment | None = None,
 ) -> GovernanceDirective:
-    if policy_result.policy_decision == PolicyDecision.DENY:
+    # Keep backward compatibility for older callers while routing through the new model.
+    resolved_static_policy = static_policy_assessment
+    if resolved_static_policy is None and policy_result is not None and policy_directive is not None:
+        resolved_static_policy = StaticPolicyAssessment(
+            policy_decision=policy_result.policy_decision,
+            reason_codes=policy_result.reason_codes,
+            summary=policy_result.summary,
+            policy_engine_name=policy_result.policy_engine_name,
+            policy_bundle_version=policy_result.policy_bundle_version,
+            policy_directive=policy_directive,
+        )
+    if resolved_static_policy is None:
+        raise ValueError("combine_governance_directives requires static policy information.")
+
+    resolved_dynamic_policy = dynamic_policy_assessment or oversight_assessment
+    if resolved_static_policy.policy_decision == PolicyDecision.DENY:
         return GovernanceDirective.STOP
-
-    if policy_result.policy_decision == PolicyDecision.REQUIRE_HUMAN_REVIEW:
+    if resolved_static_policy.policy_decision == PolicyDecision.REQUIRE_HUMAN_REVIEW:
         return GovernanceDirective.WAIT_HUMAN_REVIEW
-
-    if policy_result.policy_decision == PolicyDecision.ASK_CLARIFICATION:
+    if resolved_static_policy.policy_decision == PolicyDecision.ASK_CLARIFICATION:
         return GovernanceDirective.ASK_USER_CLARIFICATION
+    if resolved_dynamic_policy is None:
+        return resolved_static_policy.policy_directive
 
-    if oversight_assessment is None:
-        return policy_directive
-
-    oversight_directive = _map_oversight_directive(oversight_assessment.recommended_directive)
-    if oversight_directive == GovernanceDirective.WAIT_HUMAN_REVIEW:
+    dynamic_directive = _map_dynamic_directive(resolved_dynamic_policy.recommended_directive)
+    if dynamic_directive == GovernanceDirective.WAIT_HUMAN_REVIEW:
         return GovernanceDirective.WAIT_HUMAN_REVIEW
-
-    if oversight_directive == GovernanceDirective.REPLAN:
+    if dynamic_directive == GovernanceDirective.REPLAN:
         return GovernanceDirective.REPLAN
-
-    if oversight_directive == GovernanceDirective.REQUEST_MORE_EVIDENCE:
+    if dynamic_directive == GovernanceDirective.REQUEST_MORE_EVIDENCE:
         return GovernanceDirective.REQUEST_MORE_EVIDENCE
+    return resolved_static_policy.policy_directive
 
-    return policy_directive
 
-
-# Convert the oversight recommendation into the governance directive enum.
-def _map_oversight_directive(
-    recommended_directive: OversightRecommendedDirective,
+# Convert the dynamic recommendation into the governance directive enum.
+def _map_dynamic_directive(
+    recommended_directive: DynamicPolicyRecommendedDirective,
 ) -> GovernanceDirective:
-    if recommended_directive == OversightRecommendedDirective.WAIT_HUMAN_REVIEW:
+    if recommended_directive == DynamicPolicyRecommendedDirective.WAIT_HUMAN_REVIEW:
         return GovernanceDirective.WAIT_HUMAN_REVIEW
-    if recommended_directive == OversightRecommendedDirective.REPLAN:
+    if recommended_directive == DynamicPolicyRecommendedDirective.REPLAN:
         return GovernanceDirective.REPLAN
-    if recommended_directive == OversightRecommendedDirective.REQUEST_MORE_EVIDENCE:
+    if recommended_directive == DynamicPolicyRecommendedDirective.REQUEST_MORE_EVIDENCE:
         return GovernanceDirective.REQUEST_MORE_EVIDENCE
-    if recommended_directive == OversightRecommendedDirective.CONTINUE_READ_ONLY:
+    if recommended_directive == DynamicPolicyRecommendedDirective.CONTINUE_READ_ONLY:
         return GovernanceDirective.CONTINUE_READ_ONLY
     return GovernanceDirective.CONTINUE
 
 
-# Summarize how policy and adaptive oversight produced the final directive.
+# Summarize how the layered governance stack produced the final directive.
 def _build_combined_summary(
     *,
-    policy_summary: str,
-    policy_directive: GovernanceDirective,
+    static_policy_assessment: StaticPolicyAssessment,
     final_directive: GovernanceDirective,
-    oversight_assessment: OversightAssessment | None,
+    dynamic_policy_assessment: DynamicPolicyAssessment | None,
+    behavioral_assessment: BehavioralAssessment | None,
 ) -> str:
-    if oversight_assessment is None:
-        return policy_summary
-
-    if final_directive == policy_directive:
-        return (
-            f"{policy_summary} Adaptive oversight recommended "
-            f"'{oversight_assessment.recommended_directive.value}' and preserved the policy directive "
-            f"'{policy_directive.value}'."
-        )
-
-    return (
-        f"{policy_summary} Adaptive oversight made the decision more conservative: "
-        f"policy directive '{policy_directive.value}' became '{final_directive.value}'. "
-        f"{oversight_assessment.summary}"
-    )
+    summary_parts = [static_policy_assessment.summary]
+    if dynamic_policy_assessment is not None:
+        if final_directive == static_policy_assessment.policy_directive:
+            summary_parts.append(
+                "Dynamic policy preserved the static directive "
+                f"'{static_policy_assessment.policy_directive.value}'."
+            )
+        else:
+            summary_parts.append(
+                "Dynamic policy made the decision more conservative: "
+                f"'{static_policy_assessment.policy_directive.value}' became '{final_directive.value}'."
+            )
+        summary_parts.append(dynamic_policy_assessment.summary)
+    if behavioral_assessment is not None:
+        summary_parts.append(behavioral_assessment.summary)
+    return " ".join(summary_parts)
 
 
 # Execute the policy evaluation against OPA over HTTP.
@@ -430,35 +510,32 @@ class OPAHttpPolicyEngine(PolicyEnginePort):
             {"input": build_opa_input_document(policy_input=policy_input)},
             ensure_ascii=False,
         ).encode("utf-8")
-
         request = Request(
             self._resolve_url(),
             data=payload,
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-
         try:
             with urlopen(request, timeout=self._settings.timeout_seconds) as response:
                 raw_body = response.read().decode("utf-8")
-        except HTTPError as exc:  # pragma: no cover - network/client errors
+        except HTTPError as exc:  # pragma: no cover
             raise PolicyEngineExecutionError(
                 f"OPA policy request failed with HTTP {exc.code}: {exc.reason}"
             ) from exc
-        except URLError as exc:  # pragma: no cover - network/client errors
+        except URLError as exc:  # pragma: no cover
             raise PolicyEngineExecutionError(f"OPA policy request failed: {exc.reason}") from exc
-        except Exception as exc:  # pragma: no cover - network/client errors
+        except Exception as exc:  # pragma: no cover
             raise PolicyEngineExecutionError(f"OPA policy request failed: {exc}") from exc
 
         try:
             parsed_body = json.loads(raw_body)
-        except json.JSONDecodeError as exc:  # pragma: no cover - malformed response
+        except json.JSONDecodeError as exc:  # pragma: no cover
             raise PolicyEngineExecutionError(f"OPA returned invalid JSON: {exc}") from exc
 
         result = parsed_body.get("result")
         if not isinstance(result, dict):
             raise PolicyEngineExecutionError("OPA response did not contain a structured result.")
-
         return PolicyEvaluationResult(
             policy_decision=_parse_policy_decision(result.get("policy_decision")),
             reason_codes=_parse_reason_codes(result.get("reason_codes")),
@@ -486,7 +563,6 @@ def _resolve_evaluated_plan_step(
     for step in task_state.plan_steps:
         if step.step_id == actor_result.plan_step_id:
             return step
-
     return None
 
 
@@ -494,7 +570,6 @@ def _resolve_evaluated_plan_step(
 def _parse_policy_decision(value: Any) -> PolicyDecision:
     if not isinstance(value, str):
         raise PolicyEngineExecutionError("OPA policy decision must be a string.")
-
     try:
         return PolicyDecision(value)
     except ValueError as exc:
@@ -505,7 +580,6 @@ def _parse_policy_decision(value: Any) -> PolicyDecision:
 def _parse_reason_codes(value: Any) -> tuple[GovernanceReasonCode, ...]:
     if not isinstance(value, list) or not value:
         raise PolicyEngineExecutionError("OPA reason_codes must be a non-empty list.")
-
     parsed_codes: list[GovernanceReasonCode] = []
     for item in value:
         if not isinstance(item, str):
@@ -514,7 +588,6 @@ def _parse_reason_codes(value: Any) -> tuple[GovernanceReasonCode, ...]:
             parsed_codes.append(GovernanceReasonCode(item))
         except ValueError as exc:
             raise PolicyEngineExecutionError(f"OPA returned an unknown reason code: {item}") from exc
-
     return tuple(parsed_codes)
 
 
@@ -528,11 +601,9 @@ def _parse_non_empty_text(value: Any, *, field_name: str) -> str:
 # Load simple KEY=VALUE pairs from the supported .env file locations.
 def _load_env_file_values() -> dict[str, str]:
     env_values: dict[str, str] = {}
-
     for candidate in _candidate_env_paths():
         if not candidate.exists():
             continue
-
         for raw_line in candidate.read_text(encoding="utf-8").splitlines():
             line = raw_line.strip()
             if not line or line.startswith("#"):
@@ -541,27 +612,23 @@ def _load_env_file_values() -> dict[str, str]:
                 line = line[len("export ") :].strip()
             if "=" not in line:
                 continue
-
             key, value = line.split("=", 1)
             key = key.strip()
             value = value.strip().strip("\"'")
             if key:
                 env_values[key] = value
-
     return env_values
 
 
 # Search both repository root and src-level env files for local development.
 def _candidate_env_paths() -> list[Path]:
     repo_root = Path(__file__).resolve().parents[2]
-    return [
-        repo_root / ".env",
-        repo_root / "src" / ".env",
-    ]
+    return [repo_root / ".env", repo_root / "src" / ".env"]
 
 
 __all__ = [
     "GovernanceDecision",
+    "GovernanceDecisionTrace",
     "GovernanceDirective",
     "GovernanceReasonCode",
     "OPAHttpPolicyEngine",
@@ -571,11 +638,14 @@ __all__ = [
     "PolicyEnginePort",
     "PolicyEvaluationInput",
     "PolicyEvaluationResult",
+    "StaticPolicyAssessment",
     "build_default_policy_engine",
     "build_governance_decision",
     "build_opa_input_document",
     "build_policy_evaluation_input",
+    "combine_governance_assessments",
     "combine_governance_directives",
     "constrains_capability_use",
     "derive_governance_directive",
+    "evaluate_static_policy",
 ]

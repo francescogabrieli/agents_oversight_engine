@@ -35,6 +35,7 @@ from layer2_runtime_governance import (
     ActorResult,
     ActorResultType,
     ActorTask,
+    BehavioralStoreSettings,
     CapabilityAccessMode,
     ExternalCommunicationPhase,
     GovernanceDecision,
@@ -49,6 +50,7 @@ from layer2_runtime_governance import (
     PolicyEvaluationResult,
     RuntimeFlag,
     RuntimeState,
+    SQLiteBehavioralStore,
     ScratchpadEntry,
     ScratchpadEntryType,
     StepValidation,
@@ -1506,6 +1508,55 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             runtime_summary = json.loads(paths.runtime_summary_path.read_text(encoding="utf-8"))
             self.assertEqual(dashboard_payload["runtime_state"], "completed")
             self.assertEqual(runtime_summary["thread_id"], "persisted-runtime-test")
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_behavioral_store_is_populated_and_second_run_sees_history(self) -> None:
+        temp_dir = REPO_ROOT / "_behavioral_store_test"
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+        try:
+            behavioral_store = SQLiteBehavioralStore(
+                settings=BehavioralStoreSettings(
+                    database_path=temp_dir / "behavioral.sqlite3"
+                )
+            )
+
+            first_trace = run_layer2_flow(
+                raw_task_text="Find official sources about the DMA and summarize them.",
+                context_hint="Prefer official EU sources.",
+                thread_id="behavioral-run-1",
+                demo_intake_profile="research",
+                planner_service=StubPlanner(),
+                actor_service=StubActor(),
+                tool_gateway_service=StubToolGateway(),
+                replanner_service=StubReplanner(),
+                policy_engine_service=StubPolicyEngine(),
+                behavioral_store_service=behavioral_store,
+                checkpointer=build_default_checkpointer(storage_path=temp_dir / "cp1.pkl"),
+            )
+            first_state = first_trace["final_result"]["task_state"]
+            self.assertFalse(first_state.last_behavioral_assessment.history_available)
+            self.assertEqual(first_state.last_behavioral_assessment.historical_run_count, 0)
+
+            second_trace = run_layer2_flow(
+                raw_task_text="Find official sources about the DMA and summarize them.",
+                context_hint="Prefer official EU sources.",
+                thread_id="behavioral-run-2",
+                demo_intake_profile="research",
+                planner_service=StubPlanner(),
+                actor_service=StubActor(),
+                tool_gateway_service=StubToolGateway(),
+                replanner_service=StubReplanner(),
+                policy_engine_service=StubPolicyEngine(),
+                behavioral_store_service=behavioral_store,
+                checkpointer=build_default_checkpointer(storage_path=temp_dir / "cp2.pkl"),
+            )
+            second_state = second_trace["final_result"]["task_state"]
+            self.assertTrue(second_state.last_behavioral_assessment.history_available)
+            self.assertGreaterEqual(second_state.last_behavioral_assessment.historical_run_count, 1)
+            self.assertTrue((temp_dir / "behavioral.sqlite3").exists())
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 

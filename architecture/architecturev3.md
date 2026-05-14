@@ -369,8 +369,9 @@ Proprietà del contract:
 - l'agente non si ferma per checkpoint hardcoded: l'interruzione avviene solo quando il blocco di governance produce una direttiva di controllo o escalation
 
 Valutazioni attese all'interno del `Governance Core`:
-- il `policy_engine` legge lo stream e produce una decisione di policy come `allow`, `allow_read_only`, `ask_clarification`, `require_human_review` o `deny`
-- il blocco `confidence_risk_trajectory` usa lo stream per calcolare segnali continui su qualità delle evidenze, rischio operativo e salute della traiettoria
+- il layer di `static_policy` legge lo stream e produce una decisione hard come `allow`, `allow_read_only`, `ask_clarification`, `require_human_review` o `deny`
+- il layer di `dynamic_policy` usa lo stream per calcolare segnali continui su qualità delle evidenze, rischio operativo e salute della traiettoria
+- il layer `behavioral` legge memoria storica e feature delle run precedenti per produrre un assessment storico non bloccante
 - il `judge` opera su eventi o snapshot periodici dello stream, senza dipendere da checkpoint statici, e produce una valutazione semantica del comportamento del runtime
 - il `decision_combiner` riceve questi esiti e produce la direttiva finale del blocco governance
 
@@ -386,8 +387,9 @@ Implementazione corrente: **nodo LangGraph `governance` con componenti interni t
 Direzione architetturale futura: **subgraph LangGraph esplicito**, quando HITL `interrupt / resume`, judge semantico e osservabilita avanzata richiederanno nodi separati.
 
 Componenti principali nella baseline corrente:
-- `policy_engine`, backed by OPA HTTP
-- `confidence_risk_trajectory`, deterministico e configurato da `configs/layer2_oversight_policy.json`
+- `static_policy`, backed by OPA HTTP
+- `dynamic_policy`, deterministico e configurato da `configs/layer2_oversight_policy.json`
+- `behavioral_foundation`, backed by SQLite locale e feature storiche tipizzate
 - `decision_combiner`, tipizzato in `governance.py`
 
 Componenti futuri:
@@ -396,10 +398,10 @@ Componenti futuri:
 
 Ruolo:
 - osservare in continuo lo stream operativo emesso dall'`Agent Core`
-- valutare policy, rischio, incertezza e coerenza semantica durante l'esecuzione
+- valutare policy, rischio, incertezza, contesto storico e coerenza semantica durante l'esecuzione
 - trasformare gli esiti dei sottosistemi in una decisione di controllo spiegabile e tracciabile
 
-#### Policy Engine
+#### Static Policy
 
 Implementazione: **nodo del grafo + componente esterno OPA (Open Policy Agent)**.
 
@@ -425,10 +427,10 @@ Segnali usati dalle policy:
 - vincoli organizzativi
 - eventuali precedenti approvazioni umane
 
-Il `Policy Engine` definisce i confini hard del runtime.
-I livelli adattivi successivi non possono mai allargare ciò che il `Policy Engine` ha negato o ristretto.
+Il layer di `static_policy` definisce i confini hard del runtime.
+I livelli successivi non possono mai allargare ciò che la `static_policy` ha negato o ristretto.
 
-#### Confidence, Risk & Trajectory
+#### Dynamic Policy
 
 Implementazione corrente: **componente deterministico interno al nodo `governance`**.
 
@@ -439,6 +441,8 @@ File principali:
 Persistenza runtime:
 - `TaskState.last_oversight_assessment`
 - `TaskState.oversight_history`
+- `TaskState.last_dynamic_policy_assessment`
+- `TaskState.dynamic_policy_history`
 
 Score distinti:
 - `evidence_quality_score`
@@ -446,7 +450,7 @@ Score distinti:
 - `trajectory_health_score`
 
 Ruolo:
-- operare come **adaptive oversight layer**
+- operare come **deterministic adaptive policy layer**
 - intervenire quando nessuna policy hard ha bloccato l'azione, ma il runtime non è sufficientemente robusto per proseguire in autonomia
 - evitare un unico `confidence_score` aggregato
 - separare qualità delle evidenze, rischio operativo e salute della traiettoria
@@ -467,7 +471,41 @@ Granularita dell'evidenza:
 - esempi granulari di obblighi, divieti o requisiti specifici devono essere richiesti solo quando il task li domanda o quando sono direttamente presenti nelle evidenze osservate
 
 Il layer produce una raccomandazione, non un permesso assoluto.
-OPA resta il confine hard: l'oversight puo solo confermare o rendere piu prudente la decisione di policy.
+OPA resta il confine hard: la `dynamic_policy` puo solo confermare o rendere piu prudente la decisione di policy.
+
+#### Behavioral Foundation
+
+Implementazione corrente: **componente interno al nodo `governance` con persistenza SQLite locale**.
+
+File principali:
+- `src/layer2_runtime_governance/behavioral.py`
+- `artifacts/runtime/behavioral/behavioral.sqlite3`
+
+Persistenza runtime:
+- `TaskState.last_behavioral_assessment`
+- `TaskState.behavioral_history`
+
+Ruolo:
+- materializzare un assessment storico della run corrente a partire da memoria locale persistita
+- salvare snapshot strutturati di run, step, tool call, decisioni di governance, segnali dinamici e feature aggregate
+- preparare il terreno per similarity search, deviation analysis e novelty scoring futuri
+- rendere disponibile al `decision_combiner` un contesto storico tipizzato senza introdurre ancora nuova autorità decisionale
+
+Responsabilità della baseline attuale:
+- leggere la memoria SQLite locale
+- esporre un `BehavioralAssessment` tipizzato e leggibile
+- persistere feature e snapshot della run corrente come read model storico
+
+Limiti espliciti della baseline attuale:
+- il layer `behavioral` non produce ancora `novelty_score` o `behavior_deviation_score`
+- il layer `behavioral` non seleziona ancora task simili con ranking forte
+- il layer `behavioral` non modifica ancora la direttiva finale del runtime
+- la memoria SQLite non sostituisce la trace completa: è un read model indicizzato, non la source of truth primaria
+
+Direzione evolutiva:
+- aggiungere similarity e deviation rispetto a run storiche comparabili
+- trasformare l'assessment storico in segnale advisory ad alta priorità
+- mantenere comunque il vincolo che `behavioral` non possa rendere il sistema più permissivo della `static_policy`
 
 #### Guardrail Proporzionati
 
@@ -506,14 +544,15 @@ Produce invece una valutazione semantica che può contribuire a `continue`, `rep
 Implementazione corrente: **funzione tipizzata in `governance.py`**.
 
 Ruolo:
-- ricevere gli esiti di `policy_engine` e `confidence_risk_trajectory`
+- ricevere gli esiti di `static_policy`, `dynamic_policy` e `behavioral`
 - produrre una sola direttiva di controllo per il runtime
 - applicare una gerarchia esplicita di decisione
 
 Gerarchia di combinazione:
-1. il `Policy Engine` ha priorità sui vincoli non negoziabili
-2. il layer `confidence_risk_trajectory` può rendere più prudente la decisione entro i confini ammessi dalla policy
-3. il `judge` contribuira in futuro come segnale semantico ad alta priorita, ma non potra ampliare cio che la policy ha vietato
+1. la `static_policy` ha priorità sui vincoli non negoziabili
+2. la `dynamic_policy` può rendere più prudente la decisione entro i confini ammessi dalla policy
+3. il layer `behavioral` nella baseline corrente contribuisce solo come contesto tracciato e non cambia ancora la direttiva finale
+4. il `judge` contribuira in futuro come segnale semantico ad alta priorita, ma non potra ampliare cio che la policy ha vietato
 
 Regole correnti:
 - `OPA deny` diventa sempre `stop`
@@ -522,6 +561,7 @@ Regole correnti:
 - `OPA allow` con rischio operativo alto diventa `wait_human_review`
 - `OPA allow` con completion fragile diventa `request_more_evidence`
 - `OPA allow` con traiettoria degradata diventa `replan`
+- l'assessment `behavioral` corrente viene tracciato e persistito ma non altera ancora l'output del combiner
 - `OPA allow` con segnali sani conserva la direttiva policy-derived
 
 Output possibili:
@@ -675,13 +715,14 @@ Questo macro-block è un **componente ibrido**.
 
 È costruito dalla fusione di:
 - **memory nativa di LangGraph**, usata per working state, checkpoint, pause/resume e stato del grafo
-- **layer custom esterno**, usato per salvare evidenze, risultati dei tool, decisioni di governance, interventi umani ed eventi di osservabilità
+- **layer custom esterno**, usato per salvare evidenze, risultati dei tool, decisioni di governance, interventi umani, eventi di osservabilità e memoria behavioural indicizzata
 
 Responsabilità principali:
 - persistere il `TaskState`
 - salvare le evidenze raccolte
 - salvare risultati dei tool
 - salvare decisioni di governance
+- salvare assessment statici, dinamici e behavioural
 - salvare decisioni umane
 - raccogliere eventi per tracing e replay
 
@@ -708,6 +749,7 @@ Responsabilità:
 Responsabilità:
 - decisioni policy
 - score di rischio e traiettoria
+- assessment behavioural e feature storiche aggregate
 - escalation
 - interventi umani
 
@@ -745,6 +787,7 @@ Input principali:
 - outcome del task
 - trace della run
 - decisioni policy
+- assessment behavioural e feature storiche
 - decisioni umane
 - evidenze raccolte
 - feedback umano
@@ -757,6 +800,7 @@ Responsabilità principali:
 - valutare come si è comportato il sistema
 - misurare qualità della traiettoria e gestione dell'incertezza
 - verificare il rispetto delle policy
+- usare memoria storica e feature aggregate per identificare pattern ripetuti, casi anomali e deviazioni
 - trasformare i risultati della evaluation in aggiornamenti del sistema
 
 Metriche minime consigliate:
@@ -772,6 +816,7 @@ Aree di miglioramento possibili:
 - prompt
 - soglie
 - policy
+- segnali behavioural, similarity e novelty
 - dataset di test
 - casi difficili da riutilizzare
 

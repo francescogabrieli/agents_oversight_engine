@@ -18,8 +18,9 @@ from .tool_contract import ObservedEvidence, ToolExecutionResult, ToolRequest
 
 if TYPE_CHECKING:
     from .actor_contract import ActorResult, ActorResultType
-    from .governance import GovernanceDecision, GovernanceDirective
-    from .oversight import OversightAssessment
+    from .behavioral import BehavioralAssessment
+    from .governance import GovernanceDirective, GovernanceDecisionTrace, StaticPolicyAssessment
+    from .oversight import DynamicPolicyAssessment, OversightAssessment
 
 
 # Layer 2 currently covers bootstrap, planning, and the actor/tool observation loop.
@@ -160,7 +161,10 @@ class HumanReviewRequest:
     current_tool_request: ToolRequest | None
     governance_directive: GovernanceDirective | None
     governance_summary: str | None
-    oversight_summary: str | None
+    static_policy_summary: str | None = None
+    dynamic_policy_summary: str | None = None
+    behavioral_summary: str | None = None
+    oversight_summary: str | None = None
     reason_codes: tuple[str, ...] = field(default_factory=tuple)
     allowed_decisions: tuple[HumanReviewDecisionType, ...] = field(default_factory=tuple)
     review_summary: str | None = None
@@ -228,8 +232,15 @@ class TaskState:
     tool_call_count: int = 0
 
     # Governance snapshot.
-    last_governance_decision: GovernanceDecision | None = None
-    governance_history: list[GovernanceDecision] = field(default_factory=list)
+    last_static_policy_assessment: StaticPolicyAssessment | None = None
+    static_policy_history: list[StaticPolicyAssessment] = field(default_factory=list)
+    last_dynamic_policy_assessment: DynamicPolicyAssessment | None = None
+    dynamic_policy_history: list[DynamicPolicyAssessment] = field(default_factory=list)
+    last_behavioral_assessment: BehavioralAssessment | None = None
+    behavioral_history: list[BehavioralAssessment] = field(default_factory=list)
+    last_governance_decision: GovernanceDecisionTrace | None = None
+    governance_history: list[GovernanceDecisionTrace] = field(default_factory=list)
+    # Keep the legacy oversight fields populated until all dependent surfaces migrate.
     last_oversight_assessment: OversightAssessment | None = None
     oversight_history: list[OversightAssessment] = field(default_factory=list)
 

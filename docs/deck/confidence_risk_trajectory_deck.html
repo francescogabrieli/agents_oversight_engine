@@ -608,9 +608,6 @@
             <p>Evidenze deboli dovrebbero richiedere piu' evidenze; una traiettoria degradata dovrebbe attivare replanning; un rischio alto dovrebbe attivare human review.</p>
           </div>
         </div>
-        <div class="speaker-note">
-          <strong>Nota per il relatore:</strong> l'obiettivo non e' rendere l'agente meno autonomo. L'obiettivo e' rendere l'autonomia condizionata a una robustezza osservabile.
-        </div>
       </main>
     </section>
 
@@ -639,9 +636,6 @@
             <h3>trajectory_health_score</h3>
             <p>Misura se l'esecuzione sta avanzando in modo coerente nel piano semantico, senza cicli, fallimenti o ripianificazioni eccessive.</p>
           </div>
-        </div>
-        <div class="speaker-note">
-          <strong>Nota per il relatore:</strong> questi punteggi rispondono a domande diverse: sappiamo abbastanza? La prossima azione e' prudente? L'esecuzione e' ancora su un percorso sano?
         </div>
       </main>
     </section>
@@ -822,9 +816,6 @@
             </tr>
           </tbody>
         </table>
-        <div class="speaker-note">
-          <strong>Nota per il relatore:</strong> l'oversight non rende mai piu' permissiva la policy OPA; puo' solo conservare, restringere o escalare.
-        </div>
       </main>
     </section>
 
@@ -949,7 +940,7 @@
             </div>
             <div class="card green">
               <h3>Direttiva di oversight</h3>
-              <p><code>continue_read_only</code> oppure <code>continue</code>, in base all'output del combiner dopo OPA. Non serve human review perche' l'azione e' read-only, il rischio resta sotto la soglia massima e il combiner conserva la direttiva piu' permissiva compatibile.</p>
+              <p><code>continue_read_only</code>, salvo escalation piu' prudente del combiner. Non serve human review perche' l'azione e' read-only, il rischio resta sotto la soglia massima e il combiner non amplia mai la capacita' oltre il permesso OPA.</p>
             </div>
           </div>
         </div>
@@ -1010,10 +1001,10 @@
           <div class="card blue">
             <h3>Incrementi ancora aperti</h3>
             <ul class="tight-list">
-              <li>Separare <code>WAITING_HUMAN_REVIEW</code> in un futuro flusso <code>interrupt / resume</code> HITL.</li>
+              <li>Estendere il flusso HITL gia' implementato con workflow operatore e dashboard piu' ricchi.</li>
               <li>Introdurre un judge semantico solo dopo aver consolidato il slice deterministico.</li>
               <li>Ampliare le policy solo quando il comportamento corrente restera' stabile e testabile.</li>
-              <li>Estendere il controllo a write-like o external communication solo con revisione umana esplicita.</li>
+              <li>Completare il ramo <code>external_communication</code> fino all'esecuzione esternamente impattante, oggi ancora assente nonostante il gate di review sia gia' tipizzato.</li>
             </ul>
           </div>
         </div>
