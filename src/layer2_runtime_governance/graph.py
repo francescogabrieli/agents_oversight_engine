@@ -27,6 +27,7 @@ from layer1_intake import (
 
 from .behavioral import (
     BehavioralAssessment,
+    BehavioralRecommendedDirective,
     BehavioralStorePort,
     BehavioralStoreSettings,
     SQLiteBehavioralStore,
@@ -51,6 +52,7 @@ from .governance import (
     StaticPolicyAssessment,
     build_default_policy_engine,
 )
+from .judge import JudgeAssessment, JudgePort, JudgeRecommendedDirective
 from .oversight import (
     DynamicPolicyAssessment,
     DynamicPolicyRecommendedDirective,
@@ -135,6 +137,7 @@ def build_runtime_graph(
     tool_gateway_service: ToolGatewayPort | None = None,
     replanner_service: ReplannerPort | None = None,
     policy_engine_service: PolicyEnginePort | None = None,
+    judge_service: JudgePort | None = None,
     behavioral_store_service: BehavioralStorePort | None = None,
     hitl_event_callback: Callable[[TaskState], None] | None = None,
 ):
@@ -158,6 +161,7 @@ def build_runtime_graph(
         "governance",
         _build_governance_node(
             resolved_policy_engine,
+            judge_service=judge_service,
             behavioral_store_service=behavioral_store_service,
             hitl_event_callback=hitl_event_callback,
         ),
@@ -244,6 +248,7 @@ def _build_actor_node(actor_service: ActorPort):
 def _build_governance_node(
     policy_engine_service: PolicyEnginePort,
     *,
+    judge_service: JudgePort | None = None,
     behavioral_store_service: BehavioralStorePort | None = None,
     hitl_event_callback: Callable[[TaskState], None] | None = None,
 ):
@@ -256,6 +261,7 @@ def _build_governance_node(
             "task_state": governance(
                 _copy_task_state(state["task_state"]),
                 policy_engine_service=policy_engine_service,
+                judge_service=judge_service,
                 behavioral_store_service=behavioral_store_service,
                 thread_id=thread_id,
                 hitl_event_callback=hitl_event_callback,
@@ -457,9 +463,12 @@ def _build_default_checkpointer(*, storage_path: Any | None = None) -> DiskBacke
             GovernanceDirective,
             GovernanceReasonCode,
             BehavioralAssessment,
+            BehavioralRecommendedDirective,
             BehavioralStoreSettings,
             SQLiteBehavioralStore,
             StaticPolicyAssessment,
+            JudgeAssessment,
+            JudgeRecommendedDirective,
             DynamicPolicyAssessment,
             DynamicPolicyRecommendedDirective,
             EvidenceQualityAssessment,

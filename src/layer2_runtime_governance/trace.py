@@ -14,6 +14,7 @@ from layer1_intake import IntakeResult
 from .actor_contract import ActorResult
 from .behavioral import BehavioralAssessment
 from .governance import GovernanceDecision, StaticPolicyAssessment
+from .judge import JudgeAssessment
 from .oversight import (
     DynamicPolicyAssessment,
     EvidenceQualityAssessment,
@@ -139,9 +140,16 @@ class TraceGovernanceDecision:
     policy_bundle_version: str
     policy_directive: str
     oversight_recommended_directive: str
+    behavioral_recommended_directive: str
+    judge_recommended_directive: str
+    judge_invoked: bool
     static_policy_summary: str | None
     dynamic_policy_summary: str | None
     behavioral_summary: str | None
+    judge_summary: str | None
+    behavioral_similarity_score: float | None
+    behavioral_deviation_score: float | None
+    behavioral_novelty_score: float | None
     oversight_summary: str | None
 
 
@@ -177,12 +185,31 @@ class TraceStaticPolicyAssessment:
 
 @dataclass(frozen=True)
 class TraceBehavioralAssessment:
-    # TraceBehavioralAssessment exposes the behavioural foundation history summary.
+    # TraceBehavioralAssessment exposes the behavioural history summary, scores, and advisory directive.
     history_available: bool
     historical_run_count: int
     feature_snapshot_version: str
     summary: str
     notes: tuple[str, ...]
+    matched_run_count: int
+    historical_similarity_score: float | None
+    behavior_deviation_score: float | None
+    novelty_score: float | None
+    behavioral_recommended_directive: str
+    behavioral_flags: tuple[str, ...]
+    matched_run_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class TraceJudgeAssessment:
+    # TraceJudgeAssessment keeps the selective semantic judge auditable across governance passes.
+    invoked: bool
+    recommendation: str
+    confidence: float
+    summary: str
+    rationale: str
+    flags: tuple[str, ...]
+    evaluated_target: str
 
 
 @dataclass(frozen=True)
@@ -201,6 +228,7 @@ class TraceHumanReviewRequest:
     static_policy_summary: str | None
     dynamic_policy_summary: str | None
     behavioral_summary: str | None
+    judge_summary: str | None
     oversight_summary: str | None
     reason_codes: tuple[str, ...]
     allowed_decisions: tuple[str, ...]
@@ -261,6 +289,7 @@ class Layer2RuntimeTrace:
     static_policy_assessments: tuple[TraceStaticPolicyAssessment, ...]
     dynamic_policy_assessments: tuple[TraceOversightAssessment, ...]
     behavioral_assessments: tuple[TraceBehavioralAssessment, ...]
+    judge_assessments: tuple[TraceJudgeAssessment, ...]
     governance_decisions: tuple[TraceGovernanceDecision, ...]
     oversight_assessments: tuple[TraceOversightAssessment, ...]
     human_review: TraceHumanReviewSummary
@@ -299,6 +328,9 @@ def build_layer2_runtime_trace(
         ),
         behavioral_assessments=tuple(
             _build_behavioral_assessment(assessment) for assessment in task_state.behavioral_history
+        ),
+        judge_assessments=tuple(
+            _build_judge_assessment(assessment) for assessment in task_state.judge_history
         ),
         governance_decisions=tuple(
             _build_governance_decision(decision) for decision in task_state.governance_history
@@ -361,6 +393,10 @@ def build_compact_trace_from_runtime_trace(trace: Layer2RuntimeTrace) -> dict[st
             "behavioral_pass_count": len(trace.behavioral_assessments),
             "last_behavioral_assessment": (
                 asdict(trace.behavioral_assessments[-1]) if trace.behavioral_assessments else None
+            ),
+            "judge_pass_count": len(trace.judge_assessments),
+            "last_judge_assessment": (
+                asdict(trace.judge_assessments[-1]) if trace.judge_assessments else None
             ),
             "governance_pass_count": len(trace.governance_decisions),
             "last_governance_decision": (
@@ -566,9 +602,16 @@ def _build_governance_decision(decision: GovernanceDecision) -> TraceGovernanceD
         policy_bundle_version=decision.policy_bundle_version,
         policy_directive=decision.policy_directive.value,
         oversight_recommended_directive=decision.oversight_recommended_directive.value,
+        behavioral_recommended_directive=decision.behavioral_recommended_directive.value,
+        judge_recommended_directive=decision.judge_recommended_directive.value,
+        judge_invoked=decision.judge_invoked,
         static_policy_summary=decision.static_policy_summary,
         dynamic_policy_summary=decision.dynamic_policy_summary,
         behavioral_summary=decision.behavioral_summary,
+        judge_summary=decision.judge_summary,
+        behavioral_similarity_score=decision.behavioral_similarity_score,
+        behavioral_deviation_score=decision.behavioral_deviation_score,
+        behavioral_novelty_score=decision.behavioral_novelty_score,
         oversight_summary=decision.oversight_summary,
     )
 
@@ -609,6 +652,28 @@ def _build_behavioral_assessment(
         feature_snapshot_version=assessment.feature_snapshot_version,
         summary=assessment.summary,
         notes=assessment.notes,
+        matched_run_count=assessment.matched_run_count,
+        historical_similarity_score=assessment.historical_similarity_score,
+        behavior_deviation_score=assessment.behavior_deviation_score,
+        novelty_score=assessment.novelty_score,
+        behavioral_recommended_directive=assessment.behavioral_recommended_directive.value,
+        behavioral_flags=assessment.behavioral_flags,
+        matched_run_ids=assessment.matched_run_ids,
+    )
+
+
+# Convert one judge assessment into the trace representation.
+def _build_judge_assessment(
+    assessment: JudgeAssessment,
+) -> TraceJudgeAssessment:
+    return TraceJudgeAssessment(
+        invoked=assessment.invoked,
+        recommendation=assessment.recommendation.value,
+        confidence=assessment.confidence,
+        summary=assessment.summary,
+        rationale=assessment.rationale,
+        flags=assessment.flags,
+        evaluated_target=assessment.evaluated_target,
     )
 
 
@@ -662,6 +727,7 @@ def _build_human_review_request(
         static_policy_summary=request.static_policy_summary,
         dynamic_policy_summary=request.dynamic_policy_summary,
         behavioral_summary=request.behavioral_summary,
+        judge_summary=request.judge_summary,
         oversight_summary=request.oversight_summary,
         reason_codes=tuple(request.reason_codes),
         allowed_decisions=tuple(decision.value for decision in request.allowed_decisions),
@@ -839,6 +905,7 @@ __all__ = [
     "TraceHumanReviewSummary",
     "TraceGovernanceDecision",
     "TraceIntakeSummary",
+    "TraceJudgeAssessment",
     "TraceObservedEvidence",
     "TraceStaticPolicyAssessment",
     "TraceOversightAssessment",

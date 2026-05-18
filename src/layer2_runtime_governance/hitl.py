@@ -29,6 +29,7 @@ def build_human_review_request(*, state: TaskState, thread_id: str) -> HumanRevi
     governance_decision = state.last_governance_decision
     dynamic_policy_assessment = state.last_dynamic_policy_assessment or state.last_oversight_assessment
     behavioral_assessment = state.last_behavioral_assessment
+    judge_assessment = state.last_judge_assessment
     resume_state = _resolve_resume_state(state)
 
     reason_codes: list[str] = []
@@ -67,6 +68,7 @@ def build_human_review_request(*, state: TaskState, thread_id: str) -> HumanRevi
         behavioral_summary=(
             behavioral_assessment.summary if behavioral_assessment is not None else None
         ),
+        judge_summary=judge_assessment.summary if judge_assessment is not None else None,
         oversight_summary=(
             dynamic_policy_assessment.summary if dynamic_policy_assessment is not None else None
         ),
@@ -76,6 +78,7 @@ def build_human_review_request(*, state: TaskState, thread_id: str) -> HumanRevi
             governance_decision=governance_decision,
             dynamic_policy_assessment=dynamic_policy_assessment,
             behavioral_assessment=behavioral_assessment,
+            judge_assessment=judge_assessment,
             resume_state=resume_state,
         ),
     )
@@ -274,6 +277,7 @@ def _build_review_summary(
     governance_decision: Any,
     dynamic_policy_assessment: DynamicPolicyAssessment | OversightAssessment | None,
     behavioral_assessment: BehavioralAssessment | None,
+    judge_assessment: Any,
     resume_state: RuntimeState,
 ) -> str | None:
     parts: list[str] = []
@@ -292,6 +296,8 @@ def _build_review_summary(
         )
     if behavioral_assessment is not None and behavioral_assessment.summary:
         _append_unique_review_part(parts, normalized_parts, behavioral_assessment.summary)
+    if judge_assessment is not None and getattr(judge_assessment, "summary", None):
+        _append_unique_review_part(parts, normalized_parts, judge_assessment.summary)
     _append_unique_review_part(parts, normalized_parts, f"Approval would resume to '{resume_state.value}'.")
     return " ".join(parts) if parts else None
 

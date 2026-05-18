@@ -6,6 +6,7 @@ import sys
 import unittest
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from langgraph.types import Command
@@ -35,12 +36,20 @@ from layer2_runtime_governance import (
     ActorResult,
     ActorResultType,
     ActorTask,
+    BehavioralAssessment,
+    BehavioralRecommendedDirective,
     BehavioralStoreSettings,
     CapabilityAccessMode,
+    DynamicPolicyAssessment,
+    DynamicPolicyRecommendedDirective,
+    EvidenceQualityAssessment,
     ExternalCommunicationPhase,
     GovernanceDecision,
     GovernanceDirective,
     GovernanceReasonCode,
+    JudgeAssessment,
+    JudgePort,
+    JudgeRecommendedDirective,
     PlanStep,
     PlanStepStatus,
     PlannerDecision,
@@ -53,6 +62,7 @@ from layer2_runtime_governance import (
     SQLiteBehavioralStore,
     ScratchpadEntry,
     ScratchpadEntryType,
+    StepRecord,
     StepValidation,
     StepValidationDecision,
     TaskState,
@@ -64,6 +74,10 @@ from layer2_runtime_governance import (
     ToolSource,
     OpenRouterActor,
     OpenRouterActorSettings,
+    OperationalRiskAssessment,
+    OversightReasonCode,
+    OversightSignalLevel,
+    TrajectoryHealthAssessment,
     build_default_checkpointer,
     build_actor_task,
     build_default_actor,
@@ -93,7 +107,7 @@ from layer2_runtime_governance.governance import (
     OPAHttpPolicyEngineSettings,
     build_opa_input_document,
 )
-from layer2_runtime_governance.nodes import observe_tool_result
+from layer2_runtime_governance.nodes import governance, observe_tool_result
 from layer2_runtime_governance.tool_contract import ObservedEvidence
 import layer2_runtime_governance.openrouter_client as openrouter_client_module
 
@@ -388,6 +402,36 @@ class ReviewPolicyEngine(PolicyEnginePort):
             summary="The action is allowed by the review policy engine.",
             policy_engine_name=self.policy_engine_name,
             policy_bundle_version=self.policy_bundle_version,
+        )
+
+
+class StaticJudge(JudgePort):
+    judge_name = "static_judge"
+    prompt_version = "static_judge_v1"
+
+    def __init__(self, assessment: JudgeAssessment) -> None:
+        self._assessment = assessment
+
+    # Return one deterministic judge assessment so governance tests stay network-free.
+    def evaluate(
+        self,
+        *,
+        task_state,
+        policy_input,
+        static_policy_assessment,
+        dynamic_policy_assessment,
+        behavioral_assessment,
+        evaluated_target,
+        invocation_flags,
+    ) -> JudgeAssessment:
+        return JudgeAssessment(
+            invoked=self._assessment.invoked,
+            recommendation=self._assessment.recommendation,
+            confidence=self._assessment.confidence,
+            summary=self._assessment.summary,
+            rationale=self._assessment.rationale,
+            flags=invocation_flags or self._assessment.flags,
+            evaluated_target=evaluated_target,
         )
 
 
@@ -1560,6 +1604,474 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
+    def test_behavioral_below_threshold_stays_descriptive_and_continue(self) -> None:
+        temp_dir = REPO_ROOT / "_behavioral_below_threshold_test"
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+        try:
+            behavioral_store = SQLiteBehavioralStore(
+                settings=BehavioralStoreSettings(database_path=temp_dir / "behavioral.sqlite3")
+            )
+            state = _build_behavioral_candidate_state()
+            dynamic_policy = _strong_dynamic_policy_assessment()
+
+            assessment = behavioral_store.build_behavioral_assessment(
+                thread_id="current-run",
+                task_state=state,
+                dynamic_policy_assessment=dynamic_policy,
+            )
+
+            self.assertEqual(
+                assessment.behavioral_recommended_directive,
+                BehavioralRecommendedDirective.CONTINUE,
+            )
+            self.assertIsNone(assessment.historical_similarity_score)
+            self.assertIsNone(assessment.behavior_deviation_score)
+            self.assertIsNone(assessment.novelty_score)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_behavioral_same_family_high_similarity_stays_continue(self) -> None:
+        temp_dir = REPO_ROOT / "_behavioral_similarity_test"
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+        try:
+            behavioral_store = SQLiteBehavioralStore(
+                settings=BehavioralStoreSettings(database_path=temp_dir / "behavioral.sqlite3")
+            )
+            state = _build_behavioral_candidate_state()
+            _seed_behavioral_history(
+                behavioral_store=behavioral_store,
+                count=24,
+                prefix="similar",
+                profile_overrides={},
+            )
+
+            assessment = behavioral_store.build_behavioral_assessment(
+                thread_id="current-run",
+                task_state=state,
+                dynamic_policy_assessment=_strong_dynamic_policy_assessment(),
+            )
+
+            self.assertEqual(
+                assessment.behavioral_recommended_directive,
+                BehavioralRecommendedDirective.CONTINUE,
+            )
+            self.assertIsNotNone(assessment.historical_similarity_score)
+            self.assertGreaterEqual(assessment.historical_similarity_score, 0.80)
+            self.assertGreaterEqual(assessment.matched_run_count, 5)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_behavioral_high_novelty_with_fragile_evidence_requests_more_evidence(self) -> None:
+        temp_dir = REPO_ROOT / "_behavioral_novelty_test"
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+        try:
+            behavioral_store = SQLiteBehavioralStore(
+                settings=BehavioralStoreSettings(database_path=temp_dir / "behavioral.sqlite3")
+            )
+            state = _build_behavioral_candidate_state()
+            state.plan_steps.extend(
+                [
+                    PlanStep(
+                        step_id="step_4",
+                        objective="Collect additional niche evidence.",
+                        rationale="Make the current profile longer than history.",
+                        expected_outcome="Extra context.",
+                    ),
+                    PlanStep(
+                        step_id="step_5",
+                        objective="Produce completion attempt.",
+                        rationale="Force a completion-shaped runtime state.",
+                        expected_outcome="Completion attempt.",
+                    ),
+                ]
+            )
+            state.actor_turn_count = 5
+            state.tool_call_count = 2
+            state.current_state = RuntimeState.ABORTED
+            state.step_history.extend(
+                [
+                    StepRecord(3, RuntimeState.REPLANNING, "replanner", "Replanned."),
+                    StepRecord(4, RuntimeState.REPLANNING, "replanner", "Replanned."),
+                ]
+            )
+            state.governance_history = [
+                GovernanceDecision(
+                    directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
+                    policy_decision=PolicyDecision.ALLOW,
+                    reason_codes=(GovernanceReasonCode.ALLOWED_BY_POLICY,),
+                    summary="Escalated once.",
+                    constrains_capability_use=False,
+                    evaluated_actor_result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+                    evaluated_tool_name=None,
+                    policy_engine_name="test_policy",
+                    policy_bundle_version="test_v1",
+                    policy_directive=GovernanceDirective.CONTINUE,
+                    oversight_recommended_directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
+                )
+            ]
+            state.observed_evidence[0] = ObservedEvidence(
+                evidence_id=state.observed_evidence[0].evidence_id,
+                plan_step_id=state.observed_evidence[0].plan_step_id,
+                title=state.observed_evidence[0].title,
+                locator=state.observed_evidence[0].locator,
+                excerpt=state.observed_evidence[0].excerpt,
+                source_tool=state.observed_evidence[0].source_tool,
+                support_level=EvidenceSupportLevel.SOURCE_DISCOVERY,
+            )
+            state.actor_result = ActorResult(
+                plan_step_id="step_3",
+                result_type=ActorResultType.FINAL_OUTPUT,
+                summary="Final output attempted from weak evidence.",
+                capability_mode=CapabilityAccessMode.NONE,
+                output_text="A detailed final output from limited support.",
+                step_validation=StepValidation(
+                    plan_step_id="step_3",
+                    objective_satisfied=True,
+                    evidence_sufficient=False,
+                    confidence=0.44,
+                    next_action=StepValidationDecision.REQUEST_MORE_EVIDENCE,
+                    rationale_summary="The output is still weakly supported.",
+                ),
+            )
+            _seed_behavioral_history(
+                behavioral_store=behavioral_store,
+                count=24,
+                prefix="novelty",
+                profile_overrides={
+                    "sensitivity": SensitivityLevel.MEDIUM.value,
+                    "policy_profile_name": "legacy_profile",
+                    "step_count": 2,
+                    "actor_turn_count": 1,
+                    "tool_call_count": 0,
+                    "max_evidence_support_level": EvidenceSupportLevel.SOURCE_DISCOVERY.value,
+                    "tool_name": ToolName.MCP_LOCAL_TEST_ECHO.value,
+                },
+            )
+
+            assessment = behavioral_store.build_behavioral_assessment(
+                thread_id="current-run",
+                task_state=state,
+                dynamic_policy_assessment=_weak_dynamic_policy_assessment(),
+            )
+
+            self.assertEqual(
+                assessment.behavioral_recommended_directive,
+                BehavioralRecommendedDirective.REQUEST_MORE_EVIDENCE,
+            )
+            self.assertIsNotNone(assessment.historical_similarity_score)
+            self.assertLess(assessment.historical_similarity_score, 0.35)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_behavioral_deviation_can_trigger_replan(self) -> None:
+        temp_dir = REPO_ROOT / "_behavioral_replan_test"
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+        try:
+            behavioral_store = SQLiteBehavioralStore(
+                settings=BehavioralStoreSettings(database_path=temp_dir / "behavioral.sqlite3")
+            )
+            state = _build_behavioral_candidate_state()
+            state.plan_steps.extend(
+                [
+                    PlanStep(
+                        step_id="step_4",
+                        objective="Recover from divergence.",
+                        rationale="Force a wider trajectory gap.",
+                        expected_outcome="Recovery path 1.",
+                    ),
+                    PlanStep(
+                        step_id="step_5",
+                        objective="Recover further.",
+                        rationale="Force a wider trajectory gap.",
+                        expected_outcome="Recovery path 2.",
+                    ),
+                    PlanStep(
+                        step_id="step_6",
+                        objective="Recover further.",
+                        rationale="Force a wider trajectory gap.",
+                        expected_outcome="Recovery path 3.",
+                    ),
+                    PlanStep(
+                        step_id="step_7",
+                        objective="Recover further.",
+                        rationale="Force a wider trajectory gap.",
+                        expected_outcome="Recovery path 4.",
+                    ),
+                ]
+            )
+            state.actor_turn_count = 10
+            state.tool_call_count = 6
+            state.plan_steps = state.plan_steps[:3]
+            state.step_history.extend(
+                [
+                    StepRecord(3, RuntimeState.REPLANNING, "replanner", "Replanned."),
+                    StepRecord(4, RuntimeState.REPLANNING, "replanner", "Replanned."),
+                    StepRecord(5, RuntimeState.REPLANNING, "replanner", "Replanned."),
+                    StepRecord(6, RuntimeState.REPLANNING, "replanner", "Replanned."),
+                    StepRecord(7, RuntimeState.REPLANNING, "replanner", "Replanned."),
+                ]
+            )
+            state.governance_history = [
+                GovernanceDecision(
+                    directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
+                    policy_decision=PolicyDecision.ALLOW,
+                    reason_codes=(GovernanceReasonCode.ALLOWED_BY_POLICY,),
+                    summary="Escalated once.",
+                    constrains_capability_use=False,
+                    evaluated_actor_result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+                    evaluated_tool_name=None,
+                    policy_engine_name="test_policy",
+                    policy_bundle_version="test_v1",
+                    policy_directive=GovernanceDirective.CONTINUE,
+                    oversight_recommended_directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
+                ),
+                GovernanceDecision(
+                    directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
+                    policy_decision=PolicyDecision.ALLOW,
+                    reason_codes=(GovernanceReasonCode.ALLOWED_BY_POLICY,),
+                    summary="Escalated twice.",
+                    constrains_capability_use=False,
+                    evaluated_actor_result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+                    evaluated_tool_name=None,
+                    policy_engine_name="test_policy",
+                    policy_bundle_version="test_v1",
+                    policy_directive=GovernanceDirective.CONTINUE,
+                    oversight_recommended_directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
+                ),
+            ]
+            _seed_behavioral_history(
+                behavioral_store=behavioral_store,
+                count=24,
+                prefix="replan",
+                profile_overrides={
+                    "actor_turn_count": 2,
+                    "tool_call_count": 1,
+                    "replan_count": 0,
+                },
+            )
+
+            assessment = behavioral_store.build_behavioral_assessment(
+                thread_id="current-run",
+                task_state=state,
+                dynamic_policy_assessment=_strong_dynamic_policy_assessment(),
+            )
+
+            self.assertEqual(
+                assessment.behavioral_recommended_directive,
+                BehavioralRecommendedDirective.REPLAN,
+            )
+            self.assertIsNotNone(assessment.behavior_deviation_score)
+            self.assertGreaterEqual(assessment.behavior_deviation_score, 0.60)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_behavioral_high_review_rate_with_unhealthy_dynamic_signals_waits_review(self) -> None:
+        temp_dir = REPO_ROOT / "_behavioral_review_rate_test"
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+        try:
+            behavioral_store = SQLiteBehavioralStore(
+                settings=BehavioralStoreSettings(database_path=temp_dir / "behavioral.sqlite3")
+            )
+            state = _build_behavioral_candidate_state()
+            _seed_behavioral_history(
+                behavioral_store=behavioral_store,
+                count=24,
+                prefix="review-heavy",
+                profile_overrides={"review_count": 1},
+            )
+
+            assessment = behavioral_store.build_behavioral_assessment(
+                thread_id="current-run",
+                task_state=state,
+                dynamic_policy_assessment=_review_dynamic_policy_assessment(),
+            )
+
+            self.assertEqual(
+                assessment.behavioral_recommended_directive,
+                BehavioralRecommendedDirective.WAIT_HUMAN_REVIEW,
+            )
+            self.assertIn("historical_review_rate_high", assessment.behavioral_flags)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_judge_is_not_invoked_for_static_review(self) -> None:
+        state = _build_actor_ready_state_for_judge()
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.PROPOSE_ACTION,
+            summary="Propose one external read-only action.",
+            capability_mode=CapabilityAccessMode.READ_ONLY,
+            tool_request=ToolRequest(
+                plan_step_id="step_1",
+                tool_name=ToolName.WEB_SEARCH,
+                reason="Need one governed lookup.",
+                query="governed lookup",
+            ),
+        )
+        state.current_tool_request = state.actor_result.tool_request
+        result = governance(
+            state,
+            policy_engine_service=ReviewPolicyEngine(),
+            judge_service=StaticJudge(_judge_wait_review_assessment()),
+            thread_id="judge-static-review",
+        )
+
+        self.assertIsNotNone(result.last_judge_assessment)
+        self.assertFalse(result.last_judge_assessment.invoked)
+        self.assertEqual(
+            result.last_governance_decision.directive,
+            GovernanceDirective.WAIT_HUMAN_REVIEW,
+        )
+
+    def test_judge_is_invoked_for_fragile_completion(self) -> None:
+        state = _build_actor_ready_state_for_judge()
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.FINAL_OUTPUT,
+            summary="Attempt fragile completion.",
+            capability_mode=CapabilityAccessMode.NONE,
+            output_text="A precise output from limited evidence.",
+            step_validation=StepValidation(
+                plan_step_id="step_1",
+                objective_satisfied=True,
+                evidence_sufficient=False,
+                confidence=0.40,
+                next_action=StepValidationDecision.REQUEST_MORE_EVIDENCE,
+                rationale_summary="Still not sufficiently grounded.",
+            ),
+        )
+        state.current_tool_request = None
+
+        result = governance(
+            state,
+            policy_engine_service=StubPolicyEngine(),
+            judge_service=StaticJudge(_judge_more_evidence_assessment()),
+            thread_id="judge-fragile-completion",
+        )
+
+        self.assertTrue(result.last_judge_assessment.invoked)
+        self.assertEqual(
+            result.last_judge_assessment.recommendation,
+            JudgeRecommendedDirective.REQUEST_MORE_EVIDENCE,
+        )
+
+    def test_judge_is_invoked_for_external_draft(self) -> None:
+        state = _build_actor_ready_state_for_judge()
+        external_intake = _build_external_communication_intake_result_for_governance()
+        state = TaskState.from_intake(external_intake)
+        state.current_state = RuntimeState.ACTING
+        state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Draft the external note.",
+                rationale="The task is in the external branch.",
+                expected_outcome="One local draft.",
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        state.current_plan_step_index = 0
+        state.external_communication.phase = ExternalCommunicationPhase.DRAFT_PROPOSAL
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+            summary="Draft prepared.",
+            capability_mode=CapabilityAccessMode.NONE,
+            output_text="Draft email body.",
+            step_validation=StepValidation(
+                plan_step_id="step_1",
+                objective_satisfied=True,
+                evidence_sufficient=True,
+                confidence=0.72,
+                next_action=StepValidationDecision.COMPLETE_STEP,
+                rationale_summary="Draft is complete.",
+            ),
+        )
+
+        result = governance(
+            state,
+            policy_engine_service=StubPolicyEngine(),
+            judge_service=StaticJudge(_judge_wait_review_assessment()),
+            thread_id="judge-external-draft",
+        )
+
+        self.assertTrue(result.last_judge_assessment.invoked)
+        self.assertEqual(result.last_judge_assessment.evaluated_target, "external_draft")
+
+    def test_governance_combiner_prefers_more_conservative_judge(self) -> None:
+        state = _build_actor_ready_state_for_judge()
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.FINAL_OUTPUT,
+            summary="Fragile final output.",
+            capability_mode=CapabilityAccessMode.NONE,
+            output_text="Possibly unsupported completion.",
+            step_validation=StepValidation(
+                plan_step_id="step_1",
+                objective_satisfied=True,
+                evidence_sufficient=False,
+                confidence=0.42,
+                next_action=StepValidationDecision.REQUEST_MORE_EVIDENCE,
+                rationale_summary="Output is not strongly grounded.",
+            ),
+        )
+        state.current_tool_request = None
+
+        result = governance(
+            state,
+            policy_engine_service=StubPolicyEngine(),
+            judge_service=StaticJudge(_judge_wait_review_assessment()),
+            thread_id="judge-precedence",
+        )
+
+        self.assertEqual(
+            result.last_governance_decision.directive,
+            GovernanceDirective.WAIT_HUMAN_REVIEW,
+        )
+        self.assertEqual(
+            result.last_governance_decision.judge_recommended_directive,
+            GovernanceDirective.WAIT_HUMAN_REVIEW,
+        )
+
+    def test_judge_snapshot_is_persisted_in_sqlite(self) -> None:
+        temp_dir = REPO_ROOT / "_judge_persistence_test"
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+        try:
+            behavioral_store = SQLiteBehavioralStore(
+                settings=BehavioralStoreSettings(database_path=temp_dir / "behavioral.sqlite3")
+            )
+            state = _build_actor_ready_state_for_judge()
+            governance(
+                state,
+                policy_engine_service=StubPolicyEngine(),
+                judge_service=StaticJudge(_judge_wait_review_assessment()),
+                thread_id="judge-persisted-run",
+                behavioral_store_service=behavioral_store,
+            )
+            self.assertGreaterEqual(len(state.judge_history), 1)
+
+            import sqlite3
+
+            with sqlite3.connect(temp_dir / "behavioral.sqlite3") as connection:
+                row_count = connection.execute(
+                    "SELECT COUNT(*) FROM judge_assessments WHERE thread_id = ?",
+                    ("judge-persisted-run",),
+                ).fetchone()[0]
+            self.assertGreaterEqual(int(row_count), 1)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
     # Verify replanning drops stale live tool context from the replaced step trajectory.
     def test_replanner_clears_stale_live_tool_context(self) -> None:
         state = _build_replanning_task_state()
@@ -2656,6 +3168,417 @@ def _build_replanning_task_state() -> TaskState:
     return state
 
 
+# Build one actor-ready state that is convenient for judge and combiner tests.
+def _build_actor_ready_state_for_judge() -> TaskState:
+    state = TaskState.from_intake(_build_research_intake_result())
+    state.current_state = RuntimeState.ACTING
+    state.plan_steps = [
+        PlanStep(
+            step_id="step_1",
+            objective="Collect concise official evidence.",
+            rationale="The task should remain grounded.",
+            expected_outcome="A grounded local answer.",
+            status=PlanStepStatus.IN_PROGRESS,
+        )
+    ]
+    state.current_plan_step_index = 0
+    state.actor_turn_count = 1
+    state.actor_result = ActorResult(
+        plan_step_id="step_1",
+        result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+        summary="Local output produced.",
+        capability_mode=CapabilityAccessMode.NONE,
+        output_text="A local grounded update.",
+        step_validation=StepValidation(
+            plan_step_id="step_1",
+            objective_satisfied=True,
+            evidence_sufficient=True,
+            confidence=0.72,
+            next_action=StepValidationDecision.COMPLETE_STEP,
+            rationale_summary="The local output looks adequate.",
+        ),
+    )
+    state.observed_evidence = [
+        ObservedEvidence(
+            evidence_id="evidence-1",
+            plan_step_id="step_1",
+            title="Source shortlist",
+            locator="https://example.org/source",
+            excerpt="Source metadata only.",
+            source_tool=ToolName.WEB_SEARCH,
+            support_level=EvidenceSupportLevel.SOURCE_DISCOVERY,
+        )
+    ]
+    return state
+
+
+# Build one complete current profile that behavioural scoring can compare against history.
+def _build_behavioral_candidate_state() -> TaskState:
+    state = TaskState.from_intake(_build_research_intake_result())
+    state.current_state = RuntimeState.ACTING
+    state.plan_steps = [
+        PlanStep(
+            step_id="step_1",
+            objective="Collect official evidence.",
+            rationale="Ground the task first.",
+            expected_outcome="Evidence gathered.",
+            status=PlanStepStatus.COMPLETED,
+        ),
+        PlanStep(
+            step_id="step_2",
+            objective="Synthesize the grounded answer.",
+            rationale="Summarize only after evidence collection.",
+            expected_outcome="A concise answer.",
+            status=PlanStepStatus.COMPLETED,
+        ),
+        PlanStep(
+            step_id="step_3",
+            objective="Finalize the local answer.",
+            rationale="The runtime can complete locally.",
+            expected_outcome="A final answer.",
+            status=PlanStepStatus.IN_PROGRESS,
+        ),
+    ]
+    state.current_plan_step_index = 2
+    state.actor_turn_count = 3
+    state.tool_call_count = 1
+    state.step_history.extend(
+        [
+            StepRecord(1, RuntimeState.ACTING, "planner", "Planned."),
+            StepRecord(2, RuntimeState.ACTING, "actor", "Actor turn."),
+        ]
+    )
+    state.step_validations = [
+        StepValidation(
+            plan_step_id="step_1",
+            objective_satisfied=True,
+            evidence_sufficient=True,
+            confidence=0.82,
+            next_action=StepValidationDecision.COMPLETE_STEP,
+            rationale_summary="The evidence step is done.",
+        )
+    ]
+    state.actor_result = ActorResult(
+        plan_step_id="step_3",
+        result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+        summary="Local synthesis in progress.",
+        capability_mode=CapabilityAccessMode.NONE,
+        output_text="A concise grounded answer.",
+        step_validation=StepValidation(
+            plan_step_id="step_3",
+            objective_satisfied=True,
+            evidence_sufficient=True,
+            confidence=0.78,
+            next_action=StepValidationDecision.COMPLETE_STEP,
+            rationale_summary="The synthesis looks complete.",
+        ),
+    )
+    request = ToolRequest(
+        plan_step_id="step_1",
+        tool_name=ToolName.WEB_SEARCH,
+        reason="Collect official evidence.",
+        query="official evidence",
+    )
+    state.tool_results_history = [
+        ToolExecutionResult(
+            request=request,
+            success=True,
+            summary="Collected official evidence.",
+            content="Grounded result.",
+            sources=(
+                ToolSource(
+                    title="Official source",
+                    locator="https://example.org/official",
+                    snippet="Grounded result.",
+                ),
+            ),
+        )
+    ]
+    state.observed_evidence = [
+        ObservedEvidence(
+            evidence_id="behavioral-evidence-1",
+            plan_step_id="step_1",
+            title="Official source",
+            locator="https://example.org/official",
+            excerpt="Grounded result.",
+            source_tool=ToolName.WEB_SEARCH,
+            support_level=EvidenceSupportLevel.DETAILED_EXTRACTED,
+        )
+    ]
+    return state
+
+
+# Build a strong dynamic-policy assessment that should not force behavioural escalation by itself.
+def _strong_dynamic_policy_assessment() -> DynamicPolicyAssessment:
+    return DynamicPolicyAssessment(
+        evidence_quality=EvidenceQualityAssessment(
+            score=0.90,
+            level=OversightSignalLevel.STRONG,
+            reason_codes=(OversightReasonCode.EVIDENCE_MARKED_SUFFICIENT,),
+        ),
+        operational_risk=OperationalRiskAssessment(
+            score=0.12,
+            level=OversightSignalLevel.LOW,
+            reason_codes=(OversightReasonCode.TOOL_RISK_LOW,),
+        ),
+        trajectory_health=TrajectoryHealthAssessment(
+            score=0.93,
+            level=OversightSignalLevel.HEALTHY,
+            reason_codes=(OversightReasonCode.ACTOR_TURNS_WITHIN_LIMIT,),
+        ),
+        recommended_directive=DynamicPolicyRecommendedDirective.CONTINUE,
+        summary="Dynamic policy is healthy.",
+        reason_codes=(OversightReasonCode.RECOMMEND_CONTINUE,),
+    )
+
+
+# Build a weak dynamic-policy assessment so novelty can escalate to more evidence.
+def _weak_dynamic_policy_assessment() -> DynamicPolicyAssessment:
+    return DynamicPolicyAssessment(
+        evidence_quality=EvidenceQualityAssessment(
+            score=0.30,
+            level=OversightSignalLevel.WEAK,
+            reason_codes=(OversightReasonCode.OBSERVED_EVIDENCE_MISSING,),
+        ),
+        operational_risk=OperationalRiskAssessment(
+            score=0.18,
+            level=OversightSignalLevel.LOW,
+            reason_codes=(OversightReasonCode.TOOL_RISK_LOW,),
+        ),
+        trajectory_health=TrajectoryHealthAssessment(
+            score=0.78,
+            level=OversightSignalLevel.HEALTHY,
+            reason_codes=(OversightReasonCode.ACTOR_TURNS_WITHIN_LIMIT,),
+        ),
+        recommended_directive=DynamicPolicyRecommendedDirective.CONTINUE,
+        summary="Dynamic policy sees weak evidence quality.",
+        reason_codes=(OversightReasonCode.RECOMMEND_CONTINUE,),
+    )
+
+
+# Build a dynamic-policy assessment that is already operationally or trajectory-wise unhealthy.
+def _review_dynamic_policy_assessment() -> DynamicPolicyAssessment:
+    return DynamicPolicyAssessment(
+        evidence_quality=EvidenceQualityAssessment(
+            score=0.52,
+            level=OversightSignalLevel.MODERATE,
+            reason_codes=(OversightReasonCode.EVIDENCE_SUPPORT_BELOW_STEP_NEED,),
+        ),
+        operational_risk=OperationalRiskAssessment(
+            score=0.64,
+            level=OversightSignalLevel.HIGH,
+            reason_codes=(OversightReasonCode.TOOL_REQUIRES_HUMAN_REVIEW,),
+        ),
+        trajectory_health=TrajectoryHealthAssessment(
+            score=0.55,
+            level=OversightSignalLevel.DEGRADED,
+            reason_codes=(OversightReasonCode.RECOMMEND_HUMAN_REVIEW,),
+        ),
+        recommended_directive=DynamicPolicyRecommendedDirective.WAIT_HUMAN_REVIEW,
+        summary="Dynamic policy is already unhealthy.",
+        reason_codes=(OversightReasonCode.RECOMMEND_HUMAN_REVIEW,),
+    )
+
+
+# Build one deterministic judge escalation toward more evidence.
+def _judge_more_evidence_assessment() -> JudgeAssessment:
+    return JudgeAssessment(
+        invoked=True,
+        recommendation=JudgeRecommendedDirective.REQUEST_MORE_EVIDENCE,
+        confidence=0.74,
+        summary="Judge detected a fragile completion attempt.",
+        rationale="The output overreaches the available evidence.",
+        flags=("fragile_completion",),
+        evaluated_target="fragile_completion",
+    )
+
+
+# Build one deterministic judge escalation toward human review.
+def _judge_wait_review_assessment() -> JudgeAssessment:
+    return JudgeAssessment(
+        invoked=True,
+        recommendation=JudgeRecommendedDirective.WAIT_HUMAN_REVIEW,
+        confidence=0.88,
+        summary="Judge recommends human review.",
+        rationale="The semantic risk remains high.",
+        flags=("semantic_risk_high",),
+        evaluated_target="dynamic_escalation",
+    )
+
+
+# Build one external-communication intake result so judge tests can hit the draft branch.
+def _build_external_communication_intake_result_for_governance() -> IntakeResult:
+    return IntakeResult(
+        structured_task=StructuredTask(
+            task_spec=TaskSpec(
+                goal="Prepare a cautious external communication draft.",
+                context="Keep everything local and reviewable.",
+                constraints=["Do not send anything automatically."],
+                domain_type=DomainType.EXTERNAL_COMMUNICATION,
+                domain_label="external_comm_governance_test",
+                sensitivity=SensitivityLevel.HIGH,
+                success_criteria=["Pause before any external execution."],
+            ),
+            execution_policy=ExecutionPolicy(
+                confidence_threshold=0.65,
+                budget=BudgetConfig(max_steps=4, max_tool_calls=3),
+                policy_profile_name="external_comm_profile",
+            ),
+        ),
+        metadata=IntakeMetadata(
+            parse_status=ParseStatus.COMPLETE,
+            parser_name="external_comm_test_intake",
+            prompt_version="external_comm_test_v1",
+            schema_version="1.0.0",
+            warnings=[],
+            missing_information=[],
+        ),
+    )
+
+
+# Seed one comparable historical corpus directly into the behavioural SQLite store.
+def _seed_behavioral_history(
+    *,
+    behavioral_store: SQLiteBehavioralStore,
+    count: int,
+    prefix: str,
+    profile_overrides: dict[str, Any],
+) -> None:
+    import sqlite3
+
+    behavioral_store.settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(behavioral_store.settings.database_path) as connection:
+        behavioral_store._ensure_schema(connection)
+        for index in range(count):
+            thread_id = f"{prefix}-{index}"
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO runs (
+                    thread_id, final_state, domain_type, sensitivity, policy_profile_name,
+                    budget_max_steps, budget_max_tool_calls, actor_turn_count, tool_call_count,
+                    replan_count, review_count, abort_count, has_external_communication,
+                    max_evidence_support_level
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    thread_id,
+                    "completed",
+                    profile_overrides.get("domain_type", DomainType.RESEARCH.value),
+                    profile_overrides.get("sensitivity", SensitivityLevel.LOW.value),
+                    profile_overrides.get("policy_profile_name", "default"),
+                    5,
+                    10,
+                    int(profile_overrides.get("actor_turn_count", 3)),
+                    int(profile_overrides.get("tool_call_count", 1)),
+                    int(profile_overrides.get("replan_count", 0)),
+                    int(profile_overrides.get("review_count", 0)),
+                    int(profile_overrides.get("abort_count", 0)),
+                    int(profile_overrides.get("has_external_communication", 0)),
+                    profile_overrides.get(
+                        "max_evidence_support_level",
+                        EvidenceSupportLevel.DETAILED_EXTRACTED.value,
+                    ),
+                ),
+            )
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO tool_calls (
+                    thread_id, call_index, plan_step_id, tool_name, success, support_level
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    thread_id,
+                    1,
+                    "step_1",
+                    profile_overrides.get("tool_name", ToolName.WEB_SEARCH.value),
+                    1,
+                    profile_overrides.get(
+                        "max_evidence_support_level",
+                        EvidenceSupportLevel.DETAILED_EXTRACTED.value,
+                    ),
+                ),
+            )
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO governance_decisions (
+                    thread_id, decision_index, static_policy_decision,
+                    dynamic_recommended_directive, final_directive, reason_codes_json
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    thread_id,
+                    1,
+                    PolicyDecision.ALLOW.value,
+                    profile_overrides.get(
+                        "dynamic_recommended_directive",
+                        DynamicPolicyRecommendedDirective.CONTINUE.value,
+                    ),
+                    GovernanceDirective.WAIT_HUMAN_REVIEW.value
+                    if int(profile_overrides.get("review_count", 0)) > 0
+                    else GovernanceDirective.CONTINUE.value,
+                    json.dumps([GovernanceReasonCode.ALLOWED_BY_POLICY.value]),
+                ),
+            )
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO steps (
+                    thread_id, step_id, status, actor_result_type, validation_next_action, turn_count
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    thread_id,
+                    "step_1",
+                    PlanStepStatus.COMPLETED.value,
+                    ActorResultType.INTERMEDIATE_OUTPUT.value,
+                    StepValidationDecision.COMPLETE_STEP.value,
+                    int(profile_overrides.get("actor_turn_count", 3)),
+                ),
+            )
+            feature_values = {
+                "feature_snapshot_version": "behavioral_features_v2",
+                "step_count": str(profile_overrides.get("step_count", 3)),
+                "actor_turn_count": str(profile_overrides.get("actor_turn_count", 3)),
+                "tool_call_count": str(profile_overrides.get("tool_call_count", 1)),
+                "replan_count": str(profile_overrides.get("replan_count", 0)),
+                "review_count": str(profile_overrides.get("review_count", 0)),
+                "abort_count": str(profile_overrides.get("abort_count", 0)),
+                "has_external_communication": str(profile_overrides.get("has_external_communication", 0)),
+                "max_evidence_support_level": profile_overrides.get(
+                    "max_evidence_support_level",
+                    EvidenceSupportLevel.DETAILED_EXTRACTED.value,
+                ),
+                "governance_distribution": json.dumps(
+                    {
+                        (
+                            GovernanceDirective.WAIT_HUMAN_REVIEW.value
+                            if int(profile_overrides.get("review_count", 0)) > 0
+                            else GovernanceDirective.CONTINUE.value
+                        ): 1
+                    },
+                    sort_keys=True,
+                ),
+                "validation_distribution": json.dumps(
+                    {StepValidationDecision.COMPLETE_STEP.value: 1},
+                    sort_keys=True,
+                ),
+                "historical_similarity_score": "",
+                "behavior_deviation_score": "",
+                "novelty_score": "",
+                "matched_run_count": "0",
+                "behavioral_recommended_directive": BehavioralRecommendedDirective.CONTINUE.value,
+            }
+            for feature_name, feature_value in feature_values.items():
+                connection.execute(
+                    """
+                    INSERT OR REPLACE INTO behavioral_features (
+                        thread_id, feature_name, feature_value
+                    ) VALUES (?, ?, ?)
+                    """,
+                    (thread_id, feature_name, feature_value),
+                )
+        connection.commit()
+
+
 # Build a deterministic Layer 2 graph with the stubbed governance stack.
 def _build_test_graph(
     *,
@@ -2664,14 +3587,16 @@ def _build_test_graph(
     tool_gateway_service: ToolGatewayPort | None = None,
     replanner_service: ReplannerPort | None = None,
     policy_engine_service: PolicyEnginePort | None = None,
+    judge_service: JudgePort | None = None,
 ):
     return _ThreadIdInjectingGraph(
         build_runtime_graph(
-        planner_service=planner_service or StubPlanner(),
-        actor_service=actor_service or StubActor(),
-        tool_gateway_service=tool_gateway_service or StubToolGateway(),
-        replanner_service=replanner_service or StubReplanner(),
-        policy_engine_service=policy_engine_service or StubPolicyEngine(),
+            planner_service=planner_service or StubPlanner(),
+            actor_service=actor_service or StubActor(),
+            tool_gateway_service=tool_gateway_service or StubToolGateway(),
+            replanner_service=replanner_service or StubReplanner(),
+            policy_engine_service=policy_engine_service or StubPolicyEngine(),
+            judge_service=judge_service,
         )
     )
 

@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from .actor_contract import ActorResult, ActorResultType
     from .behavioral import BehavioralAssessment
     from .governance import GovernanceDirective, GovernanceDecisionTrace, StaticPolicyAssessment
+    from .judge import JudgeAssessment
     from .oversight import DynamicPolicyAssessment, OversightAssessment
 
 
@@ -164,6 +165,7 @@ class HumanReviewRequest:
     static_policy_summary: str | None = None
     dynamic_policy_summary: str | None = None
     behavioral_summary: str | None = None
+    judge_summary: str | None = None
     oversight_summary: str | None = None
     reason_codes: tuple[str, ...] = field(default_factory=tuple)
     allowed_decisions: tuple[HumanReviewDecisionType, ...] = field(default_factory=tuple)
@@ -238,6 +240,8 @@ class TaskState:
     dynamic_policy_history: list[DynamicPolicyAssessment] = field(default_factory=list)
     last_behavioral_assessment: BehavioralAssessment | None = None
     behavioral_history: list[BehavioralAssessment] = field(default_factory=list)
+    last_judge_assessment: JudgeAssessment | None = None
+    judge_history: list[JudgeAssessment] = field(default_factory=list)
     last_governance_decision: GovernanceDecisionTrace | None = None
     governance_history: list[GovernanceDecisionTrace] = field(default_factory=list)
     # Keep the legacy oversight fields populated until all dependent surfaces migrate.

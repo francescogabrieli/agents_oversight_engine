@@ -12,7 +12,8 @@ from urllib.request import Request, urlopen
 from layer1_intake import DomainType, SensitivityLevel
 
 from .actor_contract import ActorResult, ActorResultType, CapabilityAccessMode
-from .behavioral import BehavioralAssessment
+from .behavioral import BehavioralAssessment, BehavioralRecommendedDirective
+from .judge import JudgeAssessment, JudgeRecommendedDirective
 from .oversight import (
     DynamicPolicyAssessment,
     DynamicPolicyRecommendedDirective,
@@ -121,9 +122,16 @@ class GovernanceDecisionTrace:
     policy_bundle_version: str
     policy_directive: GovernanceDirective
     oversight_recommended_directive: GovernanceDirective
+    behavioral_recommended_directive: GovernanceDirective = GovernanceDirective.CONTINUE
+    judge_recommended_directive: GovernanceDirective = GovernanceDirective.CONTINUE
+    judge_invoked: bool = False
     static_policy_summary: str | None = None
     dynamic_policy_summary: str | None = None
     behavioral_summary: str | None = None
+    judge_summary: str | None = None
+    behavioral_similarity_score: float | None = None
+    behavioral_deviation_score: float | None = None
+    behavioral_novelty_score: float | None = None
     oversight_summary: str | None = None
 
 
@@ -343,15 +351,28 @@ def combine_governance_assessments(
     static_policy_assessment: StaticPolicyAssessment,
     dynamic_policy_assessment: DynamicPolicyAssessment | None = None,
     behavioral_assessment: BehavioralAssessment | None = None,
+    judge_assessment: JudgeAssessment | None = None,
 ) -> GovernanceDecisionTrace:
     final_directive = combine_governance_directives(
         static_policy_assessment=static_policy_assessment,
         dynamic_policy_assessment=dynamic_policy_assessment,
+        behavioral_assessment=behavioral_assessment,
+        judge_assessment=judge_assessment,
     )
     dynamic_directive = _map_dynamic_directive(
         dynamic_policy_assessment.recommended_directive
         if dynamic_policy_assessment is not None
         else DynamicPolicyRecommendedDirective.CONTINUE
+    )
+    behavioral_directive = _map_behavioral_directive(
+        behavioral_assessment.behavioral_recommended_directive
+        if behavioral_assessment is not None
+        else BehavioralRecommendedDirective.CONTINUE
+    )
+    judge_directive = _map_judge_directive(
+        judge_assessment.recommendation
+        if judge_assessment is not None
+        else JudgeRecommendedDirective.CONTINUE
     )
     return GovernanceDecisionTrace(
         directive=final_directive,
@@ -362,6 +383,7 @@ def combine_governance_assessments(
             final_directive=final_directive,
             dynamic_policy_assessment=dynamic_policy_assessment,
             behavioral_assessment=behavioral_assessment,
+            judge_assessment=judge_assessment,
         ),
         constrains_capability_use=constrains_capability_use(
             policy_input=policy_input,
@@ -374,11 +396,28 @@ def combine_governance_assessments(
         policy_bundle_version=static_policy_assessment.policy_bundle_version,
         policy_directive=static_policy_assessment.policy_directive,
         oversight_recommended_directive=dynamic_directive,
+        behavioral_recommended_directive=behavioral_directive,
+        judge_recommended_directive=judge_directive,
+        judge_invoked=judge_assessment.invoked if judge_assessment is not None else False,
         static_policy_summary=static_policy_assessment.summary,
         dynamic_policy_summary=(
             dynamic_policy_assessment.summary if dynamic_policy_assessment is not None else None
         ),
         behavioral_summary=behavioral_assessment.summary if behavioral_assessment is not None else None,
+        judge_summary=judge_assessment.summary if judge_assessment is not None else None,
+        behavioral_similarity_score=(
+            behavioral_assessment.historical_similarity_score
+            if behavioral_assessment is not None
+            else None
+        ),
+        behavioral_deviation_score=(
+            behavioral_assessment.behavior_deviation_score
+            if behavioral_assessment is not None
+            else None
+        ),
+        behavioral_novelty_score=(
+            behavioral_assessment.novelty_score if behavioral_assessment is not None else None
+        ),
         oversight_summary=(
             dynamic_policy_assessment.summary if dynamic_policy_assessment is not None else None
         ),
@@ -392,6 +431,7 @@ def build_governance_decision(
     policy_result: PolicyEvaluationResult,
     oversight_assessment: DynamicPolicyAssessment | None = None,
     behavioral_assessment: BehavioralAssessment | None = None,
+    judge_assessment: JudgeAssessment | None = None,
 ) -> GovernanceDecisionTrace:
     static_policy_assessment = StaticPolicyAssessment(
         policy_decision=policy_result.policy_decision,
@@ -409,6 +449,7 @@ def build_governance_decision(
         static_policy_assessment=static_policy_assessment,
         dynamic_policy_assessment=oversight_assessment,
         behavioral_assessment=behavioral_assessment,
+        judge_assessment=judge_assessment,
     )
 
 
@@ -417,6 +458,8 @@ def combine_governance_directives(
     *,
     static_policy_assessment: StaticPolicyAssessment | None = None,
     dynamic_policy_assessment: DynamicPolicyAssessment | None = None,
+    behavioral_assessment: BehavioralAssessment | None = None,
+    judge_assessment: JudgeAssessment | None = None,
     policy_result: PolicyEvaluationResult | None = None,
     policy_directive: GovernanceDirective | None = None,
     oversight_assessment: DynamicPolicyAssessment | None = None,
@@ -442,16 +485,24 @@ def combine_governance_directives(
         return GovernanceDirective.WAIT_HUMAN_REVIEW
     if resolved_static_policy.policy_decision == PolicyDecision.ASK_CLARIFICATION:
         return GovernanceDirective.ASK_USER_CLARIFICATION
-    if resolved_dynamic_policy is None:
-        return resolved_static_policy.policy_directive
-
-    dynamic_directive = _map_dynamic_directive(resolved_dynamic_policy.recommended_directive)
-    if dynamic_directive == GovernanceDirective.WAIT_HUMAN_REVIEW:
-        return GovernanceDirective.WAIT_HUMAN_REVIEW
-    if dynamic_directive == GovernanceDirective.REPLAN:
-        return GovernanceDirective.REPLAN
-    if dynamic_directive == GovernanceDirective.REQUEST_MORE_EVIDENCE:
-        return GovernanceDirective.REQUEST_MORE_EVIDENCE
+    candidate_directives = [resolved_static_policy.policy_directive]
+    if resolved_dynamic_policy is not None:
+        candidate_directives.append(
+            _map_dynamic_directive(resolved_dynamic_policy.recommended_directive)
+        )
+    if behavioral_assessment is not None:
+        candidate_directives.append(
+            _map_behavioral_directive(behavioral_assessment.behavioral_recommended_directive)
+        )
+    if judge_assessment is not None:
+        candidate_directives.append(_map_judge_directive(judge_assessment.recommendation))
+    most_conservative = max(candidate_directives, key=_conservativeness_rank)
+    if most_conservative in {
+        GovernanceDirective.WAIT_HUMAN_REVIEW,
+        GovernanceDirective.REPLAN,
+        GovernanceDirective.REQUEST_MORE_EVIDENCE,
+    }:
+        return most_conservative
     return resolved_static_policy.policy_directive
 
 
@@ -470,6 +521,46 @@ def _map_dynamic_directive(
     return GovernanceDirective.CONTINUE
 
 
+# Convert the behavioural recommendation into the governance directive enum.
+def _map_behavioral_directive(
+    recommended_directive: BehavioralRecommendedDirective,
+) -> GovernanceDirective:
+    if recommended_directive == BehavioralRecommendedDirective.WAIT_HUMAN_REVIEW:
+        return GovernanceDirective.WAIT_HUMAN_REVIEW
+    if recommended_directive == BehavioralRecommendedDirective.REPLAN:
+        return GovernanceDirective.REPLAN
+    if recommended_directive == BehavioralRecommendedDirective.REQUEST_MORE_EVIDENCE:
+        return GovernanceDirective.REQUEST_MORE_EVIDENCE
+    return GovernanceDirective.CONTINUE
+
+
+# Convert the judge recommendation into the governance directive enum.
+def _map_judge_directive(
+    recommended_directive: JudgeRecommendedDirective,
+) -> GovernanceDirective:
+    if recommended_directive == JudgeRecommendedDirective.WAIT_HUMAN_REVIEW:
+        return GovernanceDirective.WAIT_HUMAN_REVIEW
+    if recommended_directive == JudgeRecommendedDirective.REPLAN:
+        return GovernanceDirective.REPLAN
+    if recommended_directive == JudgeRecommendedDirective.REQUEST_MORE_EVIDENCE:
+        return GovernanceDirective.REQUEST_MORE_EVIDENCE
+    return GovernanceDirective.CONTINUE
+
+
+# Order runtime directives by conservativeness while preserving read-only static policy as non-escalating.
+def _conservativeness_rank(directive: GovernanceDirective) -> int:
+    ordering = {
+        GovernanceDirective.CONTINUE: 0,
+        GovernanceDirective.CONTINUE_READ_ONLY: 0,
+        GovernanceDirective.REQUEST_MORE_EVIDENCE: 1,
+        GovernanceDirective.REPLAN: 2,
+        GovernanceDirective.WAIT_HUMAN_REVIEW: 3,
+        GovernanceDirective.ASK_USER_CLARIFICATION: 4,
+        GovernanceDirective.STOP: 5,
+    }
+    return ordering[directive]
+
+
 # Summarize how the layered governance stack produced the final directive.
 def _build_combined_summary(
     *,
@@ -477,6 +568,7 @@ def _build_combined_summary(
     final_directive: GovernanceDirective,
     dynamic_policy_assessment: DynamicPolicyAssessment | None,
     behavioral_assessment: BehavioralAssessment | None,
+    judge_assessment: JudgeAssessment | None = None,
 ) -> str:
     summary_parts = [static_policy_assessment.summary]
     if dynamic_policy_assessment is not None:
@@ -493,6 +585,8 @@ def _build_combined_summary(
         summary_parts.append(dynamic_policy_assessment.summary)
     if behavioral_assessment is not None:
         summary_parts.append(behavioral_assessment.summary)
+    if judge_assessment is not None and judge_assessment.summary:
+        summary_parts.append(judge_assessment.summary)
     return " ".join(summary_parts)
 
 

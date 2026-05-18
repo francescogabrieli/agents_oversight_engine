@@ -41,6 +41,8 @@ It already includes:
 - deterministic dynamic policy assessment for evidence quality, operational risk, and trajectory health
 - explicit separation of static policy, dynamic policy, behavioural foundation, and final decision combining inside governance
 - local SQLite behavioural memory as a non-authoritative read model for historical run features
+- behavioural similarity, deviation, and novelty scoring with conservative escalation recommendations
+- selective `LLM-as-a-judge` assessments for fragile outputs and risky draft states
 - typed human-review requests and decisions with LangGraph `interrupt / resume`
 - durable local LangGraph checkpoint persistence and per-thread runtime artifacts on disk
 - typed `external_communication` phase tracking for evidence, draft, review, approval, and blocked states
@@ -134,6 +136,7 @@ Purpose:
 - replace the current and pending semantic trajectory through `replanner` when the actor signals `NEEDS_REPLAN`
 - evaluate actor outcomes through a typed governance node backed by an OPA policy engine
 - combine OPA hard policy decisions with deterministic dynamic policy signals and non-blocking behavioural context
+- selectively invoke a typed semantic judge and combine it conservatively with static, dynamic, and behavioural signals
 - persist governance decisions in `TaskState` with an explicit `ABORTED` stop state for hard denials
 - persist oversight assessments in `TaskState` for audit and thesis traceability
 - maintain an audit-safe scratchpad and typed step self-validations during actor execution
@@ -152,6 +155,7 @@ Main files:
 - `tool_gateway.py`
 - `governance.py`
 - `behavioral.py`
+- `judge.py`
 - `oversight.py`
 - `evaluation.py`
 - `openrouter_client.py`
@@ -161,7 +165,7 @@ Main files:
 
 Current design:
 
-- `state.py` defines the bootstrap state contract, runtime flags, planner snapshot models, actor execution snapshot, tool loop state, observed evidence, audit-safe scratchpad entries, typed step validations, oversight history, runtime step outcomes, and the typed `external_communication` subflow state
+- `state.py` defines the bootstrap state contract, runtime flags, planner snapshot models, actor execution snapshot, tool loop state, observed evidence, audit-safe scratchpad entries, typed step validations, layered governance histories, runtime step outcomes, and the typed `external_communication` subflow state
 - `nodes.py` contains `bootstrap_from_intake`, `planner`, `actor`, `governance`, `human_review`, `tool_gateway`, `observe_tool_result`, `replanner`, and bootstrap closure helpers
 - `planning.py` defines the planner port, prompt builders, and the default OpenAI-backed planner
 - `acting.py` defines the actor port, prompt builders, the temporary OpenRouter-backed actor, and the optional OpenAI-backed actor using runtime-bound tools instead of a prompt-only tool inventory
@@ -172,7 +176,8 @@ Current design:
 - `configs/layer2_tool_gateway.json` is the active Tool Gateway registry for configured native, HTTP, OpenAI, and MCP-backed tools
 - MCP is usable as a governed backend behind the Tool Gateway; the actor must never call MCP servers directly
 - `governance.py` defines the typed static-policy contracts, OPA HTTP policy engine, decision combiner, and final governance decision trace used after actor execution
-- `behavioral.py` defines the behavioural foundation contract plus the SQLite-backed historical read model used to materialize non-blocking behavioural assessments
+- `behavioral.py` defines the behavioural foundation contract, SQLite-backed historical read model, similarity/deviation/novelty scoring, and conservative behavioural recommendations
+- `judge.py` defines the selective semantic judge port, invocation policy, and typed judge assessments
 - `oversight.py` defines deterministic dynamic policy assessment for `evidence_quality`, `operational_risk`, and `trajectory_health`, plus the recommendation consumed by governance
 - `openrouter_client.py` defines the OpenRouter HTTP adapter used by the temporary Layer 2 actor test backend
 - `persistence.py` defines the durable disk-backed LangGraph saver plus the per-thread runtime artifact store used for trace, dashboard, and HITL persistence
@@ -289,7 +294,7 @@ Current relevant files:
 - the active baseline includes `bootstrap_from_intake -> planner -> actor -> governance -> tool_gateway -> observe_tool_result -> actor`
 - the active baseline also includes the real `replanner` branch triggered by `NEEDS_REPLAN`
 - the active baseline also includes a typed governance branch after `actor` that can continue, replan, escalate, or abort
-- governance now combines four explicit internal layers: static policy, deterministic dynamic policy, behavioural foundation, and a deterministic decision combiner; OPA denials, required review, and clarification decisions remain non-negotiable
+- governance now combines five explicit internal layers: static policy, deterministic dynamic policy, behavioural intelligence, selective judge review, and a deterministic decision combiner; OPA denials, required review, and clarification decisions remain non-negotiable
 - external communication drafts are now explicit runtime state, and policy may require review based on the typed `external_communication` phase
 - the planner/executor split should remain aligned with `docs/plan-and-execute.ipynb` unless there is a clear thesis-driven reason to diverge
 - planner output must remain semantic and typed

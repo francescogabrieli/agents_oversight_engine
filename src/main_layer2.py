@@ -28,6 +28,7 @@ from layer2_runtime_governance import HumanReviewDecision
 from layer2_runtime_governance.actor_contract import ActorPort
 from layer2_runtime_governance.behavioral import BehavioralStorePort
 from layer2_runtime_governance.governance import PolicyEnginePort
+from layer2_runtime_governance.judge import JudgePort
 from layer2_runtime_governance.persistence import RuntimeArtifactStore, persist_runtime_artifacts
 from layer2_runtime_governance.planning import PlannerPort
 from layer2_runtime_governance.replanning import ReplannerPort
@@ -63,6 +64,7 @@ def run_layer2_flow(
     tool_gateway_service: ToolGatewayPort | None = None,
     replanner_service: ReplannerPort | None = None,
     policy_engine_service: PolicyEnginePort | None = None,
+    judge_service: JudgePort | None = None,
     behavioral_store_service: BehavioralStorePort | None = None,
     checkpointer: Any | None = None,
     artifact_store: RuntimeArtifactStore | None = None,
@@ -76,6 +78,7 @@ def run_layer2_flow(
         tool_gateway_service=tool_gateway_service,
         replanner_service=replanner_service,
         policy_engine_service=policy_engine_service,
+        judge_service=judge_service,
         behavioral_store_service=behavioral_store_service,
         checkpointer=checkpointer,
         hitl_event_callback=hitl_event_callback,
@@ -143,6 +146,7 @@ def resume_layer2_flow(
     tool_gateway_service: ToolGatewayPort | None = None,
     replanner_service: ReplannerPort | None = None,
     policy_engine_service: PolicyEnginePort | None = None,
+    judge_service: JudgePort | None = None,
     behavioral_store_service: BehavioralStorePort | None = None,
     checkpointer: Any | None = None,
     artifact_store: RuntimeArtifactStore | None = None,
@@ -153,6 +157,7 @@ def resume_layer2_flow(
         tool_gateway_service=tool_gateway_service,
         replanner_service=replanner_service,
         policy_engine_service=policy_engine_service,
+        judge_service=judge_service,
         behavioral_store_service=behavioral_store_service,
         checkpointer=checkpointer,
     )

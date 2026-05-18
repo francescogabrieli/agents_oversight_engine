@@ -28,11 +28,14 @@ from layer2_runtime_governance import (
     ActorResult,
     ActorResultType,
     BehavioralAssessment,
+    BehavioralRecommendedDirective,
     CapabilityAccessMode,
     EvidenceQualityAssessment,
     GovernanceDecision,
     GovernanceDirective,
     GovernanceReasonCode,
+    JudgeAssessment,
+    JudgeRecommendedDirective,
     OperationalRiskAssessment,
     OversightAssessment,
     OversightReasonCode,
@@ -54,6 +57,7 @@ from layer2_runtime_governance import (
     ToolRequest,
     ToolSource,
     TraceOversightAssessment,
+    TraceJudgeAssessment,
     TrajectoryHealthAssessment,
     build_compact_trace_from_runtime_trace,
     build_layer2_runtime_trace,
@@ -93,6 +97,9 @@ class Layer2TraceTests(unittest.TestCase):
         self.assertEqual(len(trace.dynamic_policy_assessments), 2)
         self.assertEqual(len(trace.behavioral_assessments), 1)
         self.assertTrue(trace.behavioral_assessments[0].history_available)
+        self.assertEqual(len(trace.judge_assessments), 1)
+        self.assertIsInstance(trace.judge_assessments[0], TraceJudgeAssessment)
+        self.assertEqual(trace.judge_assessments[0].recommendation, "wait_human_review")
 
     def test_trace_dict_and_json_are_json_safe(self) -> None:
         state = _complete_task_state()
@@ -129,6 +136,7 @@ class Layer2TraceTests(unittest.TestCase):
         self.assertEqual(compact["governance_snapshot"]["static_policy_pass_count"], 2)
         self.assertEqual(compact["governance_snapshot"]["dynamic_policy_pass_count"], 2)
         self.assertEqual(compact["governance_snapshot"]["behavioral_pass_count"], 1)
+        self.assertEqual(compact["governance_snapshot"]["judge_pass_count"], 1)
         self.assertEqual(
             compact["governance_snapshot"]["last_oversight_assessment"]["trajectory_health"][
                 "level"
@@ -259,6 +267,8 @@ def _complete_task_state() -> TaskState:
     state.last_oversight_assessment = state.oversight_history[-1]
     state.behavioral_history = [_behavioral()]
     state.last_behavioral_assessment = state.behavioral_history[-1]
+    state.judge_history = [_judge()]
+    state.last_judge_assessment = state.judge_history[-1]
     return state
 
 
@@ -428,9 +438,29 @@ def _behavioral() -> BehavioralAssessment:
     return BehavioralAssessment(
         history_available=True,
         historical_run_count=3,
-        feature_snapshot_version="behavioral_features_v1",
-        summary="Behavioral foundation found 3 historical runs in SQLite.",
-        notes=("behavioral_foundation_only", "sqlite_history_available"),
+        feature_snapshot_version="behavioral_features_v2",
+        summary="Behavioral analysis matched 3 comparable runs.",
+        notes=("sqlite_history_available",),
+        matched_run_count=3,
+        historical_similarity_score=0.82,
+        behavior_deviation_score=0.21,
+        novelty_score=0.18,
+        behavioral_recommended_directive=BehavioralRecommendedDirective.CONTINUE,
+        behavioral_flags=("stable_history",),
+        matched_run_ids=("run-1", "run-2", "run-3"),
+    )
+
+
+# Build one selective judge assessment for trace export.
+def _judge() -> JudgeAssessment:
+    return JudgeAssessment(
+        invoked=True,
+        recommendation=JudgeRecommendedDirective.WAIT_HUMAN_REVIEW,
+        confidence=0.87,
+        summary="Judge recommends human review.",
+        rationale="The output is semantically risky.",
+        flags=("semantic_risk_high",),
+        evaluated_target="external_draft",
     )
 
 

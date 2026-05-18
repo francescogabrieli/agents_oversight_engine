@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import shutil
 import unittest
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from layer2_runtime_governance import (
     ActorResult,
     ActorResultType,
     CapabilityAccessMode,
+    BehavioralStoreSettings,
     GovernanceDirective,
     GovernanceReasonCode,
     PlanStep,
@@ -34,6 +36,7 @@ from layer2_runtime_governance import (
     PolicyDecision,
     PolicyEvaluationResult,
     RuntimeState,
+    SQLiteBehavioralStore,
     ToolName,
     ToolRequest,
     TaskState,
@@ -52,10 +55,12 @@ class AutomaticHitlControlPlaneTests(unittest.TestCase):
     def test_governance_notifies_when_human_review_is_requested(self) -> None:
         task_state = _build_actor_ready_state()
         notifications: list[object] = []
+        behavioral_store = _build_empty_behavioral_store("hitl_notify")
 
         result = governance(
             task_state,
             policy_engine_service=_ReviewPolicyEngine(),
+            behavioral_store_service=behavioral_store,
             thread_id="thread-hitl",
             hitl_event_callback=notifications.append,
         )
@@ -87,10 +92,12 @@ class AutomaticHitlControlPlaneTests(unittest.TestCase):
     def test_governance_does_not_notify_when_review_is_not_required(self) -> None:
         task_state = _build_actor_ready_state()
         notifications: list[object] = []
+        behavioral_store = _build_empty_behavioral_store("hitl_live")
 
         result = governance(
             task_state,
             policy_engine_service=_AllowPolicyEngine(),
+            behavioral_store_service=behavioral_store,
             thread_id="thread-live",
             hitl_event_callback=notifications.append,
         )
@@ -207,6 +214,15 @@ def _intake_result() -> IntakeResult:
             warnings=[],
             missing_information=[],
         ),
+    )
+
+
+# Build an empty per-test behavioural store so HITL tests stay independent from local runtime history.
+def _build_empty_behavioral_store(suffix: str) -> SQLiteBehavioralStore:
+    temp_root = REPO_ROOT / f"_test_behavioral_{suffix}"
+    shutil.rmtree(temp_root, ignore_errors=True)
+    return SQLiteBehavioralStore(
+        settings=BehavioralStoreSettings(database_path=temp_root / "behavioral.sqlite3")
     )
 
 

@@ -5,7 +5,12 @@ from typing import Callable
 
 from layer1_intake import DomainType, IntakeResult
 
-from .behavioral import BehavioralStorePort, build_behavioral_assessment, persist_behavioral_snapshot
+from .behavioral import (
+    BehavioralStorePort,
+    build_behavioral_assessment,
+    persist_behavioral_snapshot,
+    persist_judge_snapshot,
+)
 from .actor_contract import ActorPort, ActorResult, ActorResultType, build_actor_task
 from .governance import (
     GovernanceDecision,
@@ -17,6 +22,7 @@ from .governance import (
     build_policy_evaluation_input,
     evaluate_static_policy,
 )
+from .judge import JudgePort, evaluate_judge
 from .oversight import evaluate_dynamic_policy
 from .planning import PlannerPort
 from .hitl import build_human_review_request
@@ -150,6 +156,7 @@ def governance(
     state: TaskState,
     *,
     policy_engine_service: PolicyEnginePort,
+    judge_service: JudgePort | None = None,
     behavioral_store_service: BehavioralStorePort | None = None,
     thread_id: str | None = None,
     hitl_event_callback: Callable[[TaskState], None] | None = None,
@@ -175,13 +182,23 @@ def governance(
     behavioral_assessment = build_behavioral_assessment(
         thread_id=resolved_thread_id,
         task_state=state,
+        dynamic_policy_assessment=dynamic_policy_assessment,
         behavioral_store=behavioral_store_service,
+    )
+    judge_assessment = evaluate_judge(
+        task_state=state,
+        policy_input=policy_input,
+        static_policy_assessment=static_policy_assessment,
+        dynamic_policy_assessment=dynamic_policy_assessment,
+        behavioral_assessment=behavioral_assessment,
+        judge_service=judge_service,
     )
     governance_decision = combine_governance_assessments(
         policy_input=policy_input,
         static_policy_assessment=static_policy_assessment,
         dynamic_policy_assessment=dynamic_policy_assessment,
         behavioral_assessment=behavioral_assessment,
+        judge_assessment=judge_assessment,
     )
 
     state.last_static_policy_assessment = static_policy_assessment
@@ -190,6 +207,8 @@ def governance(
     state.dynamic_policy_history.append(dynamic_policy_assessment)
     state.last_behavioral_assessment = behavioral_assessment
     state.behavioral_history.append(behavioral_assessment)
+    state.last_judge_assessment = judge_assessment
+    state.judge_history.append(judge_assessment)
     state.last_oversight_assessment = dynamic_policy_assessment
     state.oversight_history.append(dynamic_policy_assessment)
     state.last_governance_decision = governance_decision
@@ -217,6 +236,14 @@ def governance(
         persist_behavioral_snapshot(
             thread_id=resolved_thread_id,
             intake_result=state.intake_payload,
+            task_state=state,
+            behavioral_store=behavioral_store_service,
+        )
+    except Exception:
+        pass
+    try:
+        persist_judge_snapshot(
+            thread_id=resolved_thread_id,
             task_state=state,
             behavioral_store=behavioral_store_service,
         )

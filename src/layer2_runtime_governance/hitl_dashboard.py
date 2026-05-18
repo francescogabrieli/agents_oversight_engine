@@ -52,6 +52,13 @@ class DashboardGovernancePanel:
     static_policy_summary: str | None
     dynamic_policy_summary: str | None
     behavioral_summary: str | None
+    judge_summary: str | None
+    behavioral_recommended_directive: str
+    judge_recommended_directive: str
+    judge_invoked: bool
+    behavioral_similarity_score: float | None
+    behavioral_deviation_score: float | None
+    behavioral_novelty_score: float | None
     oversight_summary: str | None
 
 
@@ -74,12 +81,19 @@ class DashboardOversightPanel:
 
 @dataclass(frozen=True)
 class DashboardBehavioralPanel:
-    # DashboardBehavioralPanel exposes the v1 behavioural foundation without making it authoritative.
+    # DashboardBehavioralPanel exposes the behavioural history, scores, and advisory directive.
     history_available: bool
     historical_run_count: int
     feature_snapshot_version: str
     summary: str
     notes: tuple[str, ...]
+    matched_run_count: int
+    historical_similarity_score: float | None
+    behavior_deviation_score: float | None
+    novelty_score: float | None
+    behavioral_recommended_directive: str
+    behavioral_flags: tuple[str, ...]
+    matched_run_ids: tuple[str, ...]
 
 
 # DashboardHumanReviewPanel captures the review payload and resume path.
@@ -211,6 +225,13 @@ def _build_governance_panel(
         static_policy_summary=governance_decision.static_policy_summary,
         dynamic_policy_summary=governance_decision.dynamic_policy_summary,
         behavioral_summary=governance_decision.behavioral_summary,
+        judge_summary=governance_decision.judge_summary,
+        behavioral_recommended_directive=governance_decision.behavioral_recommended_directive.value,
+        judge_recommended_directive=governance_decision.judge_recommended_directive.value,
+        judge_invoked=governance_decision.judge_invoked,
+        behavioral_similarity_score=governance_decision.behavioral_similarity_score,
+        behavioral_deviation_score=governance_decision.behavioral_deviation_score,
+        behavioral_novelty_score=governance_decision.behavioral_novelty_score,
         oversight_summary=governance_decision.oversight_summary,
     )
 
@@ -257,6 +278,13 @@ def _build_behavioral_panel(
         feature_snapshot_version=behavioral_assessment.feature_snapshot_version,
         summary=behavioral_assessment.summary,
         notes=behavioral_assessment.notes,
+        matched_run_count=behavioral_assessment.matched_run_count,
+        historical_similarity_score=behavioral_assessment.historical_similarity_score,
+        behavior_deviation_score=behavioral_assessment.behavior_deviation_score,
+        novelty_score=behavioral_assessment.novelty_score,
+        behavioral_recommended_directive=behavioral_assessment.behavioral_recommended_directive.value,
+        behavioral_flags=behavioral_assessment.behavioral_flags,
+        matched_run_ids=behavioral_assessment.matched_run_ids,
     )
 
 
