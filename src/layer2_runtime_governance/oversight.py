@@ -425,13 +425,107 @@ def evaluate_evidence_quality(
     )
 
 
-# Keep status-only observations from inflating evidence quality.
+# Keep status-only or content-free observations from inflating evidence quality.
 def _meaningful_observed_evidence(*, task_state: TaskState):
     return [
         item
         for item in task_state.observed_evidence
-        if item.excerpt and len(" ".join(item.excerpt.split())) >= 40
+        if _is_meaningful_observed_evidence_item(item=item)
     ]
+
+
+# Evaluate evidence substance using support level and excerpt shape, not only raw length.
+def _is_meaningful_observed_evidence_item(*, item) -> bool:
+    normalized_excerpt = _normalize_evidence_excerpt(item.excerpt)
+    if not normalized_excerpt:
+        return False
+
+    lowered_excerpt = normalized_excerpt.lower()
+    if lowered_excerpt in {
+        "url text fetched successfully.",
+        "web search executed successfully.",
+        "tool succeeded.",
+    }:
+        return False
+
+    word_count = len(normalized_excerpt.split())
+    if item.support_level == EvidenceSupportLevel.SOURCE_DISCOVERY:
+        if _looks_like_source_shortlist(normalized_excerpt):
+            return True
+        return bool(item.locator.strip()) and word_count >= 5
+
+    if item.support_level == EvidenceSupportLevel.HIGH_LEVEL_SUMMARY:
+        if word_count >= 8:
+            return True
+        return len(normalized_excerpt) >= 80 and _contains_substantive_content_markers(lowered_excerpt)
+
+    if item.support_level in {
+        EvidenceSupportLevel.DETAILED_EXTRACTED,
+        EvidenceSupportLevel.PRIMARY_LEGAL,
+    }:
+        if word_count >= 5:
+            return True
+        return _contains_substantive_content_markers(lowered_excerpt) and len(normalized_excerpt) >= 30
+
+    return word_count >= 8
+
+
+# Normalize whitespace before lightweight evidence heuristics run.
+def _normalize_evidence_excerpt(value: str | None) -> str:
+    if value is None:
+        return ""
+    return " ".join(value.split())
+
+
+# Detect source-discovery evidence that is mostly a compact shortlist of URLs and source names.
+def _looks_like_source_shortlist(text: str) -> bool:
+    lowered_text = text.lower()
+    if "http://" in lowered_text or "https://" in lowered_text:
+        return True
+    return any(
+        marker in lowered_text
+        for marker in (
+            "official source",
+            "official sources",
+            "source shortlist",
+            "eur-lex",
+            "european commission",
+            "portal",
+            "legislation page",
+        )
+    )
+
+
+# Detect content markers that suggest the excerpt carries substantive claims.
+def _contains_substantive_content_markers(text: str) -> bool:
+    return any(
+        marker in text
+        for marker in (
+            "purpose",
+            "scope",
+            "overview",
+            "summary",
+            "applies to",
+            "aims to",
+            "objective",
+            "obligation",
+            "obligations",
+            "prohibition",
+            "criteria",
+            "threshold",
+            "deadline",
+            "entered into force",
+            "applies from",
+            "article ",
+            "must ",
+            "shall ",
+            "required to",
+            "interoperability",
+            "data portability",
+            "gatekeeper",
+            "gatekeepers",
+        )
+    )
 
 
 # Score operational risk from actor intent, task sensitivity, and tool registry metadata.

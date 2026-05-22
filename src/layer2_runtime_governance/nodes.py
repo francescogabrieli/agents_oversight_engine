@@ -1016,14 +1016,55 @@ def _is_meaningful_evidence_excerpt(value: str | None) -> bool:
     if value is None:
         return False
     normalized = " ".join(value.split())
-    if len(normalized) < 40:
+    if not normalized:
         return False
-    status_only = {
+
+    lowered = normalized.lower()
+    if lowered in {
         "url text fetched successfully.",
         "web search executed successfully.",
         "tool succeeded.",
-    }
-    return normalized.lower() not in status_only
+    }:
+        return False
+
+    word_count = len(normalized.split())
+    if word_count >= 8:
+        return True
+
+    if "http://" in lowered or "https://" in lowered:
+        return True
+
+    if any(
+        marker in lowered
+        for marker in (
+            "official source",
+            "official sources",
+            "source shortlist",
+            "eur-lex",
+            "european commission",
+            "portal",
+            "legislation page",
+            "purpose",
+            "scope",
+            "overview",
+            "summary",
+            "obligation",
+            "criteria",
+            "threshold",
+            "deadline",
+            "article ",
+            "must ",
+            "shall ",
+            "required to",
+            "interoperability",
+            "data portability",
+            "entered into force",
+            "applies from",
+        )
+    ):
+        return len(normalized) >= 30
+
+    return len(normalized) >= 80
 
 
 # Detect URL fetch failures that show the runtime could not extract readable text from a source.

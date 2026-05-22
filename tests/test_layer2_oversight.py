@@ -142,6 +142,74 @@ class Layer2OversightTests(unittest.TestCase):
         self.assertEqual(assessment.level, OversightSignalLevel.WEAK)
         self.assertIn(OversightReasonCode.OBSERVED_EVIDENCE_MISSING, assessment.reason_codes)
 
+    def test_evidence_quality_counts_source_shortlist_as_meaningful_discovery(self) -> None:
+        task_state = _build_task_state_with_actor_result(
+            actor_result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+            validation=StepValidation(
+                plan_step_id="step_1",
+                objective_satisfied=True,
+                evidence_sufficient=False,
+                confidence=0.6,
+                next_action=StepValidationDecision.REQUEST_MORE_EVIDENCE,
+                rationale_summary="The sources were identified but not yet synthesized.",
+            ),
+        )
+        task_state.plan_steps[0].objective = "Identify official DMA sources."
+        task_state.observed_evidence.append(
+            ObservedEvidence(
+                evidence_id="step_1:tool:1:fallback",
+                plan_step_id="step_1",
+                title="Official DMA sources",
+                locator="Digital Markets Act official site:europa.eu OR site:eur-lex.europa.eu",
+                excerpt=(
+                    "- European Commission DMA portal: https://digital-markets-act.ec.europa.eu/index_en\n"
+                    "- EUR-Lex DMA summary page: https://eur-lex.europa.eu/EN/legal-content/summary/digital-markets-act.html"
+                ),
+                source_tool=ToolName.WEB_SEARCH,
+                support_level=EvidenceSupportLevel.SOURCE_DISCOVERY,
+            )
+        )
+
+        assessment = evaluate_evidence_quality(
+            task_state=task_state,
+            config=load_oversight_policy_config(),
+        )
+
+        self.assertIn(OversightReasonCode.OBSERVED_EVIDENCE_PRESENT, assessment.reason_codes)
+        self.assertIn(OversightReasonCode.SOURCE_LOCATOR_PRESENT, assessment.reason_codes)
+
+    def test_evidence_quality_ignores_status_only_excerpt_even_if_long_enough(self) -> None:
+        task_state = _build_task_state_with_actor_result(
+            actor_result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+            validation=StepValidation(
+                plan_step_id="step_1",
+                objective_satisfied=False,
+                evidence_sufficient=False,
+                confidence=0.4,
+                next_action=StepValidationDecision.CONTINUE_ACTING,
+                rationale_summary="The observation is not substantive evidence.",
+            ),
+        )
+        task_state.observed_evidence.append(
+            ObservedEvidence(
+                evidence_id="step_1:tool:1:source:1",
+                plan_step_id="step_1",
+                title="status",
+                locator="https://example.org/status",
+                excerpt="Web search executed successfully.",
+                source_tool=ToolName.WEB_SEARCH,
+                support_level=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
+            )
+        )
+
+        assessment = evaluate_evidence_quality(
+            task_state=task_state,
+            config=load_oversight_policy_config(),
+        )
+
+        self.assertIn(OversightReasonCode.OBSERVED_EVIDENCE_MISSING, assessment.reason_codes)
+        self.assertIn(OversightReasonCode.SOURCE_LOCATOR_MISSING, assessment.reason_codes)
+
     def test_operational_risk_uses_tool_registry_and_sensitivity(self) -> None:
         task_state = _build_task_state_with_actor_result(
             actor_result_type=ActorResultType.PROPOSE_ACTION,
