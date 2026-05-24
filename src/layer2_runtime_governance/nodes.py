@@ -29,6 +29,7 @@ from .hitl import build_human_review_request
 from .hitl import human_review
 from .state import (
     ExecutedPlanStep,
+    ExternalCommunicationDraft,
     ExternalCommunicationPhase,
     PlanStep,
     PlanStepStatus,
@@ -692,7 +693,17 @@ def _update_external_communication_after_actor_result(
         )
         return
 
+    if (
+        state.external_communication is not None
+        and state.external_communication.phase == ExternalCommunicationPhase.APPROVED_FOR_EXECUTION
+    ):
+        return
+
     if actor_result.output_text and actor_result.output_text.strip():
+        _update_external_communication_draft(
+            state,
+            body=actor_result.output_text.strip(),
+        )
         _set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.DRAFT_PROPOSAL,
@@ -711,6 +722,29 @@ def _set_external_communication_phase(
         return
     state.external_communication.phase = phase
     state.external_communication.last_transition_summary = summary
+
+
+# Keep the current external communication draft structured as the actor progresses.
+def _update_external_communication_draft(
+    state: TaskState,
+    *,
+    body: str,
+) -> None:
+    if state.external_communication is None:
+        return
+
+    current_draft = state.external_communication.draft
+    state.external_communication.draft = ExternalCommunicationDraft(
+        channel=current_draft.channel if current_draft is not None else "external_communication",
+        recipient=current_draft.recipient if current_draft is not None else None,
+        subject=current_draft.subject if current_draft is not None else None,
+        body=body,
+        metadata=(
+            dict(current_draft.metadata)
+            if current_draft is not None
+            else {"source": "actor_output"}
+        ),
+    )
 
 
 # Advance the runtime cursor to the next semantic step after a completed execution.

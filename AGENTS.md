@@ -45,7 +45,7 @@ It already includes:
 - selective `LLM-as-a-judge` assessments for fragile outputs and risky draft states
 - typed human-review requests and decisions with LangGraph `interrupt / resume`
 - durable local LangGraph checkpoint persistence and per-thread runtime artifacts on disk
-- typed `external_communication` phase tracking for evidence, draft, review, approval, and blocked states
+- typed `external_communication` phase tracking for evidence, draft, review/edit, approval, and blocked states
 - typed runtime trace export through `trace.py`, surfaced by `src/main_layer2.py`
 - offline trace evaluation and reporting through `evaluation.py`, surfaced by `src/main_layer2_evaluation.py`
 
@@ -96,7 +96,8 @@ Important implementation principles:
 - `external_communication` is handled conservatively:
   - first evidence collection
   - then draft proposal
-  - then human review before externally impactful execution
+  - then human review, with typed edit-and-submit support on the governed draft
+  - then the approved resume path remains the only path toward external execution
 - policy and governance logic should remain explicit and explainable
 
 
@@ -184,6 +185,7 @@ Current design:
 - `trace.py` defines the typed, JSON-exportable Layer 2 runtime trace contract used for debugging, thesis evidence, HITL payloads, and evaluation
 - `evaluation.py` defines the offline trace evaluation pipeline that reads exported trace JSON and produces JSON and Markdown reports
 - `hitl_dashboard.py` defines the dashboard-facing snapshot model derived from `TaskState`, governance, oversight, and HITL review payloads
+- `main_layer2_dashboard.py` now acts as a single-run operator control plane with typed resume actions, inline validation feedback, and rich edit support for `external_communication`
 - `configs/layer2_oversight_policy.json` defines the explicit weights, thresholds, risk scores, sensitivity multipliers, and trajectory penalties used by the dynamic policy layer
 - `runtime_warnings.py` centralizes warning suppression needed before importing selected LangGraph/LangChain dependencies
 - `graph.py` contains the current LangGraph wiring for the planner/actor/governance/tool/replanner/human-review loop:
@@ -355,6 +357,7 @@ Current relevant files:
 - Any externally impactful write-like action should be reviewable before execution.
 - HITL payloads must remain readable and compact.
 - Human decisions should remain canonical and typed.
+- `modify_and_continue` is a canonical HITL action only for `external_communication` drafts.
 
 
 ## Debugging Guidance

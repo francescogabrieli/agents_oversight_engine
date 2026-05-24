@@ -15,8 +15,11 @@ from urllib.parse import parse_qs, urlparse
 
 from layer1_intake import IntakeResult
 from layer2_runtime_governance import (
+    ExternalCommunicationDraft,
     HumanReviewDecision,
     HumanReviewDecisionType,
+    HumanReviewExternalEdit,
+    HumanReviewRequest,
     build_default_checkpointer,
     build_runtime_graph,
     build_governance_hitl_dashboard_snapshot,
@@ -173,6 +176,17 @@ def build_dashboard_snapshot(session: DashboardSession):
 
 # Render a local HTML control plane from the current dashboard snapshot.
 def render_dashboard_page(session: DashboardSession) -> str:
+    return _render_dashboard_page_internal(session=session)
+
+
+# Render the dashboard page with optional transient operator feedback and form state.
+def _render_dashboard_page_internal(
+    *,
+    session: DashboardSession,
+    form_state: dict[str, str] | None = None,
+    form_error: str | None = None,
+    operator_feedback: str | None = None,
+) -> str:
     with session.lock:
         task_state = _get_dashboard_task_state_unlocked(session)
         snapshot = build_governance_hitl_dashboard_snapshot(task_state)
@@ -199,6 +213,9 @@ def render_dashboard_page(session: DashboardSession) -> str:
             dashboard_mode=dashboard_mode,
             auto_refresh_enabled=auto_refresh_enabled,
             rendered_at=rendered_at,
+            form_state=form_state,
+            form_error=form_error,
+            operator_feedback=operator_feedback,
         ),
     )
 
@@ -323,20 +340,22 @@ def _build_request_handler(*, session: DashboardSession):
 
         # Handle one human review submission and redirect back to the dashboard view.
         def _handle_resume_request(self) -> None:
+            payload = self._read_form_payload()
             try:
-                payload = self._read_form_payload()
                 decision = _parse_human_review_decision(payload, session=self.dashboard_session)
                 resume_dashboard_session(self.dashboard_session, decision)
-                self._redirect("/")
+                self._write_html(
+                    _render_dashboard_page_internal(
+                        session=self.dashboard_session,
+                        operator_feedback=_build_operator_feedback_message(decision),
+                    )
+                )
             except ValueError as exc:
                 self._write_html(
-                    _render_html_document(
-                        title="Resume error",
-                        body=_render_error_message(str(exc)),
-                        dashboard_mode="terminal",
-                        auto_refresh_enabled=False,
-                        rendered_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                        snapshot_json=None,
+                    _render_dashboard_page_internal(
+                        session=self.dashboard_session,
+                        form_state=payload,
+                        form_error=str(exc),
                     ),
                     status=HTTPStatus.BAD_REQUEST,
                 )
@@ -379,12 +398,6 @@ def _build_request_handler(*, session: DashboardSession):
             self.send_header("Content-Length", str(len(encoded)))
             self.end_headers()
             self.wfile.write(encoded)
-
-        # Redirect the browser back to the dashboard shell after a successful submit.
-        def _redirect(self, location: str) -> None:
-            self.send_response(HTTPStatus.SEE_OTHER)
-            self.send_header("Location", location)
-            self.end_headers()
 
     return DashboardRequestHandler
 
@@ -469,6 +482,9 @@ def _render_dashboard_body(
     dashboard_mode: str,
     auto_refresh_enabled: bool,
     rendered_at: str,
+    form_state: dict[str, str] | None,
+    form_error: str | None,
+    operator_feedback: str | None,
 ) -> str:
     task_spec = session.intake_result.structured_task.task_spec
     metadata = session.intake_result.metadata
@@ -490,14 +506,28 @@ def _render_dashboard_body(
             auto_refresh_enabled=auto_refresh_enabled,
             rendered_at=rendered_at,
         ),
+        _render_operator_feedback_banner(operator_feedback),
         """
         <div class="dashboard-grid">
         """
+        + _render_operator_actions_card(
+            snapshot=snapshot,
+            snapshot_dict=snapshot_dict,
+            session=session,
+            form_state=form_state,
+            form_error=form_error,
+        )
         + _render_plan_card(snapshot.current_plan_step)
         + _render_governance_card(snapshot.governance)
         + _render_oversight_card(snapshot.oversight)
         + _render_external_communication_card(snapshot.external_communication)
-        + _render_human_review_card(snapshot, snapshot_dict, session)
+        + _render_human_review_card(
+            snapshot,
+            snapshot_dict,
+            session,
+            form_state=form_state,
+            form_error=form_error,
+        )
         + _render_snapshot_card(snapshot_dict)
         + """
         </div>
@@ -538,6 +568,15 @@ def _render_dashboard_banner(
             ("Runtime state", snapshot.runtime_state),
             ("Resume state", snapshot.resume_state or "n/a"),
             ("Pending review", "yes" if snapshot.has_pending_review else "no"),
+            (
+                "Last decision",
+                (
+                    snapshot.human_review.last_decision.decision_type.value
+                    if snapshot.human_review is not None
+                    and snapshot.human_review.last_decision is not None
+                    else "n/a"
+                ),
+            ),
             ("Actor turns", str(actor_turn_count)),
             ("Tool calls", str(tool_call_count)),
         ]
@@ -566,6 +605,22 @@ def _render_dashboard_banner(
         </div>
         """,
         class_name="card card-hero card-wide",
+    )
+
+
+# Render one success banner after a typed operator action resumes the runtime.
+def _render_operator_feedback_banner(operator_feedback: str | None) -> str:
+    if operator_feedback is None:
+        return ""
+    return _render_card(
+        "Operator Outcome",
+        f"""
+        <div class="callout callout-success">
+          <strong>Operator action accepted.</strong>
+          <span>{html.escape(operator_feedback)}</span>
+        </div>
+        """,
+        class_name="card card-wide",
     )
 
 
@@ -643,11 +698,99 @@ def _render_external_communication_card(external_communication_panel) -> str:
             external_communication_panel.last_transition_summary or "n/a",
         ),
     ]
+    if external_communication_panel.draft is not None:
+        rows.extend(
+            [
+                ("Draft channel", external_communication_panel.draft.channel),
+                ("Draft recipient", external_communication_panel.draft.recipient or "n/a"),
+                ("Draft subject", external_communication_panel.draft.subject or "n/a"),
+            ]
+        )
+    if external_communication_panel.last_applied_edit is not None:
+        rows.extend(
+            [
+                (
+                    "Last applied edit note",
+                    external_communication_panel.last_applied_edit.note or "n/a",
+                ),
+                (
+                    "Last edited channel",
+                    external_communication_panel.last_applied_edit.draft.channel,
+                ),
+            ]
+        )
     return _render_card("External Communication", _render_rows(rows))
 
 
-# Render the human review panel and action form.
-def _render_human_review_card(snapshot, snapshot_dict: dict[str, Any], session: DashboardSession) -> str:
+# Render the primary operator actions card when the runtime is paused for review.
+def _render_operator_actions_card(
+    *,
+    snapshot,
+    snapshot_dict: dict[str, Any],
+    session: DashboardSession,
+    form_state: dict[str, str] | None,
+    form_error: str | None,
+) -> str:
+    human_review = snapshot.human_review
+    if snapshot.focus.value != "waiting_human_review" or human_review is None:
+        return ""
+
+    pending_request = human_review.pending_request
+    if pending_request is None:
+        return ""
+
+    callout = """
+      <div class="callout callout-warning">
+        <strong>Operator action required.</strong>
+        <span>This run is paused at a governed review gate. A typed decision here resumes the runtime immediately.</span>
+      </div>
+    """
+    summary_rows = [
+        ("Thread", pending_request.thread_id),
+        ("Resume state", human_review.resume_state or "n/a"),
+        ("Allowed decisions", ", ".join(decision.value for decision in human_review.allowed_decisions)),
+        ("Reason codes", ", ".join(pending_request.reason_codes) or "n/a"),
+        (
+            "Last decision outcome",
+            (
+                human_review.last_decision.decision_type.value
+                if human_review.last_decision is not None
+                else "n/a"
+            ),
+        ),
+    ]
+
+    body = callout + _render_rows(summary_rows)
+    if form_error is not None:
+        body += f"""
+        <div class="callout callout-danger">
+          <strong>Submission blocked.</strong>
+          <span>{html.escape(form_error)}</span>
+        </div>
+        """
+    body += _render_decision_guidance(human_review.allowed_decisions)
+    body += _render_resume_form(
+        pending_request,
+        human_review.allowed_decisions,
+        form_state=form_state,
+    )
+    body += _render_small_json_block("Pending snapshot", snapshot_dict.get("human_review", {}))
+    return _render_card(
+        "Operator Actions",
+        body,
+        class_name="card card-wide card-control",
+    )
+
+
+# Render the human review context and current draft without mutating the operator form state.
+def _render_human_review_card(
+    snapshot,
+    snapshot_dict: dict[str, Any],
+    session: DashboardSession,
+    *,
+    form_state: dict[str, str] | None,
+    form_error: str | None,
+) -> str:
     human_review = snapshot.human_review
     if human_review is None:
         return _render_card(
@@ -657,12 +800,6 @@ def _render_human_review_card(snapshot, snapshot_dict: dict[str, Any], session: 
         )
 
     pending_request = human_review.pending_request
-    callout = """
-      <div class="callout callout-warning">
-        <strong>Human review required.</strong>
-        <span>The runtime is paused and will resume only after a typed decision is submitted.</span>
-      </div>
-    """
     request_rows = [
         ("Resume state", human_review.resume_state or "n/a"),
         ("Allowed decisions", ", ".join(decision.value for decision in human_review.allowed_decisions)),
@@ -672,12 +809,17 @@ def _render_human_review_card(snapshot, snapshot_dict: dict[str, Any], session: 
         ("Decision history", str(len(human_review.decision_history))),
     ]
 
-    payload_html = callout + _render_rows(request_rows)
+    payload_html = _render_rows(request_rows)
     if pending_request is not None:
         payload_html += _render_pending_request_block(pending_request)
-        payload_html += _render_resume_form(pending_request, human_review.allowed_decisions)
+        payload_html += _render_external_draft_review_block(
+            pending_request=pending_request,
+            allowed_decisions=human_review.allowed_decisions,
+            form_state=form_state,
+        )
 
-    payload_html += _render_small_json_block("Pending snapshot", snapshot_dict.get("human_review", {}))
+    if human_review.last_decision is not None:
+        payload_html += _render_last_decision_block(human_review.last_decision)
     return _render_card("Human Review", payload_html, class_name="card card-wide")
 
 
@@ -689,6 +831,7 @@ def _render_pending_request_block(pending_request: Any) -> str:
         ("Current state", pending_request.current_state),
         ("Current plan step", pending_request.current_plan_step_id or "n/a"),
         ("Actor result type", pending_request.actor_result_type or "n/a"),
+        ("External target", pending_request.external_communication_target_type or "n/a"),
         ("Governance directive", pending_request.governance_directive or "n/a"),
         ("Governance summary", pending_request.governance_summary or "n/a"),
         ("Oversight summary", pending_request.oversight_summary or "n/a"),
@@ -702,44 +845,275 @@ def _render_pending_request_block(pending_request: Any) -> str:
             pending_request.current_tool_request,
         )
 
-    return _render_subsection("Pending request", _render_rows(rows) + tool_request_html)
+    return _render_subsection(
+        "Pending request",
+        _render_rows(rows) + tool_request_html,
+    )
+
+
+# Render the review-time external draft comparison when the branch supports typed edit-and-submit.
+def _render_external_draft_review_block(
+    *,
+    pending_request: Any,
+    allowed_decisions: tuple[HumanReviewDecisionType, ...],
+    form_state: dict[str, str] | None,
+) -> str:
+    original_draft = pending_request.external_communication_draft
+    if original_draft is None:
+        return ""
+
+    can_modify_external = HumanReviewDecisionType.MODIFY_AND_CONTINUE in allowed_decisions
+    editable_draft = _build_editable_external_draft(original_draft, form_state=form_state)
+    original_block = _render_external_draft_summary(
+        title="Current draft",
+        draft=original_draft,
+        note="This is the governed draft currently stored in the runtime.",
+    )
+
+    if not can_modify_external:
+        return _render_subsection("External draft", original_block)
+
+    editable_block = _render_external_draft_summary(
+        title="Editable draft",
+        draft=editable_draft,
+        note="These are the values that will be submitted if you choose modify_and_continue.",
+    )
+    return _render_subsection(
+        "External draft review",
+        f"""
+        <div class="draft-compare-grid">
+          {original_block}
+          {editable_block}
+        </div>
+        """,
+    )
+
+
+# Render a compact draft summary card for either the stored or editable version.
+def _render_external_draft_summary(*, title: str, draft: ExternalCommunicationDraft, note: str) -> str:
+    return f"""
+      <section class="draft-panel">
+        <h4>{html.escape(title)}</h4>
+        {_render_rows(
+            [
+                ("Channel", draft.channel),
+                ("Recipient", draft.recipient or "n/a"),
+                ("Subject", draft.subject or "n/a"),
+                ("Body", draft.body or "n/a"),
+            ]
+        )}
+        <p class="note">{html.escape(note)}</p>
+        {_render_small_json_block("Draft metadata", draft.metadata)}
+      </section>
+    """
+
+
+# Build the in-form editable draft view while preserving invalid submit values after an error.
+def _build_editable_external_draft(
+    original_draft: ExternalCommunicationDraft,
+    *,
+    form_state: dict[str, str] | None,
+) -> ExternalCommunicationDraft:
+    if form_state is None:
+        return original_draft
+
+    metadata = dict(original_draft.metadata)
+    metadata_raw = _optional_text(form_state.get("external_communication_metadata"))
+    if metadata_raw is not None:
+        try:
+            parsed_metadata = json.loads(metadata_raw)
+        except json.JSONDecodeError:
+            pass
+        else:
+            if isinstance(parsed_metadata, dict):
+                metadata = {str(key): value for key, value in parsed_metadata.items()}
+
+    return ExternalCommunicationDraft(
+        channel=_resolve_form_value(form_state, "external_communication_channel", original_draft.channel),
+        recipient=_resolve_form_value(
+            form_state,
+            "external_communication_recipient",
+            original_draft.recipient or "",
+        ) or None,
+        subject=_resolve_form_value(
+            form_state,
+            "external_communication_subject",
+            original_draft.subject or "",
+        ) or None,
+        body=_resolve_form_value(form_state, "external_communication_body", original_draft.body or ""),
+        metadata=metadata,
+    )
 
 
 # Render the resume form with one typed button per allowed decision.
 def _render_resume_form(
     pending_request: Any,
     allowed_decisions: tuple[HumanReviewDecisionType, ...],
+    *,
+    form_state: dict[str, str] | None,
 ) -> str:
     button_html: list[str] = []
     for decision in allowed_decisions:
         button_label = decision.value.replace("_", " ")
+        button_class = _decision_button_class(decision)
         button_html.append(
-            f"<button class=\"decision-button\" type=\"submit\" name=\"decision_type\" value=\"{html.escape(decision.value)}\">{html.escape(button_label)}</button>"
+            f"<button class=\"decision-button {html.escape(button_class)}\" type=\"submit\" name=\"decision_type\" value=\"{html.escape(decision.value)}\">{html.escape(button_label)}</button>"
         )
 
     buttons = "".join(button_html)
+    external_edit_html = ""
+    can_modify_external = (
+        pending_request.external_communication_draft is not None
+        and HumanReviewDecisionType.MODIFY_AND_CONTINUE in allowed_decisions
+    )
+    if can_modify_external:
+        external_edit_html = _render_external_communication_edit_fields(
+            pending_request.external_communication_draft,
+            form_state=form_state,
+        )
     return f"""
       <form class="resume-form" method="post" action="/resume">
-        <p class="note resume-note">Choose one typed decision to resume the runtime from the paused checkpoint.</p>
+        <p class="note resume-note">Choose one typed decision to resume the runtime from the paused checkpoint. Approvals continue the run immediately; conservative actions send it into a stricter branch.</p>
         <div class="resume-fields">
           <input type="hidden" name="request_id" value="{html.escape(pending_request.request_id)}" />
           <input type="hidden" name="thread_id" value="{html.escape(pending_request.thread_id)}" />
         <label>
           Reviewer ID
-          <input type="text" name="reviewer_id" placeholder="operator-1" />
+          <input type="text" name="reviewer_id" placeholder="operator-1" value="{html.escape(_resolve_form_value(form_state, 'reviewer_id', ''))}" />
         </label>
         <label>
           Note
-          <textarea name="note" rows="3" placeholder="Optional operator note"></textarea>
+          <textarea name="note" rows="3" placeholder="Optional operator note">{html.escape(_resolve_form_value(form_state, 'note', ''))}</textarea>
         </label>
         <label>
           Clarification text
-          <textarea name="clarification_text" rows="3" placeholder="Optional clarification payload"></textarea>
+          <textarea name="clarification_text" rows="3" placeholder="Optional clarification payload">{html.escape(_resolve_form_value(form_state, 'clarification_text', ''))}</textarea>
         </label>
         </div>
+        {external_edit_html}
         <div class="decision-row">{buttons}</div>
       </form>
     """
+
+
+# Render the editable external communication fields for modify-and-continue.
+def _render_external_communication_edit_fields(
+    draft: ExternalCommunicationDraft,
+    *,
+    form_state: dict[str, str] | None,
+) -> str:
+    metadata_value = _resolve_form_value(
+        form_state,
+        "external_communication_metadata",
+        json.dumps(_to_jsonable(draft.metadata), indent=2, ensure_ascii=False),
+    )
+    return f"""
+      <fieldset class="edit-fieldset">
+        <legend>External communication edit</legend>
+        <p class="note">Submitting <code>modify_and_continue</code> applies these values as the new governed draft.</p>
+        <div class="resume-fields">
+          <label>
+            Channel
+            <input type="text" name="external_communication_channel" value="{html.escape(_resolve_form_value(form_state, 'external_communication_channel', draft.channel))}" />
+          </label>
+          <label>
+            Recipient
+            <input type="text" name="external_communication_recipient" value="{html.escape(_resolve_form_value(form_state, 'external_communication_recipient', draft.recipient or ''))}" />
+          </label>
+          <label>
+            Subject
+            <input type="text" name="external_communication_subject" value="{html.escape(_resolve_form_value(form_state, 'external_communication_subject', draft.subject or ''))}" />
+          </label>
+          <label>
+            Body
+            <textarea name="external_communication_body" rows="6">{html.escape(_resolve_form_value(form_state, 'external_communication_body', draft.body or ''))}</textarea>
+          </label>
+          <label>
+            Metadata JSON
+            <textarea name="external_communication_metadata" rows="4">{html.escape(metadata_value)}</textarea>
+          </label>
+        </div>
+      </fieldset>
+    """
+
+
+# Render one short decision guide so operator intent is explicit before submit.
+def _render_decision_guidance(allowed_decisions: tuple[HumanReviewDecisionType, ...]) -> str:
+    guidance_rows = []
+    for decision in allowed_decisions:
+        guidance_rows.append(
+            f"""
+            <div class="decision-guide decision-guide-{html.escape(_decision_family(decision))}">
+              <strong>{html.escape(decision.value)}</strong>
+              <span>{html.escape(_decision_help_text(decision))}</span>
+            </div>
+            """
+        )
+    return f'<div class="decision-guide-grid">{"".join(guidance_rows)}</div>'
+
+
+# Render the last typed human decision in a compact audit-safe block.
+def _render_last_decision_block(last_decision: HumanReviewDecision) -> str:
+    rows = [
+        ("Decision type", last_decision.decision_type.value),
+        ("Reviewer", last_decision.reviewer_id or "n/a"),
+        ("Note", last_decision.note or "n/a"),
+        ("Clarification", last_decision.clarification_text or "n/a"),
+    ]
+    if last_decision.external_communication_edit is not None:
+        rows.extend(
+            [
+                (
+                    "Edited channel",
+                    last_decision.external_communication_edit.draft.channel,
+                ),
+                (
+                    "Edited recipient",
+                    last_decision.external_communication_edit.draft.recipient or "n/a",
+                ),
+            ]
+        )
+    return _render_subsection("Last human decision", _render_rows(rows))
+
+
+# Classify decisions for styling and operator emphasis.
+def _decision_family(decision: HumanReviewDecisionType) -> str:
+    if decision in {
+        HumanReviewDecisionType.APPROVE_CONTINUE,
+        HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY,
+        HumanReviewDecisionType.MODIFY_AND_CONTINUE,
+    }:
+        return "approval"
+    if decision == HumanReviewDecisionType.ABORT:
+        return "terminal"
+    return "conservative"
+
+
+# Map decisions to button classes with stronger operator affordances.
+def _decision_button_class(decision: HumanReviewDecisionType) -> str:
+    family = _decision_family(decision)
+    if family == "approval":
+        return "decision-button-approval"
+    if family == "terminal":
+        return "decision-button-terminal"
+    return "decision-button-conservative"
+
+
+# Keep the operator-facing semantics explicit next to each canonical decision.
+def _decision_help_text(decision: HumanReviewDecisionType) -> str:
+    if decision == HumanReviewDecisionType.APPROVE_CONTINUE:
+        return "Resume the runtime on the stored path."
+    if decision == HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY:
+        return "Resume under a stricter read-only execution envelope."
+    if decision == HumanReviewDecisionType.MODIFY_AND_CONTINUE:
+        return "Apply the edited external draft and resume immediately."
+    if decision == HumanReviewDecisionType.REQUEST_MORE_EVIDENCE:
+        return "Send the run back to gather stronger evidence."
+    if decision == HumanReviewDecisionType.REPLAN:
+        return "Invalidate the current trajectory and request replanning."
+    if decision == HumanReviewDecisionType.ASK_CLARIFICATION:
+        return "Keep the run paused until missing information is resolved."
+    return "Terminate the run in a hard stopped state."
 
 
 # Render the raw snapshot JSON in a collapsible block.
@@ -938,13 +1312,79 @@ def _parse_human_review_decision(
     if decision_type not in pending_request.allowed_decisions:
         raise ValueError(f"Decision '{decision_type.value}' is not allowed for this review request.")
 
+    external_edit = None
+    if decision_type == HumanReviewDecisionType.MODIFY_AND_CONTINUE:
+        external_edit = _parse_external_communication_edit(
+            payload,
+            pending_request=pending_request,
+        )
+
     return HumanReviewDecision(
         request_id=request_id,
         decision_type=decision_type,
         note=_optional_text(payload.get("note")),
         clarification_text=_optional_text(payload.get("clarification_text")),
+        external_communication_edit=external_edit,
         reviewer_id=_optional_text(payload.get("reviewer_id")),
     )
+
+
+# Parse the external draft edits submitted by the dashboard form.
+def _parse_external_communication_edit(
+    payload: dict[str, str],
+    *,
+    pending_request: HumanReviewRequest,
+) -> HumanReviewExternalEdit:
+    current_draft = pending_request.external_communication_draft
+    if current_draft is None:
+        raise ValueError("modify_and_continue requires an external communication draft.")
+
+    channel = _optional_text(payload.get("external_communication_channel")) or current_draft.channel
+    body = _optional_text(payload.get("external_communication_body")) or current_draft.body
+    if not channel:
+        raise ValueError("External communication channel is required for modify_and_continue.")
+    if not body:
+        raise ValueError("External communication body is required for modify_and_continue.")
+
+    metadata_raw = _optional_text(payload.get("external_communication_metadata"))
+    if metadata_raw is None:
+        metadata = dict(current_draft.metadata)
+    else:
+        try:
+            metadata_payload = json.loads(metadata_raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("External communication metadata must be valid JSON.") from exc
+        if not isinstance(metadata_payload, dict):
+            raise ValueError("External communication metadata must be a JSON object.")
+        metadata = {str(key): value for key, value in metadata_payload.items()}
+
+    return HumanReviewExternalEdit(
+        draft=ExternalCommunicationDraft(
+            channel=channel,
+            recipient=_optional_text(payload.get("external_communication_recipient")),
+            subject=_optional_text(payload.get("external_communication_subject")),
+            body=body,
+            metadata=metadata,
+        ),
+        note=_optional_text(payload.get("note")),
+    )
+
+
+# Build a short success message that stays aligned with the typed decision semantics.
+def _build_operator_feedback_message(decision: HumanReviewDecision) -> str:
+    if decision.decision_type == HumanReviewDecisionType.MODIFY_AND_CONTINUE:
+        return "The edited external draft was accepted and the runtime resumed on the governed path."
+    if decision.decision_type == HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY:
+        return "The runtime resumed under the approved read-only envelope."
+    if decision.decision_type == HumanReviewDecisionType.APPROVE_CONTINUE:
+        return "The runtime resumed on the approved execution path."
+    if decision.decision_type == HumanReviewDecisionType.REQUEST_MORE_EVIDENCE:
+        return "The runtime resumed in a more conservative evidence-gathering path."
+    if decision.decision_type == HumanReviewDecisionType.REPLAN:
+        return "The runtime resumed by invalidating the current path and entering replanning."
+    if decision.decision_type == HumanReviewDecisionType.ASK_CLARIFICATION:
+        return "The clarification request was accepted and the run remains paused for resolution."
+    return "The abort decision was accepted and the run is now stopped."
 
 
 # Normalize optional text form fields to None when blank.
@@ -953,6 +1393,20 @@ def _optional_text(value: str | None) -> str | None:
         return None
     text = value.strip()
     return text or None
+
+
+# Reuse submitted values after an inline validation error without mutating TaskState.
+def _resolve_form_value(
+    form_state: dict[str, str] | None,
+    field_name: str,
+    fallback: str,
+) -> str:
+    if form_state is None:
+        return fallback
+    value = form_state.get(field_name)
+    if value is None:
+        return fallback
+    return value
 
 
 # Build a short stable token from the task text for thread ids and logs.

@@ -12,8 +12,10 @@ from .behavioral import BehavioralAssessment
 from .oversight import DynamicPolicyAssessment, OversightAssessment
 from .state import (
     ExternalCommunicationPhase,
+    ExternalCommunicationDraft,
     HumanReviewDecision,
     HumanReviewDecisionType,
+    HumanReviewExternalEdit,
     HumanReviewRequest,
     RuntimeFlag,
     RuntimeState,
@@ -31,6 +33,9 @@ def build_human_review_request(*, state: TaskState, thread_id: str) -> HumanRevi
     behavioral_assessment = state.last_behavioral_assessment
     judge_assessment = state.last_judge_assessment
     resume_state = _resolve_resume_state(state)
+    external_draft = (
+        state.external_communication.draft if state.external_communication is not None else None
+    )
 
     reason_codes: list[str] = []
     if governance_decision is not None:
@@ -72,14 +77,19 @@ def build_human_review_request(*, state: TaskState, thread_id: str) -> HumanRevi
         oversight_summary=(
             dynamic_policy_assessment.summary if dynamic_policy_assessment is not None else None
         ),
+        external_communication_target_type=(
+            external_draft.channel if external_draft is not None else None
+        ),
+        external_communication_draft=external_draft,
         reason_codes=tuple(reason_codes),
-        allowed_decisions=tuple(HumanReviewDecisionType),
+        allowed_decisions=_resolve_allowed_human_review_decisions(state=state),
         review_summary=_build_review_summary(
             governance_decision=governance_decision,
             dynamic_policy_assessment=dynamic_policy_assessment,
             behavioral_assessment=behavioral_assessment,
             judge_assessment=judge_assessment,
             resume_state=resume_state,
+            external_communication_draft=external_draft,
         ),
     )
 
@@ -104,6 +114,10 @@ def human_review(state: TaskState, *, thread_id: str) -> TaskState:
         decision_payload,
         expected_request_id=pending_request.request_id,
     )
+    if human_review_decision.decision_type not in pending_request.allowed_decisions:
+        raise ValueError(
+            "Human review decision is not permitted for the current review request."
+        )
     _apply_human_review_decision(runtime_state, human_review_decision)
 
     runtime_state.human_review_resume_state = pending_request.resume_state
@@ -139,13 +153,19 @@ def _coerce_human_review_decision(
         if decision_type_value is None:
             raise ValueError("Human review resume payload is missing decision_type.")
 
+        decision_type = _parse_decision_type(decision_type_value)
+        external_edit = _optional_external_communication_edit(payload)
+        if decision_type == HumanReviewDecisionType.MODIFY_AND_CONTINUE and external_edit is None:
+            raise ValueError("modify_and_continue requires an external communication edit payload.")
+
         decision = HumanReviewDecision(
             request_id=_extract_request_id(payload),
-            decision_type=_parse_decision_type(decision_type_value),
+            decision_type=decision_type,
             note=_optional_text(payload.get("note")),
             clarification_text=_optional_text(
                 payload.get("clarification_text", payload.get("clarification"))
             ),
+            external_communication_edit=external_edit,
             reviewer_id=_optional_text(payload.get("reviewer_id")),
         )
     else:
@@ -190,6 +210,15 @@ def _apply_human_review_decision(
             phase=ExternalCommunicationPhase.APPROVED_FOR_EXECUTION,
             summary="Human review approved the external communication draft under a read-only runtime envelope.",
         )
+        state.current_state = pending_request.resume_state
+        return
+
+    if human_review_decision.decision_type == HumanReviewDecisionType.MODIFY_AND_CONTINUE:
+        external_edit = human_review_decision.external_communication_edit
+        if external_edit is None:
+            raise ValueError("modify_and_continue requires an external communication edit payload.")
+        _apply_external_communication_edit(state, external_edit=external_edit)
+        state.current_tool_request = None
         state.current_state = pending_request.resume_state
         return
 
@@ -279,6 +308,7 @@ def _build_review_summary(
     behavioral_assessment: BehavioralAssessment | None,
     judge_assessment: Any,
     resume_state: RuntimeState,
+    external_communication_draft: ExternalCommunicationDraft | None = None,
 ) -> str | None:
     parts: list[str] = []
     normalized_parts: list[str] = []
@@ -298,8 +328,36 @@ def _build_review_summary(
         _append_unique_review_part(parts, normalized_parts, behavioral_assessment.summary)
     if judge_assessment is not None and getattr(judge_assessment, "summary", None):
         _append_unique_review_part(parts, normalized_parts, judge_assessment.summary)
+    if external_communication_draft is not None:
+        _append_unique_review_part(
+            parts,
+            normalized_parts,
+            "The external communication draft can be modified and submitted in this review step.",
+        )
     _append_unique_review_part(parts, normalized_parts, f"Approval would resume to '{resume_state.value}'.")
     return " ".join(parts) if parts else None
+
+
+# Resolve the canonical operator choices for the current review context.
+def _resolve_allowed_human_review_decisions(
+    *,
+    state: TaskState,
+) -> tuple[HumanReviewDecisionType, ...]:
+    base_decisions = [
+        HumanReviewDecisionType.APPROVE_CONTINUE,
+        HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY,
+    ]
+    if state.external_communication is not None and state.external_communication.draft is not None:
+        base_decisions.append(HumanReviewDecisionType.MODIFY_AND_CONTINUE)
+    base_decisions.extend(
+        [
+            HumanReviewDecisionType.REQUEST_MORE_EVIDENCE,
+            HumanReviewDecisionType.REPLAN,
+            HumanReviewDecisionType.ASK_CLARIFICATION,
+            HumanReviewDecisionType.ABORT,
+        ]
+    )
+    return tuple(base_decisions)
 
 
 # Append one review summary fragment only when it does not already appear in the summary body.
@@ -369,6 +427,63 @@ def _optional_text(value: Any) -> str | None:
     return cleaned or None
 
 
+# Parse a fully typed external draft from a review payload.
+def _coerce_external_communication_draft(payload: Any) -> ExternalCommunicationDraft:
+    if isinstance(payload, ExternalCommunicationDraft):
+        return payload
+    if not isinstance(payload, dict):
+        raise ValueError("External communication draft must be a dict or dataclass.")
+
+    channel = _optional_text(payload.get("channel"))
+    if channel is None:
+        raise ValueError("External communication draft is missing channel.")
+
+    body = _optional_text(payload.get("body"))
+    if body is None:
+        raise ValueError("External communication draft is missing body.")
+
+    metadata = payload.get("metadata")
+    if metadata is None:
+        metadata_dict: dict[str, Any] = {}
+    elif not isinstance(metadata, dict):
+        raise ValueError("External communication draft metadata must be a dict.")
+    else:
+        metadata_dict = {str(key): value for key, value in metadata.items()}
+
+    return ExternalCommunicationDraft(
+        channel=channel,
+        recipient=_optional_text(payload.get("recipient")),
+        subject=_optional_text(payload.get("subject")),
+        body=body,
+        metadata=metadata_dict,
+    )
+
+
+# Parse the human edit wrapper used by the modify-and-continue decision.
+def _coerce_external_communication_edit(payload: Any) -> HumanReviewExternalEdit:
+    if isinstance(payload, HumanReviewExternalEdit):
+        return payload
+    if not isinstance(payload, dict):
+        raise ValueError("External communication edit must be a dict or dataclass.")
+
+    draft_payload = payload.get("draft", payload.get("external_communication_draft"))
+    if draft_payload is None:
+        raise ValueError("External communication edit is missing draft.")
+
+    return HumanReviewExternalEdit(
+        draft=_coerce_external_communication_draft(draft_payload),
+        note=_optional_text(payload.get("note")),
+    )
+
+
+# Recover an optional external edit wrapper from a review payload.
+def _optional_external_communication_edit(payload: dict[str, Any]) -> HumanReviewExternalEdit | None:
+    edit_payload = payload.get("external_communication_edit", payload.get("external_edit"))
+    if edit_payload is None:
+        return None
+    return _coerce_external_communication_edit(edit_payload)
+
+
 # Reuse the existing step restoration helper without duplicating runtime semantics.
 def _restore_actor_step_for_more_evidence(state: TaskState) -> None:
     actor_result = state.actor_result
@@ -387,6 +502,28 @@ def _restore_actor_step_for_more_evidence(state: TaskState) -> None:
     ]
     if state.final_output_text == actor_result.output_text:
         state.final_output_text = None
+
+
+# Apply a validated external communication edit and preserve it in the audit trail.
+def _apply_external_communication_edit(
+    state: TaskState,
+    *,
+    external_edit: HumanReviewExternalEdit,
+) -> None:
+    if state.external_communication is None:
+        raise ValueError("Cannot edit external communication without a typed branch state.")
+
+    state.external_communication.draft = external_edit.draft
+    state.external_communication.last_applied_edit = external_edit
+    state.external_communication.edit_history.append(external_edit)
+    _set_external_communication_phase(
+        state,
+        phase=ExternalCommunicationPhase.APPROVED_FOR_EXECUTION,
+        summary=(
+            "Human review modified the external communication draft and submitted it "
+            "for governed continuation."
+        ),
+    )
 
 
 # Keep external communication phase updates local to the typed HITL resume logic.

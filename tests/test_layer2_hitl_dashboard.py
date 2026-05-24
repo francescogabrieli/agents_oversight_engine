@@ -29,6 +29,7 @@ from layer2_runtime_governance import (
     CapabilityAccessMode,
     DashboardFocus,
     EvidenceQualityAssessment,
+    ExternalCommunicationDraft,
     ExternalCommunicationPhase,
     GovernanceDecision,
     GovernanceDirective,
@@ -36,6 +37,7 @@ from layer2_runtime_governance import (
     GovernanceReasonCode,
     HumanReviewDecision,
     HumanReviewDecisionType,
+    HumanReviewExternalEdit,
     HumanReviewRequest,
     OperationalRiskAssessment,
     OversightAssessment,
@@ -92,7 +94,11 @@ class Layer2HitlDashboardTests(unittest.TestCase):
         self.assertEqual(snapshot.human_review.resume_state, "acting")
         self.assertEqual(
             snapshot.human_review.allowed_decisions,
-            tuple(HumanReviewDecisionType),
+            tuple(
+                decision
+                for decision in HumanReviewDecisionType
+                if decision != HumanReviewDecisionType.MODIFY_AND_CONTINUE
+            ),
         )
         self.assertEqual(payload["focus"], "waiting_human_review")
         self.assertEqual(decoded["human_review"]["pending_request"]["request_id"], "thread-1:hitl")
@@ -126,6 +132,23 @@ class Layer2HitlDashboardTests(unittest.TestCase):
     def test_dashboard_snapshot_exposes_external_communication_phase(self) -> None:
         task_state = TaskState.from_intake(_external_communication_intake_result())
         task_state.external_communication.phase = ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
+        task_state.external_communication.draft = ExternalCommunicationDraft(
+            channel="email",
+            recipient="ops@example.com",
+            subject="Draft update",
+            body="Please review this draft.",
+            metadata={"priority": "high"},
+        )
+        task_state.external_communication.last_applied_edit = HumanReviewExternalEdit(
+            draft=ExternalCommunicationDraft(
+                channel="email",
+                recipient="ops@example.com",
+                subject="Updated draft",
+                body="Please review the updated draft.",
+                metadata={"priority": "high"},
+            ),
+            note="Clarified the request before submission.",
+        )
         task_state.external_communication.last_transition_summary = (
             "A draft proposal reached the governed review gate."
         )
@@ -134,6 +157,11 @@ class Layer2HitlDashboardTests(unittest.TestCase):
 
         self.assertIsNotNone(snapshot.external_communication)
         self.assertEqual(snapshot.external_communication.phase, "human_review_required")
+        self.assertEqual(snapshot.external_communication.draft.channel, "email")
+        self.assertEqual(
+            snapshot.external_communication.last_applied_edit.note,
+            "Clarified the request before submission.",
+        )
         self.assertIn("governed review gate", snapshot.external_communication.last_transition_summary)
 
 
@@ -277,7 +305,13 @@ def _human_review_request() -> HumanReviewRequest:
         governance_summary="Human review is required.",
         oversight_summary="Evidence and risk warrant human review.",
         reason_codes=("human_review_required", "tool_requires_human_review"),
-        allowed_decisions=tuple(HumanReviewDecisionType),
+        external_communication_target_type=None,
+        external_communication_draft=None,
+        allowed_decisions=tuple(
+            decision
+            for decision in HumanReviewDecisionType
+            if decision != HumanReviewDecisionType.MODIFY_AND_CONTINUE
+        ),
         review_summary="The task should pause for operator review.",
     )
 

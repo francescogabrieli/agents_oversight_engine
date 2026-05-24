@@ -1836,6 +1836,9 @@ Le decisioni tipizzate possono poi reindirizzare il runtime verso:
 Quindi la review non è un vicolo cieco.
 È una pausa tipizzata con resume controllato.
 
+Nel ramo `external_communication`, la review può anche includere un edit della bozza corrente: l'umano modifica il draft strutturato e invia `modify_and_continue`, che vale come approvazione operativa della versione aggiornata.
+La dashboard locale espone questo passaggio come control plane single-run: mostra il draft corrente, i campi editabili, gli errori inline di validazione e il feedback immediato dopo il submit della decisione tipizzata.
+
 ## 35. Persistenza Behavioral E Judge Dopo Ogni Governance Pass
 
 Dopo la governance, il runtime prova a fare due persist:

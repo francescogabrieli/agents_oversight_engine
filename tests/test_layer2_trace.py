@@ -30,12 +30,18 @@ from layer2_runtime_governance import (
     BehavioralAssessment,
     BehavioralRecommendedDirective,
     CapabilityAccessMode,
+    ExternalCommunicationDraft,
+    ExternalCommunicationPhase,
     EvidenceQualityAssessment,
     GovernanceDecision,
     GovernanceDirective,
     GovernanceReasonCode,
     JudgeAssessment,
     JudgeRecommendedDirective,
+    HumanReviewDecision,
+    HumanReviewDecisionType,
+    HumanReviewExternalEdit,
+    HumanReviewRequest,
     OperationalRiskAssessment,
     OversightAssessment,
     OversightReasonCode,
@@ -166,6 +172,37 @@ class Layer2TraceTests(unittest.TestCase):
         self.assertEqual(review_trace.runtime.current_state, "waiting_human_review")
         self.assertEqual(aborted_trace.runtime.current_state, "aborted")
 
+    def test_trace_includes_external_communication_edit_history(self) -> None:
+        state = _external_communication_task_state()
+
+        trace = build_layer2_runtime_trace(
+            thread_id="external-trace",
+            intake_result=state.intake_payload,
+            task_state=state,
+        )
+
+        self.assertIsNotNone(trace.human_review)
+        self.assertIsNotNone(trace.external_communication)
+        self.assertEqual(trace.external_communication.phase, "approved_for_execution")
+        self.assertEqual(trace.external_communication.draft.channel, "email")
+        self.assertEqual(
+            trace.external_communication.last_applied_edit.note,
+            "Updated the target before submission.",
+        )
+        self.assertEqual(len(trace.external_communication.edit_history), 1)
+        self.assertEqual(
+            trace.human_review.pending_request.external_communication_target_type,
+            "email",
+        )
+        self.assertEqual(
+            trace.human_review.pending_request.external_communication_draft.channel,
+            "email",
+        )
+        self.assertEqual(
+            trace.human_review.decision_history[0].external_communication_edit.draft.channel,
+            "slack",
+        )
+
 
 # Build a canonical IntakeResult for trace tests.
 def _intake_result() -> IntakeResult:
@@ -190,6 +227,36 @@ def _intake_result() -> IntakeResult:
             parse_status=ParseStatus.COMPLETE,
             parser_name="trace_test_intake",
             prompt_version="trace_test_v1",
+            schema_version="1.0.0",
+            warnings=[],
+            missing_information=[],
+        ),
+    )
+
+
+# Build an IntakeResult for the external communication trace coverage.
+def _external_communication_intake_result() -> IntakeResult:
+    return IntakeResult(
+        structured_task=StructuredTask(
+            task_spec=TaskSpec(
+                goal="Prepare a governed external communication draft.",
+                context="Use deterministic fixtures.",
+                constraints=["Keep the draft local."],
+                domain_type=DomainType.EXTERNAL_COMMUNICATION,
+                domain_label="trace_external_comm",
+                sensitivity=SensitivityLevel.HIGH,
+                success_criteria=["Expose the typed external communication trace."],
+            ),
+            execution_policy=ExecutionPolicy(
+                confidence_threshold=0.7,
+                budget=BudgetConfig(max_steps=4, max_tool_calls=3),
+                policy_profile_name="trace_external_profile",
+            ),
+        ),
+        metadata=IntakeMetadata(
+            parse_status=ParseStatus.COMPLETE,
+            parser_name="trace_external_intake",
+            prompt_version="trace_external_v1",
             schema_version="1.0.0",
             warnings=[],
             missing_information=[],
@@ -269,6 +336,75 @@ def _complete_task_state() -> TaskState:
     state.last_behavioral_assessment = state.behavioral_history[-1]
     state.judge_history = [_judge()]
     state.last_judge_assessment = state.judge_history[-1]
+    return state
+
+
+# Build a complete TaskState that exercises the typed external communication review history.
+def _external_communication_task_state() -> TaskState:
+    state = TaskState.from_intake(_external_communication_intake_result())
+    state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+    state.bootstrap_completed = True
+    state.plan_steps = [
+        PlanStep(
+            step_id="step_1",
+            objective="Draft the external communication.",
+            rationale="The draft must remain local until review is complete.",
+            expected_outcome="A reviewable external draft.",
+            status=PlanStepStatus.IN_PROGRESS,
+        )
+    ]
+    state.current_plan_step_index = 0
+    state.external_communication.phase = ExternalCommunicationPhase.APPROVED_FOR_EXECUTION
+    state.external_communication.draft = ExternalCommunicationDraft(
+        channel="email",
+        recipient="ops@example.com",
+        subject="Draft update",
+        body="Please review this draft before sending.",
+        metadata={"priority": "high"},
+    )
+    applied_edit = HumanReviewExternalEdit(
+        draft=ExternalCommunicationDraft(
+            channel="slack",
+            recipient="#ops",
+            subject="Updated subject",
+            body="Updated body text.",
+            metadata={"priority": "critical"},
+        ),
+        note="Updated the target before submission.",
+    )
+    state.external_communication.last_applied_edit = applied_edit
+    state.external_communication.edit_history = [applied_edit]
+    pending_request = HumanReviewRequest(
+        request_id="external-trace:human_review",
+        thread_id="external-trace",
+        current_state=RuntimeState.WAITING_HUMAN_REVIEW,
+        resume_state=RuntimeState.ACTING,
+        current_plan_step_id="step_1",
+        current_plan_step_objective="Draft the external communication.",
+        actor_result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+        current_tool_request=None,
+        governance_directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
+        governance_summary="External communication requires review.",
+        oversight_summary="Review is still required.",
+        external_communication_target_type="email",
+        external_communication_draft=state.external_communication.draft,
+        reason_codes=("human_review_required",),
+        allowed_decisions=(
+            HumanReviewDecisionType.APPROVE_CONTINUE,
+            HumanReviewDecisionType.MODIFY_AND_CONTINUE,
+        ),
+        review_summary="The external draft may be edited and resubmitted.",
+    )
+    state.pending_human_review_request = pending_request
+    state.last_human_review_request = pending_request
+    decision = HumanReviewDecision(
+        request_id=pending_request.request_id,
+        decision_type=HumanReviewDecisionType.MODIFY_AND_CONTINUE,
+        external_communication_edit=applied_edit,
+        reviewer_id="operator-1",
+    )
+    state.human_review_history = [decision]
+    state.last_human_review_decision = decision
     return state
 
 

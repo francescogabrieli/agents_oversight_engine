@@ -24,7 +24,9 @@ from .oversight import (
 )
 from .state import (
     ExecutedPlanStep,
+    ExternalCommunicationDraft,
     ExternalCommunicationState,
+    HumanReviewExternalEdit,
     ScratchpadEntry,
     StepRecord,
     StepValidation,
@@ -213,6 +215,23 @@ class TraceJudgeAssessment:
 
 
 @dataclass(frozen=True)
+class TraceExternalCommunicationDraft:
+    # TraceExternalCommunicationDraft captures the typed outbound content in JSON-safe form.
+    channel: str
+    recipient: str | None
+    subject: str | None
+    body: str | None
+    metadata: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class TraceHumanReviewExternalEdit:
+    # TraceHumanReviewExternalEdit captures a human-applied draft edit for audit.
+    draft: TraceExternalCommunicationDraft
+    note: str | None
+
+
+@dataclass(frozen=True)
 class TraceHumanReviewRequest:
     # TraceHumanReviewRequest captures the pending HITL payload in JSON-safe form.
     request_id: str
@@ -230,6 +249,8 @@ class TraceHumanReviewRequest:
     behavioral_summary: str | None
     judge_summary: str | None
     oversight_summary: str | None
+    external_communication_target_type: str | None
+    external_communication_draft: TraceExternalCommunicationDraft | None
     reason_codes: tuple[str, ...]
     allowed_decisions: tuple[str, ...]
     review_summary: str | None
@@ -242,6 +263,7 @@ class TraceHumanReviewDecision:
     decision_type: str
     note: str | None
     clarification_text: str | None
+    external_communication_edit: TraceHumanReviewExternalEdit | None
     reviewer_id: str | None
 
 
@@ -267,6 +289,9 @@ class TraceExecutionSummary:
 class TraceExternalCommunicationSummary:
     # Keep the current external communication phase visible in runtime artifacts and evaluation.
     phase: str
+    draft: TraceExternalCommunicationDraft | None
+    last_applied_edit: TraceHumanReviewExternalEdit | None
+    edit_history: tuple[TraceHumanReviewExternalEdit, ...]
     last_transition_summary: str | None
 
 
@@ -729,6 +754,12 @@ def _build_human_review_request(
         behavioral_summary=request.behavioral_summary,
         judge_summary=request.judge_summary,
         oversight_summary=request.oversight_summary,
+        external_communication_target_type=request.external_communication_target_type,
+        external_communication_draft=(
+            _build_external_communication_draft(request.external_communication_draft)
+            if request.external_communication_draft is not None
+            else None
+        ),
         reason_codes=tuple(request.reason_codes),
         allowed_decisions=tuple(decision.value for decision in request.allowed_decisions),
         review_summary=request.review_summary,
@@ -744,6 +775,11 @@ def _build_human_review_decision(
         decision_type=decision.decision_type.value,
         note=decision.note,
         clarification_text=decision.clarification_text,
+        external_communication_edit=(
+            _build_human_review_external_edit(decision.external_communication_edit)
+            if decision.external_communication_edit is not None
+            else None
+        ),
         reviewer_id=decision.reviewer_id,
     )
 
@@ -756,7 +792,43 @@ def _build_external_communication_summary(
         return None
     return TraceExternalCommunicationSummary(
         phase=external_communication.phase.value,
+        draft=(
+            _build_external_communication_draft(external_communication.draft)
+            if external_communication.draft is not None
+            else None
+        ),
+        last_applied_edit=(
+            _build_human_review_external_edit(external_communication.last_applied_edit)
+            if external_communication.last_applied_edit is not None
+            else None
+        ),
+        edit_history=tuple(
+            _build_human_review_external_edit(edit) for edit in external_communication.edit_history
+        ),
         last_transition_summary=external_communication.last_transition_summary,
+    )
+
+
+# Convert one external communication draft into trace form.
+def _build_external_communication_draft(
+    draft: ExternalCommunicationDraft,
+) -> TraceExternalCommunicationDraft:
+    return TraceExternalCommunicationDraft(
+        channel=draft.channel,
+        recipient=draft.recipient,
+        subject=draft.subject,
+        body=draft.body,
+        metadata=dict(draft.metadata),
+    )
+
+
+# Convert one human edit wrapper into trace form.
+def _build_human_review_external_edit(
+    edit: HumanReviewExternalEdit,
+) -> TraceHumanReviewExternalEdit:
+    return TraceHumanReviewExternalEdit(
+        draft=_build_external_communication_draft(edit.draft),
+        note=edit.note,
     )
 
 
@@ -899,8 +971,10 @@ __all__ = [
     "TraceActorTurn",
     "TraceExecutionSummary",
     "TraceExternalCommunicationSummary",
+    "TraceExternalCommunicationDraft",
     "TraceBehavioralAssessment",
     "TraceHumanReviewDecision",
+    "TraceHumanReviewExternalEdit",
     "TraceHumanReviewRequest",
     "TraceHumanReviewSummary",
     "TraceGovernanceDecision",

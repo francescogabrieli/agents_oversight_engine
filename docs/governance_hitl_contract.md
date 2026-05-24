@@ -5,7 +5,7 @@ This document extracts the current runtime boundary between:
 - `governance`
 - `oversight`
 - `human_review` / `interrupt-resume`
-- the typed `external_communication` subflow and its still-future execution branch
+- the typed `external_communication` subflow, including human edit/submit on the governed draft
 
 It is intentionally operational, not aspirational: the goal is to make the current control contract explicit so a future dashboard can expose it without inventing new behavior.
 
@@ -26,7 +26,7 @@ The table below separates what the code already implements from what is only a d
 | `governance` is the hard control point after actor execution | Implemented | `src/layer2_runtime_governance/governance.py`, `src/layer2_runtime_governance/nodes.py` |
 | `oversight` can only make the runtime more conservative | Implemented | `src/layer2_runtime_governance/governance.py`, `src/layer2_runtime_governance/oversight.py` |
 | `human_review` is the only pause/resume path for typed operator intervention | Implemented | `src/layer2_runtime_governance/hitl.py`, `src/layer2_runtime_governance/graph.py` |
-| `external_communication` stays gated behind evidence, draft, and human review | Partially implemented typed phase model | `src/layer2_runtime_governance/state.py`, `src/layer2_runtime_governance/nodes.py`, `src/layer2_runtime_governance/governance.py`, `src/layer2_runtime_governance/hitl.py` |
+| `external_communication` stays gated behind evidence, draft, edit, and human review | Partially implemented typed phase model | `src/layer2_runtime_governance/state.py`, `src/layer2_runtime_governance/nodes.py`, `src/layer2_runtime_governance/governance.py`, `src/layer2_runtime_governance/hitl.py` |
 | The dashboard is a view and decision surface over this contract | Implemented local HTML control plane | `src/main_layer2_dashboard.py`, `src/layer2_runtime_governance/hitl_dashboard.py` |
 
 ## Dashboard Data Model
@@ -68,6 +68,7 @@ Already typed in the runtime:
 | Policy requires clarification because input is incomplete or ambiguous | `governance` | `ask_user_clarification` | `WAITING_HUMAN_REVIEW` | Show a clarification-oriented review card; operator must resolve the missing information |
 | Policy denies the actor outcome | `governance` | `stop` | `ABORTED` | Show a terminal denial state; no resume path should be offered |
 | Human reviewer approves continuation | `human_review` | resume to the stored state | Usually `ACTING`, `READY_NEXT_STEP`, or `COMPLETED` | Return control to the runtime using the typed resume payload |
+| Human reviewer edits an external communication draft and submits it | `human_review` | resume to the stored state with the edited draft applied | Usually `ACTING`, `READY_NEXT_STEP`, or `COMPLETED` | Accept the modified draft as the approved governed version for `external_communication` |
 | Human reviewer asks for more evidence | `human_review` | resume after restoring the step | `ACTING` | Keep the task live, but force another evidence-gathering cycle |
 | Human reviewer requests replanning | `human_review` | resume to replanning | `REPLANNING` | Show that the current plan was invalidated and must be replaced |
 | Human reviewer aborts | `human_review` | terminal stop | `ABORTED` | Show final termination; no further action should be possible |
@@ -78,12 +79,14 @@ The current review contract is typed through `HumanReviewDecisionType`:
 
 - `approve_continue`
 - `approve_continue_read_only`
+- `modify_and_continue`
 - `request_more_evidence`
 - `replan`
 - `ask_clarification`
 - `abort`
 
 These are the only actions a dashboard should expose as canonical operator choices.
+`modify_and_continue` is only exposed when the pending review includes an `external_communication` draft.
 
 ## What the Dashboard Should Display
 
@@ -120,7 +123,7 @@ These parts of the contract are already directly reflected in code:
 - explicit runtime states for `WAITING_HUMAN_REVIEW`, `REPLANNING`, `ABORTED`, and normal progression
 - persisted governance, oversight, and human review history in `TaskState`
 - durable checkpoint persistence and thread-level runtime artifacts on disk
-- typed `external_communication` phase tracking for evidence, draft, review, approval, and blocked states
+- typed `external_communication` phase tracking for evidence, draft, review/edit, approval, and blocked states
 
 These parts still need a UI or an execution branch:
 
@@ -132,7 +135,7 @@ The current runtime now tracks a typed flow with these phases:
 
 1. evidence collection
 2. draft proposal
-3. human review
+3. human review and edit
 4. approved for execution
 5. blocked
 

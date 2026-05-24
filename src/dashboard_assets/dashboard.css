@@ -155,6 +155,13 @@ body {
   background: var(--panel-2);
 }
 
+.card-control {
+  border-color: rgba(245, 158, 11, 0.38);
+  background:
+    linear-gradient(180deg, rgba(120, 53, 15, 0.18), rgba(17, 24, 39, 0.96)),
+    var(--panel);
+}
+
 .card h2 {
   margin: 0 0 14px;
   font-size: 1.1rem;
@@ -183,6 +190,16 @@ body {
 .callout-warning {
   border-color: rgba(245, 158, 11, 0.42);
   background: rgba(245, 158, 11, 0.10);
+}
+
+.callout-success {
+  border-color: rgba(52, 211, 153, 0.46);
+  background: rgba(52, 211, 153, 0.12);
+}
+
+.callout-danger {
+  border-color: rgba(248, 113, 113, 0.48);
+  background: rgba(127, 29, 29, 0.28);
 }
 
 .subsection {
@@ -290,6 +307,20 @@ body {
   resize: vertical;
 }
 
+.edit-fieldset {
+  margin: 0;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  background: rgba(15, 23, 42, 0.46);
+}
+
+.edit-fieldset legend {
+  padding: 0 8px;
+  color: #bfdbfe;
+  font-weight: 700;
+}
+
 .decision-row {
   display: flex;
   flex-wrap: wrap;
@@ -309,6 +340,90 @@ body {
 
 .decision-button:hover {
   background: rgba(96, 165, 250, 0.22);
+}
+
+.decision-button-approval {
+  border-color: rgba(52, 211, 153, 0.75);
+  background: rgba(52, 211, 153, 0.14);
+}
+
+.decision-button-approval:hover {
+  background: rgba(52, 211, 153, 0.22);
+}
+
+.decision-button-conservative {
+  border-color: rgba(245, 158, 11, 0.78);
+  background: rgba(245, 158, 11, 0.14);
+}
+
+.decision-button-conservative:hover {
+  background: rgba(245, 158, 11, 0.22);
+}
+
+.decision-button-terminal {
+  border-color: rgba(248, 113, 113, 0.82);
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.decision-button-terminal:hover {
+  background: rgba(248, 113, 113, 0.20);
+}
+
+.decision-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.decision-guide {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.54);
+}
+
+.decision-guide strong {
+  font-size: 0.9rem;
+}
+
+.decision-guide span {
+  color: #dbe4f0;
+  line-height: 1.45;
+  font-size: 0.9rem;
+}
+
+.decision-guide-approval {
+  border-color: rgba(52, 211, 153, 0.34);
+}
+
+.decision-guide-conservative {
+  border-color: rgba(245, 158, 11, 0.34);
+}
+
+.decision-guide-terminal {
+  border-color: rgba(248, 113, 113, 0.34);
+}
+
+.draft-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.draft-panel {
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(51, 65, 85, 0.8);
+  background: rgba(15, 23, 42, 0.54);
+}
+
+.draft-panel h4 {
+  margin: 0 0 10px;
+  font-size: 0.98rem;
+  color: #bfdbfe;
 }
 
 .note {

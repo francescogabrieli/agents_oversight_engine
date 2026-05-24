@@ -43,6 +43,7 @@ from layer2_runtime_governance import (
     DynamicPolicyAssessment,
     DynamicPolicyRecommendedDirective,
     EvidenceQualityAssessment,
+    ExternalCommunicationDraft,
     ExternalCommunicationPhase,
     GovernanceDecision,
     GovernanceDirective,
@@ -66,6 +67,7 @@ from layer2_runtime_governance import (
     StepValidation,
     StepValidationDecision,
     TaskState,
+    HumanReviewExternalEdit,
     EvidenceSupportLevel,
     ToolExecutionResult,
     ToolGatewayPort,
@@ -83,13 +85,14 @@ from layer2_runtime_governance import (
     build_default_actor,
     HumanReviewDecision,
     HumanReviewDecisionType,
+    build_human_review_request,
     build_governance_decision,
     build_policy_evaluation_input,
     build_runtime_graph,
     replanner,
 )
 from layer2_runtime_governance.persistence import RuntimeArtifactStore
-from layer2_runtime_governance.hitl import _apply_human_review_decision
+from layer2_runtime_governance.hitl import _apply_human_review_decision, human_review
 from main_layer2 import build_compact_trace, write_layer2_trace_file
 from main_layer2 import run_layer2_flow
 from layer2_runtime_governance.replanning import (
@@ -1404,6 +1407,137 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
                 ),
                 config={"configurable": {"thread_id": thread_id}},
             )
+
+    def test_human_review_modify_and_continue_applies_external_edit_and_resumes(self) -> None:
+        task_state = TaskState.from_intake(_build_external_communication_intake_result())
+        task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        task_state.human_review_resume_state = RuntimeState.ACTING
+        task_state.external_communication.phase = ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
+        task_state.external_communication.draft = ExternalCommunicationDraft(
+            channel="email",
+            recipient="ops@example.com",
+            subject="Original subject",
+            body="Original body",
+            metadata={"priority": "high"},
+        )
+        pending_request = build_human_review_request(state=task_state, thread_id="external-edit")
+        task_state.pending_human_review_request = pending_request
+
+        self.assertIn(
+            HumanReviewDecisionType.MODIFY_AND_CONTINUE,
+            pending_request.allowed_decisions,
+        )
+
+        _apply_human_review_decision(
+            task_state,
+            HumanReviewDecision(
+                request_id=pending_request.request_id,
+                decision_type=HumanReviewDecisionType.MODIFY_AND_CONTINUE,
+                external_communication_edit=HumanReviewExternalEdit(
+                    draft=ExternalCommunicationDraft(
+                        channel="slack",
+                        recipient="#ops",
+                        subject="Updated subject",
+                        body="Updated body",
+                        metadata={"priority": "critical"},
+                    ),
+                    note="Clarified the target before submission.",
+                ),
+            ),
+        )
+
+        self.assertEqual(task_state.current_state, RuntimeState.ACTING)
+        self.assertEqual(
+            task_state.external_communication.phase,
+            ExternalCommunicationPhase.APPROVED_FOR_EXECUTION,
+        )
+        self.assertEqual(task_state.external_communication.draft.channel, "slack")
+        self.assertEqual(task_state.external_communication.draft.recipient, "#ops")
+        self.assertEqual(task_state.external_communication.last_applied_edit.note, "Clarified the target before submission.")
+        self.assertEqual(len(task_state.external_communication.edit_history), 1)
+        self.assertEqual(len(task_state.human_review_history), 0)
+
+    def test_human_review_modify_and_continue_rejects_invalid_request_id(self) -> None:
+        task_state = TaskState.from_intake(_build_external_communication_intake_result())
+        task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        task_state.human_review_resume_state = RuntimeState.ACTING
+        task_state.external_communication.phase = ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
+        task_state.external_communication.draft = ExternalCommunicationDraft(
+            channel="email",
+            recipient="ops@example.com",
+            subject="Original subject",
+            body="Original body",
+        )
+        pending_request = build_human_review_request(state=task_state, thread_id="external-edit")
+        task_state.pending_human_review_request = pending_request
+
+        with self.assertRaises(ValueError):
+            _apply_human_review_decision(
+                task_state,
+                HumanReviewDecision(
+                    request_id="wrong-request-id",
+                    decision_type=HumanReviewDecisionType.MODIFY_AND_CONTINUE,
+                    external_communication_edit=HumanReviewExternalEdit(
+                        draft=ExternalCommunicationDraft(
+                            channel="email",
+                            recipient="ops@example.com",
+                            subject="Updated subject",
+                            body="Updated body",
+                        ),
+                    ),
+                ),
+            )
+
+    def test_human_review_node_accepts_modify_and_continue_and_resumes(self) -> None:
+        task_state = TaskState.from_intake(_build_external_communication_intake_result())
+        task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        task_state.human_review_resume_state = RuntimeState.ACTING
+        task_state.external_communication.phase = ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
+        task_state.external_communication.draft = ExternalCommunicationDraft(
+            channel="email",
+            recipient="ops@example.com",
+            subject="Original subject",
+            body="Original body",
+            metadata={"priority": "high"},
+        )
+        pending_request = build_human_review_request(
+            state=task_state,
+            thread_id="external-edit-node",
+        )
+        task_state.pending_human_review_request = pending_request
+
+        resume_payload = {
+            "request_id": pending_request.request_id,
+            "thread_id": pending_request.thread_id,
+            "decision_type": "modify_and_continue",
+            "note": "Submit the updated draft.",
+            "reviewer_id": "operator-1",
+            "external_communication_edit": {
+                "draft": {
+                    "channel": "slack",
+                    "recipient": "#ops",
+                    "subject": "Updated subject",
+                    "body": "Updated body",
+                    "metadata": {"priority": "critical"},
+                },
+                "note": "Updated the target before submission.",
+            },
+        }
+
+        with patch("layer2_runtime_governance.hitl.interrupt", return_value=resume_payload):
+            result_state = human_review(task_state, thread_id="external-edit-node")
+
+        self.assertEqual(result_state.current_state, RuntimeState.ACTING)
+        self.assertIsNone(result_state.pending_human_review_request)
+        self.assertEqual(result_state.last_human_review_decision.decision_type, HumanReviewDecisionType.MODIFY_AND_CONTINUE)
+        self.assertEqual(
+            result_state.external_communication.phase,
+            ExternalCommunicationPhase.APPROVED_FOR_EXECUTION,
+        )
+        self.assertEqual(result_state.external_communication.draft.channel, "slack")
+        self.assertEqual(result_state.external_communication.draft.recipient, "#ops")
+        self.assertEqual(result_state.external_communication.last_applied_edit.note, "Updated the target before submission.")
+        self.assertEqual(len(result_state.external_communication.edit_history), 1)
 
     def test_intermediate_output_does_not_complete_step_without_validation(self) -> None:
         graph = _build_test_graph(actor_service=ProgressThenCompleteActor())

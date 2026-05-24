@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from layer1_intake import (
     DomainType,
@@ -74,6 +74,7 @@ class HumanReviewDecisionType(str, Enum):
     # Human review stays typed so the runtime can pause and resume deterministically.
     APPROVE_CONTINUE = "approve_continue"
     APPROVE_CONTINUE_READ_ONLY = "approve_continue_read_only"
+    MODIFY_AND_CONTINUE = "modify_and_continue"
     REQUEST_MORE_EVIDENCE = "request_more_evidence"
     REPLAN = "replan"
     ASK_CLARIFICATION = "ask_clarification"
@@ -150,6 +151,23 @@ class StepValidation:
 
 
 @dataclass(frozen=True)
+class ExternalCommunicationDraft:
+    # Keep the external payload explicit so HITL can edit the real outbound content.
+    channel: str
+    recipient: str | None = None
+    subject: str | None = None
+    body: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class HumanReviewExternalEdit:
+    # Human edits are carried as a typed full draft, not as a free-form patch.
+    draft: ExternalCommunicationDraft
+    note: str | None = None
+
+
+@dataclass(frozen=True)
 class HumanReviewRequest:
     # Human review requests are persisted so interrupts can resume on the same checkpoint.
     request_id: str
@@ -167,6 +185,8 @@ class HumanReviewRequest:
     behavioral_summary: str | None = None
     judge_summary: str | None = None
     oversight_summary: str | None = None
+    external_communication_target_type: str | None = None
+    external_communication_draft: ExternalCommunicationDraft | None = None
     reason_codes: tuple[str, ...] = field(default_factory=tuple)
     allowed_decisions: tuple[HumanReviewDecisionType, ...] = field(default_factory=tuple)
     review_summary: str | None = None
@@ -179,6 +199,7 @@ class HumanReviewDecision:
     decision_type: HumanReviewDecisionType
     note: str | None = None
     clarification_text: str | None = None
+    external_communication_edit: HumanReviewExternalEdit | None = None
     reviewer_id: str | None = None
 
 
@@ -186,6 +207,9 @@ class HumanReviewDecision:
 class ExternalCommunicationState:
     # Keep the externally impactful draft/review boundary explicit in TaskState.
     phase: ExternalCommunicationPhase
+    draft: ExternalCommunicationDraft | None = None
+    last_applied_edit: HumanReviewExternalEdit | None = None
+    edit_history: list[HumanReviewExternalEdit] = field(default_factory=list)
     last_transition_summary: str | None = None
 
 
@@ -321,9 +345,11 @@ class TaskState:
 __all__ = [
     "ExecutedPlanStep",
     "ExternalCommunicationPhase",
+    "ExternalCommunicationDraft",
     "ExternalCommunicationState",
     "HumanReviewDecision",
     "HumanReviewDecisionType",
+    "HumanReviewExternalEdit",
     "HumanReviewRequest",
     "PlanStep",
     "PlanStepStatus",

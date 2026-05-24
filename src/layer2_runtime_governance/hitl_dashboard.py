@@ -11,9 +11,11 @@ from .oversight import DynamicPolicyAssessment, OversightAssessment
 from .state import (
     HumanReviewDecision,
     HumanReviewDecisionType,
+    HumanReviewExternalEdit,
     HumanReviewRequest,
     RuntimeState,
     TaskState,
+    ExternalCommunicationDraft,
 )
 
 
@@ -106,12 +108,16 @@ class DashboardHumanReviewPanel:
     allowed_decisions: tuple[HumanReviewDecisionType, ...]
     resume_state: str | None
     review_summary: str | None
+    external_communication_target_type: str | None
+    external_communication_draft: ExternalCommunicationDraft | None
 
 
 @dataclass(frozen=True)
 class DashboardExternalCommunicationPanel:
     # Expose the governed external communication phase without inventing new UI logic.
     phase: str
+    draft: ExternalCommunicationDraft | None
+    last_applied_edit: HumanReviewExternalEdit | None
     last_transition_summary: str | None
 
 
@@ -327,6 +333,16 @@ def _build_human_review_panel(*, task_state: TaskState) -> DashboardHumanReviewP
                 last_decision=last_decision,
             )
         ),
+        external_communication_target_type=(
+            pending_request.external_communication_target_type
+            if pending_request is not None
+            else None
+        ),
+        external_communication_draft=(
+            pending_request.external_communication_draft
+            if pending_request is not None
+            else None
+        ),
     )
 
 
@@ -339,6 +355,8 @@ def _build_external_communication_panel(
         return None
     return DashboardExternalCommunicationPanel(
         phase=task_state.external_communication.phase.value,
+        draft=task_state.external_communication.draft,
+        last_applied_edit=task_state.external_communication.last_applied_edit,
         last_transition_summary=task_state.external_communication.last_transition_summary,
     )
 
