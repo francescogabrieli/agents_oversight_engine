@@ -16,6 +16,7 @@ from .state import (
     RuntimeState,
     TaskState,
     ExternalCommunicationDraft,
+    normalize_task_state_serialization,
 )
 
 
@@ -145,6 +146,7 @@ class GovernanceHitlDashboardSnapshot:
 def build_governance_hitl_dashboard_snapshot(
     task_state: TaskState,
 ) -> GovernanceHitlDashboardSnapshot:
+    normalize_task_state_serialization(task_state)
     current_state = task_state.current_state
     focus = _resolve_dashboard_focus(task_state=current_state)
     governance_panel = _build_governance_panel(task_state.last_governance_decision)

@@ -22,11 +22,13 @@ from .state import (
     PlanStepStatus,
     StepRecord,
     TaskState,
+    normalize_task_state_serialization,
 )
 
 
 # Build the canonical human review request from the current runtime state.
 def build_human_review_request(*, state: TaskState, thread_id: str) -> HumanReviewRequest:
+    normalize_task_state_serialization(state)
     current_plan_step = state.current_plan_step
     governance_decision = state.last_governance_decision
     dynamic_policy_assessment = state.last_dynamic_policy_assessment or state.last_oversight_assessment

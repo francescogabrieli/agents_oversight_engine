@@ -752,18 +752,48 @@ def _render_operator_actions_card(
 
 # Render the few runtime facts an operator needs before choosing an action.
 def _render_review_chips(*, snapshot, pending_request: Any) -> str:
-    chips = [
-        ("Resume", snapshot.resume_state or pending_request.resume_state or "n/a"),
-        ("Target", pending_request.external_communication_target_type or "runtime"),
+    chips: list[tuple[str, str, str]] = [
+        ("Resume", snapshot.resume_state or pending_request.resume_state or "n/a", "neutral"),
+        ("Target", pending_request.external_communication_target_type or "runtime", "neutral"),
     ]
     if snapshot.oversight is not None:
         chips.extend(
             [
-                ("Evidence", snapshot.oversight.evidence_quality_level),
-                ("Risk", snapshot.oversight.operational_risk_level),
+                (
+                    "Evidence",
+                    snapshot.oversight.evidence_quality_level,
+                    _chip_tone(snapshot.oversight.evidence_quality_level),
+                ),
+                (
+                    "Risk",
+                    snapshot.oversight.operational_risk_level,
+                    _chip_tone(snapshot.oversight.operational_risk_level),
+                ),
             ]
         )
-    return _render_fact_grid(chips)
+    rendered = []
+    for label, value, tone in chips:
+        rendered.append(
+            f"""
+            <div class="signal-chip signal-chip-{html.escape(tone)}">
+              <span>{html.escape(label)}</span>
+              <strong>{html.escape(str(value))}</strong>
+            </div>
+            """
+        )
+    return f'<div class="signal-grid">{"".join(rendered)}</div>'
+
+
+# Map compact status values to visual tone classes.
+def _chip_tone(value: str) -> str:
+    normalized = str(value).lower()
+    if normalized in {"high", "weak", "degraded", "critical"}:
+        return "danger"
+    if normalized in {"moderate", "medium", "partial"}:
+        return "warning"
+    if normalized in {"healthy", "strong", "low"}:
+        return "success"
+    return "neutral"
 
 
 # Render decision buttons in operator-oriented groups without hiding typed values.
@@ -1002,26 +1032,39 @@ def _render_resume_form(
             pending_request.external_communication_draft,
             form_state=form_state,
         )
-    return f"""
-      <form class="resume-form" method="post" action="/resume">
-        {external_edit_html}
+    operator_fields = f"""
+      <div class="operator-sidebar">
         <div class="resume-fields compact-fields">
           <input type="hidden" name="request_id" value="{html.escape(pending_request.request_id)}" />
           <input type="hidden" name="thread_id" value="{html.escape(pending_request.thread_id)}" />
-        <label>
-          Reviewer ID
-          <input type="text" name="reviewer_id" placeholder="operator-1" value="{html.escape(_resolve_form_value(form_state, 'reviewer_id', ''))}" />
-        </label>
-        <label>
-          Note
-          <textarea name="note" rows="3" placeholder="Optional operator note">{html.escape(_resolve_form_value(form_state, 'note', ''))}</textarea>
-        </label>
-        <label>
-          Clarification text
-          <textarea name="clarification_text" rows="3" placeholder="Optional clarification payload">{html.escape(_resolve_form_value(form_state, 'clarification_text', ''))}</textarea>
-        </label>
+          <label>
+            Reviewer ID
+            <input type="text" name="reviewer_id" placeholder="operator-1" value="{html.escape(_resolve_form_value(form_state, 'reviewer_id', ''))}" />
+          </label>
+          <label>
+            Note
+            <textarea name="note" rows="3" placeholder="Optional operator note">{html.escape(_resolve_form_value(form_state, 'note', ''))}</textarea>
+          </label>
+          <label>
+            Clarification text
+            <textarea name="clarification_text" rows="3" placeholder="Only for ask clarification">{html.escape(_resolve_form_value(form_state, 'clarification_text', ''))}</textarea>
+          </label>
         </div>
         {_render_decision_buttons(allowed_decisions)}
+      </div>
+    """
+    if can_modify_external:
+        form_body = f"""
+          <div class="operator-workspace">
+            {external_edit_html}
+            {operator_fields}
+          </div>
+        """
+    else:
+        form_body = operator_fields
+    return f"""
+      <form class="resume-form" method="post" action="/resume">
+        {form_body}
       </form>
     """
 
@@ -1040,7 +1083,9 @@ def _render_external_communication_edit_fields(
     return f"""
       <fieldset class="edit-fieldset draft-editor">
         <legend>External draft</legend>
-        <p class="note">Edit these fields, then choose <strong>Submit edited draft</strong>. That action applies the edit and resumes the run.</p>
+        <div class="draft-header">
+          <p class="note">Review or edit the governed draft. <strong>Submit edited draft</strong> applies these values and resumes the run.</p>
+        </div>
         <div class="resume-fields">
           <label>
             Channel

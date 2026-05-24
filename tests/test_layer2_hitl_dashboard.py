@@ -164,6 +164,22 @@ class Layer2HitlDashboardTests(unittest.TestCase):
         )
         self.assertIn("governed review gate", snapshot.external_communication.last_transition_summary)
 
+    def test_dashboard_snapshot_coerces_restored_external_draft_dict(self) -> None:
+        task_state = TaskState.from_intake(_external_communication_intake_result())
+        task_state.external_communication.phase = ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
+        task_state.external_communication.draft = {
+            "channel": "email",
+            "recipient": "ops@example.com",
+            "subject": "Restored subject",
+            "body": "Restored body",
+            "metadata": {"source": "checkpoint"},
+        }
+
+        snapshot = build_governance_hitl_dashboard_snapshot(task_state)
+
+        self.assertEqual(snapshot.external_communication.draft.channel, "email")
+        self.assertEqual(snapshot.external_communication.draft.recipient, "ops@example.com")
+
 
 # Build a canonical IntakeResult for dashboard tests.
 def _intake_result() -> IntakeResult:

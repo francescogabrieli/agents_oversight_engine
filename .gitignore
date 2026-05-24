@@ -33,3 +33,4 @@ langgraph_documentation.md
 
 # Runtime artifacts
 artifacts/
+.codex/

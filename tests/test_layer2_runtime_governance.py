@@ -1488,6 +1488,29 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
                 ),
             )
 
+    def test_build_human_review_request_coerces_restored_external_draft_dict(self) -> None:
+        task_state = TaskState.from_intake(_build_external_communication_intake_result())
+        task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        task_state.human_review_resume_state = RuntimeState.ACTING
+        task_state.external_communication.phase = ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
+        task_state.external_communication.draft = {
+            "channel": "email",
+            "recipient": "ops@example.com",
+            "subject": "Original subject",
+            "body": "Original body",
+            "metadata": {"priority": "high"},
+        }
+
+        pending_request = build_human_review_request(
+            state=task_state,
+            thread_id="external-edit-restored",
+        )
+
+        self.assertIsInstance(task_state.external_communication.draft, ExternalCommunicationDraft)
+        self.assertEqual(task_state.external_communication.draft.channel, "email")
+        self.assertIsInstance(pending_request.external_communication_draft, ExternalCommunicationDraft)
+        self.assertEqual(pending_request.external_communication_draft.recipient, "ops@example.com")
+
     def test_human_review_node_accepts_modify_and_continue_and_resumes(self) -> None:
         task_state = TaskState.from_intake(_build_external_communication_intake_result())
         task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW

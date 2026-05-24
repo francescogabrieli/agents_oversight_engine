@@ -22,7 +22,7 @@
 
 body {
   margin: 0;
-  font-family: "Aptos", "Segoe UI", "Helvetica Neue", sans-serif;
+  font-family: "Fira Sans", "Aptos", "Segoe UI", sans-serif;
   background:
     linear-gradient(135deg, rgba(36, 84, 214, 0.07), transparent 30%),
     linear-gradient(180deg, #ffffff 0%, var(--bg) 42%, #edf1f6 100%);
@@ -30,7 +30,7 @@ body {
 }
 
 .shell {
-  max-width: 1180px;
+  max-width: 1280px;
   margin: 0 auto;
   padding: 22px 18px 42px;
 }
@@ -166,12 +166,47 @@ body {
 
 .review-panel {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
   gap: 18px;
   align-items: start;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--border);
 }
+
+.signal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.signal-chip {
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: #ffffff;
+}
+
+.signal-chip span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 800;
+}
+
+.signal-chip strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.92rem;
+  line-height: 1.25;
+}
+
+.signal-chip-neutral { border-left-color: var(--accent); }
+.signal-chip-success { border-left-color: var(--success); background: var(--success-soft); }
+.signal-chip-warning { border-left-color: var(--warning); background: var(--warning-soft); }
+.signal-chip-danger { border-left-color: var(--danger); background: var(--danger-soft); }
 
 .callout {
   display: flex;
@@ -254,6 +289,24 @@ body {
   margin-top: 16px;
 }
 
+.operator-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  gap: 16px;
+  align-items: start;
+}
+
+.operator-sidebar {
+  position: sticky;
+  top: 16px;
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
 .resume-fields {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
@@ -261,7 +314,7 @@ body {
 }
 
 .compact-fields {
-  grid-template-columns: minmax(170px, 0.5fr) minmax(260px, 1fr) minmax(260px, 1fr);
+  grid-template-columns: 1fr;
 }
 
 .resume-form label {
@@ -282,6 +335,7 @@ body {
   color: var(--text);
   font: inherit;
   font-weight: 400;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
 }
 
 .resume-form textarea {
@@ -290,9 +344,19 @@ body {
   line-height: 1.45;
 }
 
+.resume-form input:focus-visible,
+.resume-form textarea:focus-visible,
+.decision-button:focus-visible,
+.technical-details > summary:focus-visible,
+.json-block summary:focus-visible {
+  outline: 3px solid rgba(36, 84, 214, 0.22);
+  outline-offset: 2px;
+  border-color: var(--accent);
+}
+
 .draft-editor {
   margin: 0;
-  padding: 14px;
+  padding: 16px;
   border-radius: 8px;
   border: 1px solid #9db6ff;
   background: var(--accent-soft);
@@ -305,7 +369,17 @@ body {
 }
 
 .draft-editor textarea[name="external_communication_body"] {
-  min-height: 280px;
+  min-height: 360px;
+  font-family: "Fira Code", "Cascadia Code", Consolas, monospace;
+  font-size: 0.88rem;
+}
+
+.draft-header {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #c7d6ff;
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .action-bar {
@@ -342,6 +416,7 @@ body {
   color: var(--text);
   cursor: pointer;
   font-weight: 800;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
 }
 
 .decision-button:hover {
@@ -383,6 +458,11 @@ body {
   padding: 14px 16px;
   color: #344054;
   font-weight: 800;
+  transition: background 160ms ease;
+}
+
+.technical-details > summary:hover {
+  background: #ffffff;
 }
 
 .technical-grid {
@@ -404,6 +484,7 @@ body {
   cursor: pointer;
   color: var(--accent);
   font-weight: 800;
+  transition: color 160ms ease;
 }
 
 .json-block pre {
@@ -447,6 +528,15 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .signal-grid,
+  .operator-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .operator-sidebar {
+    position: static;
+  }
+
   .compact-fields {
     grid-template-columns: 1fr;
   }
@@ -460,5 +550,16 @@ body {
 
   .kv-table th {
     padding-bottom: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

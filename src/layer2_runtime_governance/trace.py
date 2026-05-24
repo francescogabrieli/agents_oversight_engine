@@ -27,6 +27,7 @@ from .state import (
     ExternalCommunicationDraft,
     ExternalCommunicationState,
     HumanReviewExternalEdit,
+    normalize_task_state_serialization,
     ScratchpadEntry,
     StepRecord,
     StepValidation,
@@ -327,6 +328,7 @@ def build_layer2_runtime_trace(
     intake_result: IntakeResult,
     task_state: TaskState,
 ) -> Layer2RuntimeTrace:
+    normalize_task_state_serialization(task_state)
     return Layer2RuntimeTrace(
         runtime=_build_runtime_summary(thread_id=thread_id, task_state=task_state),
         intake=_build_intake_summary(intake_result=intake_result),
