@@ -508,7 +508,7 @@ def _render_dashboard_body(
         ),
         _render_operator_feedback_banner(operator_feedback),
         """
-        <div class="dashboard-grid">
+        <div class="control-layout">
         """
         + _render_operator_actions_card(
             snapshot=snapshot,
@@ -517,18 +517,7 @@ def _render_dashboard_body(
             form_state=form_state,
             form_error=form_error,
         )
-        + _render_plan_card(snapshot.current_plan_step)
-        + _render_governance_card(snapshot.governance)
-        + _render_oversight_card(snapshot.oversight)
-        + _render_external_communication_card(snapshot.external_communication)
-        + _render_human_review_card(
-            snapshot,
-            snapshot_dict,
-            session,
-            form_state=form_state,
-            form_error=form_error,
-        )
-        + _render_snapshot_card(snapshot_dict)
+        + _render_technical_details_card(snapshot=snapshot, snapshot_dict=snapshot_dict)
         + """
         </div>
         """,
@@ -564,8 +553,7 @@ def _render_dashboard_banner(
     fact_grid = _render_fact_grid(
         [
             ("Thread", session.thread_id),
-            ("Focus", snapshot.focus.value),
-            ("Runtime state", snapshot.runtime_state),
+            ("State", snapshot.runtime_state),
             ("Resume state", snapshot.resume_state or "n/a"),
             ("Pending review", "yes" if snapshot.has_pending_review else "no"),
             (
@@ -577,20 +565,11 @@ def _render_dashboard_banner(
                     else "n/a"
                 ),
             ),
-            ("Actor turns", str(actor_turn_count)),
-            ("Tool calls", str(tool_call_count)),
         ]
     )
-    metadata_rows = [
-        ("Task goal", task_spec_goal),
-        ("Task context", task_spec_context or "n/a"),
-        ("Policy profile", policy_profile),
-        ("Parse status", parse_status),
-        ("Terminal state", snapshot.terminal_state or "n/a"),
-    ]
 
     return _render_card(
-        "Overview",
+        "Run",
         f"""
         <div class="hero-copy">
           <p class="eyebrow">Layer 2 HITL control plane</p>
@@ -599,12 +578,9 @@ def _render_dashboard_banner(
         </div>
         {status_strip}
         {fact_grid}
-        <div class="subsection">
-          <h3>Task summary</h3>
-          {_render_rows(metadata_rows)}
-        </div>
+        <p class="task-line"><strong>Task:</strong> {html.escape(_compact_text(task_spec_goal, 220))}</p>
         """,
-        class_name="card card-hero card-wide",
+        class_name="card card-hero",
     )
 
 
@@ -739,28 +715,22 @@ def _render_operator_actions_card(
     if pending_request is None:
         return ""
 
-    callout = """
-      <div class="callout callout-warning">
-        <strong>Operator action required.</strong>
-        <span>This run is paused at a governed review gate. A typed decision here resumes the runtime immediately.</span>
+    review_summary = (
+        human_review.review_summary
+        or pending_request.governance_summary
+        or pending_request.oversight_summary
+        or "Human review is required before the run can continue."
+    )
+    body = f"""
+      <div class="review-panel">
+        <div>
+          <p class="eyebrow">Operator action required</p>
+          <h2>Review and resume</h2>
+          <p class="lede">{html.escape(_compact_text(review_summary, 340))}</p>
+        </div>
+        {_render_review_chips(snapshot=snapshot, pending_request=pending_request)}
       </div>
     """
-    summary_rows = [
-        ("Thread", pending_request.thread_id),
-        ("Resume state", human_review.resume_state or "n/a"),
-        ("Allowed decisions", ", ".join(decision.value for decision in human_review.allowed_decisions)),
-        ("Reason codes", ", ".join(pending_request.reason_codes) or "n/a"),
-        (
-            "Last decision outcome",
-            (
-                human_review.last_decision.decision_type.value
-                if human_review.last_decision is not None
-                else "n/a"
-            ),
-        ),
-    ]
-
-    body = callout + _render_rows(summary_rows)
     if form_error is not None:
         body += f"""
         <div class="callout callout-danger">
@@ -768,18 +738,88 @@ def _render_operator_actions_card(
           <span>{html.escape(form_error)}</span>
         </div>
         """
-    body += _render_decision_guidance(human_review.allowed_decisions)
     body += _render_resume_form(
         pending_request,
         human_review.allowed_decisions,
         form_state=form_state,
     )
-    body += _render_small_json_block("Pending snapshot", snapshot_dict.get("human_review", {}))
     return _render_card(
-        "Operator Actions",
+        "Operator Review",
         body,
-        class_name="card card-wide card-control",
+        class_name="card card-control",
     )
+
+
+# Render the few runtime facts an operator needs before choosing an action.
+def _render_review_chips(*, snapshot, pending_request: Any) -> str:
+    chips = [
+        ("Resume", snapshot.resume_state or pending_request.resume_state or "n/a"),
+        ("Target", pending_request.external_communication_target_type or "runtime"),
+    ]
+    if snapshot.oversight is not None:
+        chips.extend(
+            [
+                ("Evidence", snapshot.oversight.evidence_quality_level),
+                ("Risk", snapshot.oversight.operational_risk_level),
+            ]
+        )
+    return _render_fact_grid(chips)
+
+
+# Render decision buttons in operator-oriented groups without hiding typed values.
+def _render_decision_buttons(allowed_decisions: tuple[HumanReviewDecisionType, ...]) -> str:
+    primary = [
+        HumanReviewDecisionType.MODIFY_AND_CONTINUE,
+        HumanReviewDecisionType.APPROVE_CONTINUE,
+    ]
+    secondary = [
+        HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY,
+        HumanReviewDecisionType.REQUEST_MORE_EVIDENCE,
+        HumanReviewDecisionType.REPLAN,
+        HumanReviewDecisionType.ASK_CLARIFICATION,
+    ]
+    terminal = [HumanReviewDecisionType.ABORT]
+    groups = [
+        ("Resume now", primary),
+        ("Conservative", secondary),
+        ("Stop", terminal),
+    ]
+    rendered_groups = []
+    for title, decisions in groups:
+        buttons = []
+        for decision in decisions:
+            if decision not in allowed_decisions:
+                continue
+            buttons.append(
+                "<button "
+                f"class=\"decision-button {html.escape(_decision_button_class(decision))}\" "
+                f"type=\"submit\" name=\"decision_type\" value=\"{html.escape(decision.value)}\">"
+                f"{html.escape(_decision_button_label(decision))}</button>"
+            )
+        if buttons:
+            rendered_groups.append(
+                f"""
+                <div class="action-group">
+                  <span>{html.escape(title)}</span>
+                  <div class="decision-row">{''.join(buttons)}</div>
+                </div>
+                """
+            )
+    return f'<div class="action-bar">{"".join(rendered_groups)}</div>'
+
+
+# Keep action labels short while preserving canonical submit values.
+def _decision_button_label(decision: HumanReviewDecisionType) -> str:
+    labels = {
+        HumanReviewDecisionType.MODIFY_AND_CONTINUE: "Submit edited draft",
+        HumanReviewDecisionType.APPROVE_CONTINUE: "Approve",
+        HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY: "Approve read-only",
+        HumanReviewDecisionType.REQUEST_MORE_EVIDENCE: "More evidence",
+        HumanReviewDecisionType.REPLAN: "Replan",
+        HumanReviewDecisionType.ASK_CLARIFICATION: "Ask clarification",
+        HumanReviewDecisionType.ABORT: "Abort",
+    }
+    return labels.get(decision, decision.value.replace("_", " "))
 
 
 # Render the human review context and current draft without mutating the operator form state.
@@ -952,15 +992,6 @@ def _render_resume_form(
     *,
     form_state: dict[str, str] | None,
 ) -> str:
-    button_html: list[str] = []
-    for decision in allowed_decisions:
-        button_label = decision.value.replace("_", " ")
-        button_class = _decision_button_class(decision)
-        button_html.append(
-            f"<button class=\"decision-button {html.escape(button_class)}\" type=\"submit\" name=\"decision_type\" value=\"{html.escape(decision.value)}\">{html.escape(button_label)}</button>"
-        )
-
-    buttons = "".join(button_html)
     external_edit_html = ""
     can_modify_external = (
         pending_request.external_communication_draft is not None
@@ -973,8 +1004,8 @@ def _render_resume_form(
         )
     return f"""
       <form class="resume-form" method="post" action="/resume">
-        <p class="note resume-note">Choose one typed decision to resume the runtime from the paused checkpoint. Approvals continue the run immediately; conservative actions send it into a stricter branch.</p>
-        <div class="resume-fields">
+        {external_edit_html}
+        <div class="resume-fields compact-fields">
           <input type="hidden" name="request_id" value="{html.escape(pending_request.request_id)}" />
           <input type="hidden" name="thread_id" value="{html.escape(pending_request.thread_id)}" />
         <label>
@@ -990,8 +1021,7 @@ def _render_resume_form(
           <textarea name="clarification_text" rows="3" placeholder="Optional clarification payload">{html.escape(_resolve_form_value(form_state, 'clarification_text', ''))}</textarea>
         </label>
         </div>
-        {external_edit_html}
-        <div class="decision-row">{buttons}</div>
+        {_render_decision_buttons(allowed_decisions)}
       </form>
     """
 
@@ -1008,9 +1038,9 @@ def _render_external_communication_edit_fields(
         json.dumps(_to_jsonable(draft.metadata), indent=2, ensure_ascii=False),
     )
     return f"""
-      <fieldset class="edit-fieldset">
-        <legend>External communication edit</legend>
-        <p class="note">Submitting <code>modify_and_continue</code> applies these values as the new governed draft.</p>
+      <fieldset class="edit-fieldset draft-editor">
+        <legend>External draft</legend>
+        <p class="note">Edit these fields, then choose <strong>Submit edited draft</strong>. That action applies the edit and resumes the run.</p>
         <div class="resume-fields">
           <label>
             Channel
@@ -1026,7 +1056,7 @@ def _render_external_communication_edit_fields(
           </label>
           <label>
             Body
-            <textarea name="external_communication_body" rows="6">{html.escape(_resolve_form_value(form_state, 'external_communication_body', draft.body or ''))}</textarea>
+            <textarea name="external_communication_body" rows="12">{html.escape(_resolve_form_value(form_state, 'external_communication_body', draft.body or ''))}</textarea>
           </label>
           <label>
             Metadata JSON
@@ -1126,6 +1156,41 @@ def _render_snapshot_card(snapshot_dict: dict[str, Any]) -> str:
         + _render_small_json_block("Governance HITL snapshot", snapshot_dict),
         class_name="card card-wide card-muted",
     )
+
+
+# Render audit material behind one collapsed control so the operator UI stays readable.
+def _render_technical_details_card(*, snapshot, snapshot_dict: dict[str, Any]) -> str:
+    plan_html = _render_plan_card(snapshot.current_plan_step)
+    governance_html = _render_governance_card(snapshot.governance)
+    oversight_html = _render_oversight_card(snapshot.oversight)
+    external_html = _render_external_communication_card(snapshot.external_communication)
+    review_rows = []
+    if snapshot.human_review is not None:
+        review_rows = [
+            ("Resume state", snapshot.human_review.resume_state or "n/a"),
+            (
+                "Allowed decisions",
+                ", ".join(decision.value for decision in snapshot.human_review.allowed_decisions),
+            ),
+            ("Decision history", str(len(snapshot.human_review.decision_history))),
+        ]
+    review_html = _render_card(
+        "Human Review",
+        _render_rows(review_rows) if review_rows else "<p class=\"note\">No human review payload.</p>",
+    )
+    return f"""
+      <details class="technical-details">
+        <summary>Technical details</summary>
+        <div class="technical-grid">
+          {plan_html}
+          {governance_html}
+          {oversight_html}
+          {external_html}
+          {review_html}
+          {_render_snapshot_card(snapshot_dict)}
+        </div>
+      </details>
+    """
 
 
 # Render one card wrapper with a title, body, and optional layout modifier.
@@ -1414,6 +1479,14 @@ def _short_token(raw_task_text: str) -> str:
     cleaned = "".join(ch if ch.isalnum() else "-" for ch in raw_task_text.lower())
     collapsed = "-".join(part for part in cleaned.split("-") if part)
     return collapsed[:24] or "dashboard"
+
+
+# Shorten long runtime summaries so the main operator surface stays scannable.
+def _compact_text(value: str, max_chars: int) -> str:
+    normalized = " ".join(str(value).split())
+    if len(normalized) <= max_chars:
+        return normalized
+    return normalized[: max_chars - 3].rstrip() + "..."
 
 
 # Format a floating-point score for a compact human-readable dashboard.
