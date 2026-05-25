@@ -53,7 +53,6 @@ from layer2_runtime_governance import (
 from main_layer2_dashboard import (
     DashboardSession,
     _build_operator_feedback_message,
-    _build_external_draft_form_values,
     _render_dashboard_page_internal,
     build_dashboard_session_from_thread_id,
     create_dashboard_session,
@@ -90,6 +89,8 @@ class MainLayer2DashboardTests(unittest.TestCase):
         self.assertIn("External draft", html)
         self.assertIn('name="external_communication_body"', html)
         self.assertIn('type="hidden" name="external_communication_metadata"', html)
+        self.assertNotIn('name="external_communication_recipient"', html)
+        self.assertNotIn('name="external_communication_subject"', html)
         self.assertIn("thread-1:hitl", html)
         self.assertIn('/assets/dashboard.css', html)
         self.assertIn('/assets/dashboard.js', html)
@@ -105,8 +106,6 @@ class MainLayer2DashboardTests(unittest.TestCase):
             "reviewer_id": "operator-1",
             "note": "Submit the revised draft.",
             "external_communication_channel": "slack",
-            "external_communication_recipient": "#ops",
-            "external_communication_subject": "Updated subject",
             "external_communication_body": "Updated body text.",
             "external_communication_metadata": '{"priority": "critical"}',
         }
@@ -119,10 +118,7 @@ class MainLayer2DashboardTests(unittest.TestCase):
             decision.external_communication_edit.draft.channel,
             "slack",
         )
-        self.assertEqual(
-            decision.external_communication_edit.draft.recipient,
-            "#ops",
-        )
+        self.assertEqual(decision.external_communication_edit.draft.body, "Updated body text.")
         self.assertEqual(
             decision.external_communication_edit.draft.metadata["priority"],
             "critical",
@@ -168,27 +164,6 @@ class MainLayer2DashboardTests(unittest.TestCase):
 
         self.assertIsNone(decision.clarification_text)
 
-    def test_external_draft_form_values_split_embedded_subject_and_recipient(self) -> None:
-        draft = ExternalCommunicationDraft(
-            channel="external_communication",
-            recipient=None,
-            subject=None,
-            body=(
-                "Subject: Review Required - Incident Notification to Operations Team "
-                "Dear Operations Team,\nPlease review this draft."
-            ),
-            metadata={},
-        )
-
-        values = _build_external_draft_form_values(draft, form_state=None)
-
-        self.assertEqual(
-            values["subject"],
-            "Review Required - Incident Notification to Operations Team",
-        )
-        self.assertEqual(values["recipient"], "Operations Team")
-        self.assertEqual(values["body"], "Dear Operations Team,\nPlease review this draft.")
-
     def test_render_dashboard_page_shows_inline_form_error_and_preserves_values(self) -> None:
         session = _build_paused_session()
         form_state = {
@@ -197,8 +172,6 @@ class MainLayer2DashboardTests(unittest.TestCase):
             "reviewer_id": "operator-2",
             "note": "Keep these edits.",
             "external_communication_channel": "slack",
-            "external_communication_recipient": "#ops",
-            "external_communication_subject": "Updated subject",
             "external_communication_body": "",
         }
 
@@ -211,8 +184,6 @@ class MainLayer2DashboardTests(unittest.TestCase):
         self.assertIn("Submission blocked.", html)
         self.assertIn("External communication body is required for modify_and_continue.", html)
         self.assertIn('value="operator-2"', html)
-        self.assertIn('value="slack"', html)
-        self.assertIn('value="#ops"', html)
         self.assertIn("Keep these edits.", html)
         self.assertNotIn("Metadata JSON", html)
 

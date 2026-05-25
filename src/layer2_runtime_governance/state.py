@@ -84,6 +84,7 @@ class HumanReviewDecisionType(str, Enum):
 class ExternalCommunicationPhase(str, Enum):
     # External communication remains a gated subflow, even before real execution is added.
     EVIDENCE_COLLECTION = "evidence_collection"
+    DRAFT_IN_PROGRESS = "draft_in_progress"
     DRAFT_PROPOSAL = "draft_proposal"
     HUMAN_REVIEW_REQUIRED = "human_review_required"
     APPROVED_FOR_EXECUTION = "approved_for_execution"
@@ -207,6 +208,7 @@ class HumanReviewDecision:
 class ExternalCommunicationState:
     # Keep the externally impactful draft/review boundary explicit in TaskState.
     phase: ExternalCommunicationPhase
+    review_ready: bool = False
     draft: ExternalCommunicationDraft | None = None
     last_applied_edit: HumanReviewExternalEdit | None = None
     edit_history: list[HumanReviewExternalEdit] = field(default_factory=list)

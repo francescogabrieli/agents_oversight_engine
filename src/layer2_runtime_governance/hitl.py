@@ -196,6 +196,7 @@ def _apply_human_review_decision(
             state,
             phase=ExternalCommunicationPhase.APPROVED_FOR_EXECUTION,
             summary="Human review approved the external communication draft for the next governed step.",
+            review_ready=True,
         )
         state.current_state = pending_request.resume_state
         return
@@ -211,6 +212,7 @@ def _apply_human_review_decision(
             state,
             phase=ExternalCommunicationPhase.APPROVED_FOR_EXECUTION,
             summary="Human review approved the external communication draft under a read-only runtime envelope.",
+            review_ready=True,
         )
         state.current_state = pending_request.resume_state
         return
@@ -229,6 +231,7 @@ def _apply_human_review_decision(
             state,
             phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
             summary="Human review sent the external communication branch back for more evidence.",
+            review_ready=False,
         )
         _restore_actor_step_for_more_evidence(state)
         state.current_tool_request = None
@@ -240,6 +243,7 @@ def _apply_human_review_decision(
             state,
             phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
             summary="Human review invalidated the current external communication trajectory and requested replanning.",
+            review_ready=False,
         )
         state.current_tool_request = None
         state.current_state = RuntimeState.REPLANNING
@@ -252,6 +256,7 @@ def _apply_human_review_decision(
             state,
             phase=ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED,
             summary="Human review requested clarification before the external communication branch can continue.",
+            review_ready=True,
         )
         state.current_tool_request = None
         state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
@@ -262,6 +267,7 @@ def _apply_human_review_decision(
             state,
             phase=ExternalCommunicationPhase.BLOCKED,
             summary="Human review aborted the external communication branch.",
+            review_ready=False,
         )
         state.current_tool_request = None
         state.last_tool_result = None
@@ -525,6 +531,7 @@ def _apply_external_communication_edit(
             "Human review modified the external communication draft and submitted it "
             "for governed continuation."
         ),
+        review_ready=True,
     )
 
 
@@ -534,8 +541,11 @@ def _set_external_communication_phase(
     *,
     phase: ExternalCommunicationPhase,
     summary: str,
+    review_ready: bool | None = None,
 ) -> None:
     if state.external_communication is None:
         return
     state.external_communication.phase = phase
+    if review_ready is not None:
+        state.external_communication.review_ready = review_ready
     state.external_communication.last_transition_summary = summary

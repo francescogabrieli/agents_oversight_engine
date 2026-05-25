@@ -110,7 +110,12 @@ from layer2_runtime_governance.governance import (
     OPAHttpPolicyEngineSettings,
     build_opa_input_document,
 )
-from layer2_runtime_governance.nodes import governance, observe_tool_result, planner
+from layer2_runtime_governance.nodes import (
+    _record_actor_execution,
+    governance,
+    observe_tool_result,
+    planner,
+)
 from layer2_runtime_governance.tool_contract import ObservedEvidence
 import layer2_runtime_governance.openrouter_client as openrouter_client_module
 
@@ -1199,6 +1204,46 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             ],
         )
 
+    def test_provider_empty_block_routes_to_replan_without_human_review(self) -> None:
+        task_state = TaskState.from_intake(_build_external_communication_intake_result())
+        task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Draft the email header and opening.",
+                rationale="The first external communication step should produce draft content.",
+                expected_outcome="A markdown body fragment for the email.",
+                status=PlanStepStatus.BLOCKED,
+            )
+        ]
+        task_state.current_plan_step_index = 0
+        task_state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.BLOCKED,
+            summary="Actor provider returned no usable runtime action.",
+            capability_mode=CapabilityAccessMode.NONE,
+            external_impact=False,
+            blocking_reason=(
+                "Actor provider returned no usable runtime action: OpenRouter returned no "
+                "tool call and no assistant content. finish_reason='stop'."
+            ),
+        )
+
+        result = governance(
+            task_state,
+            policy_engine_service=StubPolicyEngine(),
+            judge_service=StaticJudge(_judge_wait_review_assessment()),
+            thread_id="provider-empty-replan",
+        )
+
+        self.assertEqual(result.current_state, RuntimeState.REPLANNING)
+        self.assertIsNone(result.pending_human_review_request)
+        self.assertEqual(result.last_governance_decision.directive, GovernanceDirective.REPLAN)
+        self.assertEqual(
+            result.external_communication.phase,
+            ExternalCommunicationPhase.EVIDENCE_COLLECTION,
+        )
+
     # Verify that the real OPA bundle blocks write capability even without external impact.
     def test_opa_policy_denies_write_capability_without_external_impact(self) -> None:
         opa_path = shutil.which("opa")
@@ -1236,6 +1281,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
     def test_opa_input_marks_external_communication_draft_phase(self) -> None:
         task_state = TaskState.from_intake(_build_external_communication_intake_result())
         task_state.external_communication.phase = ExternalCommunicationPhase.DRAFT_PROPOSAL
+        task_state.external_communication.review_ready = True
         task_state.plan_steps = [
             PlanStep(
                 step_id="step_1",
@@ -1261,7 +1307,201 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         )
 
         self.assertEqual(opa_input["external_communication"]["phase"], "draft_proposal")
+        self.assertTrue(opa_input["external_communication"]["review_ready"])
         self.assertTrue(opa_input["actor"]["has_output_text"])
+
+    def test_opa_policy_does_not_require_review_for_partial_external_draft(self) -> None:
+        opa_path = shutil.which("opa")
+        if opa_path is None:
+            self.skipTest("OPA executable is not available.")
+
+        task_state = TaskState.from_intake(_build_external_communication_intake_result())
+        task_state.external_communication.phase = ExternalCommunicationPhase.DRAFT_IN_PROGRESS
+        task_state.external_communication.review_ready = False
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Identify the email audience and subject.",
+                rationale="This is still partial draft work.",
+                expected_outcome="A header concept only.",
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        task_state.current_plan_step_index = 0
+        task_state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+            summary="Partial draft metadata only.",
+            capability_mode=CapabilityAccessMode.NONE,
+            external_impact=False,
+            output_text="Recipient: Ops Team Subject: Incident Update",
+        )
+
+        completed = subprocess.run(
+            [
+                opa_path,
+                "eval",
+                "--format",
+                "json",
+                "--data",
+                str(REPO_ROOT / "configs" / "opa" / "layer2_governance" / "decision.rego"),
+                "--stdin-input",
+                "data.layer2.governance.decision",
+            ],
+            input=json.dumps(
+                build_opa_input_document(
+                    policy_input=build_policy_evaluation_input(task_state=task_state)
+                )
+            ),
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        parsed = json.loads(completed.stdout)
+        decision = parsed["result"][0]["expressions"][0]["value"]
+
+        self.assertEqual(decision["policy_decision"], "allow")
+        self.assertNotIn("external_communication_review_required", decision["reason_codes"])
+
+    def test_external_partial_draft_progress_is_preserved_as_markdown_body(self) -> None:
+        task_state = TaskState.from_intake(_build_external_communication_intake_result())
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Identify the email audience, subject line, and intent.",
+                rationale="Start with the draft header plan only.",
+                expected_outcome="Recipient, subject, and purpose statement.",
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        task_state.current_plan_step_index = 0
+
+        _record_actor_execution(
+            task_state,
+            actor_result=ActorResult(
+                plan_step_id="step_1",
+                result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+                summary="Header plan prepared.",
+                capability_mode=CapabilityAccessMode.NONE,
+                external_impact=False,
+                output_text=(
+                    "Recipient: Acme Cloud Operations Team "
+                    "Subject: Urgent incident verification required "
+                    "Purpose/Intent: Request immediate manual verification."
+                ),
+                step_validation=StepValidation(
+                    plan_step_id="step_1",
+                    objective_satisfied=False,
+                    evidence_sufficient=False,
+                    confidence=0.35,
+                    next_action=StepValidationDecision.REQUEST_MORE_EVIDENCE,
+                    rationale_summary="This is only a partial draft fragment.",
+                ),
+            ),
+        )
+
+        self.assertEqual(
+            task_state.external_communication.phase,
+            ExternalCommunicationPhase.DRAFT_IN_PROGRESS,
+        )
+        self.assertFalse(task_state.external_communication.review_ready)
+        self.assertIsNone(task_state.external_communication.draft.recipient)
+        self.assertIsNone(task_state.external_communication.draft.subject)
+        self.assertIn("Recipient: Acme Cloud Operations Team", task_state.external_communication.draft.body)
+        self.assertIn("Subject: Urgent incident verification required", task_state.external_communication.draft.body)
+
+    def test_external_markdown_outline_partial_draft_stays_in_single_body(self) -> None:
+        task_state = TaskState.from_intake(_build_external_communication_intake_result())
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Identify the required email audience, purpose, and tone.",
+                rationale="Start from a structured outline before the final compose step.",
+                expected_outcome="A draft email outline with recipient, subject intent, and sections.",
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        task_state.current_plan_step_index = 0
+
+        _record_actor_execution(
+            task_state,
+            actor_result=ActorResult(
+                plan_step_id="step_1",
+                result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+                summary="Outline prepared.",
+                capability_mode=CapabilityAccessMode.NONE,
+                external_impact=False,
+                output_text=(
+                    "**Email Audience & Purpose** - **Recipient:** Acme Cloud Operations Team "
+                    "(operations@acmecloud.com) - **Purpose:** Request immediate manual verification. "
+                    "**Tone** - Professional and urgent. **Outline** 1. **Subject Line:** "
+                    "\"Urgent: Manual Verification Required - EU Notification Pipeline Incident\" "
+                    "2. **Greeting:** Direct address to the Operations Team. 3. **Incident Summary:** "
+                    "Detection time and observed impact. 4. **Requested Actions:** Verify queues and backlog. "
+                    "5. **Response Expectation:** Status update within 60 minutes."
+                ),
+                step_validation=StepValidation(
+                    plan_step_id="step_1",
+                    objective_satisfied=False,
+                    evidence_sufficient=False,
+                    confidence=0.35,
+                    next_action=StepValidationDecision.REQUEST_MORE_EVIDENCE,
+                    rationale_summary="This is still only a partial outline.",
+                ),
+            ),
+        )
+
+        self.assertIsNone(task_state.external_communication.draft.recipient)
+        self.assertIsNone(task_state.external_communication.draft.subject)
+        self.assertIn("**Email Audience & Purpose**", task_state.external_communication.draft.body)
+        self.assertIn("**Subject Line:**", task_state.external_communication.draft.body)
+        self.assertIn("**Requested Actions:**", task_state.external_communication.draft.body)
+
+    def test_external_final_draft_becomes_review_ready_proposal(self) -> None:
+        task_state = TaskState.from_intake(_build_external_communication_intake_result())
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_6",
+                objective="Ensure the overall tone and content are ready to send externally.",
+                rationale="The final step should produce the complete governed email draft.",
+                expected_outcome="A finalized email draft suitable for immediate sending.",
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        task_state.current_plan_step_index = 0
+
+        _record_actor_execution(
+            task_state,
+            actor_result=ActorResult(
+                plan_step_id="step_6",
+                result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+                summary="Final draft prepared.",
+                capability_mode=CapabilityAccessMode.NONE,
+                external_impact=False,
+                output_text=(
+                    "Subject: Incident verification request\n\n"
+                    "Operations team,\n\n"
+                    "We detected intermittent delivery failures at 09:12 CET on May 25, 2026. "
+                    "Please verify delivery queues, inspect the retry backlog, confirm whether impact "
+                    "extended beyond the notification pipeline, and report status back within 60 minutes."
+                ),
+                step_validation=StepValidation(
+                    plan_step_id="step_6",
+                    objective_satisfied=True,
+                    evidence_sufficient=True,
+                    confidence=0.91,
+                    next_action=StepValidationDecision.COMPLETE_STEP,
+                    rationale_summary="The final external draft is complete and reviewable.",
+                ),
+            ),
+        )
+
+        self.assertEqual(
+            task_state.external_communication.phase,
+            ExternalCommunicationPhase.DRAFT_PROPOSAL,
+        )
+        self.assertTrue(task_state.external_communication.review_ready)
+        self.assertIn("Operations team", task_state.external_communication.draft.body)
 
     def test_actor_asks_for_clarification_routes_to_waiting_review(self) -> None:
         graph = _build_test_graph(actor_service=ClarificationActor())

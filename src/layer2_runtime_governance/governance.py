@@ -85,6 +85,7 @@ class PolicyEvaluationInput:
     observed_evidence_count: int
     actor_turn_count: int
     external_communication_phase: ExternalCommunicationPhase | None
+    external_communication_review_ready: bool
 
 
 @dataclass(frozen=True)
@@ -219,6 +220,11 @@ def build_policy_evaluation_input(*, task_state: TaskState) -> PolicyEvaluationI
         external_communication_phase=(
             task_state.external_communication.phase if task_state.external_communication is not None else None
         ),
+        external_communication_review_ready=(
+            task_state.external_communication.review_ready
+            if task_state.external_communication is not None
+            else False
+        ),
     )
 
 
@@ -268,6 +274,7 @@ def build_opa_input_document(*, policy_input: PolicyEvaluationInput) -> dict[str
                 if policy_input.external_communication_phase is not None
                 else None
             ),
+            "review_ready": policy_input.external_communication_review_ready,
         },
     }
 
@@ -359,6 +366,8 @@ def combine_governance_assessments(
         behavioral_assessment=behavioral_assessment,
         judge_assessment=judge_assessment,
     )
+    if _provider_runtime_action_missing(policy_input=policy_input):
+        final_directive = GovernanceDirective.REPLAN
     dynamic_directive = _map_dynamic_directive(
         dynamic_policy_assessment.recommended_directive
         if dynamic_policy_assessment is not None
@@ -421,6 +430,18 @@ def combine_governance_assessments(
         oversight_summary=(
             dynamic_policy_assessment.summary if dynamic_policy_assessment is not None else None
         ),
+    )
+
+
+# Treat provider protocol failures as runtime recovery, not operator review.
+def _provider_runtime_action_missing(*, policy_input: PolicyEvaluationInput) -> bool:
+    if policy_input.actor_result_type != ActorResultType.BLOCKED:
+        return False
+    if policy_input.actor_has_output_text or policy_input.tool_name is not None:
+        return False
+    return (
+        policy_input.blocking_reason is not None
+        and "Actor provider returned no usable runtime action" in policy_input.blocking_reason
     )
 
 

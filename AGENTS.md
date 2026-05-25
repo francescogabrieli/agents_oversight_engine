@@ -297,7 +297,7 @@ Current relevant files:
 - the active baseline also includes the real `replanner` branch triggered by `NEEDS_REPLAN`
 - the active baseline also includes a typed governance branch after `actor` that can continue, replan, escalate, or abort
 - governance now combines five explicit internal layers: static policy, deterministic dynamic policy, behavioural intelligence, selective judge review, and a deterministic decision combiner; OPA denials, required review, and clarification decisions remain non-negotiable
-- external communication drafts are now explicit runtime state, and policy may require review based on the typed `external_communication` phase
+- external communication drafts are explicit runtime state; the operator-facing payload is a single markdown body, while policy distinguishes between partial draft assembly and review-ready governed drafts before opening HITL
 - the planner/executor split should remain aligned with `docs/plan-and-execute.ipynb` unless there is a clear thesis-driven reason to diverge
 - planner output must remain semantic and typed
 - planner output must not contain concrete tool calls, executable payloads, or framework-specific actions
@@ -308,6 +308,7 @@ Current relevant files:
 - planner and replanner remain OpenAI-backed for now
 - actor provider selection is controlled by `LAYER2_ACTOR_PROVIDER`, with supported values `openrouter` and `openai`
 - malformed provider JSON that omits the runtime action envelope should be recovered only when it is clearly completion-shaped; otherwise it should stop conservatively instead of being treated as normal progress
+- provider failures that return no usable runtime action and no actor output are runtime recovery events; they should route to replanning/retry rather than opening a human-review gate with an empty draft
 - actor execution may produce local outputs, request later capability use, ask clarification, or signal replan
 - actor execution should record audit-safe scratchpad entries rather than hidden chain-of-thought
 - official implementation pages and procedural regulations should be described as procedural sources, not as direct enforcers, unless the source explicitly says so

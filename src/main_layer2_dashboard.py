@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import html
 import json
-import re
 import threading
 import webbrowser
 from dataclasses import dataclass, field
@@ -678,9 +677,7 @@ def _render_external_communication_card(external_communication_panel) -> str:
     if external_communication_panel.draft is not None:
         rows.extend(
             [
-                ("Draft channel", external_communication_panel.draft.channel),
-                ("Draft recipient", external_communication_panel.draft.recipient or "n/a"),
-                ("Draft subject", external_communication_panel.draft.subject or "n/a"),
+                ("Draft body", external_communication_panel.draft.body or "n/a"),
             ]
         )
     if external_communication_panel.last_applied_edit is not None:
@@ -691,8 +688,8 @@ def _render_external_communication_card(external_communication_panel) -> str:
                     external_communication_panel.last_applied_edit.note or "n/a",
                 ),
                 (
-                    "Last edited channel",
-                    external_communication_panel.last_applied_edit.draft.channel,
+                    "Last edited body",
+                    external_communication_panel.last_applied_edit.draft.body or "n/a",
                 ),
             ]
         )
@@ -967,9 +964,6 @@ def _render_external_draft_summary(*, title: str, draft: ExternalCommunicationDr
         <h4>{html.escape(title)}</h4>
         {_render_rows(
             [
-                ("Channel", draft.channel),
-                ("Recipient", draft.recipient or "n/a"),
-                ("Subject", draft.subject or "n/a"),
                 ("Body", draft.body or "n/a"),
             ]
         )}
@@ -1001,16 +995,8 @@ def _build_editable_external_draft(
 
     return ExternalCommunicationDraft(
         channel=_resolve_form_value(form_state, "external_communication_channel", original_draft.channel),
-        recipient=_resolve_form_value(
-            form_state,
-            "external_communication_recipient",
-            original_draft.recipient or "",
-        ) or None,
-        subject=_resolve_form_value(
-            form_state,
-            "external_communication_subject",
-            original_draft.subject or "",
-        ) or None,
+        recipient=original_draft.recipient,
+        subject=original_draft.subject,
         body=_resolve_form_value(form_state, "external_communication_body", original_draft.body or ""),
         metadata=metadata,
     )
@@ -1087,55 +1073,18 @@ def _build_external_draft_form_values(
     *,
     form_state: dict[str, str] | None,
 ) -> dict[str, str]:
-    derived_subject, derived_recipient, derived_body = _derive_external_draft_header_fields(draft)
     return {
         "channel": _resolve_form_value(
             form_state,
             "external_communication_channel",
             draft.channel,
         ),
-        "recipient": _resolve_form_value(
-            form_state,
-            "external_communication_recipient",
-            draft.recipient or derived_recipient,
-        ),
-        "subject": _resolve_form_value(
-            form_state,
-            "external_communication_subject",
-            draft.subject or derived_subject,
-        ),
         "body": _resolve_form_value(
             form_state,
             "external_communication_body",
-            derived_body,
+            draft.body or "",
         ),
     }
-
-
-# Derive visible email-like fields when the LLM placed headers inside the body.
-def _derive_external_draft_header_fields(draft: ExternalCommunicationDraft) -> tuple[str, str, str]:
-    body = draft.body or ""
-    subject = ""
-    body_without_subject = body
-    subject_match = re.match(
-        r"^\s*Subject:\s*(?P<subject>.+?)(?=(?:\r?\n|Dear\s+[A-Z]|$))",
-        body,
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    if subject_match is not None:
-        subject = " ".join(subject_match.group("subject").split())
-        body_without_subject = body[subject_match.end() :].lstrip(" \r\n")
-
-    recipient = ""
-    recipient_match = re.search(
-        r"\bDear\s+(?P<recipient>[^,\n\r]+)",
-        body_without_subject,
-        flags=re.IGNORECASE,
-    )
-    if recipient_match is not None:
-        recipient = " ".join(recipient_match.group("recipient").split())
-
-    return subject, recipient, body_without_subject
 
 
 # Render the editable external communication fields for modify-and-continue.
@@ -1154,25 +1103,14 @@ def _render_external_communication_edit_fields(
       <fieldset class="edit-fieldset draft-editor">
         <legend>External draft</legend>
         <div class="draft-header">
-          <p class="note">Review or edit the governed draft. <strong>Submit edited draft</strong> applies these values and resumes the run.</p>
+          <p class="note">Review or edit the governed markdown body. <strong>Submit edited draft</strong> applies this body and resumes the run.</p>
         </div>
         <div class="resume-fields">
           <label>
-            Channel
-            <input type="text" name="external_communication_channel" value="{html.escape(field_values['channel'])}" />
-          </label>
-          <label>
-            Recipient
-            <input type="text" name="external_communication_recipient" value="{html.escape(field_values['recipient'])}" />
-          </label>
-          <label>
-            Subject
-            <input type="text" name="external_communication_subject" value="{html.escape(field_values['subject'])}" />
-          </label>
-          <label>
-            Body
+            Markdown body
             <textarea name="external_communication_body" rows="12">{html.escape(field_values['body'])}</textarea>
           </label>
+          <input type="hidden" name="external_communication_channel" value="{html.escape(field_values['channel'])}" />
           <input type="hidden" name="external_communication_metadata" value="{html.escape(metadata_value)}" />
         </div>
       </fieldset>
@@ -1206,12 +1144,8 @@ def _render_last_decision_block(last_decision: HumanReviewDecision) -> str:
         rows.extend(
             [
                 (
-                    "Edited channel",
-                    last_decision.external_communication_edit.draft.channel,
-                ),
-                (
-                    "Edited recipient",
-                    last_decision.external_communication_edit.draft.recipient or "n/a",
+                    "Edited body",
+                    last_decision.external_communication_edit.draft.body or "n/a",
                 ),
             ]
         )
@@ -1544,8 +1478,8 @@ def _parse_external_communication_edit(
     return HumanReviewExternalEdit(
         draft=ExternalCommunicationDraft(
             channel=channel,
-            recipient=_optional_text(payload.get("external_communication_recipient")),
-            subject=_optional_text(payload.get("external_communication_subject")),
+            recipient=current_draft.recipient,
+            subject=current_draft.subject,
             body=body,
             metadata=metadata,
         ),

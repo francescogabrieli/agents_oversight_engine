@@ -682,6 +682,7 @@ def _update_external_communication_after_actor_result(
             state,
             phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
             summary="The external communication branch needs more evidence or a revised plan before drafting.",
+            review_ready=False,
         )
         return
 
@@ -690,6 +691,7 @@ def _update_external_communication_after_actor_result(
             state,
             phase=ExternalCommunicationPhase.BLOCKED,
             summary="The external communication branch is blocked pending operator resolution.",
+            review_ready=False,
         )
         return
 
@@ -700,14 +702,28 @@ def _update_external_communication_after_actor_result(
         return
 
     if actor_result.output_text and actor_result.output_text.strip():
-        _update_external_communication_draft(
+        review_ready = _external_communication_output_is_review_ready(
             state,
-            body=actor_result.output_text.strip(),
+            actor_result=actor_result,
+        )
+        _merge_external_communication_draft(
+            state,
+            output_text=actor_result.output_text.strip(),
+            review_ready=review_ready,
         )
         _set_external_communication_phase(
             state,
-            phase=ExternalCommunicationPhase.DRAFT_PROPOSAL,
-            summary="A local draft proposal exists and remains inside the runtime boundary.",
+            phase=(
+                ExternalCommunicationPhase.DRAFT_PROPOSAL
+                if review_ready
+                else ExternalCommunicationPhase.DRAFT_IN_PROGRESS
+            ),
+            summary=(
+                "A review-ready external draft proposal exists and remains inside the runtime boundary."
+                if review_ready
+                else "A partial external draft is being assembled inside the runtime boundary."
+            ),
+            review_ready=review_ready,
         )
 
 
@@ -717,33 +733,90 @@ def _set_external_communication_phase(
     *,
     phase: ExternalCommunicationPhase,
     summary: str,
+    review_ready: bool | None = None,
 ) -> None:
     if state.external_communication is None:
         return
     state.external_communication.phase = phase
+    if review_ready is not None:
+        state.external_communication.review_ready = review_ready
     state.external_communication.last_transition_summary = summary
 
 
-# Keep the current external communication draft structured as the actor progresses.
-def _update_external_communication_draft(
+# Decide whether the current actor output is ready for governed human review.
+def _external_communication_output_is_review_ready(
     state: TaskState,
     *,
-    body: str,
+    actor_result: ActorResult,
+) -> bool:
+    current_step = state.current_plan_step
+    validation = actor_result.step_validation
+    if current_step is None or validation is None:
+        return False
+
+    if actor_result.result_type not in {
+        ActorResultType.INTERMEDIATE_OUTPUT,
+        ActorResultType.FINAL_OUTPUT,
+    }:
+        return False
+
+    if not (
+        validation.next_action == StepValidationDecision.COMPLETE_STEP
+        and validation.objective_satisfied
+        and validation.evidence_sufficient
+    ):
+        return False
+
+    if state.current_plan_step_index == len(state.plan_steps) - 1:
+        return True
+
+    semantic_text = " ".join(
+        filter(
+            None,
+            [
+                current_step.objective,
+                current_step.expected_outcome,
+                current_step.rationale,
+            ],
+        )
+    ).lower()
+    readiness_markers = (
+        "final draft",
+        "finalized email draft",
+        "ready to send",
+        "suitable for immediate sending",
+        "complete email draft",
+        "full email draft",
+        "compose the email",
+    )
+    return any(marker in semantic_text for marker in readiness_markers)
+
+
+# Preserve external communication content as one markdown body owned by the actor.
+def _merge_external_communication_draft(
+    state: TaskState,
+    *,
+    output_text: str,
+    review_ready: bool,
 ) -> None:
     if state.external_communication is None:
         return
 
     current_draft = state.external_communication.draft
+    metadata = (
+        dict(current_draft.metadata)
+        if current_draft is not None
+        else {"source": "actor_output"}
+    )
+    metadata["content_format"] = "markdown"
+    metadata["review_ready"] = review_ready
+
     state.external_communication.draft = ExternalCommunicationDraft(
         channel=current_draft.channel if current_draft is not None else "external_communication",
         recipient=current_draft.recipient if current_draft is not None else None,
         subject=current_draft.subject if current_draft is not None else None,
-        body=body,
-        metadata=(
-            dict(current_draft.metadata)
-            if current_draft is not None
-            else {"source": "actor_output"}
-        ),
+        body=output_text,
+        metadata=metadata,
     )
 
 
@@ -828,6 +901,7 @@ def _apply_governance_decision(
             state,
             phase=ExternalCommunicationPhase.BLOCKED,
             summary="Governance denied the external communication branch.",
+            review_ready=False,
         )
         state.current_state = RuntimeState.ABORTED
         state.current_tool_request = None
@@ -843,6 +917,7 @@ def _apply_governance_decision(
             state,
             phase=ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED,
             summary="The draft proposal reached a typed human review gate before any external execution.",
+            review_ready=True,
         )
         state.human_review_resume_state = _infer_human_review_resume_state(
             state=state,
@@ -856,6 +931,7 @@ def _apply_governance_decision(
             state,
             phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
             summary="Governance redirected the external communication branch back to replanning.",
+            review_ready=False,
         )
         state.pending_human_review_request = None
         state.human_review_resume_state = None
@@ -868,6 +944,7 @@ def _apply_governance_decision(
             state,
             phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
             summary="Governance required more evidence before the external communication draft can progress.",
+            review_ready=False,
         )
         state.pending_human_review_request = None
         state.human_review_resume_state = None

@@ -78,6 +78,7 @@ clarification_requested if {
 external_communication_review_required if {
   input.task.domain_type == "external_communication"
   input.external_communication.phase == "draft_proposal"
+  input.external_communication.review_ready == true
   input.actor.has_output_text == true
   input.actor.result_type == "intermediate_output"
 }
@@ -85,6 +86,7 @@ external_communication_review_required if {
 external_communication_review_required if {
   input.task.domain_type == "external_communication"
   input.external_communication.phase == "draft_proposal"
+  input.external_communication.review_ready == true
   input.actor.has_output_text == true
   input.actor.result_type == "final_output"
 }

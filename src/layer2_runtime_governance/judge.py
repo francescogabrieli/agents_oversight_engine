@@ -468,10 +468,13 @@ def _resolve_judge_invocation_context(
         flags.append(f"behavioral_{behavioral_assessment.behavioral_recommended_directive.value}")
         target = "behavioral_escalation"
 
-    if task_state.external_communication is not None and task_state.external_communication.phase in {
-        ExternalCommunicationPhase.DRAFT_PROPOSAL,
-        ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED,
-    }:
+    if task_state.external_communication is not None and (
+        task_state.external_communication.phase == ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
+        or (
+            task_state.external_communication.phase == ExternalCommunicationPhase.DRAFT_PROPOSAL
+            and task_state.external_communication.review_ready
+        )
+    ):
         flags.append("external_draft_review")
         target = "external_draft"
 
