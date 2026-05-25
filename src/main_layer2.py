@@ -438,7 +438,7 @@ def _build_demo_intake_result(
 
     execution_policy = ExecutionPolicy(
         confidence_threshold=0.65,
-        budget=BudgetConfig(max_steps=5, max_tool_calls=10),
+        budget=BudgetConfig(max_steps=None, max_tool_calls=None),
     )
 
     return IntakeResult(

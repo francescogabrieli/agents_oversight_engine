@@ -23,7 +23,7 @@ from .models import (
 class PolicyProfile:
     name: str
     confidence_threshold: float
-    max_steps: int
+    max_steps: int | None = None
     max_tool_calls: int | None = None
     read_only_mode: bool = False
 

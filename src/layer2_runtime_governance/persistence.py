@@ -220,7 +220,7 @@ class RuntimeArtifactStore:
         return RuntimeArtifactPaths(
             thread_dir=thread_dir,
             runtime_summary_path=thread_dir / "runtime_summary.json",
-            full_trace_path=thread_dir / "trace.full.json",
+            full_trace_path=thread_dir / "full-trace-2.json",
             compact_trace_path=thread_dir / "trace.compact.json",
             dashboard_snapshot_path=thread_dir / "dashboard_snapshot.json",
             pending_human_review_path=thread_dir / "pending_human_review.json",

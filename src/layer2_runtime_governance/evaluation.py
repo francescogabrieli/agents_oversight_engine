@@ -516,7 +516,7 @@ class _NormalizedIntake:
     schema_version: str
     policy_profile_name: str
     confidence_threshold: float
-    max_steps: int
+    max_steps: int | None
     max_tool_calls: int | None
     read_only_mode: bool
 
@@ -636,7 +636,7 @@ def _normalize_intake(payload: dict[str, Any], *, source_path: Path) -> _Normali
         schema_version=_require_str(payload, "schema_version", source_path=source_path),
         policy_profile_name=_require_str(payload, "policy_profile_name", source_path=source_path),
         confidence_threshold=float(payload.get("confidence_threshold", 0.0)),
-        max_steps=int(payload.get("max_steps", 0)),
+        max_steps=_optional_int(payload.get("max_steps")),
         max_tool_calls=_optional_int(payload.get("max_tool_calls")),
         read_only_mode=bool(payload.get("read_only_mode", False)),
     )

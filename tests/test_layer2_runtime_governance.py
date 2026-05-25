@@ -110,7 +110,7 @@ from layer2_runtime_governance.governance import (
     OPAHttpPolicyEngineSettings,
     build_opa_input_document,
 )
-from layer2_runtime_governance.nodes import governance, observe_tool_result
+from layer2_runtime_governance.nodes import governance, observe_tool_result, planner
 from layer2_runtime_governance.tool_contract import ObservedEvidence
 import layer2_runtime_governance.openrouter_client as openrouter_client_module
 
@@ -1701,6 +1701,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
 
             paths = artifact_store.build_paths(trace["thread_id"])
             self.assertTrue(paths.full_trace_path.exists())
+            self.assertEqual(paths.full_trace_path.name, "full-trace-2.json")
             self.assertTrue(paths.compact_trace_path.exists())
             self.assertTrue(paths.dashboard_snapshot_path.exists())
             self.assertTrue(paths.runtime_summary_path.exists())
@@ -2793,35 +2794,25 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             with self.assertRaisesRegex(ActorExecutionError, "timed out"):
                 actor.act(actor_task=actor_task)
 
-    def test_planner_trims_semantic_plan_to_max_steps(self) -> None:
-        graph = _build_test_graph()
-        result = graph.invoke(
-            {"intake_result": _build_research_intake_result(max_steps=1, max_tool_calls=10)},
-            config={"configurable": {"thread_id": "layer2-max-steps-trimmed"}},
+    def test_planner_does_not_trim_when_step_budget_is_unbounded(self) -> None:
+        task_state = TaskState.from_intake(
+            _build_research_intake_result(max_steps=None, max_tool_calls=None)
         )
+        planned_state = planner(task_state, planner_service=StubPlanner())
 
-        task_state = result["task_state"]
-        self.assertEqual(task_state.current_state, RuntimeState.COMPLETED)
-        self.assertEqual(len(task_state.plan_steps), 1)
-        self.assertEqual(task_state.plan_steps[0].status, PlanStepStatus.COMPLETED)
-        self.assertEqual(len(task_state.executed_steps), 1)
-        self.assertEqual(
-            task_state.final_output_text,
-            "Collected grounded evidence from official sources.",
-        )
-        self.assertIn("trimmed to the configured max_steps budget", task_state.step_history[1].summary)
+        self.assertEqual(planned_state.current_state, RuntimeState.PLANNING)
+        self.assertEqual(len(planned_state.plan_steps), 2)
+        self.assertEqual(planned_state.plan_steps[0].status, PlanStepStatus.IN_PROGRESS)
+        self.assertNotIn("trimmed to the configured", task_state.step_history[0].summary)
 
     # Small source-plus-summary tasks should not become a three-step extraction pipeline.
     def test_planner_compacts_over_decomposed_small_source_summary_task(self) -> None:
-        graph = _build_test_graph(planner_service=OverDecomposedSourceSummaryPlanner())
-        result = graph.invoke(
-            {"intake_result": _build_research_intake_result(max_steps=5, max_tool_calls=10)},
-            config={"configurable": {"thread_id": "layer2-small-summary-plan-compacted"}},
+        task_state = TaskState.from_intake(
+            _build_research_intake_result(max_steps=None, max_tool_calls=None)
         )
-
-        task_state = result["task_state"]
+        task_state = planner(task_state, planner_service=OverDecomposedSourceSummaryPlanner())
         self.assertLessEqual(len(task_state.plan_steps), 2)
-        self.assertIn("normalized to the task scope", task_state.step_history[1].summary)
+        self.assertIn("normalized to the task scope", task_state.step_history[0].summary)
         self.assertIn("high-level evidence", task_state.plan_steps[0].objective)
         self.assertIn("precision level supported", task_state.plan_steps[1].objective)
 
@@ -2951,8 +2942,8 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
 
 def _build_research_intake_result(
     *,
-    max_steps: int = 5,
-    max_tool_calls: int | None = 10,
+    max_steps: int | None = None,
+    max_tool_calls: int | None = None,
     read_only_mode: bool = False,
 ) -> IntakeResult:
     return IntakeResult(
@@ -2995,7 +2986,7 @@ def _build_external_communication_intake_result() -> IntakeResult:
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.75,
-                budget=BudgetConfig(max_steps=4, max_tool_calls=4),
+                budget=BudgetConfig(max_steps=None, max_tool_calls=None),
                 read_only_mode=False,
             ),
         ),

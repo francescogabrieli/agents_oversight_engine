@@ -179,7 +179,7 @@ class Layer1IntakeTests(unittest.TestCase):
         config = {
             "default_policy": {
                 "confidence_threshold": 0.65,
-                "budget": {"max_steps": 5, "max_tool_calls": 10},
+                "budget": {"max_steps": None, "max_tool_calls": None},
                 "read_only_mode": False,
             },
             "named_profiles": {},
@@ -191,14 +191,14 @@ class Layer1IntakeTests(unittest.TestCase):
             "sensitivity_overrides": {
                 "high": {
                     "confidence_threshold": 0.8,
-                    "budget": {"max_steps": 4, "max_tool_calls": 6},
+                    "budget": {"max_steps": None, "max_tool_calls": None},
                 }
             },
             "domain_sensitivity_overrides": {
                 "external_communication": {
                     "high": {
                         "confidence_threshold": 0.9,
-                        "budget": {"max_steps": 2, "max_tool_calls": 3},
+                        "budget": {"max_steps": None, "max_tool_calls": None},
                     }
                 }
             },
@@ -220,8 +220,8 @@ class Layer1IntakeTests(unittest.TestCase):
 
         self.assertEqual(profile.name, "default")
         self.assertEqual(profile.confidence_threshold, 0.9)
-        self.assertEqual(profile.max_steps, 2)
-        self.assertEqual(profile.max_tool_calls, 3)
+        self.assertIsNone(profile.max_steps)
+        self.assertIsNone(profile.max_tool_calls)
         self.assertTrue(profile.read_only_mode)
 
 
@@ -238,8 +238,8 @@ class _StubPolicyRepository:
         return PolicyProfile(
             name=profile_name or "default",
             confidence_threshold=0.65,
-            max_steps=5,
-            max_tool_calls=10,
+            max_steps=None,
+            max_tool_calls=None,
             read_only_mode=False,
         )
 

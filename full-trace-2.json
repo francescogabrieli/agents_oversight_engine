@@ -1,0 +1,415 @@
+{
+  "runtime": {
+    "thread_id": "layer2-793ec043-055b-41f7-ba58-7660e8b134e0",
+    "current_state": "waiting_human_review",
+    "bootstrap_completed": false,
+    "runtime_flags": [
+      "high_sensitivity"
+    ],
+    "step_history": [
+      {
+        "step_index": 0,
+        "runtime_state": "planning",
+        "node_name": "bootstrap_from_intake",
+        "summary": "Runtime state initialized from layer 1 intake payload."
+      },
+      {
+        "step_index": 1,
+        "runtime_state": "planning",
+        "node_name": "planner",
+        "summary": "Initial semantic full plan created from the current task state."
+      },
+      {
+        "step_index": 2,
+        "runtime_state": "acting",
+        "node_name": "actor",
+        "summary": "Actor executed the current semantic step and returned one typed execution outcome."
+      },
+      {
+        "step_index": 3,
+        "runtime_state": "waiting_human_review",
+        "node_name": "governance",
+        "summary": "Governance evaluated the actor outcome and produced directive 'wait_human_review'."
+      }
+    ],
+    "actor_turn_count": 1,
+    "tool_call_count": 0
+  },
+  "intake": {
+    "goal": "Draft an external email to Acme Cloud operations team requesting manual verification and status update for a sensitive EU customer notification pipeline runtime incident.",
+    "context": "Sensitive runtime incident detected 09:12 CET on May 25, 2026; intermittent delivery failures for transactional notifications; investigation ongoing; no confirmed data loss; some EU tenants experienced delayed processing.",
+    "domain_type": "external_communication",
+    "domain_label": "Email drafting for incident coordination (EU customer notification pipeline)",
+    "sensitivity": "critical",
+    "success_criteria": [
+      "Email is addressed to the operations team and clearly references the incident",
+      "Includes all provided incident facts without adding unconfirmed claims",
+      "Contains explicit verification requests (delivery queues, retry backlog, scope beyond notification pipeline)",
+      "Requests status update to the incident lead within 60 minutes",
+      "Tone is appropriate for a sensitive incident and is ready to send"
+    ],
+    "constraints": [
+      "Target recipient: operations team at Acme Cloud",
+      "Include incident details: detection time/date, intermittent delivery failures, ongoing investigation, no confirmed data loss, delayed processing for some EU tenants",
+      "Request operations to: manually verify delivery queues, check retry backlog, confirm whether customer-facing impact extended beyond the notification pipeline",
+      "Ask for a status report back to the incident lead within 60 minutes",
+      "Prefer official EU sources"
+    ],
+    "parse_status": "complete",
+    "parser_name": "openai_task_spec_parser",
+    "prompt_version": "task_spec_v1",
+    "schema_version": "1.0.0",
+    "policy_profile_name": "default",
+    "confidence_threshold": 0.9,
+    "max_steps": null,
+    "max_tool_calls": null,
+    "read_only_mode": false
+  },
+  "planner_name": "openai_layer2_planner",
+  "planner_prompt_version": "planner_v2",
+  "planner_rationale": "Draft a sensitive, incident-coordination email to Acme Cloud’s operations team that accurately states the known facts about an EU customer notification pipeline runtime incident, requests specific manual checks (delivery queues and retry backlog), clarifies questions about potential scope beyond the pipeline, and sets a clear expectation for a status update to the incident lead within 60 minutes.",
+  "planning_source": "planner",
+  "plan_steps": [
+    {
+      "step_id": "step_1",
+      "objective": "Identify the email’s audience, subject line, and intent for operational action on a sensitive EU incident.",
+      "rationale": "A clear audience and subject ensures the operations team immediately recognizes the message as an urgent verification request tied to customer-impact risk.",
+      "expected_outcome": "A draft header plan containing the correct recipient role (Acme Cloud operations team), an incident-appropriate subject, and a concise purpose statement for manual verification and a rapid status return.",
+      "status": "in_progress"
+    },
+    {
+      "step_id": "step_2",
+      "objective": "Embed all confirmed incident details provided in the context in a careful, non-speculative way.",
+      "rationale": "The email must include the detection timestamp (09:12 CET on May 25, 2026), intermittent delivery failures for transactional notifications, ongoing investigation status, no confirmed data loss, and delayed processing for some EU tenants—without adding unconfirmed claims.",
+      "expected_outcome": "A dedicated incident-details section in the email that mirrors the supplied facts and uses language that distinguishes confirmed observations from ongoing investigation.",
+      "status": "pending"
+    },
+    {
+      "step_id": "step_3",
+      "objective": "Formulate explicit manual verification requests for the operations team focused on the notification pipeline symptoms.",
+      "rationale": "Operational action requires concrete checks; the constraints call for delivery queue verification and retry backlog assessment.",
+      "expected_outcome": "A checklist-style request section asking operations to manually verify delivery queues and check the retry backlog, phrased to avoid implying outcomes not yet known.",
+      "status": "pending"
+    },
+    {
+      "step_id": "step_4",
+      "objective": "Request scope confirmation about whether customer-facing impact extended beyond the notification pipeline.",
+      "rationale": "The investigation needs operational confirmation on whether the incident affected other customer-facing components beyond the EU notification pipeline, as specified by the constraints.",
+      "expected_outcome": "A clear, separate question section requesting confirmation of whether impact extended beyond the notification pipeline (and, if yes, what components/flows were affected), while keeping answers constrained to what operations can verify.",
+      "status": "pending"
+    },
+    {
+      "step_id": "step_5",
+      "objective": "Set an explicit response deadline and define the expected form of the status update back to the incident lead within 60 minutes.",
+      "rationale": "Timeboxed coordination is critical for a sensitive incident; success criteria require a status update back to the incident lead within 60 minutes.",
+      "expected_outcome": "A closing directive specifying a 60-minute status update expectation and indicating that the response should include results of queue verification, retry backlog findings, and scope confirmation.",
+      "status": "pending"
+    },
+    {
+      "step_id": "step_6",
+      "objective": "Ensure the overall tone and content meet critical sensitivity expectations and are ready to send externally.",
+      "rationale": "For external incident coordination, the message must remain professional, urgent, and careful with customer impact language; it should be complete and self-contained for immediate operational use.",
+      "expected_outcome": "A finalized email draft with appropriate urgency, careful wording (no unconfirmed claims), and a coherent flow from incident facts to verification requests to deadline, suitable for immediate sending.",
+      "status": "pending"
+    }
+  ],
+  "current_plan_step_index": 0,
+  "current_plan_step_id": "step_1",
+  "actor": {
+    "actor_name": "openrouter_gpt_oss_120b_free_actor",
+    "actor_prompt_version": "actor_v5_openrouter_standard_tool_calling",
+    "result_type": "intermediate_output",
+    "plan_step_id": "step_1",
+    "summary": "The current draft is more specific than the observed evidence currently supports.",
+    "capability_mode": "none",
+    "external_impact": false,
+    "output_text": "Recipient: Acme Cloud Operations Team Subject: Urgent: Manual Verification Required for EU Notification Pipeline Incident (Detected 09:12 CET, 25 May 2026) Purpose/Intent: Request immediate manual verification of delivery queues and retry backlog, and confirmation of any broader customer‑facing impact, with a status update to the incident lead within 60 minutes.",
+    "blocking_reason": null,
+    "proposed_tool_name": null
+  },
+  "execution": {
+    "final_output_text": null,
+    "executed_steps": [],
+    "scratchpad": [
+      {
+        "turn_index": 1,
+        "plan_step_id": "step_1",
+        "entry_type": "completion_rationale",
+        "summary": "The runtime kept the current step open because the draft claims are more specific than the observed evidence can support; available evidence level 'local_only' is below required level 'high_level_summary'.",
+        "evidence_refs": []
+      }
+    ],
+    "step_validations": [
+      {
+        "plan_step_id": "step_1",
+        "objective_satisfied": false,
+        "evidence_sufficient": false,
+        "confidence": 0.35,
+        "next_action": "request_more_evidence",
+        "rationale_summary": "The runtime kept the current step open because the draft claims are more specific than the observed evidence can support; available evidence level 'local_only' is below required level 'high_level_summary'.",
+        "residual_uncertainty": "Revise the draft to match the current evidence ceiling or fetch stronger excerpts before finalizing more specific legal or factual claims."
+      }
+    ]
+  },
+  "tool_calls": [],
+  "observed_evidence": [],
+  "static_policy_assessments": [
+    {
+      "policy_decision": "require_human_review",
+      "reason_codes": [
+        "external_communication_review_required"
+      ],
+      "summary": "External communication drafts must reach typed human review before any outward-facing progression.",
+      "policy_engine_name": "opa_http_policy_engine",
+      "policy_bundle_version": "layer2_governance_v1",
+      "policy_directive": "wait_human_review"
+    }
+  ],
+  "dynamic_policy_assessments": [
+    {
+      "evidence_quality": {
+        "score": 0.06999999999999999,
+        "level": "weak",
+        "reason_codes": [
+          "actor_confidence_contributed",
+          "actor_confidence_below_threshold",
+          "observed_evidence_missing",
+          "source_locator_missing",
+          "evidence_support_below_step_need"
+        ]
+      },
+      "operational_risk": {
+        "score": 0.7200000000000001,
+        "level": "high",
+        "reason_codes": [
+          "tool_risk_medium",
+          "task_sensitivity_critical",
+          "read_only_capability"
+        ]
+      },
+      "trajectory_health": {
+        "score": 0.8,
+        "level": "healthy",
+        "reason_codes": [
+          "actor_turns_within_limit",
+          "no_failed_tool_results",
+          "no_replan_needed",
+          "low_confidence_uncertainty"
+        ]
+      },
+      "recommended_directive": "wait_human_review",
+      "summary": "Evidence quality is weak (0.07), operational risk is high (0.72), and trajectory health is healthy (0.80).",
+      "reason_codes": [
+        "actor_confidence_contributed",
+        "actor_confidence_below_threshold",
+        "observed_evidence_missing",
+        "source_locator_missing",
+        "evidence_support_below_step_need",
+        "tool_risk_medium",
+        "task_sensitivity_critical",
+        "read_only_capability",
+        "actor_turns_within_limit",
+        "no_failed_tool_results",
+        "no_replan_needed",
+        "low_confidence_uncertainty",
+        "recommend_human_review"
+      ]
+    }
+  ],
+  "behavioral_assessments": [
+    {
+      "history_available": true,
+      "historical_run_count": 35,
+      "feature_snapshot_version": "behavioral_features_v2",
+      "summary": "Behavioral analysis matched 5 comparable runs, best similarity=0.86, deviation=0.36, novelty=0.20, recommendation='wait_human_review'.",
+      "notes": [
+        "matched_run_count=5",
+        "review_rate=1.00",
+        "deviation_driver=step_count",
+        "historical_review_rate_high",
+        "dynamic_signals_not_healthy"
+      ],
+      "matched_run_count": 5,
+      "historical_similarity_score": 0.8600000000000001,
+      "behavior_deviation_score": 0.35714285714285715,
+      "novelty_score": 0.19666666666666666,
+      "behavioral_recommended_directive": "wait_human_review",
+      "behavioral_flags": [
+        "historical_review_rate_high",
+        "dynamic_signals_not_healthy"
+      ],
+      "matched_run_ids": [
+        "layer2-a98c6452-8f57-4d7f-9540-62bf38e2f9db",
+        "layer2-f854c9d1-abf1-42ce-baaa-ae640a8f17c3",
+        "layer2-dashboard-prepare-an-external-emai",
+        "layer2-external-governed-execution",
+        "debug-external"
+      ]
+    }
+  ],
+  "judge_assessments": [
+    {
+      "invoked": false,
+      "recommendation": "continue",
+      "confidence": 0.0,
+      "summary": "Judge not invoked for this governance pass.",
+      "rationale": "Static, dynamic, and behavioural signals did not require semantic review.",
+      "flags": [
+        "static_policy_terminal"
+      ],
+      "evaluated_target": "static_policy_terminal"
+    }
+  ],
+  "governance_decisions": [
+    {
+      "directive": "wait_human_review",
+      "policy_decision": "require_human_review",
+      "reason_codes": [
+        "external_communication_review_required"
+      ],
+      "summary": "External communication drafts must reach typed human review before any outward-facing progression. Dynamic policy preserved the static directive 'wait_human_review'. Evidence quality is weak (0.07), operational risk is high (0.72), and trajectory health is healthy (0.80). Behavioral analysis matched 5 comparable runs, best similarity=0.86, deviation=0.36, novelty=0.20, recommendation='wait_human_review'. Judge not invoked for this governance pass.",
+      "constrains_capability_use": true,
+      "evaluated_actor_result_type": "intermediate_output",
+      "evaluated_tool_name": null,
+      "policy_engine_name": "opa_http_policy_engine",
+      "policy_bundle_version": "layer2_governance_v1",
+      "policy_directive": "wait_human_review",
+      "oversight_recommended_directive": "wait_human_review",
+      "behavioral_recommended_directive": "wait_human_review",
+      "judge_recommended_directive": "continue",
+      "judge_invoked": false,
+      "static_policy_summary": "External communication drafts must reach typed human review before any outward-facing progression.",
+      "dynamic_policy_summary": "Evidence quality is weak (0.07), operational risk is high (0.72), and trajectory health is healthy (0.80).",
+      "behavioral_summary": "Behavioral analysis matched 5 comparable runs, best similarity=0.86, deviation=0.36, novelty=0.20, recommendation='wait_human_review'.",
+      "judge_summary": "Judge not invoked for this governance pass.",
+      "behavioral_similarity_score": 0.8600000000000001,
+      "behavioral_deviation_score": 0.35714285714285715,
+      "behavioral_novelty_score": 0.19666666666666666,
+      "oversight_summary": "Evidence quality is weak (0.07), operational risk is high (0.72), and trajectory health is healthy (0.80)."
+    }
+  ],
+  "oversight_assessments": [
+    {
+      "evidence_quality": {
+        "score": 0.06999999999999999,
+        "level": "weak",
+        "reason_codes": [
+          "actor_confidence_contributed",
+          "actor_confidence_below_threshold",
+          "observed_evidence_missing",
+          "source_locator_missing",
+          "evidence_support_below_step_need"
+        ]
+      },
+      "operational_risk": {
+        "score": 0.7200000000000001,
+        "level": "high",
+        "reason_codes": [
+          "tool_risk_medium",
+          "task_sensitivity_critical",
+          "read_only_capability"
+        ]
+      },
+      "trajectory_health": {
+        "score": 0.8,
+        "level": "healthy",
+        "reason_codes": [
+          "actor_turns_within_limit",
+          "no_failed_tool_results",
+          "no_replan_needed",
+          "low_confidence_uncertainty"
+        ]
+      },
+      "recommended_directive": "wait_human_review",
+      "summary": "Evidence quality is weak (0.07), operational risk is high (0.72), and trajectory health is healthy (0.80).",
+      "reason_codes": [
+        "actor_confidence_contributed",
+        "actor_confidence_below_threshold",
+        "observed_evidence_missing",
+        "source_locator_missing",
+        "evidence_support_below_step_need",
+        "tool_risk_medium",
+        "task_sensitivity_critical",
+        "read_only_capability",
+        "actor_turns_within_limit",
+        "no_failed_tool_results",
+        "no_replan_needed",
+        "low_confidence_uncertainty",
+        "recommend_human_review"
+      ]
+    }
+  ],
+  "human_review": {
+    "pending_request": {
+      "request_id": "layer2-793ec043-055b-41f7-ba58-7660e8b134e0:human_review:2:step_1",
+      "thread_id": "layer2-793ec043-055b-41f7-ba58-7660e8b134e0",
+      "current_state": "waiting_human_review",
+      "resume_state": "acting",
+      "current_plan_step_id": "step_1",
+      "current_plan_step_objective": "Identify the email’s audience, subject line, and intent for operational action on a sensitive EU incident.",
+      "actor_result_type": "intermediate_output",
+      "current_tool_request": null,
+      "governance_directive": "wait_human_review",
+      "governance_summary": "External communication drafts must reach typed human review before any outward-facing progression. Dynamic policy preserved the static directive 'wait_human_review'. Evidence quality is weak (0.07), operational risk is high (0.72), and trajectory health is healthy (0.80). Behavioral analysis matched 5 comparable runs, best similarity=0.86, deviation=0.36, novelty=0.20, recommendation='wait_human_review'. Judge not invoked for this governance pass.",
+      "static_policy_summary": "External communication drafts must reach typed human review before any outward-facing progression.",
+      "dynamic_policy_summary": "Evidence quality is weak (0.07), operational risk is high (0.72), and trajectory health is healthy (0.80).",
+      "behavioral_summary": "Behavioral analysis matched 5 comparable runs, best similarity=0.86, deviation=0.36, novelty=0.20, recommendation='wait_human_review'.",
+      "judge_summary": "Judge not invoked for this governance pass.",
+      "oversight_summary": "Evidence quality is weak (0.07), operational risk is high (0.72), and trajectory health is healthy (0.80).",
+      "external_communication_target_type": "external_communication",
+      "external_communication_draft": {
+        "channel": "external_communication",
+        "recipient": null,
+        "subject": null,
+        "body": "Recipient: Acme Cloud Operations Team Subject: Urgent: Manual Verification Required for EU Notification Pipeline Incident (Detected 09:12 CET, 25 May 2026) Purpose/Intent: Request immediate manual verification of delivery queues and retry backlog, and confirmation of any broader customer‑facing impact, with a status update to the incident lead within 60 minutes.",
+        "metadata": {
+          "source": "actor_output"
+        }
+      },
+      "reason_codes": [
+        "external_communication_review_required",
+        "actor_confidence_contributed",
+        "actor_confidence_below_threshold",
+        "observed_evidence_missing",
+        "source_locator_missing",
+        "evidence_support_below_step_need",
+        "tool_risk_medium",
+        "task_sensitivity_critical",
+        "read_only_capability",
+        "actor_turns_within_limit",
+        "no_failed_tool_results",
+        "no_replan_needed",
+        "low_confidence_uncertainty",
+        "recommend_human_review"
+      ],
+      "allowed_decisions": [
+        "approve_continue",
+        "approve_continue_read_only",
+        "modify_and_continue",
+        "request_more_evidence",
+        "replan",
+        "ask_clarification",
+        "abort"
+      ],
+      "review_summary": "External communication drafts must reach typed human review before any outward-facing progression. Dynamic policy preserved the static directive 'wait_human_review'. Evidence quality is weak (0.07), operational risk is high (0.72), and trajectory health is healthy (0.80). Behavioral analysis matched 5 comparable runs, best similarity=0.86, deviation=0.36, novelty=0.20, recommendation='wait_human_review'. Judge not invoked for this governance pass. The external communication draft can be modified and submitted in this review step. Approval would resume to 'acting'."
+    },
+    "last_request": null,
+    "last_decision": null,
+    "decision_history": []
+  },
+  "external_communication": {
+    "phase": "human_review_required",
+    "draft": {
+      "channel": "external_communication",
+      "recipient": null,
+      "subject": null,
+      "body": "Recipient: Acme Cloud Operations Team Subject: Urgent: Manual Verification Required for EU Notification Pipeline Incident (Detected 09:12 CET, 25 May 2026) Purpose/Intent: Request immediate manual verification of delivery queues and retry backlog, and confirmation of any broader customer‑facing impact, with a status update to the incident lead within 60 minutes.",
+      "metadata": {
+        "source": "actor_output"
+      }
+    },
+    "last_applied_edit": null,
+    "edit_history": [],
+    "last_transition_summary": "The draft proposal reached a typed human review gate before any external execution."
+  }
+}

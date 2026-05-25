@@ -265,7 +265,7 @@ class SQLiteBehavioralStore(BehavioralStorePort):
                 domain_type TEXT NOT NULL,
                 sensitivity TEXT NOT NULL,
                 policy_profile_name TEXT NOT NULL,
-                budget_max_steps INTEGER NOT NULL,
+                budget_max_steps INTEGER,
                 budget_max_tool_calls INTEGER,
                 actor_turn_count INTEGER NOT NULL,
                 tool_call_count INTEGER NOT NULL,
@@ -330,6 +330,51 @@ class SQLiteBehavioralStore(BehavioralStorePort):
                 flags_json TEXT NOT NULL,
                 PRIMARY KEY (thread_id, assessment_index)
             );
+            """
+        )
+        self._migrate_runs_budget_columns_to_nullable(connection)
+
+    # Rebuild the runs table when older local schemas still require a non-null max_steps budget.
+    def _migrate_runs_budget_columns_to_nullable(self, connection: sqlite3.Connection) -> None:
+        columns = connection.execute("PRAGMA table_info(runs)").fetchall()
+        if not columns:
+            return
+        budget_column = next((column for column in columns if column[1] == "budget_max_steps"), None)
+        if budget_column is None or int(budget_column[3]) == 0:
+            return
+
+        connection.executescript(
+            """
+            ALTER TABLE runs RENAME TO runs_legacy_budget_migration;
+            CREATE TABLE runs (
+                thread_id TEXT PRIMARY KEY,
+                final_state TEXT NOT NULL,
+                domain_type TEXT NOT NULL,
+                sensitivity TEXT NOT NULL,
+                policy_profile_name TEXT NOT NULL,
+                budget_max_steps INTEGER,
+                budget_max_tool_calls INTEGER,
+                actor_turn_count INTEGER NOT NULL,
+                tool_call_count INTEGER NOT NULL,
+                replan_count INTEGER NOT NULL,
+                review_count INTEGER NOT NULL,
+                abort_count INTEGER NOT NULL,
+                has_external_communication INTEGER NOT NULL,
+                max_evidence_support_level TEXT NOT NULL
+            );
+            INSERT INTO runs (
+                thread_id, final_state, domain_type, sensitivity, policy_profile_name,
+                budget_max_steps, budget_max_tool_calls, actor_turn_count, tool_call_count,
+                replan_count, review_count, abort_count, has_external_communication,
+                max_evidence_support_level
+            )
+            SELECT
+                thread_id, final_state, domain_type, sensitivity, policy_profile_name,
+                budget_max_steps, budget_max_tool_calls, actor_turn_count, tool_call_count,
+                replan_count, review_count, abort_count, has_external_communication,
+                max_evidence_support_level
+            FROM runs_legacy_budget_migration;
+            DROP TABLE runs_legacy_budget_migration;
             """
         )
 

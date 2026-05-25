@@ -66,7 +66,7 @@ class _PolicyBudgetPayload(BaseModel):
     # Validate the budget section of the JSON policy configuration.
     model_config = ConfigDict(extra="forbid")
 
-    max_steps: int = Field(..., ge=1)
+    max_steps: int | None = Field(default=None, ge=1)
     max_tool_calls: int | None = Field(default=None, ge=1)
 
 

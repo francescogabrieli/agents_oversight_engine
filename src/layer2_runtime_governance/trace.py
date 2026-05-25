@@ -65,7 +65,7 @@ class TraceIntakeSummary:
     schema_version: str
     policy_profile_name: str
     confidence_threshold: float
-    max_steps: int
+    max_steps: int | None
     max_tool_calls: int | None
     read_only_mode: bool
 

@@ -335,7 +335,7 @@ Current relevant files:
 - MCP tool calls must be server-configured, tool-allowlisted, read-only, and normalized back into `ToolExecutionResult`
 - MCP authentication and per-principal authorization are not implemented yet; credentials and runtime identity must be added above the backend adapter later, not inside actor prompts or `ToolRequest`
 - `replanner` may replace only the current and pending semantic trajectory; completed steps remain immutable history
-- `max_steps` is enforced as a semantic plan-step ceiling in the current runtime
+- `max_steps = null` means the current runtime does not impose a hard semantic step ceiling
 - `max_tool_calls = null` means the current runtime does not impose a hard tool-call ceiling
 - `WAITING_HUMAN_REVIEW` is now the typed pause state that feeds the LangGraph `interrupt / resume` HITL path
 - governance is active as an explicit runtime node and uses OPA over HTTP as the deterministic static policy engine target

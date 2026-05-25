@@ -55,7 +55,11 @@ class IntakeValidationError(IntakeDomainError):
 class BudgetConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    max_steps: int = Field(..., ge=1, description="Maximum number of steps allowed.")
+    max_steps: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Optional upper bound for semantic steps.",
+    )
     max_tool_calls: Optional[int] = Field(
         default=None,
         ge=1,

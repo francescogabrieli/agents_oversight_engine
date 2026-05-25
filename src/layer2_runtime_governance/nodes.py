@@ -97,15 +97,9 @@ def planner(state: TaskState, *, planner_service: PlannerPort) -> TaskState:
 
     planner_summary = "Initial semantic full plan created from the current task state."
     if len(planned_steps) != len(decision.plan_steps):
-        planner_summary = (
-            "Initial semantic full plan created from the current task state and "
-            "normalized to the task scope and configured max_steps budget."
-        )
+        planner_summary = "Initial semantic full plan created from the current task state and normalized to the task scope."
     elif len(state.plan_steps) != len(planned_steps):
-        planner_summary = (
-            "Initial semantic full plan created from the current task state and "
-            "trimmed to the configured max_steps budget."
-        )
+        planner_summary = "Initial semantic full plan created from the current task state and trimmed to the configured semantic step budget."
 
     _append_step_record(
         state,
@@ -422,8 +416,14 @@ def replanner(state: TaskState, *, replanner_service: ReplannerPort) -> TaskStat
 
 
 
-# Keep the planner output within the configured semantic step budget.
-def _enforce_plan_step_budget(*, plan_steps: list[PlanStep], max_steps: int) -> list[PlanStep]:
+# Keep the planner output within the configured semantic step budget when one exists.
+def _enforce_plan_step_budget(
+    *,
+    plan_steps: list[PlanStep],
+    max_steps: int | None,
+) -> list[PlanStep]:
+    if max_steps is None:
+        return list(plan_steps)
     return list(plan_steps[:max_steps])
 
 
