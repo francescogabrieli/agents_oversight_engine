@@ -3,6 +3,55 @@
   const snapshotNode = document.getElementById("dashboard-snapshot-data");
   const lastCheckedNode = document.getElementById("dashboard-last-checked");
 
+  const setupClarificationControls = () => {
+    const forms = document.querySelectorAll(".resume-form");
+    forms.forEach((form) => {
+      const clarificationField = form.querySelector("[data-clarification-field]");
+      const clarificationInput = form.querySelector('textarea[name="clarification_text"]');
+      if (!clarificationField || !clarificationInput) {
+        return;
+      }
+
+      const setClarificationActive = (active) => {
+        form.dataset.clarificationActive = active ? "true" : "false";
+        if (active) {
+          clarificationInput.removeAttribute("disabled");
+          return;
+        }
+        clarificationInput.setAttribute("disabled", "disabled");
+      };
+
+      setClarificationActive(form.dataset.clarificationActive === "true");
+
+      form.addEventListener("click", (event) => {
+        const button = event.target.closest('button[name="decision_type"]');
+        if (!button) {
+          return;
+        }
+
+        const isClarification = button.value === "ask_clarification";
+        if (!isClarification) {
+          setClarificationActive(false);
+          return;
+        }
+
+        if (form.dataset.clarificationActive !== "true") {
+          event.preventDefault();
+          setClarificationActive(true);
+          clarificationInput.focus();
+          return;
+        }
+
+        if (!clarificationInput.value.trim()) {
+          event.preventDefault();
+          clarificationInput.focus();
+        }
+      });
+    });
+  };
+
+  setupClarificationControls();
+
   if (!root || !snapshotNode) {
     return;
   }

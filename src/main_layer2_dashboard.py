@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import re
 import threading
 import webbrowser
 from dataclasses import dataclass, field
@@ -1034,6 +1035,10 @@ def _render_resume_form(
         )
     operator_fields = f"""
       <div class="operator-sidebar">
+        <div class="operator-sidebar-header">
+          <h3>Review decision</h3>
+          <p class="note">Choose one allowed action. The optional note is stored for audit; clarification text is used only with <strong>Ask clarification</strong>.</p>
+        </div>
         <div class="resume-fields compact-fields">
           <input type="hidden" name="request_id" value="{html.escape(pending_request.request_id)}" />
           <input type="hidden" name="thread_id" value="{html.escape(pending_request.thread_id)}" />
@@ -1042,12 +1047,13 @@ def _render_resume_form(
             <input type="text" name="reviewer_id" placeholder="operator-1" value="{html.escape(_resolve_form_value(form_state, 'reviewer_id', ''))}" />
           </label>
           <label>
-            Note
-            <textarea name="note" rows="3" placeholder="Optional operator note">{html.escape(_resolve_form_value(form_state, 'note', ''))}</textarea>
+            Audit note
+            <textarea name="note" rows="3" placeholder="Why you chose this action, for the trace">{html.escape(_resolve_form_value(form_state, 'note', ''))}</textarea>
           </label>
-          <label>
+          <label class="clarification-field" data-clarification-field>
             Clarification text
-            <textarea name="clarification_text" rows="3" placeholder="Only for ask clarification">{html.escape(_resolve_form_value(form_state, 'clarification_text', ''))}</textarea>
+            <textarea name="clarification_text" rows="3" placeholder="Question or missing information to resolve before continuing">{html.escape(_resolve_form_value(form_state, 'clarification_text', ''))}</textarea>
+            <span class="field-help">Submitted only when the selected action is Ask clarification.</span>
           </label>
         </div>
         {_render_decision_buttons(allowed_decisions)}
@@ -1062,11 +1068,74 @@ def _render_resume_form(
         """
     else:
         form_body = operator_fields
+    clarification_active = (
+        "true"
+        if _resolve_form_value(form_state, "decision_type", "")
+        == HumanReviewDecisionType.ASK_CLARIFICATION.value
+        else "false"
+    )
     return f"""
-      <form class="resume-form" method="post" action="/resume">
+      <form class="resume-form" method="post" action="/resume" data-clarification-active="{clarification_active}">
         {form_body}
       </form>
     """
+
+
+# Build operator-facing draft field values without mutating the canonical draft.
+def _build_external_draft_form_values(
+    draft: ExternalCommunicationDraft,
+    *,
+    form_state: dict[str, str] | None,
+) -> dict[str, str]:
+    derived_subject, derived_recipient, derived_body = _derive_external_draft_header_fields(draft)
+    return {
+        "channel": _resolve_form_value(
+            form_state,
+            "external_communication_channel",
+            draft.channel,
+        ),
+        "recipient": _resolve_form_value(
+            form_state,
+            "external_communication_recipient",
+            draft.recipient or derived_recipient,
+        ),
+        "subject": _resolve_form_value(
+            form_state,
+            "external_communication_subject",
+            draft.subject or derived_subject,
+        ),
+        "body": _resolve_form_value(
+            form_state,
+            "external_communication_body",
+            derived_body,
+        ),
+    }
+
+
+# Derive visible email-like fields when the LLM placed headers inside the body.
+def _derive_external_draft_header_fields(draft: ExternalCommunicationDraft) -> tuple[str, str, str]:
+    body = draft.body or ""
+    subject = ""
+    body_without_subject = body
+    subject_match = re.match(
+        r"^\s*Subject:\s*(?P<subject>.+?)(?=(?:\r?\n|Dear\s+[A-Z]|$))",
+        body,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if subject_match is not None:
+        subject = " ".join(subject_match.group("subject").split())
+        body_without_subject = body[subject_match.end() :].lstrip(" \r\n")
+
+    recipient = ""
+    recipient_match = re.search(
+        r"\bDear\s+(?P<recipient>[^,\n\r]+)",
+        body_without_subject,
+        flags=re.IGNORECASE,
+    )
+    if recipient_match is not None:
+        recipient = " ".join(recipient_match.group("recipient").split())
+
+    return subject, recipient, body_without_subject
 
 
 # Render the editable external communication fields for modify-and-continue.
@@ -1075,6 +1144,7 @@ def _render_external_communication_edit_fields(
     *,
     form_state: dict[str, str] | None,
 ) -> str:
+    field_values = _build_external_draft_form_values(draft, form_state=form_state)
     metadata_value = _resolve_form_value(
         form_state,
         "external_communication_metadata",
@@ -1089,24 +1159,21 @@ def _render_external_communication_edit_fields(
         <div class="resume-fields">
           <label>
             Channel
-            <input type="text" name="external_communication_channel" value="{html.escape(_resolve_form_value(form_state, 'external_communication_channel', draft.channel))}" />
+            <input type="text" name="external_communication_channel" value="{html.escape(field_values['channel'])}" />
           </label>
           <label>
             Recipient
-            <input type="text" name="external_communication_recipient" value="{html.escape(_resolve_form_value(form_state, 'external_communication_recipient', draft.recipient or ''))}" />
+            <input type="text" name="external_communication_recipient" value="{html.escape(field_values['recipient'])}" />
           </label>
           <label>
             Subject
-            <input type="text" name="external_communication_subject" value="{html.escape(_resolve_form_value(form_state, 'external_communication_subject', draft.subject or ''))}" />
+            <input type="text" name="external_communication_subject" value="{html.escape(field_values['subject'])}" />
           </label>
           <label>
             Body
-            <textarea name="external_communication_body" rows="12">{html.escape(_resolve_form_value(form_state, 'external_communication_body', draft.body or ''))}</textarea>
+            <textarea name="external_communication_body" rows="12">{html.escape(field_values['body'])}</textarea>
           </label>
-          <label>
-            Metadata JSON
-            <textarea name="external_communication_metadata" rows="4">{html.escape(metadata_value)}</textarea>
-          </label>
+          <input type="hidden" name="external_communication_metadata" value="{html.escape(metadata_value)}" />
         </div>
       </fieldset>
     """
@@ -1422,6 +1489,12 @@ def _parse_human_review_decision(
     if decision_type not in pending_request.allowed_decisions:
         raise ValueError(f"Decision '{decision_type.value}' is not allowed for this review request.")
 
+    clarification_text = None
+    if decision_type == HumanReviewDecisionType.ASK_CLARIFICATION:
+        clarification_text = _optional_text(payload.get("clarification_text"))
+        if clarification_text is None:
+            raise ValueError("Clarification text is required when asking for clarification.")
+
     external_edit = None
     if decision_type == HumanReviewDecisionType.MODIFY_AND_CONTINUE:
         external_edit = _parse_external_communication_edit(
@@ -1433,7 +1506,7 @@ def _parse_human_review_decision(
         request_id=request_id,
         decision_type=decision_type,
         note=_optional_text(payload.get("note")),
-        clarification_text=_optional_text(payload.get("clarification_text")),
+        clarification_text=clarification_text,
         external_communication_edit=external_edit,
         reviewer_id=_optional_text(payload.get("reviewer_id")),
     )

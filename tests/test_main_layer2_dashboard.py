@@ -53,6 +53,7 @@ from layer2_runtime_governance import (
 from main_layer2_dashboard import (
     DashboardSession,
     _build_operator_feedback_message,
+    _build_external_draft_form_values,
     _render_dashboard_page_internal,
     build_dashboard_session_from_thread_id,
     create_dashboard_session,
@@ -77,6 +78,7 @@ class MainLayer2DashboardTests(unittest.TestCase):
         self.assertIn("Review and resume", html)
         self.assertIn("Submit edited draft", html)
         self.assertIn("More evidence", html)
+        self.assertNotIn("Metadata JSON", html)
         self.assertIn("Technical details", html)
         self.assertIn("Current Plan Step", html)
         self.assertIn("Raw Snapshot", html)
@@ -87,6 +89,7 @@ class MainLayer2DashboardTests(unittest.TestCase):
         self.assertIn('class="resume-fields"', html)
         self.assertIn("External draft", html)
         self.assertIn('name="external_communication_body"', html)
+        self.assertIn('type="hidden" name="external_communication_metadata"', html)
         self.assertIn("thread-1:hitl", html)
         self.assertIn('/assets/dashboard.css', html)
         self.assertIn('/assets/dashboard.js', html)
@@ -138,6 +141,54 @@ class MainLayer2DashboardTests(unittest.TestCase):
                 session=session,
             )
 
+    def test_parse_human_review_decision_requires_text_for_clarification(self) -> None:
+        session = _build_paused_session()
+
+        with self.assertRaisesRegex(ValueError, "Clarification text is required"):
+            _parse_human_review_decision(
+                {
+                    "request_id": "thread-1:hitl",
+                    "decision_type": "ask_clarification",
+                    "clarification_text": "",
+                },
+                session=session,
+            )
+
+    def test_parse_human_review_decision_ignores_clarification_for_other_actions(self) -> None:
+        session = _build_paused_session()
+
+        decision = _parse_human_review_decision(
+            {
+                "request_id": "thread-1:hitl",
+                "decision_type": "approve_continue",
+                "clarification_text": "This should not affect approval.",
+            },
+            session=session,
+        )
+
+        self.assertIsNone(decision.clarification_text)
+
+    def test_external_draft_form_values_split_embedded_subject_and_recipient(self) -> None:
+        draft = ExternalCommunicationDraft(
+            channel="external_communication",
+            recipient=None,
+            subject=None,
+            body=(
+                "Subject: Review Required - Incident Notification to Operations Team "
+                "Dear Operations Team,\nPlease review this draft."
+            ),
+            metadata={},
+        )
+
+        values = _build_external_draft_form_values(draft, form_state=None)
+
+        self.assertEqual(
+            values["subject"],
+            "Review Required - Incident Notification to Operations Team",
+        )
+        self.assertEqual(values["recipient"], "Operations Team")
+        self.assertEqual(values["body"], "Dear Operations Team,\nPlease review this draft.")
+
     def test_render_dashboard_page_shows_inline_form_error_and_preserves_values(self) -> None:
         session = _build_paused_session()
         form_state = {
@@ -149,22 +200,21 @@ class MainLayer2DashboardTests(unittest.TestCase):
             "external_communication_recipient": "#ops",
             "external_communication_subject": "Updated subject",
             "external_communication_body": "",
-            "external_communication_metadata": '{"priority": "critical"',
         }
 
         html = _render_dashboard_page_internal(
             session=session,
             form_state=form_state,
-            form_error="External communication metadata must be valid JSON.",
+            form_error="External communication body is required for modify_and_continue.",
         )
 
         self.assertIn("Submission blocked.", html)
-        self.assertIn("External communication metadata must be valid JSON.", html)
+        self.assertIn("External communication body is required for modify_and_continue.", html)
         self.assertIn('value="operator-2"', html)
         self.assertIn('value="slack"', html)
         self.assertIn('value="#ops"', html)
         self.assertIn("Keep these edits.", html)
-        self.assertIn("{&quot;priority&quot;: &quot;critical&quot;", html)
+        self.assertNotIn("Metadata JSON", html)
 
     def test_render_dashboard_page_hides_external_edit_form_for_non_external_review(self) -> None:
         session = _build_non_external_paused_session()
