@@ -108,6 +108,22 @@ class Layer2TraceTests(unittest.TestCase):
         self.assertIsInstance(trace.judge_assessments[0], TraceJudgeAssessment)
         self.assertEqual(trace.judge_assessments[0].recommendation, "wait_human_review")
 
+    def test_runtime_trace_handles_legacy_string_step_kind_values(self) -> None:
+        state = _complete_task_state()
+        state.plan_steps[0].step_kind = "source_discovery"
+        state.plan_steps[0].evidence_requirement = "source_discovery"
+        state.plan_steps[0].claim_precision_ceiling = "high_level_summary"
+
+        trace = build_layer2_runtime_trace(
+            thread_id="legacy-step-kind",
+            intake_result=state.intake_payload,
+            task_state=state,
+        )
+
+        self.assertEqual(trace.plan_steps[0].step_kind, "source_discovery")
+        self.assertEqual(trace.plan_steps[0].evidence_requirement, "source_discovery")
+        self.assertEqual(trace.plan_steps[0].claim_precision_ceiling, "high_level_summary")
+
     def test_trace_dict_and_json_are_json_safe(self) -> None:
         state = _complete_task_state()
         trace = build_layer2_runtime_trace(

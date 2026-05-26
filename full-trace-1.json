@@ -1,6 +1,6 @@
 {
   "runtime": {
-    "thread_id": "layer2-a40b70e4-e59b-4644-8965-efaf0758062a",
+    "thread_id": "layer2-6adf089a-8c97-40ba-86e4-9ec17f27bca5",
     "current_state": "waiting_human_review",
     "bootstrap_completed": false,
     "runtime_flags": [
@@ -27,92 +27,165 @@
       },
       {
         "step_index": 3,
+        "runtime_state": "ready_next_step",
+        "node_name": "governance",
+        "summary": "Governance evaluated the actor outcome and produced directive 'continue'."
+      },
+      {
+        "step_index": 4,
+        "runtime_state": "ready_next_step",
+        "node_name": "actor",
+        "summary": "Actor executed the current semantic step and returned one typed execution outcome."
+      },
+      {
+        "step_index": 5,
+        "runtime_state": "ready_next_step",
+        "node_name": "governance",
+        "summary": "Governance evaluated the actor outcome and produced directive 'continue'."
+      },
+      {
+        "step_index": 6,
+        "runtime_state": "ready_next_step",
+        "node_name": "actor",
+        "summary": "Actor executed the current semantic step and returned one typed execution outcome."
+      },
+      {
+        "step_index": 7,
         "runtime_state": "waiting_human_review",
         "node_name": "governance",
         "summary": "Governance evaluated the actor outcome and produced directive 'wait_human_review'."
       }
     ],
-    "actor_turn_count": 1,
+    "actor_turn_count": 3,
     "tool_call_count": 0
   },
   "intake": {
-    "goal": "Preparare una bozza di email in italiano a un partner esterno chiedendo conferma prima di condividere un dataset riservato e indicando quali informazioni servono per procedere.",
-    "context": "Devi contattare un partner esterno per ottenere autorizzazione/confirmazione prima della condivisione di un dataset riservato; la bozza deve essere prudente e non inviata automaticamente.",
+    "goal": "Draft and send an external email to Acme Cloud operations team requesting urgent manual checks and a status update within 60 minutes regarding a sensitive EU customer notification pipeline runtime incident.",
+    "context": "Runtime incident affecting the EU customer notification pipeline was detected at 09:12 CET on May 25, 2026. It caused intermittent delivery failures for transactional notifications and is still under investigation. No confirmed data loss, but delayed processing was observed for some EU tenants.",
     "domain_type": "external_communication",
-    "domain_label": "Bozza email per richiesta di conferma su condivisione di dataset riservato",
-    "sensitivity": "high",
+    "domain_label": "Draft incident escalation email to operations (EU notification pipeline)",
+    "sensitivity": "critical",
     "success_criteria": [
-      "Testo email pronto in bozza e formulato in italiano.",
-      "Include una richiesta esplicita di conferma/autorizzazione prima della condivisione.",
-      "Specifica chiaramente le informazioni/documentazione necessarie per procedere.",
-      "Indica che la condivisione avverrà solo dopo conferma e non implica invio automatico."
+      "Email clearly communicates incident summary, current findings, and urgency.",
+      "Explicit action requests are included: verify delivery queues, check retry backlog, assess scope beyond notification pipeline.",
+      "A 60-minute response deadline to the incident lead is stated.",
+      "Content reflects the known facts (no confirmed data loss; delayed processing observed for some EU tenants) without over-claiming.",
+      "Email is suitable for external sending to the operations team."
     ],
     "constraints": [
-      "Bozza prudente: non inviare automaticamente il messaggio.",
-      "Chiedere conferma prima di condividere il dataset riservato.",
-      "Spiegare quali informazioni servono per procedere.",
-      "Usare fonti o evidenze solo se utili."
+      "Email is addressed externally to the operations team at Acme Cloud.",
+      "Incident involves a sensitive EU customer notification pipeline.",
+      "Include detection time (09:12 CET, May 25, 2026) and current investigation status (still under investigation).",
+      "State that there is no confirmed data loss, but delayed processing was observed for some EU tenants.",
+      "Request manual verification of delivery queues.",
+      "Request checking retry backlog.",
+      "Ask to confirm whether customer-facing impact extended beyond the notification pipeline.",
+      "Require a status report back to the incident lead within 60 minutes.",
+      "Prefer official EU sources."
     ],
     "parse_status": "complete",
     "parser_name": "openai_task_spec_parser",
     "prompt_version": "task_spec_v1",
     "schema_version": "1.0.0",
     "policy_profile_name": "default",
-    "confidence_threshold": 0.85,
-    "max_steps": 3,
-    "max_tool_calls": 5,
+    "confidence_threshold": 0.9,
+    "max_steps": null,
+    "max_tool_calls": null,
     "read_only_mode": false
   },
   "planner_name": "openai_layer2_planner",
   "planner_prompt_version": "planner_v2",
-  "planner_rationale": "Preparare una bozza di email in italiano, prudente e orientata alla conformità, che richieda conferma esplicita prima di qualsiasi condivisione di un dataset riservato e che indichi con chiarezza quali informazioni/documentazione sono necessarie per procedere.",
+  "planner_rationale": "Draft an external, time-bound incident escalation email to Acme Cloud operations that accurately reflects the EU notification pipeline runtime incident timeline and current state of investigation, requests specific urgent operational checks (delivery queues and retry backlog), and asks for confirmation of scope beyond the notification pipeline, without overstating confirmed data loss. The plan ensures the message is suitable for external sending and clearly conveys urgency and a 60-minute response deadline to the incident lead.",
   "planning_source": "planner",
   "plan_steps": [
     {
       "step_id": "step_1",
-      "objective": "Definire l’impostazione prudente dell’email e i requisiti di autorizzazione da comunicare",
-      "rationale": "Con dataset ad alta sensibilità è fondamentale esplicitare che la condivisione non avverrà senza conferma, chiarire il contesto della richiesta e mantenere un tono formale e cautelativo.",
-      "expected_outcome": "Un set di messaggi chiave da includere nell’email (richiesta di conferma, non condivisione finché non autorizzato, motivazione e quadro di sicurezza) pronto per essere inserito nel testo.",
+      "objective": "Define the email’s core incident facts and guardrails for claims.",
+      "rationale": "High-sensitivity external communication requires precise inclusion of detection time, scope, and investigation status, while avoiding over-claiming. Establishing a fact baseline prevents accidental inaccuracies.",
+      "expected_outcome": "A concise internal statement of known facts to populate the email: detection at 09:12 CET on May 25, 2026; intermittent delivery failures for transactional EU notifications; still under investigation; no confirmed data loss; delayed processing observed for some EU tenants; current need for operational verification and impact scoping.",
+      "step_kind": "local_transformation",
+      "evidence_requirement": "local_only",
+      "claim_precision_ceiling": "local_only",
+      "resolved_required_evidence_support_level": "local_only",
+      "resolved_required_evidence_support_source": "plan_step_evidence_requirement",
       "status": "completed"
     },
     {
       "step_id": "step_2",
-      "objective": "Identificare e descrivere le informazioni/documenti necessari per procedere con la condivisione",
-      "rationale": "Per soddisfare il successo dell’email, il partner deve sapere esattamente cosa fornire (es. condizioni di utilizzo, canali e modalità di ricezione, riferimenti contrattuali/di autorizzazione, requisiti di sicurezza e gestione dei dati). Anche senza entrare in dettagli tecnici, va richiesto ciò che abilita un’approvazione informata.",
-      "expected_outcome": "Lista chiara e concisa delle informazioni da chiedere al partner, formulata come richiesta operativa nell’email.",
-      "status": "in_progress"
+      "objective": "Map the operational action requests into clear, actionable asks for the Acme Cloud operations team.",
+      "rationale": "Operations teams respond faster to specific, concrete checks. The email must request manual verification of delivery queues and checking retry backlog, aligned to the observed failure mode.",
+      "expected_outcome": "An actionable list to include in the email: (1) manually verify EU customer notification delivery queues health/backlog/processing state; (2) check retry backlog status and whether retries are accumulating or failing; (3) assess whether issues affected any customer-facing paths beyond the EU notification pipeline.",
+      "step_kind": "high_level_summary",
+      "evidence_requirement": "local_only",
+      "claim_precision_ceiling": "local_only",
+      "resolved_required_evidence_support_level": "local_only",
+      "resolved_required_evidence_support_source": "plan_step_evidence_requirement",
+      "status": "completed"
     },
     {
       "step_id": "step_3",
-      "objective": "Redigere la bozza completa dell’email in italiano, pronta da inviare solo dopo conferma",
-      "rationale": "La bozza deve rispettare tutti i vincoli: richiesta esplicita di conferma prima della condivisione, indicazione delle informazioni necessarie, e indicazione che non c’è invio automatico né condivisione in assenza di autorizzazione.",
-      "expected_outcome": "Testo email completo in italiano con oggetto e corpo, tono prudente, richiesta di autorizzazione, elenco delle informazioni/documentazione necessarie e indicazione che la condivisione avverrà solo dopo conferma.",
-      "status": "pending"
+      "objective": "Draft the external email with an appropriate structure, urgency, and a 60-minute response deadline.",
+      "rationale": "To meet success criteria, the email must clearly communicate summary, current findings, urgency, and explicit deadlines. A structured format (subject, greeting, incident summary, requested actions, response deadline, contact/next steps) improves readability and compliance.",
+      "expected_outcome": "A complete email draft suitable for external sending that includes: a clear subject indicating urgent incident escalation for EU notification pipeline; detection time and date; current status (“still under investigation”); no confirmed data loss but delayed processing observed for some EU tenants; explicit requests for delivery queue verification and retry backlog checks; request for confirmation on whether customer-facing impact extended beyond the notification pipeline; and a requirement to provide a status report back to the incident lead within 60 minutes.",
+      "step_kind": "final_synthesis",
+      "evidence_requirement": "local_only",
+      "claim_precision_ceiling": "local_only",
+      "resolved_required_evidence_support_level": "local_only",
+      "resolved_required_evidence_support_source": "plan_step_evidence_requirement",
+      "status": "completed"
+    },
+    {
+      "step_id": "step_4",
+      "objective": "Refine wording to minimize risk while maintaining clarity, including EU sensitivity phrasing and scope boundaries.",
+      "rationale": "Sensitive EU customer communication increases the need for careful phrasing. Refinement ensures the email remains accurate, does not imply data loss without confirmation, and frames requests as verification rather than conclusions.",
+      "expected_outcome": "A tightened final draft where every potentially sensitive claim is appropriately qualified (e.g., “no confirmed data loss,” “delayed processing observed,” “still under investigation”), and the asks are framed as manual checks and impact confirmation.",
+      "step_kind": "local_transformation",
+      "evidence_requirement": "local_only",
+      "claim_precision_ceiling": "local_only",
+      "resolved_required_evidence_support_level": "local_only",
+      "resolved_required_evidence_support_source": "plan_step_evidence_requirement",
+      "status": "in_progress"
     }
   ],
-  "current_plan_step_index": 1,
-  "current_plan_step_id": "step_2",
+  "current_plan_step_index": 3,
+  "current_plan_step_id": "step_4",
   "actor": {
     "actor_name": "openrouter_gpt_oss_120b_free_actor",
     "actor_prompt_version": "actor_v5_openrouter_standard_tool_calling",
     "result_type": "intermediate_output",
-    "plan_step_id": "step_1",
-    "summary": "Provided the set of key messages required for step 1.",
+    "plan_step_id": "step_3",
+    "summary": "Drafted a complete external email meeting all constraints and success criteria.",
     "capability_mode": "none",
     "external_impact": false,
-    "output_text": "Messaggi chiave da includere nell'email: 1. **Introduzione e contesto** – Presentarsi brevemente, spiegare il progetto e la natura riservata del dataset. 2. **Richiesta di conferma** – Specificare che la condivisione del dataset avverrà solo dopo aver ricevuto una conferma/espressione di autorizzazione esplicita dal partner. 3. **Motivazione della richiesta** – Indicare perché è necessario condividere il dataset (es. analisi congiunta, sviluppo di modello) e sottolineare l'importanza della protezione dei dati. 4. **Informazioni/documenti richiesti** – Elencare chiaramente ciò che serve al partner per valutare e autorizzare la condivisione: - Accordo di riservatezza o condizioni di utilizzo dei dati. - Dettagli sui canali e modalità di trasferimento previsti (es. SFTP, piattaforma sicura). - Requisiti di sicurezza e gestione dei dati (es. crittografia, policy di retention). - Eventuali riferimenti contrattuali o autorizzazioni interne richieste. 5. **Indicazione di non invio automatico** – Ribadire che l'email è una bozza e che la condivisione non avverrà automaticamente, ma solo dopo la conferma del partner. 6. **Chiusura** – Ringraziare per la collaborazione e indicare la disponibilità a fornire ulteriori chiarimenti.",
+    "output_text": "Subject: Urgent: EU Customer Notification Pipeline Incident – Immediate Action Required (Response Needed within 60 minutes) Hi Acme Cloud Operations Team, We have detected a runtime incident affecting the EU customer notification pipeline at **09:12 CET on 25 May 2026**. The issue is causing intermittent delivery failures for transactional notifications and delayed processing for some EU tenants. The incident is **still under investigation**. At this time, there is **no confirmed data loss**, but the observed delays are impacting service reliability. **Requested actions (please complete as a priority):** 1. **Manually verify** the health, backlog, and processing state of the EU notification delivery queues. 2. **Check the retry backlog** to determine whether retries are accumulating, failing, or being processed as expected. 3. **Confirm whether any customer‑facing impact** extends beyond the EU notification pipeline (e.g., other services or regions). Please provide a status update covering the above items **within the next 60 minutes** and send it directly to the incident lead, **[Incident Lead Name]**, at **[lead‑email@example.com]**. Your prompt attention is critical to mitigate any further impact on our EU customers. Thank you for your swift cooperation. Best regards, [Your Name] Incident Lead – EU Notification Services [Your Contact Information]",
     "blocking_reason": null,
-    "proposed_tool_name": null
+    "proposed_tool_name": null,
+    "output_claim_support_level": "local_only",
+    "precision_mismatch_detected": false
   },
   "execution": {
     "final_output_text": null,
     "executed_steps": [
       {
         "step_id": "step_1",
-        "objective": "Definire l’impostazione prudente dell’email e i requisiti di autorizzazione da comunicare",
+        "objective": "Define the email’s core incident facts and guardrails for claims.",
         "result_type": "intermediate_output",
-        "summary": "Provided the set of key messages required for step 1.",
-        "output_text": "Messaggi chiave da includere nell'email: 1. **Introduzione e contesto** – Presentarsi brevemente, spiegare il progetto e la natura riservata del dataset. 2. **Richiesta di conferma** – Specificare che la condivisione del dataset avverrà solo dopo aver ricevuto una conferma/espressione di autorizzazione esplicita dal partner. 3. **Motivazione della richiesta** – Indicare perché è necessario condividere il dataset (es. analisi congiunta, sviluppo di modello) e sottolineare l'importanza della protezione dei dati. 4. **Informazioni/documenti richiesti** – Elencare chiaramente ciò che serve al partner per valutare e autorizzare la condivisione: - Accordo di riservatezza o condizioni di utilizzo dei dati. - Dettagli sui canali e modalità di trasferimento previsti (es. SFTP, piattaforma sicura). - Requisiti di sicurezza e gestione dei dati (es. crittografia, policy di retention). - Eventuali riferimenti contrattuali o autorizzazioni interne richieste. 5. **Indicazione di non invio automatico** – Ribadire che l'email è una bozza e che la condivisione non avverrà automaticamente, ma solo dopo la conferma del partner. 6. **Chiusura** – Ringraziare per la collaborazione e indicare la disponibilità a fornire ulteriori chiarimenti."
+        "summary": "Compiled concise internal statement of known incident facts and required action guardrails.",
+        "output_text": "Incident facts for email: - Detection time: 09:12 CET on May 25, 2026. - Affected component: EU customer notification pipeline. - Symptom: Intermittent delivery failures for transactional notifications; delayed processing observed for some EU tenants. - Current status: Still under investigation. - Data impact: No confirmed data loss. - Required operational actions: Manual verification of delivery queues, check retry backlog, and confirm whether any customer‑facing impact extends beyond the notification pipeline. - Response needed: Status report back to the incident lead within 60 minutes."
+      },
+      {
+        "step_id": "step_2",
+        "objective": "Map the operational action requests into clear, actionable asks for the Acme Cloud operations team.",
+        "result_type": "intermediate_output",
+        "summary": "Provided a concise, actionable list matching step 2 objectives.",
+        "output_text": "Actionable requests for the Acme Cloud operations team: 1. Manually verify the health, backlog, and processing state of the EU customer notification delivery queues. 2. Check the retry backlog status, confirming whether retries are accumulating, failing, or being processed as expected. 3. Assess and confirm whether any customer‑facing impact extends beyond the EU notification pipeline (e.g., other services or regions)."
+      },
+      {
+        "step_id": "step_3",
+        "objective": "Draft the external email with an appropriate structure, urgency, and a 60-minute response deadline.",
+        "result_type": "intermediate_output",
+        "summary": "Drafted a complete external email meeting all constraints and success criteria.",
+        "output_text": "Subject: Urgent: EU Customer Notification Pipeline Incident – Immediate Action Required (Response Needed within 60 minutes) Hi Acme Cloud Operations Team, We have detected a runtime incident affecting the EU customer notification pipeline at **09:12 CET on 25 May 2026**. The issue is causing intermittent delivery failures for transactional notifications and delayed processing for some EU tenants. The incident is **still under investigation**. At this time, there is **no confirmed data loss**, but the observed delays are impacting service reliability. **Requested actions (please complete as a priority):** 1. **Manually verify** the health, backlog, and processing state of the EU notification delivery queues. 2. **Check the retry backlog** to determine whether retries are accumulating, failing, or being processed as expected. 3. **Confirm whether any customer‑facing impact** extends beyond the EU notification pipeline (e.g., other services or regions). Please provide a status update covering the above items **within the next 60 minutes** and send it directly to the incident lead, **[Incident Lead Name]**, at **[lead‑email@example.com]**. Your prompt attention is critical to mitigate any further impact on our EU customers. Thank you for your swift cooperation. Best regards, [Your Name] Incident Lead – EU Notification Services [Your Contact Information]"
       }
     ],
     "scratchpad": [
@@ -120,8 +193,76 @@
         "turn_index": 1,
         "plan_step_id": "step_1",
         "entry_type": "completion_rationale",
-        "summary": "Generated a concise set of key messages for the email, covering prudent framing, request for confirmation, and required information, satisfying the step's expected outcome.",
-        "evidence_refs": []
+        "summary": "All required incident facts are present in the intake evidence and have been compiled into a concise statement for email drafting.",
+        "evidence_refs": [
+          "intake:1",
+          "intake:2",
+          "intake:3",
+          "intake:4",
+          "intake:5",
+          "intake:6",
+          "intake:7",
+          "intake:8",
+          "intake:9",
+          "intake:10",
+          "intake:11",
+          "intake:12",
+          "intake:14",
+          "intake:15",
+          "intake:16",
+          "intake:17",
+          "intake:18"
+        ]
+      },
+      {
+        "turn_index": 2,
+        "plan_step_id": "step_2",
+        "entry_type": "completion_rationale",
+        "summary": "Mapped the required operational actions into three clear, specific asks for the Acme Cloud operations team, directly reflecting the incident details and constraints.",
+        "evidence_refs": [
+          "intake:1",
+          "intake:2",
+          "intake:3",
+          "intake:4",
+          "intake:5",
+          "intake:6",
+          "intake:7",
+          "intake:8",
+          "intake:9",
+          "intake:10",
+          "intake:11",
+          "intake:12",
+          "intake:14",
+          "intake:15",
+          "intake:16",
+          "intake:17",
+          "intake:18"
+        ]
+      },
+      {
+        "turn_index": 3,
+        "plan_step_id": "step_3",
+        "entry_type": "completion_rationale",
+        "summary": "All required elements are present in the intake evidence and prior steps, allowing construction of a complete email draft that meets the success criteria.",
+        "evidence_refs": [
+          "intake:1",
+          "intake:2",
+          "intake:3",
+          "intake:4",
+          "intake:5",
+          "intake:6",
+          "intake:7",
+          "intake:8",
+          "intake:9",
+          "intake:10",
+          "intake:11",
+          "intake:12",
+          "intake:14",
+          "intake:15",
+          "intake:16",
+          "intake:17",
+          "intake:18"
+        ]
       }
     ],
     "step_validations": [
@@ -129,54 +270,258 @@
         "plan_step_id": "step_1",
         "objective_satisfied": true,
         "evidence_sufficient": true,
-        "confidence": 0.98,
+        "confidence": 1.0,
         "next_action": "complete_step",
-        "rationale_summary": "Generated a concise set of key messages for the email, covering prudent framing, request for confirmation, and required information, satisfying the step's expected outcome.",
+        "rationale_summary": "All required incident facts are present in the intake evidence and have been compiled into a concise statement for email drafting.",
+        "residual_uncertainty": null
+      },
+      {
+        "plan_step_id": "step_2",
+        "objective_satisfied": true,
+        "evidence_sufficient": true,
+        "confidence": 1.0,
+        "next_action": "complete_step",
+        "rationale_summary": "Mapped the required operational actions into three clear, specific asks for the Acme Cloud operations team, directly reflecting the incident details and constraints.",
+        "residual_uncertainty": null
+      },
+      {
+        "plan_step_id": "step_3",
+        "objective_satisfied": true,
+        "evidence_sufficient": true,
+        "confidence": 1.0,
+        "next_action": "complete_step",
+        "rationale_summary": "All required elements are present in the intake evidence and prior steps, allowing construction of a complete email draft that meets the success criteria.",
         "residual_uncertainty": null
       }
     ]
   },
   "tool_calls": [],
-  "observed_evidence": [],
-  "governance_decisions": [
+  "observed_evidence": [
     {
-      "directive": "wait_human_review",
+      "evidence_id": "intake:1",
+      "plan_step_id": "intake",
+      "title": "Task goal",
+      "locator": "intake://task_spec",
+      "excerpt": "Draft and send an external email to Acme Cloud operations team requesting urgent manual checks and a status update within 60 minutes regarding a sensitive EU customer notification pipeline runtime incident",
+      "source_kind": "intake_provided",
+      "source_tool": null,
+      "support_level": "local_only"
+    },
+    {
+      "evidence_id": "intake:2",
+      "plan_step_id": "intake",
+      "title": "Task context",
+      "locator": "intake://task_spec",
+      "excerpt": "Runtime incident affecting the EU customer notification pipeline was detected at 09:12 CET on May 25, 2026",
+      "source_kind": "intake_provided",
+      "source_tool": null,
+      "support_level": "local_only"
+    },
+    {
+      "evidence_id": "intake:3",
+      "plan_step_id": "intake",
+      "title": "Task context",
+      "locator": "intake://task_spec",
+      "excerpt": "It caused intermittent delivery failures for transactional notifications and is still under investigation",
+      "source_kind": "intake_provided",
+      "source_tool": null,
+      "support_level": "local_only"
+    },
+    {
+      "evidence_id": "intake:4",
+      "plan_step_id": "intake",
+      "title": "Task context",
+      "locator": "intake://task_spec",
+      "excerpt": "No confirmed data loss, but delayed processing was observed for some EU tenants",
+      "source_kind": "intake_provided",
+      "source_tool": null,
+      "support_level": "local_only"
+    },
+    {
+      "evidence_id": "intake:5",
+      "plan_step_id": "intake",
+      "title": "Task constraint",
+      "locator": "intake://task_spec",
+      "excerpt": "Email is addressed externally to the operations team at Acme Cloud.",
+      "source_kind": "intake_provided",
+      "source_tool": null,
+      "support_level": "local_only"
+    },
+    {
+      "evidence_id": "intake:6",
+      "plan_step_id": "intake",
+      "title": "Task constraint",
+      "locator": "intake://task_spec",
+      "excerpt": "Incident involves a sensitive EU customer notification pipeline.",
+      "source_kind": "intake_provided",
+      "source_tool": null,
+      "support_level": "local_only"
+    },
+    {
+      "evidence_id": "intake:7",
+      "plan_step_id": "intake",
+      "title": "Task constraint",
+      "locator": "intake://task_spec",
+      "excerpt": "Include detection time (09:12 CET, May 25, 2026) and current investigation status (still under investigation).",
+      "source_kind": "intake_provided",
+      "source_tool": null,
+      "support_level": "local_only"
+    },
+    {
+      "evidence_id": "intake:8",
+      "plan_step_id": "intake",
+      "title": "Task constraint",
+      "locator": "intake://task_spec",
+      "excerpt": "State that there is no confirmed data loss, but delayed processing was observed for some EU tenants.",
+      "source_kind": "intake_provided",
+      "source_tool": null,
+      "support_level": "local_only"
+    },
+    {
+      "evidence_id": "intake:9",
+      "plan_step_id": "intake",
+      "title": "Task constraint",
+      "locator": "intake://task_spec",
+      "excerpt": "Request manual verification of delivery queues.",
+      "source_kind": "intake_provided",
+      "source_tool": null,
+      "support_level": "local_only"
+    },
+    {
+      "evidence_id": "intake:10",
+      "plan_step_id": "intake",
+      "title": "Task constraint",
+      "locator": "intake://task_spec",
+      "excerpt": "Request checking retry backlog.",
+      "source_kind": "intake_provided",
+      "source_tool": null,
+      "support_level": "local_only"
+    },
+    {
+      "evidence_id": "intake:11",
+      "plan_step_id": "intake",
+      "title": "Task constraint",
+      "locator": "intake://task_spec",
+      "excerpt": "Ask to confirm whether customer-facing impact extended beyond the notification pipeline.",
+      "source_kind": "intake_provided",
+      "source_tool": null,
+      "support_level": "local_only"
+    },
+    {
+      "evidence_id": "intake:12",
+      "plan_step_id": "intake",
+      "title": "Task constraint",
+      "locator": "intake://task_spec",
+      "excerpt": "Require a status report back to the incident lead within 60 minutes.",
+      "source_kind": "intake_provided",
+      "source_tool": null,
+      "support_level": "local_only"
+    },
+    {
+      "evidence_id": "intake:14",
+      "plan_step_id": "intake",
+      "title": "Success criterion",
+      "locator": "intake://task_spec",
+      "excerpt": "Email clearly communicates incident summary, current findings, and urgency.",
+      "source_kind": "intake_provided",
+      "source_tool": null,
+      "support_level": "local_only"
+    },
+    {
+      "evidence_id": "intake:15",
+      "plan_step_id": "intake",
+      "title": "Success criterion",
+      "locator": "intake://task_spec",
+      "excerpt": "Explicit action requests are included: verify delivery queues, check retry backlog, assess scope beyond notification pipeline.",
+      "source_kind": "intake_provided",
+      "source_tool": null,
+      "support_level": "local_only"
+    },
+    {
+      "evidence_id": "intake:16",
+      "plan_step_id": "intake",
+      "title": "Success criterion",
+      "locator": "intake://task_spec",
+      "excerpt": "A 60-minute response deadline to the incident lead is stated.",
+      "source_kind": "intake_provided",
+      "source_tool": null,
+      "support_level": "local_only"
+    },
+    {
+      "evidence_id": "intake:17",
+      "plan_step_id": "intake",
+      "title": "Success criterion",
+      "locator": "intake://task_spec",
+      "excerpt": "Content reflects the known facts (no confirmed data loss; delayed processing observed for some EU tenants) without over-claiming.",
+      "source_kind": "intake_provided",
+      "source_tool": null,
+      "support_level": "local_only"
+    },
+    {
+      "evidence_id": "intake:18",
+      "plan_step_id": "intake",
+      "title": "Success criterion",
+      "locator": "intake://task_spec",
+      "excerpt": "Email is suitable for external sending to the operations team.",
+      "source_kind": "intake_provided",
+      "source_tool": null,
+      "support_level": "local_only"
+    }
+  ],
+  "static_policy_assessments": [
+    {
       "policy_decision": "allow",
       "reason_codes": [
         "local_output_allowed"
       ],
-      "summary": "Local output and replanning remain within policy. Adaptive oversight made the decision more conservative: policy directive 'continue' became 'wait_human_review'. Evidence quality is strong (0.70), operational risk is high (0.61), and trajectory health is healthy (1.00).",
-      "constrains_capability_use": true,
-      "evaluated_actor_result_type": "intermediate_output",
-      "evaluated_tool_name": null,
+      "summary": "Local output and replanning remain within policy.",
       "policy_engine_name": "opa_http_policy_engine",
       "policy_bundle_version": "layer2_governance_v1",
-      "policy_directive": "continue",
-      "oversight_recommended_directive": "wait_human_review",
-      "oversight_summary": "Evidence quality is strong (0.70), operational risk is high (0.61), and trajectory health is healthy (1.00)."
+      "policy_directive": "continue"
+    },
+    {
+      "policy_decision": "allow",
+      "reason_codes": [
+        "local_output_allowed"
+      ],
+      "summary": "Local output and replanning remain within policy.",
+      "policy_engine_name": "opa_http_policy_engine",
+      "policy_bundle_version": "layer2_governance_v1",
+      "policy_directive": "continue"
+    },
+    {
+      "policy_decision": "require_human_review",
+      "reason_codes": [
+        "external_communication_review_required"
+      ],
+      "summary": "External communication drafts must reach typed human review before any outward-facing progression.",
+      "policy_engine_name": "opa_http_policy_engine",
+      "policy_bundle_version": "layer2_governance_v1",
+      "policy_directive": "wait_human_review"
     }
   ],
-  "oversight_assessments": [
+  "dynamic_policy_assessments": [
     {
       "evidence_quality": {
-        "score": 0.7,
+        "score": 0.95,
         "level": "strong",
         "reason_codes": [
           "evidence_marked_sufficient",
           "objective_marked_satisfied",
           "actor_confidence_contributed",
-          "observed_evidence_missing",
-          "source_locator_missing",
+          "observed_evidence_present",
+          "source_locator_present",
           "evidence_support_matches_step_need"
         ]
       },
       "operational_risk": {
-        "score": 0.6075,
-        "level": "high",
+        "score": 0.0,
+        "level": "low",
         "reason_codes": [
-          "tool_risk_medium",
-          "task_sensitivity_high",
-          "read_only_capability"
+          "tool_risk_none",
+          "no_tool_request",
+          "no_capability",
+          "task_sensitivity_critical"
         ]
       },
       "trajectory_health": {
@@ -188,66 +533,544 @@
           "no_replan_needed"
         ]
       },
-      "recommended_directive": "wait_human_review",
-      "summary": "Evidence quality is strong (0.70), operational risk is high (0.61), and trajectory health is healthy (1.00).",
+      "recommended_directive": "continue",
+      "summary": "Evidence quality is strong (0.95), operational risk is low (0.00), and trajectory health is healthy (1.00).",
       "reason_codes": [
         "evidence_marked_sufficient",
         "objective_marked_satisfied",
         "actor_confidence_contributed",
-        "observed_evidence_missing",
-        "source_locator_missing",
+        "observed_evidence_present",
+        "source_locator_present",
         "evidence_support_matches_step_need",
-        "tool_risk_medium",
-        "task_sensitivity_high",
-        "read_only_capability",
+        "tool_risk_none",
+        "no_tool_request",
+        "no_capability",
+        "task_sensitivity_critical",
         "actor_turns_within_limit",
         "no_failed_tool_results",
         "no_replan_needed",
-        "recommend_human_review"
+        "recommend_continue"
+      ]
+    },
+    {
+      "evidence_quality": {
+        "score": 0.95,
+        "level": "strong",
+        "reason_codes": [
+          "evidence_marked_sufficient",
+          "objective_marked_satisfied",
+          "actor_confidence_contributed",
+          "observed_evidence_present",
+          "source_locator_present",
+          "evidence_support_matches_step_need"
+        ]
+      },
+      "operational_risk": {
+        "score": 0.0,
+        "level": "low",
+        "reason_codes": [
+          "tool_risk_none",
+          "no_tool_request",
+          "no_capability",
+          "task_sensitivity_critical"
+        ]
+      },
+      "trajectory_health": {
+        "score": 1.0,
+        "level": "healthy",
+        "reason_codes": [
+          "actor_turns_within_limit",
+          "no_failed_tool_results",
+          "no_replan_needed"
+        ]
+      },
+      "recommended_directive": "continue",
+      "summary": "Evidence quality is strong (0.95), operational risk is low (0.00), and trajectory health is healthy (1.00).",
+      "reason_codes": [
+        "evidence_marked_sufficient",
+        "objective_marked_satisfied",
+        "actor_confidence_contributed",
+        "observed_evidence_present",
+        "source_locator_present",
+        "evidence_support_matches_step_need",
+        "tool_risk_none",
+        "no_tool_request",
+        "no_capability",
+        "task_sensitivity_critical",
+        "actor_turns_within_limit",
+        "no_failed_tool_results",
+        "no_replan_needed",
+        "recommend_continue"
+      ]
+    },
+    {
+      "evidence_quality": {
+        "score": 0.95,
+        "level": "strong",
+        "reason_codes": [
+          "evidence_marked_sufficient",
+          "objective_marked_satisfied",
+          "actor_confidence_contributed",
+          "observed_evidence_present",
+          "source_locator_present",
+          "evidence_support_matches_step_need"
+        ]
+      },
+      "operational_risk": {
+        "score": 0.0,
+        "level": "low",
+        "reason_codes": [
+          "tool_risk_none",
+          "no_tool_request",
+          "no_capability",
+          "task_sensitivity_critical"
+        ]
+      },
+      "trajectory_health": {
+        "score": 1.0,
+        "level": "healthy",
+        "reason_codes": [
+          "actor_turns_within_limit",
+          "no_failed_tool_results",
+          "no_replan_needed"
+        ]
+      },
+      "recommended_directive": "continue",
+      "summary": "Evidence quality is strong (0.95), operational risk is low (0.00), and trajectory health is healthy (1.00).",
+      "reason_codes": [
+        "evidence_marked_sufficient",
+        "objective_marked_satisfied",
+        "actor_confidence_contributed",
+        "observed_evidence_present",
+        "source_locator_present",
+        "evidence_support_matches_step_need",
+        "tool_risk_none",
+        "no_tool_request",
+        "no_capability",
+        "task_sensitivity_critical",
+        "actor_turns_within_limit",
+        "no_failed_tool_results",
+        "no_replan_needed",
+        "recommend_continue"
+      ]
+    }
+  ],
+  "behavioral_assessments": [
+    {
+      "history_available": true,
+      "historical_run_count": 77,
+      "feature_snapshot_version": "behavioral_features_v2",
+      "summary": "Behavioral analysis matched 5 comparable runs, best similarity=0.87, deviation=0.40, novelty=0.13, recommendation='continue'.",
+      "notes": [
+        "matched_run_count=5",
+        "review_rate=0.70",
+        "deviation_driver=actor_turn_count"
+      ],
+      "matched_run_count": 5,
+      "historical_similarity_score": 0.8700000000000001,
+      "behavior_deviation_score": 0.4000522466039707,
+      "novelty_score": 0.13376984126984104,
+      "behavioral_recommended_directive": "continue",
+      "behavioral_flags": [],
+      "matched_run_ids": [
+        "layer2-793ec043-055b-41f7-ba58-7660e8b134e0",
+        "layer2-66757d08-54ac-42c9-b398-95288169effc",
+        "layer2-a5faa4de-1669-4959-b08d-bdeefa77a23f",
+        "layer2-931522a5-5111-4a0a-a54f-10083b803ab1",
+        "layer2-841b8d53-f4a5-4f48-9530-7452a5aab4da"
+      ]
+    },
+    {
+      "history_available": true,
+      "historical_run_count": 77,
+      "feature_snapshot_version": "behavioral_features_v2",
+      "summary": "Behavioral analysis matched 5 comparable runs, best similarity=0.88, deviation=0.40, novelty=0.13, recommendation='continue'.",
+      "notes": [
+        "matched_run_count=5",
+        "review_rate=0.70",
+        "deviation_driver=replan_count"
+      ],
+      "matched_run_count": 5,
+      "historical_similarity_score": 0.8780000000000001,
+      "behavior_deviation_score": 0.39762426900584796,
+      "novelty_score": 0.13102380952380932,
+      "behavioral_recommended_directive": "continue",
+      "behavioral_flags": [],
+      "matched_run_ids": [
+        "layer2-606e2899-cf1b-4e47-a3a5-ddede9a756c8",
+        "layer2-b44d24b6-cedd-462e-b99e-bd8096e10508",
+        "layer2-66757d08-54ac-42c9-b398-95288169effc",
+        "layer2-7f317594-b542-4ac2-b551-bcde63b205a2",
+        "layer2-17649bf6-2bcd-4106-9ba9-1687864c34e0"
+      ]
+    },
+    {
+      "history_available": true,
+      "historical_run_count": 77,
+      "feature_snapshot_version": "behavioral_features_v2",
+      "summary": "Behavioral analysis matched 5 comparable runs, best similarity=0.89, deviation=0.39, novelty=0.13, recommendation='continue'.",
+      "notes": [
+        "matched_run_count=5",
+        "review_rate=0.70",
+        "deviation_driver=replan_count"
+      ],
+      "matched_run_count": 5,
+      "historical_similarity_score": 0.8940000000000001,
+      "behavior_deviation_score": 0.3935846030473135,
+      "novelty_score": 0.1310079365079364,
+      "behavioral_recommended_directive": "continue",
+      "behavioral_flags": [],
+      "matched_run_ids": [
+        "layer2-606e2899-cf1b-4e47-a3a5-ddede9a756c8",
+        "layer2-66757d08-54ac-42c9-b398-95288169effc",
+        "layer2-7f317594-b542-4ac2-b551-bcde63b205a2",
+        "layer2-b44d24b6-cedd-462e-b99e-bd8096e10508",
+        "layer2-19f7b4a4-1003-4a45-9a94-6dcfa0216798"
+      ]
+    }
+  ],
+  "judge_assessments": [
+    {
+      "invoked": false,
+      "recommendation": "continue",
+      "confidence": 0.0,
+      "summary": "Judge not invoked for this governance pass.",
+      "rationale": "Static, dynamic, and behavioural signals did not require semantic review.",
+      "flags": [],
+      "evaluated_target": "actor_output"
+    },
+    {
+      "invoked": false,
+      "recommendation": "continue",
+      "confidence": 0.0,
+      "summary": "Judge not invoked for this governance pass.",
+      "rationale": "Static, dynamic, and behavioural signals did not require semantic review.",
+      "flags": [],
+      "evaluated_target": "actor_output"
+    },
+    {
+      "invoked": false,
+      "recommendation": "continue",
+      "confidence": 0.0,
+      "summary": "Judge not invoked for this governance pass.",
+      "rationale": "Static, dynamic, and behavioural signals did not require semantic review.",
+      "flags": [
+        "static_policy_terminal"
+      ],
+      "evaluated_target": "static_policy_terminal"
+    }
+  ],
+  "governance_decisions": [
+    {
+      "directive": "continue",
+      "policy_decision": "allow",
+      "reason_codes": [
+        "local_output_allowed"
+      ],
+      "summary": "Local output and replanning remain within policy. Dynamic policy preserved the static directive 'continue'. Evidence quality is strong (0.95), operational risk is low (0.00), and trajectory health is healthy (1.00). Behavioral analysis matched 5 comparable runs, best similarity=0.87, deviation=0.40, novelty=0.13, recommendation='continue'. Judge not invoked for this governance pass.",
+      "constrains_capability_use": false,
+      "evaluated_actor_result_type": "intermediate_output",
+      "evaluated_tool_name": null,
+      "policy_engine_name": "opa_http_policy_engine",
+      "policy_bundle_version": "layer2_governance_v1",
+      "policy_directive": "continue",
+      "oversight_recommended_directive": "continue",
+      "behavioral_recommended_directive": "continue",
+      "judge_recommended_directive": "continue",
+      "judge_invoked": false,
+      "static_policy_summary": "Local output and replanning remain within policy.",
+      "dynamic_policy_summary": "Evidence quality is strong (0.95), operational risk is low (0.00), and trajectory health is healthy (1.00).",
+      "behavioral_summary": "Behavioral analysis matched 5 comparable runs, best similarity=0.87, deviation=0.40, novelty=0.13, recommendation='continue'.",
+      "judge_summary": "Judge not invoked for this governance pass.",
+      "behavioral_similarity_score": 0.8700000000000001,
+      "behavioral_deviation_score": 0.4000522466039707,
+      "behavioral_novelty_score": 0.13376984126984104,
+      "oversight_summary": "Evidence quality is strong (0.95), operational risk is low (0.00), and trajectory health is healthy (1.00)."
+    },
+    {
+      "directive": "continue",
+      "policy_decision": "allow",
+      "reason_codes": [
+        "local_output_allowed"
+      ],
+      "summary": "Local output and replanning remain within policy. Dynamic policy preserved the static directive 'continue'. Evidence quality is strong (0.95), operational risk is low (0.00), and trajectory health is healthy (1.00). Behavioral analysis matched 5 comparable runs, best similarity=0.88, deviation=0.40, novelty=0.13, recommendation='continue'. Judge not invoked for this governance pass.",
+      "constrains_capability_use": false,
+      "evaluated_actor_result_type": "intermediate_output",
+      "evaluated_tool_name": null,
+      "policy_engine_name": "opa_http_policy_engine",
+      "policy_bundle_version": "layer2_governance_v1",
+      "policy_directive": "continue",
+      "oversight_recommended_directive": "continue",
+      "behavioral_recommended_directive": "continue",
+      "judge_recommended_directive": "continue",
+      "judge_invoked": false,
+      "static_policy_summary": "Local output and replanning remain within policy.",
+      "dynamic_policy_summary": "Evidence quality is strong (0.95), operational risk is low (0.00), and trajectory health is healthy (1.00).",
+      "behavioral_summary": "Behavioral analysis matched 5 comparable runs, best similarity=0.88, deviation=0.40, novelty=0.13, recommendation='continue'.",
+      "judge_summary": "Judge not invoked for this governance pass.",
+      "behavioral_similarity_score": 0.8780000000000001,
+      "behavioral_deviation_score": 0.39762426900584796,
+      "behavioral_novelty_score": 0.13102380952380932,
+      "oversight_summary": "Evidence quality is strong (0.95), operational risk is low (0.00), and trajectory health is healthy (1.00)."
+    },
+    {
+      "directive": "wait_human_review",
+      "policy_decision": "require_human_review",
+      "reason_codes": [
+        "external_communication_review_required"
+      ],
+      "summary": "External communication drafts must reach typed human review before any outward-facing progression. Dynamic policy preserved the static directive 'wait_human_review'. Evidence quality is strong (0.95), operational risk is low (0.00), and trajectory health is healthy (1.00). Behavioral analysis matched 5 comparable runs, best similarity=0.89, deviation=0.39, novelty=0.13, recommendation='continue'. Judge not invoked for this governance pass.",
+      "constrains_capability_use": true,
+      "evaluated_actor_result_type": "intermediate_output",
+      "evaluated_tool_name": null,
+      "policy_engine_name": "opa_http_policy_engine",
+      "policy_bundle_version": "layer2_governance_v1",
+      "policy_directive": "wait_human_review",
+      "oversight_recommended_directive": "continue",
+      "behavioral_recommended_directive": "continue",
+      "judge_recommended_directive": "continue",
+      "judge_invoked": false,
+      "static_policy_summary": "External communication drafts must reach typed human review before any outward-facing progression.",
+      "dynamic_policy_summary": "Evidence quality is strong (0.95), operational risk is low (0.00), and trajectory health is healthy (1.00).",
+      "behavioral_summary": "Behavioral analysis matched 5 comparable runs, best similarity=0.89, deviation=0.39, novelty=0.13, recommendation='continue'.",
+      "judge_summary": "Judge not invoked for this governance pass.",
+      "behavioral_similarity_score": 0.8940000000000001,
+      "behavioral_deviation_score": 0.3935846030473135,
+      "behavioral_novelty_score": 0.1310079365079364,
+      "oversight_summary": "Evidence quality is strong (0.95), operational risk is low (0.00), and trajectory health is healthy (1.00)."
+    }
+  ],
+  "oversight_assessments": [
+    {
+      "evidence_quality": {
+        "score": 0.95,
+        "level": "strong",
+        "reason_codes": [
+          "evidence_marked_sufficient",
+          "objective_marked_satisfied",
+          "actor_confidence_contributed",
+          "observed_evidence_present",
+          "source_locator_present",
+          "evidence_support_matches_step_need"
+        ]
+      },
+      "operational_risk": {
+        "score": 0.0,
+        "level": "low",
+        "reason_codes": [
+          "tool_risk_none",
+          "no_tool_request",
+          "no_capability",
+          "task_sensitivity_critical"
+        ]
+      },
+      "trajectory_health": {
+        "score": 1.0,
+        "level": "healthy",
+        "reason_codes": [
+          "actor_turns_within_limit",
+          "no_failed_tool_results",
+          "no_replan_needed"
+        ]
+      },
+      "recommended_directive": "continue",
+      "summary": "Evidence quality is strong (0.95), operational risk is low (0.00), and trajectory health is healthy (1.00).",
+      "reason_codes": [
+        "evidence_marked_sufficient",
+        "objective_marked_satisfied",
+        "actor_confidence_contributed",
+        "observed_evidence_present",
+        "source_locator_present",
+        "evidence_support_matches_step_need",
+        "tool_risk_none",
+        "no_tool_request",
+        "no_capability",
+        "task_sensitivity_critical",
+        "actor_turns_within_limit",
+        "no_failed_tool_results",
+        "no_replan_needed",
+        "recommend_continue"
+      ]
+    },
+    {
+      "evidence_quality": {
+        "score": 0.95,
+        "level": "strong",
+        "reason_codes": [
+          "evidence_marked_sufficient",
+          "objective_marked_satisfied",
+          "actor_confidence_contributed",
+          "observed_evidence_present",
+          "source_locator_present",
+          "evidence_support_matches_step_need"
+        ]
+      },
+      "operational_risk": {
+        "score": 0.0,
+        "level": "low",
+        "reason_codes": [
+          "tool_risk_none",
+          "no_tool_request",
+          "no_capability",
+          "task_sensitivity_critical"
+        ]
+      },
+      "trajectory_health": {
+        "score": 1.0,
+        "level": "healthy",
+        "reason_codes": [
+          "actor_turns_within_limit",
+          "no_failed_tool_results",
+          "no_replan_needed"
+        ]
+      },
+      "recommended_directive": "continue",
+      "summary": "Evidence quality is strong (0.95), operational risk is low (0.00), and trajectory health is healthy (1.00).",
+      "reason_codes": [
+        "evidence_marked_sufficient",
+        "objective_marked_satisfied",
+        "actor_confidence_contributed",
+        "observed_evidence_present",
+        "source_locator_present",
+        "evidence_support_matches_step_need",
+        "tool_risk_none",
+        "no_tool_request",
+        "no_capability",
+        "task_sensitivity_critical",
+        "actor_turns_within_limit",
+        "no_failed_tool_results",
+        "no_replan_needed",
+        "recommend_continue"
+      ]
+    },
+    {
+      "evidence_quality": {
+        "score": 0.95,
+        "level": "strong",
+        "reason_codes": [
+          "evidence_marked_sufficient",
+          "objective_marked_satisfied",
+          "actor_confidence_contributed",
+          "observed_evidence_present",
+          "source_locator_present",
+          "evidence_support_matches_step_need"
+        ]
+      },
+      "operational_risk": {
+        "score": 0.0,
+        "level": "low",
+        "reason_codes": [
+          "tool_risk_none",
+          "no_tool_request",
+          "no_capability",
+          "task_sensitivity_critical"
+        ]
+      },
+      "trajectory_health": {
+        "score": 1.0,
+        "level": "healthy",
+        "reason_codes": [
+          "actor_turns_within_limit",
+          "no_failed_tool_results",
+          "no_replan_needed"
+        ]
+      },
+      "recommended_directive": "continue",
+      "summary": "Evidence quality is strong (0.95), operational risk is low (0.00), and trajectory health is healthy (1.00).",
+      "reason_codes": [
+        "evidence_marked_sufficient",
+        "objective_marked_satisfied",
+        "actor_confidence_contributed",
+        "observed_evidence_present",
+        "source_locator_present",
+        "evidence_support_matches_step_need",
+        "tool_risk_none",
+        "no_tool_request",
+        "no_capability",
+        "task_sensitivity_critical",
+        "actor_turns_within_limit",
+        "no_failed_tool_results",
+        "no_replan_needed",
+        "recommend_continue"
       ]
     }
   ],
   "human_review": {
     "pending_request": {
-      "request_id": "layer2-a40b70e4-e59b-4644-8965-efaf0758062a:human_review:2:step_2",
-      "thread_id": "layer2-a40b70e4-e59b-4644-8965-efaf0758062a",
+      "request_id": "layer2-6adf089a-8c97-40ba-86e4-9ec17f27bca5:human_review:6:step_4",
+      "thread_id": "layer2-6adf089a-8c97-40ba-86e4-9ec17f27bca5",
       "current_state": "waiting_human_review",
       "resume_state": "ready_next_step",
-      "current_plan_step_id": "step_2",
-      "current_plan_step_objective": "Identificare e descrivere le informazioni/documenti necessari per procedere con la condivisione",
+      "current_plan_step_id": "step_4",
+      "current_plan_step_objective": "Refine wording to minimize risk while maintaining clarity, including EU sensitivity phrasing and scope boundaries.",
       "actor_result_type": "intermediate_output",
       "current_tool_request": null,
       "governance_directive": "wait_human_review",
-      "governance_summary": "Local output and replanning remain within policy. Adaptive oversight made the decision more conservative: policy directive 'continue' became 'wait_human_review'. Evidence quality is strong (0.70), operational risk is high (0.61), and trajectory health is healthy (1.00).",
-      "oversight_summary": "Evidence quality is strong (0.70), operational risk is high (0.61), and trajectory health is healthy (1.00).",
+      "governance_summary": "External communication drafts must reach typed human review before any outward-facing progression. Dynamic policy preserved the static directive 'wait_human_review'. Evidence quality is strong (0.95), operational risk is low (0.00), and trajectory health is healthy (1.00). Behavioral analysis matched 5 comparable runs, best similarity=0.89, deviation=0.39, novelty=0.13, recommendation='continue'. Judge not invoked for this governance pass.",
+      "static_policy_summary": "External communication drafts must reach typed human review before any outward-facing progression.",
+      "dynamic_policy_summary": "Evidence quality is strong (0.95), operational risk is low (0.00), and trajectory health is healthy (1.00).",
+      "behavioral_summary": "Behavioral analysis matched 5 comparable runs, best similarity=0.89, deviation=0.39, novelty=0.13, recommendation='continue'.",
+      "judge_summary": "Judge not invoked for this governance pass.",
+      "oversight_summary": "Evidence quality is strong (0.95), operational risk is low (0.00), and trajectory health is healthy (1.00).",
+      "external_communication_target_type": "external_communication",
+      "external_communication_draft": {
+        "channel": "external_communication",
+        "recipient": null,
+        "subject": null,
+        "body": "Subject: Urgent: EU Customer Notification Pipeline Incident – Immediate Action Required (Response Needed within 60 minutes) Hi Acme Cloud Operations Team, We have detected a runtime incident affecting the EU customer notification pipeline at **09:12 CET on 25 May 2026**. The issue is causing intermittent delivery failures for transactional notifications and delayed processing for some EU tenants. The incident is **still under investigation**. At this time, there is **no confirmed data loss**, but the observed delays are impacting service reliability. **Requested actions (please complete as a priority):** 1. **Manually verify** the health, backlog, and processing state of the EU notification delivery queues. 2. **Check the retry backlog** to determine whether retries are accumulating, failing, or being processed as expected. 3. **Confirm whether any customer‑facing impact** extends beyond the EU notification pipeline (e.g., other services or regions). Please provide a status update covering the above items **within the next 60 minutes** and send it directly to the incident lead, **[Incident Lead Name]**, at **[lead‑email@example.com]**. Your prompt attention is critical to mitigate any further impact on our EU customers. Thank you for your swift cooperation. Best regards, [Your Name] Incident Lead – EU Notification Services [Your Contact Information]",
+        "metadata": {
+          "source": "actor_output",
+          "content_format": "markdown",
+          "review_ready": true
+        }
+      },
       "reason_codes": [
-        "local_output_allowed",
+        "external_communication_review_required",
         "evidence_marked_sufficient",
         "objective_marked_satisfied",
         "actor_confidence_contributed",
-        "observed_evidence_missing",
-        "source_locator_missing",
+        "observed_evidence_present",
+        "source_locator_present",
         "evidence_support_matches_step_need",
-        "tool_risk_medium",
-        "task_sensitivity_high",
-        "read_only_capability",
+        "tool_risk_none",
+        "no_tool_request",
+        "no_capability",
+        "task_sensitivity_critical",
         "actor_turns_within_limit",
         "no_failed_tool_results",
         "no_replan_needed",
-        "recommend_human_review"
+        "recommend_continue"
       ],
       "allowed_decisions": [
         "approve_continue",
         "approve_continue_read_only",
+        "modify_and_continue",
         "request_more_evidence",
         "replan",
         "ask_clarification",
         "abort"
       ],
-      "review_summary": "Local output and replanning remain within policy. Adaptive oversight made the decision more conservative: policy directive 'continue' became 'wait_human_review'. Evidence quality is strong (0.70), operational risk is high (0.61), and trajectory health is healthy (1.00). Approval would resume to 'ready_next_step'."
+      "review_summary": "External communication drafts must reach typed human review before any outward-facing progression. Dynamic policy preserved the static directive 'wait_human_review'. Evidence quality is strong (0.95), operational risk is low (0.00), and trajectory health is healthy (1.00). Behavioral analysis matched 5 comparable runs, best similarity=0.89, deviation=0.39, novelty=0.13, recommendation='continue'. Judge not invoked for this governance pass. The external communication draft can be modified and submitted in this review step. Approval would resume to 'ready_next_step'."
     },
     "last_request": null,
     "last_decision": null,
     "decision_history": []
+  },
+  "external_communication": {
+    "phase": "human_review_required",
+    "draft": {
+      "channel": "external_communication",
+      "recipient": null,
+      "subject": null,
+      "body": "Subject: Urgent: EU Customer Notification Pipeline Incident – Immediate Action Required (Response Needed within 60 minutes) Hi Acme Cloud Operations Team, We have detected a runtime incident affecting the EU customer notification pipeline at **09:12 CET on 25 May 2026**. The issue is causing intermittent delivery failures for transactional notifications and delayed processing for some EU tenants. The incident is **still under investigation**. At this time, there is **no confirmed data loss**, but the observed delays are impacting service reliability. **Requested actions (please complete as a priority):** 1. **Manually verify** the health, backlog, and processing state of the EU notification delivery queues. 2. **Check the retry backlog** to determine whether retries are accumulating, failing, or being processed as expected. 3. **Confirm whether any customer‑facing impact** extends beyond the EU notification pipeline (e.g., other services or regions). Please provide a status update covering the above items **within the next 60 minutes** and send it directly to the incident lead, **[Incident Lead Name]**, at **[lead‑email@example.com]**. Your prompt attention is critical to mitigate any further impact on our EU customers. Thank you for your swift cooperation. Best regards, [Your Name] Incident Lead – EU Notification Services [Your Contact Information]",
+      "metadata": {
+        "source": "actor_output",
+        "content_format": "markdown",
+        "review_ready": true
+      }
+    },
+    "last_applied_edit": null,
+    "edit_history": [],
+    "last_transition_summary": "The draft proposal reached a typed human review gate before any external execution."
   }
 }

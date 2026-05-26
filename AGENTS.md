@@ -46,6 +46,7 @@ It already includes:
 - typed human-review requests and decisions with LangGraph `interrupt / resume`
 - durable local LangGraph checkpoint persistence and per-thread runtime artifacts on disk
 - typed `external_communication` phase tracking for evidence, draft, review/edit, approval, and blocked states
+- the external communication draft body is taken from the latest governed draft output for the branch, while the trace retains the canonical final body and diagnostics for claim precision vs typed evidence requirements
 - typed runtime trace export through `trace.py`, surfaced by `src/main_layer2.py`
 - offline trace evaluation and reporting through `evaluation.py`, surfaced by `src/main_layer2_evaluation.py`
 
@@ -167,9 +168,11 @@ Main files:
 Current design:
 
 - `state.py` defines the bootstrap state contract, runtime flags, planner snapshot models, actor execution snapshot, tool loop state, observed evidence, audit-safe scratchpad entries, typed step validations, layered governance histories, runtime step outcomes, and the typed `external_communication` subflow state
+- `state.py` now also carries typed semantic step metadata on `PlanStep` itself: `step_kind`, `evidence_requirement`, and `claim_precision_ceiling`, with legacy-compatible defaults for older planners/replanners
 - `nodes.py` contains `bootstrap_from_intake`, `planner`, `actor`, `governance`, `human_review`, `tool_gateway`, `observe_tool_result`, `replanner`, and bootstrap closure helpers
 - `planning.py` defines the planner port, prompt builders, and the default OpenAI-backed planner
 - `acting.py` defines the actor port, prompt builders, the temporary OpenRouter-backed actor, and the optional OpenAI-backed actor using runtime-bound tools instead of a prompt-only tool inventory
+- `actor_contract.py` now passes explicit evidence-support metadata to the actor, including `required_evidence_support_level`, `max_supported_claim_precision`, and the current `step_kind`
 - `replanning.py` defines the replanner port, prompt builders, the default OpenAI-backed replanner, and a local conservative fallback replanner for tests/offline use
 - `actor_contract.py` defines the typed handoff from planner state into actor-facing execution context for the current plan step, including observed evidence, scratchpad entries, and prior step validations
 - `tool_contract.py` defines typed tool requests, tool results, and observed evidence contracts
@@ -180,10 +183,12 @@ Current design:
 - `behavioral.py` defines the behavioural foundation contract, SQLite-backed historical read model, similarity/deviation/novelty scoring, and conservative behavioural recommendations
 - `judge.py` defines the selective semantic judge port, invocation policy, and typed judge assessments
 - `oversight.py` defines deterministic dynamic policy assessment for `evidence_quality`, `operational_risk`, and `trajectory_health`, plus the recommendation consumed by governance
+- `oversight.py` now resolves operational risk from an explicit runtime posture (`none`, `read_only`, `write`) and resolves evidence requirements from typed plan-step metadata before falling back to legacy heuristics
+- `configs/layer2_oversight_policy.json` now includes a `tool_risk.none` level so no-tool executions are not treated as the old medium-risk default
 - `openrouter_client.py` defines the OpenRouter HTTP adapter used by the temporary Layer 2 actor test backend
 - `persistence.py` defines the durable disk-backed LangGraph saver plus the per-thread runtime artifact store used for trace, dashboard, and HITL persistence
-- `trace.py` defines the typed, JSON-exportable Layer 2 runtime trace contract used for debugging, thesis evidence, HITL payloads, and evaluation
-- `evaluation.py` defines the offline trace evaluation pipeline that reads exported trace JSON and produces JSON and Markdown reports
+- `trace.py` defines the typed, JSON-exportable Layer 2 runtime trace contract used for debugging, thesis evidence, HITL payloads, and evaluation, including resolved evidence-requirement provenance for each plan step
+- `evaluation.py` defines the offline trace evaluation pipeline that reads exported trace JSON and produces JSON and Markdown reports, including typed-vs-heuristic evidence mismatch accounting
 - `hitl_dashboard.py` defines the dashboard-facing snapshot model derived from `TaskState`, governance, oversight, and HITL review payloads
 - `main_layer2_dashboard.py` now acts as a single-run operator control plane with typed resume actions, inline validation feedback, and rich edit support for `external_communication`
 - `configs/layer2_oversight_policy.json` defines the explicit weights, thresholds, risk scores, sensitivity multipliers, and trajectory penalties used by the dynamic policy layer
@@ -301,10 +306,12 @@ Current relevant files:
 - external communication drafts are explicit runtime state; the operator-facing payload is a single markdown body, while policy distinguishes between partial draft assembly and review-ready governed drafts before opening HITL
 - the planner/executor split should remain aligned with `docs/plan-and-execute.ipynb` unless there is a clear thesis-driven reason to diverge
 - planner output must remain semantic and typed
+- planner output may now include typed `step_kind`, `evidence_requirement`, and `claim_precision_ceiling` metadata on each semantic step; older outputs without those fields remain valid
 - planner output must not contain concrete tool calls, executable payloads, or framework-specific actions
 - small source-plus-short-summary tasks may be deterministically compacted from an over-decomposed source/extraction/synthesis pipeline into a proportional two-step trajectory
 - actor execution must operate on the current plan step, not on the full task as a second planner
 - actor output must remain typed and compact even when backed by an LLM
+- actor prompts and runtime hints should receive explicit evidence-support ceilings from the runtime contract instead of inferring them only from free-form wording
 - the current Layer 2 actor backend is OpenRouter with `openai/gpt-oss-120b:free` for first cloud-based tests; this remains a temporary test choice before moving to a stable large cloud model
 - planner and replanner remain OpenAI-backed for now
 - actor provider selection is controlled by `LAYER2_ACTOR_PROVIDER`, with supported values `openrouter` and `openai`
@@ -317,12 +324,14 @@ Current relevant files:
 - plan steps should be completed only after a typed `StepValidation` indicates that the objective is satisfied and evidence is sufficient
 - observed evidence now carries an explicit support level (`local_only`, `source_discovery`, `high_level_summary`, `detailed_extracted`, `primary_legal`) so the runtime can reason about how much claim precision the evidence can safely support
 - observed evidence now also carries an explicit provenance kind: `intake_provided` for authoritative Layer 1 task inputs and `tool_observation` for tool-derived runtime evidence; `source_tool` is therefore optional and only set for tool-observed evidence
+- `PlanStep`-level evidence requirements should now be typed first; wording-based heuristics are fallback-only and should remain conservative
 - bootstrap now materializes authoritative task-provided facts/requirements from Layer 1 into initial `observed_evidence` entries with support level `local_only`, so local drafting/transformation steps can stay grounded even before any tool call occurs
 - official timeline facts such as `entered into force`, `applies from`, `applies on`, and similar chronology statements are usually `detailed_extracted`; only threshold, article-level, or similarly strict legal claims should force `primary_legal`
 - conservative high-level summaries can be supported by `high_level_summary` evidence even when they mention broad policy themes such as gatekeepers or obligation themes; only granular, specific, article-level, threshold, or clause-like claims should force `detailed_extracted` or `primary_legal`
 - when a step is explicitly short, brief, concise, or high-level, the actor should reduce claim precision before requesting more evidence; named obligation examples such as self-preferencing, interoperability, data portability, ranking, non-discriminatory access, or transparent terms should appear only when directly present in observed evidence or specifically requested
 - governance guardrails must remain proportional: multiple safe-by-design checks should not combine into an execution-degrading loop when the task can be completed by lowering precision to the available evidence level
 - source discovery alone is not factual support; simple URL discovery is weaker than extracted content and should not justify detailed factual completion by itself
+- evaluation now distinguishes mismatch caused by typed requirements from mismatch caused by heuristic fallback, using resolved provenance exported in the trace
 - actor completion outputs that are more specific than the available evidence support level should remain in-progress rather than complete the step, even when the LLM self-reports `objective_satisfied=true` and `evidence_sufficient=true`
 - deterministic dynamic policy may request more evidence when the evaluated step/output requires a stronger evidence support level than the observed evidence currently provides
 - `INTERMEDIATE_OUTPUT` is a progress/local-output outcome and must not automatically complete the current plan step without positive validation

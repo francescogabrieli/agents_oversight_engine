@@ -8,7 +8,7 @@ from typing import Any, Iterable, Sequence
 
 
 # Version the offline evaluation contract so report consumers can track changes over time.
-EVALUATION_REPORT_VERSION = "layer2_offline_evaluation_v1"
+EVALUATION_REPORT_VERSION = "layer2_offline_evaluation_v2"
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,8 @@ class Layer2EvaluationRun:
     governance_directive_counts: dict[str, int]
     human_review_decision_counts: dict[str, int]
     evidence_support_counts: dict[str, int]
+    typed_requirement_mismatch_count: int
+    heuristic_requirement_mismatch_count: int
     tool_call_count: int
     failed_tool_count: int
     duplicate_block_count: int
@@ -58,6 +60,8 @@ class Layer2EvaluationAggregate:
     human_review_decision_distribution: dict[str, int]
     unresolved_human_review_count: int
     evidence_support_distribution: dict[str, int]
+    typed_requirement_mismatch_total: int
+    heuristic_requirement_mismatch_total: int
     tool_call_total: int
     failed_tool_total: int
     duplicate_block_total: int
@@ -188,6 +192,14 @@ def layer2_evaluation_report_to_markdown(report: Layer2EvaluationReport) -> str:
                 "Evidence support distribution",
                 _format_counts(aggregate.evidence_support_distribution),
             ),
+            _markdown_table_row(
+                "Typed requirement mismatch total",
+                str(aggregate.typed_requirement_mismatch_total),
+            ),
+            _markdown_table_row(
+                "Heuristic requirement mismatch total",
+                str(aggregate.heuristic_requirement_mismatch_total),
+            ),
             _markdown_table_row("Tool calls total", str(aggregate.tool_call_total)),
             _markdown_table_row("Failed tool total", str(aggregate.failed_tool_total)),
             _markdown_table_row("Duplicate block total", str(aggregate.duplicate_block_total)),
@@ -280,6 +292,8 @@ def _normalize_trace_payload(payload: Any, *, source_path: Path) -> _NormalizedT
         intake=_normalize_intake(intake, source_path=source_path),
         actor=_normalize_actor(actor, source_path=source_path),
         execution=_normalize_execution(execution, source_path=source_path),
+        plan_steps=_normalize_plan_steps(payload.get("plan_steps"), source_path=source_path),
+        current_plan_step_id=_optional_text(payload.get("current_plan_step_id")),
         tool_calls=_normalize_tool_calls(payload.get("tool_calls"), source_path=source_path),
         observed_evidence=_normalize_observed_evidence(
             payload.get("observed_evidence"),
@@ -312,6 +326,9 @@ def _evaluate_normalized_trace(
     evidence_support_counts = _count_values(
         evidence.support_level for evidence in normalized.observed_evidence
     )
+    typed_requirement_mismatch_count, heuristic_requirement_mismatch_count = _count_requirement_mismatches(
+        normalized=normalized
+    )
 
     tool_call_count = len(normalized.tool_calls)
     failed_tool_count = sum(1 for call in normalized.tool_calls if call.success is False)
@@ -332,6 +349,8 @@ def _evaluate_normalized_trace(
         governance_directive_counts=governance_directive_counts,
         human_review_decision_counts=human_review_decision_counts,
         evidence_support_counts=evidence_support_counts,
+        typed_requirement_mismatch_count=typed_requirement_mismatch_count,
+        heuristic_requirement_mismatch_count=heuristic_requirement_mismatch_count,
         tool_call_count=tool_call_count,
         failed_tool_count=failed_tool_count,
         duplicate_block_count=duplicate_block_count,
@@ -373,6 +392,12 @@ def _build_aggregate(
     evidence_support_distribution = _merge_nested_counts(
         run.evidence_support_counts for run in parsed_runs
     )
+    typed_requirement_mismatch_total = sum(
+        run.typed_requirement_mismatch_count for run in parsed_runs
+    )
+    heuristic_requirement_mismatch_total = sum(
+        run.heuristic_requirement_mismatch_count for run in parsed_runs
+    )
 
     total_governance_decisions = sum(governance_directive_distribution.values())
     escalation_count = sum(
@@ -407,6 +432,8 @@ def _build_aggregate(
         human_review_decision_distribution=human_review_decision_distribution,
         unresolved_human_review_count=unresolved_human_review_count,
         evidence_support_distribution=evidence_support_distribution,
+        typed_requirement_mismatch_total=typed_requirement_mismatch_total,
+        heuristic_requirement_mismatch_total=heuristic_requirement_mismatch_total,
         tool_call_total=tool_call_total,
         failed_tool_total=failed_tool_total,
         duplicate_block_total=duplicate_block_total,
@@ -438,6 +465,8 @@ def _failed_run(*, source_path: Path, status: str, error: str) -> Layer2Evaluati
         governance_directive_counts={},
         human_review_decision_counts={},
         evidence_support_counts={},
+        typed_requirement_mismatch_count=0,
+        heuristic_requirement_mismatch_count=0,
         tool_call_count=0,
         failed_tool_count=0,
         duplicate_block_count=0,
@@ -546,6 +575,15 @@ class _NormalizedObservedEvidence:
 
 
 @dataclass(frozen=True)
+class _NormalizedPlanStep:
+    step_id: str
+    evidence_requirement: str | None
+    claim_precision_ceiling: str | None
+    resolved_required_evidence_support_level: str | None
+    resolved_required_evidence_support_source: str | None
+
+
+@dataclass(frozen=True)
 class _NormalizedGovernanceDecision:
     directive: str
 
@@ -578,6 +616,8 @@ class _NormalizedTracePayload:
     intake: _NormalizedIntake
     actor: _NormalizedActor
     execution: _NormalizedExecution
+    plan_steps: tuple[_NormalizedPlanStep, ...]
+    current_plan_step_id: str | None
     tool_calls: tuple[_NormalizedToolCall, ...]
     observed_evidence: tuple[_NormalizedObservedEvidence, ...]
     governance_decisions: tuple[_NormalizedGovernanceDecision, ...]
@@ -703,6 +743,29 @@ def _normalize_observed_evidence(
     )
 
 
+# Normalize the retained plan-step metadata used for evidence requirement analysis.
+def _normalize_plan_steps(
+    payload: Any,
+    *,
+    source_path: Path,
+) -> tuple[_NormalizedPlanStep, ...]:
+    items = _normalize_optional_list(payload, source_path=source_path, field_name="plan_steps")
+    return tuple(
+        _NormalizedPlanStep(
+            step_id=_require_str(item, "step_id", source_path=source_path),
+            evidence_requirement=_optional_text(item.get("evidence_requirement")),
+            claim_precision_ceiling=_optional_text(item.get("claim_precision_ceiling")),
+            resolved_required_evidence_support_level=_optional_text(
+                item.get("resolved_required_evidence_support_level")
+            ),
+            resolved_required_evidence_support_source=_optional_text(
+                item.get("resolved_required_evidence_support_source")
+            ),
+        )
+        for item in items
+    )
+
+
 # Normalize governance decisions.
 def _normalize_governance_decisions(
     payload: Any,
@@ -800,6 +863,92 @@ def _normalize_human_review(
         last_decision=last_decision,
         has_activity=bool(pending_request or last_decision or decision_history_items),
     )
+
+
+# Count evidence requirement mismatches separately for typed metadata and heuristic fallback traces.
+def _count_requirement_mismatches(
+    *,
+    normalized: _NormalizedTracePayload,
+) -> tuple[int, int]:
+    plan_step = _resolve_evaluated_plan_step(normalized=normalized)
+    if plan_step is None:
+        return 0, 0
+
+    available_level = _max_observed_evidence_support_level(normalized.observed_evidence)
+    required_level, source = _resolve_required_support_level(plan_step=plan_step)
+    if _evidence_support_level_rank(available_level) >= _evidence_support_level_rank(required_level):
+        return 0, 0
+
+    if source in {
+        "plan_step_evidence_requirement",
+        "plan_step_claim_precision_ceiling",
+        "plan_step_kind",
+        "step_validation",
+    }:
+        return 1, 0
+
+    return 0, 1
+
+
+# Resolve the plan step used for the evaluation mismatch check.
+def _resolve_evaluated_plan_step(
+    *,
+    normalized: _NormalizedTracePayload,
+) -> _NormalizedPlanStep | None:
+    if not normalized.plan_steps:
+        return None
+
+    if normalized.current_plan_step_id is not None:
+        for step in normalized.plan_steps:
+            if step.step_id == normalized.current_plan_step_id:
+                return step
+
+    return normalized.plan_steps[-1]
+
+
+# Resolve the effective requirement and its provenance from normalized trace data.
+def _resolve_required_support_level(
+    *,
+    plan_step: _NormalizedPlanStep,
+) -> tuple[str, str]:
+    if plan_step.resolved_required_evidence_support_level:
+        return plan_step.resolved_required_evidence_support_level, (
+            plan_step.resolved_required_evidence_support_source or "heuristic_step"
+        )
+
+    if plan_step.evidence_requirement:
+        return plan_step.evidence_requirement, "plan_step_evidence_requirement"
+
+    if plan_step.claim_precision_ceiling:
+        return plan_step.claim_precision_ceiling, "plan_step_claim_precision_ceiling"
+
+    return "local_only", "heuristic_step"
+
+
+# Return the strongest observed evidence level from the normalized trace.
+def _max_observed_evidence_support_level(
+    observed_evidence: tuple[_NormalizedObservedEvidence, ...],
+) -> str:
+    if not observed_evidence:
+        return "local_only"
+
+    strongest = "local_only"
+    for evidence in observed_evidence:
+        if _evidence_support_level_rank(evidence.support_level) > _evidence_support_level_rank(strongest):
+            strongest = evidence.support_level
+    return strongest
+
+
+# Order evidence support levels from weakest to strongest for evaluation comparisons.
+def _evidence_support_level_rank(level: str) -> int:
+    ordering = {
+        "local_only": 0,
+        "source_discovery": 1,
+        "high_level_summary": 2,
+        "detailed_extracted": 3,
+        "primary_legal": 4,
+    }
+    return ordering.get(level, 0)
 
 
 # Normalize an oversight score signal.

@@ -55,6 +55,7 @@ from layer2_runtime_governance import (
     JudgePort,
     JudgeRecommendedDirective,
     PlanStep,
+    PlanStepKind,
     PlanStepStatus,
     PlannerDecision,
     PolicyDecision,
@@ -3128,6 +3129,28 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertIn("normalized to the task scope", task_state.step_history[0].summary)
         self.assertIn("high-level evidence", task_state.plan_steps[0].objective)
         self.assertIn("precision level supported", task_state.plan_steps[1].objective)
+
+    def test_build_actor_task_uses_typed_evidence_metadata(self) -> None:
+        task_state = TaskState.from_intake(_build_research_intake_result(max_steps=None, max_tool_calls=None))
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Collect official sources.",
+                rationale="The step is source discovery.",
+                expected_outcome="A shortlist of official sources.",
+                step_kind=PlanStepKind.SOURCE_DISCOVERY,
+                evidence_requirement=EvidenceSupportLevel.SOURCE_DISCOVERY,
+                claim_precision_ceiling=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        task_state.current_plan_step_index = 0
+
+        actor_task = build_actor_task(task_state=task_state)
+
+        self.assertEqual(actor_task.step_kind, PlanStepKind.SOURCE_DISCOVERY)
+        self.assertEqual(actor_task.required_evidence_support_level, EvidenceSupportLevel.SOURCE_DISCOVERY)
+        self.assertEqual(actor_task.max_supported_claim_precision, EvidenceSupportLevel.HIGH_LEVEL_SUMMARY)
 
     # Verify source-level observation does not clone one global excerpt across many sources.
     def test_observe_tool_result_uses_single_fallback_evidence_for_multi_source_results(self) -> None:

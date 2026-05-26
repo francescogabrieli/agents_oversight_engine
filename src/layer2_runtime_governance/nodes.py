@@ -32,6 +32,7 @@ from .state import (
     ExternalCommunicationDraft,
     ExternalCommunicationPhase,
     PlanStep,
+    PlanStepKind,
     PlanStepStatus,
     RuntimeFlag,
     RuntimeState,
@@ -457,6 +458,9 @@ def _compact_small_source_summary_plan(
                 "A compact set of official source references plus enough high-level source "
                 "content or metadata to support a concise summary."
             ),
+            step_kind=PlanStepKind.SOURCE_DISCOVERY,
+            evidence_requirement=EvidenceSupportLevel.SOURCE_DISCOVERY,
+            claim_precision_ceiling=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
         ),
         PlanStep(
             step_id="step_2",
@@ -472,6 +476,9 @@ def _compact_small_source_summary_plan(
                 "A brief summary and official source list, with no unsupported thresholds, "
                 "article-level claims, or granular obligations."
             ),
+            step_kind=PlanStepKind.FINAL_SYNTHESIS,
+            evidence_requirement=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
+            claim_precision_ceiling=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
         ),
     ]
 
@@ -657,14 +664,20 @@ def _record_actor_execution(state: TaskState, *, actor_result: ActorResult) -> N
     state.last_tool_result = None
 
     if actor_result.result_type == ActorResultType.FINAL_OUTPUT:
-        state.final_output_text = actor_result.output_text
+        if state.task_spec.domain_type == DomainType.EXTERNAL_COMMUNICATION:
+            state.final_output_text = _build_external_communication_draft_body(state)
+        else:
+            state.final_output_text = actor_result.output_text
         state.current_plan_step_index = None
         return
 
     _advance_to_next_plan_step(state)
     # Promote the last completed step output into the canonical final output slot.
     if state.current_plan_step_index is None and actor_result.output_text:
-        state.final_output_text = actor_result.output_text
+        if state.task_spec.domain_type == DomainType.EXTERNAL_COMMUNICATION:
+            state.final_output_text = _build_external_communication_draft_body(state)
+        else:
+            state.final_output_text = actor_result.output_text
 
 
 # Keep the external communication subflow explicit even before outbound execution exists.
@@ -691,8 +704,8 @@ def _update_external_communication_after_actor_result(
     if actor_result.result_type == ActorResultType.BLOCKED:
         _set_external_communication_phase(
             state,
-            phase=ExternalCommunicationPhase.BLOCKED,
-            summary="The external communication branch is blocked pending operator resolution.",
+            phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
+            summary="The external communication branch hit a recoverable runtime block and remains in recovery.",
             review_ready=False,
         )
         return
@@ -817,9 +830,40 @@ def _merge_external_communication_draft(
         channel=current_draft.channel if current_draft is not None else "external_communication",
         recipient=current_draft.recipient if current_draft is not None else None,
         subject=current_draft.subject if current_draft is not None else None,
-        body=output_text,
+        body=_build_external_communication_draft_body(
+            state,
+            current_output_text=output_text,
+        ),
         metadata=metadata,
     )
+
+
+# Compose the governed external draft from the latest valid step output.
+def _build_external_communication_draft_body(
+    state: TaskState,
+    *,
+    current_output_text: str | None = None,
+) -> str | None:
+    current_fragment = (
+        current_output_text.strip()
+        if current_output_text is not None and current_output_text.strip()
+        else None
+    )
+    if current_fragment is not None:
+        return current_fragment
+
+    for step in reversed(state.executed_steps):
+        if step.output_text and step.output_text.strip():
+            return step.output_text.strip()
+
+    if state.external_communication is not None and state.external_communication.draft is not None:
+        draft_body = state.external_communication.draft.body
+        if draft_body and draft_body.strip():
+            return draft_body.strip()
+
+    if not state.executed_steps:
+        return None
+    return None
 
 
 # Advance the runtime cursor to the next semantic step after a completed execution.
@@ -849,9 +893,11 @@ def _map_actor_result_to_runtime_state(
 
     if actor_result.result_type in {
         ActorResultType.ASK_CLARIFICATION,
-        ActorResultType.BLOCKED,
     }:
         return RuntimeState.WAITING_HUMAN_REVIEW
+
+    if actor_result.result_type == ActorResultType.BLOCKED:
+        return RuntimeState.ACTING
 
     if actor_result.result_type == ActorResultType.PROPOSE_ACTION:
         return RuntimeState.READY_TOOL_EXECUTION

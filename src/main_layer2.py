@@ -70,6 +70,7 @@ def run_layer2_flow(
     artifact_store: RuntimeArtifactStore | None = None,
     progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
     hitl_event_callback: Callable[[TaskState], None] | None = None,
+    live_trace: bool = False,
 ) -> dict[str, Any]:
     # Run Layer 1 plus the current Layer 2 graph and return the resulting trace.
     runtime_graph = build_runtime_graph(
@@ -128,6 +129,7 @@ def run_layer2_flow(
             thread_id=resolved_thread_id,
             config=config,
             progress_callback=progress_callback,
+            live_trace=live_trace,
         )
 
     # Return both layer boundaries so callers can inspect the handoff end to end.
@@ -194,6 +196,7 @@ def _stream_runtime_graph_with_progress(
     thread_id: str,
     config: dict[str, Any],
     progress_callback: Callable[[str, dict[str, Any]], None],
+    live_trace: bool,
 ) -> dict[str, Any]:
     final_result: dict[str, Any] = {}
     for chunk in runtime_graph.stream(
@@ -207,6 +210,13 @@ def _stream_runtime_graph_with_progress(
             node_update = update if isinstance(update, dict) else {}
             progress_callback(str(node_name), node_update)
             final_result.update(node_update)
+        if live_trace:
+            _print_live_trace_snapshot(
+                runtime_graph=runtime_graph,
+                config=config,
+                thread_id=thread_id,
+                tag="chunk",
+            )
 
     snapshot = runtime_graph.get_state(config)
     snapshot_values = snapshot.values if snapshot is not None else {}
@@ -216,6 +226,34 @@ def _stream_runtime_graph_with_progress(
         final_result["__interrupt__"] = list(snapshot.interrupts)
 
     return final_result
+
+
+# Print the current full trace snapshot during streaming so the terminal can follow the run live.
+def _print_live_trace_snapshot(
+    *,
+    runtime_graph: Any,
+    config: dict[str, Any],
+    thread_id: str,
+    tag: str,
+) -> None:
+    snapshot = runtime_graph.get_state(config)
+    if snapshot is None:
+        return
+    snapshot_values = snapshot.values if snapshot is not None else {}
+    if not isinstance(snapshot_values, dict):
+        return
+    task_state = snapshot_values.get("task_state")
+    intake_result = snapshot_values.get("intake_result")
+    if task_state is None or intake_result is None:
+        return
+
+    runtime_trace = build_layer2_runtime_trace(
+        thread_id=thread_id,
+        intake_result=intake_result,
+        task_state=task_state,
+    )
+    print(f"\n[Layer 2][trace:{tag}]", file=sys.stderr, flush=True)
+    print(layer2_trace_to_json(runtime_trace), file=sys.stderr, flush=True)
 
 
 # Read the post-run graph snapshot so invoke and stream paths share the same final-state contract.
@@ -406,6 +444,11 @@ def parse_cli_args() -> argparse.Namespace:
         help="Print the full trace instead of the compact summary.",
     )
     parser.add_argument(
+        "--live-trace",
+        action="store_true",
+        help="Print the full trace snapshot after each streamed node update.",
+    )
+    parser.add_argument(
         "--demo-intake-profile",
         choices=["research", "clarification"],
         default=None,
@@ -497,6 +540,7 @@ def main() -> None:
         checkpointer=checkpointer,
         progress_callback=None if args.quiet else _print_progress,
         hitl_event_callback=hitl_tracker.record,
+        live_trace=args.live_trace,
     )
     write_layer2_trace_file(trace, output_path=args.trace_file)
 

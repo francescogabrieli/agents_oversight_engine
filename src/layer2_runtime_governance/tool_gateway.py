@@ -53,6 +53,7 @@ class ToolCapability(str, Enum):
 
 # ToolRiskLevel records a coarse governance label for future policy use.
 class ToolRiskLevel(str, Enum):
+    NONE = "none"
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"

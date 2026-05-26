@@ -59,6 +59,16 @@ class PlanStepStatus(str, Enum):
     BLOCKED = "blocked"
 
 
+class PlanStepKind(str, Enum):
+    # Step kinds classify the semantic role of the current plan step.
+    LOCAL_TRANSFORMATION = "local_transformation"
+    SOURCE_DISCOVERY = "source_discovery"
+    HIGH_LEVEL_SUMMARY = "high_level_summary"
+    DETAILED_EXTRACTION = "detailed_extraction"
+    COMPLIANCE_OR_LEGAL = "compliance_or_legal"
+    FINAL_SYNTHESIS = "final_synthesis"
+
+
 class ScratchpadEntryType(str, Enum):
     # These are audit categories, not hidden reasoning transcripts.
     OBSERVATION = "observation"
@@ -114,6 +124,9 @@ class PlanStep:
     objective: str
     rationale: str
     expected_outcome: str
+    step_kind: PlanStepKind | None = None
+    evidence_requirement: EvidenceSupportLevel | None = None
+    claim_precision_ceiling: EvidenceSupportLevel | None = None
     status: PlanStepStatus = PlanStepStatus.PENDING
 
 
@@ -618,6 +631,7 @@ __all__ = [
     "HumanReviewExternalEdit",
     "HumanReviewRequest",
     "PlanStep",
+    "PlanStepKind",
     "PlanStepStatus",
     "PlannerDecision",
     "RuntimeFlag",

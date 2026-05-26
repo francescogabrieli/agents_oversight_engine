@@ -119,6 +119,8 @@ Rules:
 - Do not introduce exact dates, years, thresholds, deadlines, or other precise numeric/legal claims unless those details are directly present in the observed evidence or fetched content.
 - When the current step asks for a short, brief, concise, or high-level summary, keep obligation language broad unless a named example is directly present in observed evidence. Prefer "obligations and prohibitions for gatekeepers" over unsupported examples such as self-preferencing, interoperability, data portability, ranking, non-discriminatory access, or transparent terms.
 - If the runtime says available_evidence_support_level is high_level_summary, do not try to satisfy the step by becoming more granular; reduce claim precision instead.
+- Respect the explicit required_evidence_support_level and max_supported_claim_precision fields from the runtime contract.
+- If the available evidence is below the requirement, prefer lowering claim precision or requesting more evidence rather than inventing finer-grained claims.
 - Keep the turn compact, explicit, and directly actionable by the runtime.
 - Respect read_only_mode when it is true.
 - Do not emit chain-of-thought.
@@ -174,6 +176,21 @@ def build_actor_user_prompt(*, actor_task: ActorTask) -> str:
                 "objective": actor_task.current_plan_step.objective,
                 "rationale": actor_task.current_plan_step.rationale,
                 "expected_outcome": actor_task.current_plan_step.expected_outcome,
+                "step_kind": (
+                    actor_task.current_plan_step.step_kind.value
+                    if actor_task.current_plan_step.step_kind is not None
+                    else None
+                ),
+                "evidence_requirement": (
+                    actor_task.current_plan_step.evidence_requirement.value
+                    if actor_task.current_plan_step.evidence_requirement is not None
+                    else None
+                ),
+                "claim_precision_ceiling": (
+                    actor_task.current_plan_step.claim_precision_ceiling.value
+                    if actor_task.current_plan_step.claim_precision_ceiling is not None
+                    else None
+                ),
                 "status": actor_task.current_plan_step.status.value,
             },
             "plan_steps": [
@@ -324,6 +341,10 @@ def _build_actor_execution_hints(*, actor_task: ActorTask) -> dict[str, object]:
         "fetch_url_text_available": True,
         "available_evidence_support_level": available_support_level.value,
         "required_evidence_support_level": required_support_level.value,
+        "max_supported_claim_precision": actor_task.max_supported_claim_precision.value,
+        "step_kind": (
+            actor_task.step_kind.value if actor_task.step_kind is not None else None
+        ),
         "high_level_summary_mode": high_level_summary_mode,
         "avoid_granular_obligation_examples_unless_directly_observed": high_level_summary_mode,
         "safe_high_level_obligation_phrase": "obligations and prohibitions for gatekeepers",
@@ -383,16 +404,32 @@ def _required_evidence_support_level(
     actor_task: ActorTask,
     output_text: str | None,
 ) -> EvidenceSupportLevel:
-    required_level = _required_evidence_support_level_from_step(actor_task=actor_task)
-    if output_text and output_text.strip():
-        output_level = _required_evidence_support_level_from_output_text(text=output_text)
-        if _evidence_support_level_rank(output_level) > _evidence_support_level_rank(required_level):
-            return output_level
-    return required_level
+    return actor_task.required_evidence_support_level
+
+
+# Estimate how specific the current output draft is without changing the typed step requirement.
+def _output_claim_support_level(
+    *,
+    output_text: str | None,
+) -> EvidenceSupportLevel:
+    if not output_text or not output_text.strip():
+        return EvidenceSupportLevel.LOCAL_ONLY
+    return _required_evidence_support_level_from_output_text(text=output_text)
 
 
 # Infer the minimum support level from the semantic scope of the current step.
 def _required_evidence_support_level_from_step(*, actor_task: ActorTask) -> EvidenceSupportLevel:
+    if actor_task.current_plan_step.evidence_requirement is not None:
+        return actor_task.current_plan_step.evidence_requirement
+
+    if actor_task.current_plan_step.claim_precision_ceiling is not None:
+        return actor_task.current_plan_step.claim_precision_ceiling
+
+    if actor_task.current_plan_step.step_kind is not None:
+        return _required_evidence_support_level_from_step_kind(
+            step_kind=actor_task.current_plan_step.step_kind,
+        )
+
     scope_text = " ".join(
         part.strip()
         for part in (
@@ -483,6 +520,23 @@ def _required_evidence_support_level_from_step(*, actor_task: ActorTask) -> Evid
     ):
         return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
 
+    return EvidenceSupportLevel.LOCAL_ONLY
+
+
+# Map typed plan-step kinds to conservative evidence requirements when explicit metadata is absent.
+def _required_evidence_support_level_from_step_kind(*, step_kind) -> EvidenceSupportLevel:
+    if step_kind.value == "local_transformation":
+        return EvidenceSupportLevel.LOCAL_ONLY
+    if step_kind.value == "source_discovery":
+        return EvidenceSupportLevel.SOURCE_DISCOVERY
+    if step_kind.value == "high_level_summary":
+        return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
+    if step_kind.value == "detailed_extraction":
+        return EvidenceSupportLevel.DETAILED_EXTRACTED
+    if step_kind.value == "compliance_or_legal":
+        return EvidenceSupportLevel.PRIMARY_LEGAL
+    if step_kind.value == "final_synthesis":
+        return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
     return EvidenceSupportLevel.LOCAL_ONLY
 
 
@@ -789,7 +843,15 @@ def _guard_completion_against_unsupported_precision(
         actor_task=actor_task,
         output_text=output_text,
     )
-    if _evidence_support_level_rank(available_level) >= _evidence_support_level_rank(required_level):
+    output_claim_level = _output_claim_support_level(output_text=output_text)
+    effective_required_level = required_level
+    if _evidence_support_level_rank(output_claim_level) > _evidence_support_level_rank(
+        effective_required_level
+    ):
+        effective_required_level = output_claim_level
+    if _evidence_support_level_rank(available_level) >= _evidence_support_level_rank(
+        effective_required_level
+    ):
         return arguments
 
     guarded_arguments = dict(arguments)
@@ -804,8 +866,8 @@ def _guard_completion_against_unsupported_precision(
         "The current draft is more specific than the observed evidence currently supports."
     )
     support_gap_detail = (
-        f"available evidence level '{available_level.value}' is below required level "
-        f"'{required_level.value}'."
+        f"typed requirement is '{required_level.value}', but the current output claims "
+        f"'{output_claim_level.value}' precision while available evidence remains '{available_level.value}'."
     )
     if precision_markers:
         guarded_arguments["completion_rationale"] = (

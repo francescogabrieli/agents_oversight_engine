@@ -144,7 +144,21 @@ class Layer2EvaluationTests(unittest.TestCase):
 
             self.assertTrue(written_json.exists())
             self.assertTrue(written_md.exists())
-            self.assertEqual(json.loads(written_json.read_text(encoding="utf-8"))["report_version"], "layer2_offline_evaluation_v1")
+            self.assertEqual(
+                json.loads(written_json.read_text(encoding="utf-8"))["report_version"],
+                "layer2_offline_evaluation_v2",
+            )
+
+    def test_requirement_mismatch_counts_distinguish_typed_and_heuristic_sources(self) -> None:
+        with _workspace_temp_dir() as temp_path:
+            _write_trace_json(temp_path / "typed.json", _typed_requirement_mismatch_payload())
+            _write_trace_json(temp_path / "heuristic.json", _heuristic_requirement_mismatch_payload())
+
+            report = evaluate_layer2_trace_inputs([temp_path])
+
+        self.assertEqual(report.aggregate.parsed_runs, 2)
+        self.assertEqual(report.aggregate.typed_requirement_mismatch_total, 1)
+        self.assertEqual(report.aggregate.heuristic_requirement_mismatch_total, 1)
 
 
 # Build a trace payload with deterministic metrics for the evaluation tests.
@@ -312,6 +326,8 @@ def _base_trace_payload(
         "execution": {
             "final_output_text": "Done." if current_state == "completed" else None,
         },
+        "plan_steps": [],
+        "current_plan_step_id": None,
         "tool_calls": deepcopy(tool_calls),
         "observed_evidence": deepcopy(observed_evidence),
         "governance_decisions": [{"directive": directive} for directive in governance_directives],
@@ -325,11 +341,79 @@ def _write_trace_json(path: Path, payload: dict[str, object]) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+# Build a trace payload that should count as a typed requirement mismatch.
+def _typed_requirement_mismatch_payload() -> dict[str, object]:
+    payload = _base_trace_payload(
+        thread_id="typed-mismatch",
+        current_state="completed",
+        governance_directives=["continue"],
+        human_review={
+            "pending_request": None,
+            "last_request": None,
+            "last_decision": None,
+            "decision_history": [],
+        },
+        observed_evidence=[{"support_level": "local_only"}],
+        tool_calls=[],
+        oversight_assessments=[],
+    )
+    payload["plan_steps"] = [
+        {
+            "step_id": "step_1",
+            "objective": "Produce a legally grounded answer.",
+            "rationale": "The step is explicit about legal precision.",
+            "expected_outcome": "A precise answer.",
+            "step_kind": "compliance_or_legal",
+            "evidence_requirement": "primary_legal",
+            "claim_precision_ceiling": "primary_legal",
+            "resolved_required_evidence_support_level": "primary_legal",
+            "resolved_required_evidence_support_source": "plan_step_evidence_requirement",
+            "status": "completed",
+        }
+    ]
+    payload["current_plan_step_id"] = "step_1"
+    return payload
+
+
+# Build a trace payload that should count as a heuristic fallback mismatch.
+def _heuristic_requirement_mismatch_payload() -> dict[str, object]:
+    payload = _base_trace_payload(
+        thread_id="heuristic-mismatch",
+        current_state="completed",
+        governance_directives=["continue"],
+        human_review={
+            "pending_request": None,
+            "last_request": None,
+            "last_decision": None,
+            "decision_history": [],
+        },
+        observed_evidence=[{"support_level": "local_only"}],
+        tool_calls=[],
+        oversight_assessments=[],
+    )
+    payload["plan_steps"] = [
+        {
+            "step_id": "step_1",
+            "objective": "Summarize the topic at a high level.",
+            "rationale": "The step is only discoverable from wording.",
+            "expected_outcome": "A concise summary.",
+            "step_kind": None,
+            "evidence_requirement": None,
+            "claim_precision_ceiling": None,
+            "resolved_required_evidence_support_level": "high_level_summary",
+            "resolved_required_evidence_support_source": "heuristic_step",
+            "status": "completed",
+        }
+    ]
+    payload["current_plan_step_id"] = "step_1"
+    return payload
+
+
 # Use a workspace-local throwaway directory so the test environment does not depend on temp permissions.
 @contextmanager
 def _workspace_temp_dir() -> Path:
-    temp_dir = REPO_ROOT / f"_layer2_eval_{uuid4().hex}"
-    temp_dir.mkdir()
+    temp_dir = REPO_ROOT / "artifacts" / "runtime" / f"_layer2_eval_{uuid4().hex}"
+    temp_dir.mkdir(parents=True, exist_ok=False)
     try:
         yield temp_dir
     finally:

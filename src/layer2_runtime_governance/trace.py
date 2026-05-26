@@ -18,8 +18,13 @@ from .judge import JudgeAssessment
 from .oversight import (
     DynamicPolicyAssessment,
     EvidenceQualityAssessment,
+    EvidenceRequirementSource,
     OperationalRiskAssessment,
     OversightAssessment,
+    _evidence_support_level_rank,
+    _output_claim_support_level,
+    _output_stays_within_intake_support,
+    resolve_required_evidence_support_context,
     TrajectoryHealthAssessment,
 )
 from .state import (
@@ -32,6 +37,7 @@ from .state import (
     StepRecord,
     StepValidation,
     TaskState,
+    PlanStepKind,
 )
 from .state import HumanReviewDecision, HumanReviewRequest
 from .tool_contract import ObservedEvidence, ToolExecutionResult, ToolRequest, ToolSource
@@ -77,6 +83,11 @@ class TracePlanStep:
     objective: str
     rationale: str
     expected_outcome: str
+    step_kind: str | None
+    evidence_requirement: str | None
+    claim_precision_ceiling: str | None
+    resolved_required_evidence_support_level: str | None
+    resolved_required_evidence_support_source: str | None
     status: str
 
 
@@ -93,6 +104,8 @@ class TraceActorTurn:
     output_text: str | None
     blocking_reason: str | None
     proposed_tool_name: str | None
+    output_claim_support_level: str | None
+    precision_mismatch_detected: bool
 
 
 @dataclass(frozen=True)
@@ -337,7 +350,9 @@ def build_layer2_runtime_trace(
         planner_prompt_version=task_state.planner_prompt_version,
         planner_rationale=task_state.planner_rationale,
         planning_source=_resolve_planning_source(task_state.planner_name),
-        plan_steps=tuple(_build_plan_step(step) for step in task_state.plan_steps),
+        plan_steps=tuple(
+            _build_plan_step(step=step, task_state=task_state) for step in task_state.plan_steps
+        ),
         current_plan_step_index=task_state.current_plan_step_index,
         current_plan_step_id=(
             task_state.current_plan_step.step_id if task_state.current_plan_step is not None else None
@@ -495,18 +510,37 @@ def _build_intake_summary(*, intake_result: IntakeResult) -> TraceIntakeSummary:
 
 
 # Convert one plan step into the trace representation.
-def _build_plan_step(step: Any) -> TracePlanStep:
+def _build_plan_step(*, step: Any, task_state: TaskState) -> TracePlanStep:
+    resolved_requirement = resolve_required_evidence_support_context(
+        task_state=task_state,
+        current_step=step,
+    )
     return TracePlanStep(
         step_id=step.step_id,
         objective=step.objective,
         rationale=step.rationale,
         expected_outcome=step.expected_outcome,
-        status=step.status.value,
+        step_kind=_enum_value(step.step_kind),
+        evidence_requirement=_enum_value(step.evidence_requirement),
+        claim_precision_ceiling=_enum_value(step.claim_precision_ceiling),
+        resolved_required_evidence_support_level=_enum_value(
+            resolved_requirement.required_level
+        ),
+        resolved_required_evidence_support_source=_enum_value(resolved_requirement.source),
+        status=_enum_value(step.status),
     )
 
 
 # Convert the latest actor result into the trace representation.
 def _build_actor_turn(*, actor_result: ActorResult | None, task_state: TaskState) -> TraceActorTurn:
+    resolved_requirement = (
+        resolve_required_evidence_support_context(task_state=task_state)
+        if actor_result is not None
+        else None
+    )
+    output_claim_level = (
+        _output_claim_support_level(task_state=task_state) if actor_result is not None else None
+    )
     return TraceActorTurn(
         actor_name=task_state.actor_name,
         actor_prompt_version=task_state.actor_prompt_version,
@@ -521,6 +555,16 @@ def _build_actor_turn(*, actor_result: ActorResult | None, task_state: TaskState
             actor_result.tool_request.tool_name.value
             if actor_result is not None and actor_result.tool_request is not None
             else None
+        ),
+        output_claim_support_level=output_claim_level.value if output_claim_level is not None else None,
+        precision_mismatch_detected=bool(
+            actor_result is not None
+            and actor_result.output_text
+            and resolved_requirement is not None
+            and output_claim_level is not None
+            and not _output_stays_within_intake_support(task_state=task_state)
+            and _evidence_support_level_rank(output_claim_level)
+            > _evidence_support_level_rank(resolved_requirement.required_level)
         ),
     )
 
@@ -968,6 +1012,17 @@ def _to_jsonable(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_to_jsonable(item) for item in value]
     return value
+
+
+# Convert enum-like values to plain strings while tolerating already materialized strings.
+def _enum_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, str):
+        return value
+    return str(value)
 
 
 __all__ = [

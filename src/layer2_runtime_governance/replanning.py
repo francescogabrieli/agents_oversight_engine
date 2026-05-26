@@ -8,7 +8,8 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .state import PlanStep, PlanStepStatus, TaskState
+from .state import PlanStep, PlanStepKind, PlanStepStatus, TaskState
+from .tool_contract import EvidenceSupportLevel
 
 try:
     from openai import OpenAI
@@ -69,6 +70,9 @@ class _ReplanStepPayload(BaseModel):
     objective: str = Field(..., min_length=1)
     rationale: str = Field(..., min_length=1)
     expected_outcome: str = Field(..., min_length=1)
+    step_kind: PlanStepKind | None = None
+    evidence_requirement: EvidenceSupportLevel | None = None
+    claim_precision_ceiling: EvidenceSupportLevel | None = None
 
 
 class _ReplanningPayload(BaseModel):
@@ -93,6 +97,11 @@ Each replacement step must contain:
 - objective
 - rationale
 - expected_outcome
+
+If the runtime context makes it clear, also emit:
+- step_kind
+- evidence_requirement
+- claim_precision_ceiling
 
 Rules:
 - Do not modify or repeat completed steps.
@@ -275,6 +284,9 @@ class OpenAIReplanner(ReplannerPort):
                     objective=step.objective,
                     rationale=step.rationale,
                     expected_outcome=step.expected_outcome,
+                    step_kind=step.step_kind,
+                    evidence_requirement=step.evidence_requirement,
+                    claim_precision_ceiling=step.claim_precision_ceiling,
                     status=PlanStepStatus.PENDING,
                 )
                 for index, step in enumerate(payload.replacement_steps, start=1)
@@ -305,6 +317,9 @@ class LocalConservativeReplanner(ReplannerPort):
             objective=f"Recover from the blocked step: {current_step.objective}",
             rationale=f"The actor requested replanning because: {reason}",
             expected_outcome="A revised executable step that lets the runtime continue safely.",
+            step_kind=current_step.step_kind,
+            evidence_requirement=current_step.evidence_requirement,
+            claim_precision_ceiling=current_step.claim_precision_ceiling,
             status=PlanStepStatus.PENDING,
         )
 

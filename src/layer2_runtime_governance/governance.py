@@ -18,7 +18,14 @@ from .oversight import (
     DynamicPolicyAssessment,
     DynamicPolicyRecommendedDirective,
 )
-from .state import ExternalCommunicationPhase, RuntimeFlag, RuntimeState, StepValidationDecision, TaskState
+from .state import (
+    ExternalCommunicationPhase,
+    RuntimeFlag,
+    RuntimeState,
+    ScratchpadEntryType,
+    StepValidationDecision,
+    TaskState,
+)
 from .tool_contract import ToolName
 
 
@@ -367,8 +374,16 @@ def combine_governance_assessments(
         behavioral_assessment=behavioral_assessment,
         judge_assessment=judge_assessment,
     )
-    if _provider_runtime_action_missing(policy_input=policy_input):
+    repeated_recovery = _repeated_recovery_attempt_detected(task_state=task_state)
+    repeated_provider_failure = _repeated_provider_runtime_failure_detected(task_state=task_state)
+    if repeated_recovery and final_directive == GovernanceDirective.REQUEST_MORE_EVIDENCE:
         final_directive = GovernanceDirective.REPLAN
+    if _provider_runtime_action_missing(policy_input=policy_input):
+        final_directive = (
+            GovernanceDirective.WAIT_HUMAN_REVIEW
+            if repeated_provider_failure
+            else GovernanceDirective.REPLAN
+        )
     final_directive = _normalize_intermediate_output_directive(
         task_state=task_state,
         policy_input=policy_input,
@@ -390,17 +405,33 @@ def combine_governance_assessments(
         if judge_assessment is not None
         else JudgeRecommendedDirective.CONTINUE
     )
+    combined_summary = _build_combined_summary(
+        static_policy_assessment=static_policy_assessment,
+        final_directive=final_directive,
+        dynamic_policy_assessment=dynamic_policy_assessment,
+        behavioral_assessment=behavioral_assessment,
+        judge_assessment=judge_assessment,
+    )
+    summary_suffixes: list[str] = []
+    if repeated_recovery and final_directive == GovernanceDirective.REPLAN:
+        summary_suffixes.append(
+            "Repeated recovery on the same step triggered replanning to avoid a loop."
+        )
+    if repeated_provider_failure and final_directive == GovernanceDirective.WAIT_HUMAN_REVIEW:
+        summary_suffixes.append(
+            "Repeated provider runtime failures on the same step escalated to human review to avoid a replan loop."
+        )
+    if _provider_runtime_action_missing(policy_input=policy_input) and not repeated_provider_failure:
+        summary_suffixes.append(
+            "The actor provider returned no usable runtime action, so the runtime treated the event as recovery and replanned."
+        )
+    if summary_suffixes:
+        combined_summary = f"{combined_summary} {' '.join(summary_suffixes)}"
     return GovernanceDecisionTrace(
         directive=final_directive,
         policy_decision=static_policy_assessment.policy_decision,
         reason_codes=static_policy_assessment.reason_codes,
-        summary=_build_combined_summary(
-            static_policy_assessment=static_policy_assessment,
-            final_directive=final_directive,
-            dynamic_policy_assessment=dynamic_policy_assessment,
-            behavioral_assessment=behavioral_assessment,
-            judge_assessment=judge_assessment,
-        ),
+        summary=combined_summary,
         constrains_capability_use=constrains_capability_use(
             policy_input=policy_input,
             static_policy_assessment=static_policy_assessment,
@@ -509,6 +540,43 @@ def _provider_runtime_action_missing(*, policy_input: PolicyEvaluationInput) -> 
         policy_input.blocking_reason is not None
         and "Actor provider returned no usable runtime action" in policy_input.blocking_reason
     )
+
+
+# Escalate repeated same-step recovery attempts so the runtime does not spin on evidence requests.
+def _repeated_recovery_attempt_detected(*, task_state: TaskState) -> bool:
+    current_step = task_state.current_plan_step
+    actor_result = task_state.actor_result
+    if current_step is None or actor_result is None:
+        return False
+    if actor_result.result_type not in {
+        ActorResultType.INTERMEDIATE_OUTPUT,
+        ActorResultType.FINAL_OUTPUT,
+    }:
+        return False
+
+    repeated_request_count = sum(
+        1
+        for validation in task_state.step_validations
+        if validation.plan_step_id == current_step.step_id
+        and validation.next_action == StepValidationDecision.REQUEST_MORE_EVIDENCE
+    )
+    return repeated_request_count >= 2
+
+
+# Detect repeated provider failures on the same step so the runtime can stop a replan loop.
+def _repeated_provider_runtime_failure_detected(*, task_state: TaskState) -> bool:
+    current_step = task_state.current_plan_step
+    if current_step is None:
+        return False
+
+    repeated_failure_count = sum(
+        1
+        for entry in task_state.scratchpad
+        if entry.plan_step_id == current_step.step_id
+        and entry.entry_type == ScratchpadEntryType.UNCERTAINTY
+        and entry.summary.startswith("Actor provider returned no usable runtime action")
+    )
+    return repeated_failure_count >= 2
 
 
 # Keep the old public builder alive while internally delegating to the new layered combiner.

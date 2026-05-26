@@ -724,7 +724,7 @@ def _render_operator_actions_card(
         <div>
           <p class="eyebrow">Operator action required</p>
           <h2>Review and resume</h2>
-          <p class="lede">{html.escape(_compact_text(review_summary, 340))}</p>
+          <p class="lede">{html.escape(review_summary)}</p>
         </div>
         {_render_review_chips(snapshot=snapshot, pending_request=pending_request)}
       </div>

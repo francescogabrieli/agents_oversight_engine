@@ -9,6 +9,7 @@ from layer1_intake import ExecutionPolicy, IntakeMetadata, TaskSpec
 from .state import (
     ExecutedPlanStep,
     PlanStepStatus,
+    PlanStepKind,
     RuntimeFlag,
     RuntimeState,
     ScratchpadEntry,
@@ -17,6 +18,7 @@ from .state import (
     TaskState,
 )
 from .tool_contract import ObservedEvidence, ToolExecutionResult, ToolRequest
+from .tool_contract import EvidenceSupportLevel
 
 
 # CapabilityAccessMode keeps external-read and external-write intent explicit.
@@ -43,6 +45,9 @@ class ActorPlanStep:
     objective: str
     rationale: str
     expected_outcome: str
+    step_kind: PlanStepKind | None
+    evidence_requirement: EvidenceSupportLevel | None
+    claim_precision_ceiling: EvidenceSupportLevel | None
     status: PlanStepStatus
 
 
@@ -76,6 +81,9 @@ class ActorTask:
     actor_turn_count: int
     current_plan_step_index: int
     current_plan_step: ActorPlanStep
+    required_evidence_support_level: EvidenceSupportLevel
+    max_supported_claim_precision: EvidenceSupportLevel
+    step_kind: PlanStepKind | None = None
     planner_rationale: str | None = None
     planner_name: str | None = None
     planner_prompt_version: str | None = None
@@ -127,6 +135,9 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
             objective=step.objective,
             rationale=step.rationale,
             expected_outcome=step.expected_outcome,
+            step_kind=step.step_kind,
+            evidence_requirement=step.evidence_requirement,
+            claim_precision_ceiling=step.claim_precision_ceiling,
             status=step.status,
         )
         for step in task_state.plan_steps
@@ -162,6 +173,15 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
         actor_turn_count=task_state.actor_turn_count,
         current_plan_step_index=current_index,
         current_plan_step=actor_plan_steps[current_index],
+        required_evidence_support_level=_resolve_actor_required_evidence_support_level(
+            task_state=task_state,
+            current_step=task_state.current_plan_step,
+        ),
+        max_supported_claim_precision=_resolve_actor_claim_precision_ceiling(
+            task_state=task_state,
+            current_step=task_state.current_plan_step,
+        ),
+        step_kind=task_state.current_plan_step.step_kind,
         planner_rationale=task_state.planner_rationale,
         planner_name=task_state.planner_name,
         planner_prompt_version=task_state.planner_prompt_version,
@@ -175,6 +195,37 @@ def _compute_remaining_tool_calls(*, task_state: TaskState) -> int | None:
         return None
 
     return max(max_tool_calls - task_state.tool_call_count, 0)
+
+
+# Resolve the minimum evidence support level the actor should treat as required.
+def _resolve_actor_required_evidence_support_level(
+    *,
+    task_state: TaskState,
+    current_step,
+) -> EvidenceSupportLevel:
+    from .oversight import resolve_required_evidence_support_context
+
+    return resolve_required_evidence_support_context(
+        task_state=task_state,
+        current_step=current_step,
+    ).required_level
+
+
+# Resolve the maximum claim precision the actor may safely emit for the current step.
+def _resolve_actor_claim_precision_ceiling(
+    *,
+    task_state: TaskState,
+    current_step,
+) -> EvidenceSupportLevel:
+    resolved_level = _resolve_actor_required_evidence_support_level(
+        task_state=task_state,
+        current_step=current_step,
+    )
+    if current_step.claim_precision_ceiling is not None:
+        return current_step.claim_precision_ceiling
+    if current_step.evidence_requirement is not None:
+        return current_step.evidence_requirement
+    return resolved_level
 
 
 __all__ = [

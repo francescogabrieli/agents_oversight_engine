@@ -8,7 +8,8 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .state import PlanStep, PlannerDecision, TaskState
+from .state import PlanStep, PlanStepKind, PlannerDecision, TaskState
+from .tool_contract import EvidenceSupportLevel
 
 try:
     from openai import OpenAI
@@ -60,6 +61,9 @@ class _PlanStepPayload(BaseModel):
     objective: str = Field(..., min_length=1)
     rationale: str = Field(..., min_length=1)
     expected_outcome: str = Field(..., min_length=1)
+    step_kind: PlanStepKind | None = None
+    evidence_requirement: EvidenceSupportLevel | None = None
+    claim_precision_ceiling: EvidenceSupportLevel | None = None
 
 
 class _PlanningPayload(BaseModel):
@@ -83,6 +87,11 @@ Each item in plan_steps must contain:
 - objective
 - rationale
 - expected_outcome
+
+If you can classify the step safely, also emit:
+- step_kind
+- evidence_requirement
+- claim_precision_ceiling
 
 Rules:
 - Stay at the semantic planning level.
@@ -195,14 +204,17 @@ class OpenAIPlanner(PlannerPort):
             raise PlannerExecutionError("Planner returned no structured output.")
 
         plan_steps = [
-            PlanStep(
-                step_id=f"step_{index}",
-                objective=item.objective,
-                rationale=item.rationale,
-                expected_outcome=item.expected_outcome,
-            )
-            for index, item in enumerate(payload.plan_steps, start=1)
-        ]
+        PlanStep(
+            step_id=f"step_{index}",
+            objective=item.objective,
+            rationale=item.rationale,
+            expected_outcome=item.expected_outcome,
+            step_kind=item.step_kind,
+            evidence_requirement=item.evidence_requirement,
+            claim_precision_ceiling=item.claim_precision_ceiling,
+        )
+        for index, item in enumerate(payload.plan_steps, start=1)
+    ]
 
         return PlannerDecision(
             plan_steps=plan_steps,

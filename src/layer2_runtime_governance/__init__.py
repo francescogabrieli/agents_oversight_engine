@@ -101,6 +101,8 @@ from .oversight import (
     DynamicPolicyAssessment,
     DynamicPolicyRecommendedDirective,
     EvidenceQualityAssessment,
+    EvidenceRequirementResolution,
+    EvidenceRequirementSource,
     EvidenceQualityWeights,
     OperationalRiskAssessment,
     OversightAssessment,
@@ -119,6 +121,7 @@ from .oversight import (
     evaluate_trajectory_health,
     get_default_oversight_policy_config_path,
     load_oversight_policy_config,
+    resolve_required_evidence_support_context,
 )
 from .persistence import (
     DiskBackedMemorySaver,
@@ -156,6 +159,7 @@ from .state import (
     HumanReviewExternalEdit,
     HumanReviewRequest,
     PlanStep,
+    PlanStepKind,
     PlanStepStatus,
     PlannerDecision,
     RuntimeFlag,
@@ -244,6 +248,8 @@ __all__ = [
     "EvidenceSourceKind",
     "EvidenceSupportLevel",
     "EvidenceQualityAssessment",
+    "EvidenceRequirementResolution",
+    "EvidenceRequirementSource",
     "EvidenceQualityWeights",
     "ExecutedPlanStep",
     "ExternalCommunicationPhase",
@@ -292,6 +298,7 @@ __all__ = [
     "OversightRecommendedDirective",
     "OversightSignalLevel",
     "PlanStep",
+    "PlanStepKind",
     "PlanStepStatus",
     "PlannerDecision",
     "PlannerExecutionError",
@@ -405,5 +412,6 @@ __all__ = [
     "planner",
     "replanner",
     "should_invoke_judge",
+    "resolve_required_evidence_support_context",
     "tool_gateway",
 ]

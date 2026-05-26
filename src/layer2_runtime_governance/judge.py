@@ -16,7 +16,9 @@ from .oversight import (
     DynamicPolicyRecommendedDirective,
     OversightSignalLevel,
     _available_evidence_support_level,
+    _effective_support_check_level,
     _evidence_support_level_rank,
+    _output_claim_support_level,
     _output_stays_within_intake_support,
     _required_evidence_support_level,
 )
@@ -434,6 +436,8 @@ def build_judge_user_prompt(
             "flags": list(invocation_flags),
             "available_support_level": _available_evidence_support_level(task_state=task_state).value,
             "required_support_level": _required_evidence_support_level(task_state=task_state).value,
+            "output_claim_support_level": _output_claim_support_level(task_state=task_state).value,
+            "precision_mismatch_detected": _precision_mismatch_detected(task_state=task_state),
         },
     }
     return (
@@ -508,7 +512,14 @@ def _precision_mismatch_detected(*, task_state: TaskState) -> bool:
         return False
     available_level = _available_evidence_support_level(task_state=task_state)
     required_level = _required_evidence_support_level(task_state=task_state)
-    return _evidence_support_level_rank(available_level) < _evidence_support_level_rank(required_level)
+    output_claim_level = _output_claim_support_level(task_state=task_state)
+    effective_level = _effective_support_check_level(
+        required_level=required_level,
+        output_claim_level=output_claim_level,
+    )
+    return _evidence_support_level_rank(available_level) < _evidence_support_level_rank(
+        effective_level
+    )
 
 
 # Detect fragile completion attempts that should receive semantic review attention.

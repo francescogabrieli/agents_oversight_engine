@@ -101,6 +101,7 @@ textarea {
   max-width: 96ch;
   color: var(--muted-strong);
   line-height: 1.55;
+  overflow-wrap: anywhere;
 }
 
 .card-hero .lede,

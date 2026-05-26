@@ -235,6 +235,30 @@ class Layer2OversightTests(unittest.TestCase):
         self.assertEqual(assessment.level, OversightSignalLevel.LOW)
         self.assertIn(OversightReasonCode.TOOL_RISK_LOW, assessment.reason_codes)
 
+    def test_operational_risk_stays_minimal_without_capability_or_tool(self) -> None:
+        task_state = _build_task_state_with_actor_result(
+            actor_result_type=ActorResultType.PROPOSE_ACTION,
+            tool_request=None,
+        )
+        policy_input = build_policy_evaluation_input(task_state=task_state)
+
+        assessment = evaluate_operational_risk(
+            policy_input=policy_input,
+            config=load_oversight_policy_config(),
+            tool_gateway_config=_tool_config(
+                risk_level=ToolRiskLevel.LOW,
+                requires_human_review=False,
+            ),
+        )
+
+        self.assertEqual(assessment.score, 0.0)
+        self.assertEqual(assessment.level, OversightSignalLevel.LOW)
+        self.assertIn(OversightReasonCode.TOOL_RISK_NONE, assessment.reason_codes)
+        self.assertIn(OversightReasonCode.NO_TOOL_REQUEST, assessment.reason_codes)
+        self.assertIn(OversightReasonCode.NO_CAPABILITY, assessment.reason_codes)
+        self.assertNotIn(OversightReasonCode.READ_ONLY_CAPABILITY, assessment.reason_codes)
+        self.assertNotIn(OversightReasonCode.TOOL_RISK_MEDIUM, assessment.reason_codes)
+
     def test_operational_risk_escalates_for_review_required_tool(self) -> None:
         task_state = _build_task_state_with_actor_result(
             actor_result_type=ActorResultType.PROPOSE_ACTION,

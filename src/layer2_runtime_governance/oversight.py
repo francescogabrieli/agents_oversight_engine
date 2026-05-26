@@ -10,11 +10,12 @@ from typing import TYPE_CHECKING
 from layer1_intake import SensitivityLevel
 
 from .actor_contract import ActorResultType, CapabilityAccessMode
-from .state import StepValidation, StepValidationDecision, TaskState
+from .state import PlanStepKind, StepValidation, StepValidationDecision, TaskState
 from .tool_contract import EvidenceSourceKind, EvidenceSupportLevel
 from .tool_gateway import (
     ToolCapability,
     ToolGatewayConfig,
+    ToolDefinition,
     ToolRiskLevel,
     build_default_tool_gateway_config,
     get_default_tool_gateway_config_path,
@@ -68,11 +69,14 @@ class OversightReasonCode(str, Enum):
     TOOL_RISK_LOW = "tool_risk_low"
     TOOL_RISK_MEDIUM = "tool_risk_medium"
     TOOL_RISK_HIGH = "tool_risk_high"
+    TOOL_RISK_NONE = "tool_risk_none"
     TOOL_RISK_UNKNOWN = "tool_risk_unknown"
     TASK_SENSITIVITY_LOW = "task_sensitivity_low"
     TASK_SENSITIVITY_MEDIUM = "task_sensitivity_medium"
     TASK_SENSITIVITY_HIGH = "task_sensitivity_high"
     TASK_SENSITIVITY_CRITICAL = "task_sensitivity_critical"
+    NO_CAPABILITY = "no_capability"
+    NO_TOOL_REQUEST = "no_tool_request"
     READ_ONLY_CAPABILITY = "read_only_capability"
     WRITE_CAPABILITY = "write_capability"
     EXTERNAL_IMPACT = "external_impact"
@@ -176,6 +180,33 @@ class DynamicPolicyAssessment:
 OversightAssessment = DynamicPolicyAssessment
 
 
+class EvidenceRequirementSource(str, Enum):
+    # EvidenceRequirementSource records whether the requirement came from typed metadata or fallback text heuristics.
+    STEP_VALIDATION = "step_validation"
+    PLAN_STEP_EVIDENCE_REQUIREMENT = "plan_step_evidence_requirement"
+    PLAN_STEP_CLAIM_PRECISION_CEILING = "plan_step_claim_precision_ceiling"
+    PLAN_STEP_KIND = "plan_step_kind"
+    HEURISTIC_STEP = "heuristic_step"
+    HEURISTIC_OUTPUT = "heuristic_output"
+
+
+@dataclass(frozen=True)
+class EvidenceRequirementResolution:
+    # EvidenceRequirementResolution keeps the resolved support level and its provenance explicit.
+    required_level: EvidenceSupportLevel
+    source: EvidenceRequirementSource
+
+
+@dataclass(frozen=True)
+class RuntimeActionRiskContext:
+    # RuntimeActionRiskContext makes the actor posture visible before scoring operational risk.
+    capability_posture: str
+    tool_posture: str
+    external_posture: str
+    tool_risk_level: str
+    tool_definition: ToolDefinition | None
+
+
 # Load deterministic oversight scoring settings from repository configuration.
 def load_oversight_policy_config(*, config_path: Path | None = None) -> OversightPolicyConfig:
     resolved_path = config_path or get_default_oversight_policy_config_path()
@@ -206,7 +237,7 @@ def load_oversight_policy_config(*, config_path: Path | None = None) -> Oversigh
                 str(key): float(value)
                 for key, value in risk_scores.get(
                     "tool_risk",
-                    {"low": 0.15, "medium": 0.45, "high": 0.75, "critical": 0.95},
+                    {"none": 0.0, "low": 0.15, "medium": 0.45, "high": 0.75, "critical": 0.95},
                 ).items()
             },
             sensitivity_multiplier={
@@ -267,7 +298,7 @@ def build_default_oversight_policy_config() -> OversightPolicyConfig:
             last_tool_success=0.05,
         ),
         risk_scores=RiskScores(
-            tool_risk={"low": 0.15, "medium": 0.45, "high": 0.75, "critical": 0.95},
+            tool_risk={"none": 0.0, "low": 0.15, "medium": 0.45, "high": 0.75, "critical": 0.95},
             sensitivity_multiplier={"low": 1.0, "medium": 1.15, "high": 1.35, "critical": 1.6},
             external_impact_additive=0.25,
             write_capability_additive=0.30,
@@ -536,25 +567,32 @@ def evaluate_operational_risk(
     tool_gateway_config: ToolGatewayConfig,
 ) -> OperationalRiskAssessment:
     reason_codes: list[OversightReasonCode] = []
-    tool_definition = (
-        tool_gateway_config.tools.get(policy_input.tool_name)
-        if policy_input.tool_name is not None
-        else None
+    risk_context = resolve_runtime_action_risk_context(
+        policy_input=policy_input,
+        tool_gateway_config=tool_gateway_config,
     )
-    tool_risk_level = (
-        tool_definition.risk_level.value
-        if tool_definition is not None
-        else ToolRiskLevel.MEDIUM.value
-    )
-    if tool_definition is None and policy_input.tool_name is not None:
+    tool_definition = risk_context.tool_definition
+
+    reason_codes.append(_tool_risk_reason_code(risk_context.tool_risk_level))
+    if risk_context.tool_posture == "unknown_tool":
         reason_codes.append(OversightReasonCode.TOOL_RISK_UNKNOWN)
+    elif risk_context.tool_posture == "no_tool":
+        reason_codes.append(OversightReasonCode.NO_TOOL_REQUEST)
+
+    if risk_context.capability_posture == "none":
+        reason_codes.append(OversightReasonCode.NO_CAPABILITY)
+    elif risk_context.capability_posture == "read_only":
+        reason_codes.append(OversightReasonCode.READ_ONLY_CAPABILITY)
     else:
-        reason_codes.append(_tool_risk_reason_code(tool_risk_level))
+        reason_codes.append(OversightReasonCode.WRITE_CAPABILITY)
+
+    if risk_context.external_posture == "external_impact":
+        reason_codes.append(OversightReasonCode.EXTERNAL_IMPACT)
 
     sensitivity = policy_input.task_sensitivity.value
     reason_codes.append(_sensitivity_reason_code(policy_input.task_sensitivity))
 
-    base_risk = config.risk_scores.tool_risk.get(tool_risk_level, 0.45)
+    base_risk = config.risk_scores.tool_risk.get(risk_context.tool_risk_level, 0.0)
     multiplier = config.risk_scores.sensitivity_multiplier.get(sensitivity, 1.15)
     score = base_risk * multiplier
 
@@ -564,9 +602,6 @@ def evaluate_operational_risk(
 
     if policy_input.capability_mode == CapabilityAccessMode.WRITE:
         score += config.risk_scores.write_capability_additive
-        reason_codes.append(OversightReasonCode.WRITE_CAPABILITY)
-    else:
-        reason_codes.append(OversightReasonCode.READ_ONLY_CAPABILITY)
 
     if tool_definition is not None and tool_definition.requires_human_review:
         score += config.risk_scores.requires_human_review_additive
@@ -577,6 +612,50 @@ def evaluate_operational_risk(
         score=score,
         level=_risk_level(score=score, config=config),
         reason_codes=tuple(reason_codes),
+    )
+
+
+# Resolve the actor's execution posture before operational-risk scoring runs.
+def resolve_runtime_action_risk_context(
+    *,
+    policy_input: "PolicyEvaluationInput",
+    tool_gateway_config: ToolGatewayConfig,
+) -> RuntimeActionRiskContext:
+    tool_definition = (
+        tool_gateway_config.tools.get(policy_input.tool_name)
+        if policy_input.tool_name is not None
+        else None
+    )
+
+    if policy_input.tool_name is None:
+        tool_posture = "no_tool"
+        tool_risk_level = ToolRiskLevel.NONE.value
+    elif tool_definition is None:
+        tool_posture = "unknown_tool"
+        tool_risk_level = ToolRiskLevel.MEDIUM.value
+    else:
+        tool_posture = "known_tool"
+        tool_risk_level = tool_definition.risk_level.value
+
+    if policy_input.capability_mode == CapabilityAccessMode.WRITE:
+        capability_posture = "write"
+    elif policy_input.capability_mode == CapabilityAccessMode.READ_ONLY:
+        capability_posture = "read_only"
+    else:
+        capability_posture = "none"
+
+    external_posture = (
+        "external_impact"
+        if policy_input.external_impact or policy_input.capability_mode == CapabilityAccessMode.WRITE
+        else "local_only"
+    )
+
+    return RuntimeActionRiskContext(
+        capability_posture=capability_posture,
+        tool_posture=tool_posture,
+        external_posture=external_posture,
+        tool_risk_level=tool_risk_level,
+        tool_definition=tool_definition,
     )
 
 
@@ -788,7 +867,13 @@ def _evidence_support_matches_step_need(*, task_state: TaskState) -> bool:
         return True
     available_level = _available_evidence_support_level(task_state=task_state)
     required_level = _required_evidence_support_level(task_state=task_state)
-    return _evidence_support_level_rank(available_level) >= _evidence_support_level_rank(required_level)
+    output_claim_level = _output_claim_support_level(task_state=task_state)
+    return _evidence_support_level_rank(available_level) >= _evidence_support_level_rank(
+        _effective_support_check_level(
+            required_level=required_level,
+            output_claim_level=output_claim_level,
+        )
+    )
 
 
 # Return the strongest evidence support level currently available to the actor.
@@ -799,16 +884,129 @@ def _available_evidence_support_level(*, task_state: TaskState) -> EvidenceSuppo
     return max((item.support_level for item in meaningful_evidence), key=_evidence_support_level_rank)
 
 
-# Infer the minimum support level needed by the evaluated step and its current draft output.
+# Resolve the minimum support level needed by the evaluated step and its current draft output.
 def _required_evidence_support_level(*, task_state: TaskState) -> EvidenceSupportLevel:
-    step = _evaluated_plan_step(task_state=task_state)
+    return resolve_required_evidence_support_context(task_state=task_state).required_level
+
+
+# Estimate the claim precision implied by the current actor output without mutating the step requirement.
+def _output_claim_support_level(*, task_state: TaskState) -> EvidenceSupportLevel:
     output_text = task_state.actor_result.output_text if task_state.actor_result is not None else None
-    required_level = _required_evidence_support_level_from_step(step_text=_step_scope_text(step))
-    if output_text and output_text.strip():
-        output_level = _required_evidence_support_level_from_output_text(text=output_text)
-        if _evidence_support_level_rank(output_level) > _evidence_support_level_rank(required_level):
-            return output_level
+    if not output_text or not output_text.strip():
+        return EvidenceSupportLevel.LOCAL_ONLY
+    return _required_evidence_support_level_from_output_text(text=output_text)
+
+
+# Compare required support and output precision while keeping the typed requirement authoritative.
+def _effective_support_check_level(
+    *,
+    required_level: EvidenceSupportLevel,
+    output_claim_level: EvidenceSupportLevel,
+) -> EvidenceSupportLevel:
+    if _evidence_support_level_rank(output_claim_level) > _evidence_support_level_rank(required_level):
+        return output_claim_level
     return required_level
+
+
+# Resolve the evidence support level and record whether the value came from typed metadata or fallback heuristics.
+def resolve_required_evidence_support_context(
+    *,
+    task_state: TaskState,
+    current_step=None,
+) -> EvidenceRequirementResolution:
+    step = current_step or _evaluated_plan_step(task_state=task_state)
+    resolution = _required_evidence_support_level_from_step_metadata(step=step)
+
+    validation = _latest_relevant_validation(task_state=task_state)
+    if validation is not None and _validation_requires_recovery(validation=validation):
+        resolution = EvidenceRequirementResolution(
+            required_level=_coerce_evidence_support_level(resolution.required_level),
+            source=EvidenceRequirementSource.STEP_VALIDATION,
+        )
+
+    return EvidenceRequirementResolution(
+        required_level=_coerce_evidence_support_level(resolution.required_level),
+        source=resolution.source,
+    )
+
+
+# Resolve typed plan-step metadata before any text heuristics are consulted.
+def _required_evidence_support_level_from_step_metadata(*, step) -> EvidenceRequirementResolution:
+    if step is None:
+        return EvidenceRequirementResolution(
+            required_level=EvidenceSupportLevel.LOCAL_ONLY,
+            source=EvidenceRequirementSource.HEURISTIC_STEP,
+        )
+
+    if step.evidence_requirement is not None:
+        return EvidenceRequirementResolution(
+            required_level=_coerce_evidence_support_level(step.evidence_requirement),
+            source=EvidenceRequirementSource.PLAN_STEP_EVIDENCE_REQUIREMENT,
+        )
+
+    if step.claim_precision_ceiling is not None:
+        return EvidenceRequirementResolution(
+            required_level=_coerce_evidence_support_level(step.claim_precision_ceiling),
+            source=EvidenceRequirementSource.PLAN_STEP_CLAIM_PRECISION_CEILING,
+        )
+
+    if step.step_kind is not None:
+        return EvidenceRequirementResolution(
+            required_level=_required_evidence_support_level_from_step_kind(
+                step_kind=step.step_kind
+            ),
+            source=EvidenceRequirementSource.PLAN_STEP_KIND,
+        )
+
+    return EvidenceRequirementResolution(
+        required_level=_required_evidence_support_level_from_step(
+            step_text=_step_scope_text(step)
+        ),
+        source=EvidenceRequirementSource.HEURISTIC_STEP,
+    )
+
+
+# Map the typed plan-step kind to a conservative evidence requirement when no explicit threshold is present.
+def _required_evidence_support_level_from_step_kind(
+    *,
+    step_kind: PlanStepKind | str,
+) -> EvidenceSupportLevel:
+    if isinstance(step_kind, str):
+        try:
+            step_kind = PlanStepKind(step_kind)
+        except ValueError:
+            return EvidenceSupportLevel.LOCAL_ONLY
+    if step_kind == PlanStepKind.LOCAL_TRANSFORMATION:
+        return EvidenceSupportLevel.LOCAL_ONLY
+    if step_kind == PlanStepKind.SOURCE_DISCOVERY:
+        return EvidenceSupportLevel.SOURCE_DISCOVERY
+    if step_kind == PlanStepKind.HIGH_LEVEL_SUMMARY:
+        return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
+    if step_kind == PlanStepKind.DETAILED_EXTRACTION:
+        return EvidenceSupportLevel.DETAILED_EXTRACTED
+    if step_kind == PlanStepKind.COMPLIANCE_OR_LEGAL:
+        return EvidenceSupportLevel.PRIMARY_LEGAL
+    if step_kind == PlanStepKind.FINAL_SYNTHESIS:
+        return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
+    return EvidenceSupportLevel.LOCAL_ONLY
+
+
+# Coerce legacy string values into the typed evidence-support enum.
+def _coerce_evidence_support_level(value) -> EvidenceSupportLevel:
+    if isinstance(value, EvidenceSupportLevel):
+        return value
+    if isinstance(value, str):
+        return EvidenceSupportLevel(value)
+    return EvidenceSupportLevel.LOCAL_ONLY
+
+
+# Detect validation states that should act as a recovery or ceiling signal.
+def _validation_requires_recovery(*, validation: StepValidation) -> bool:
+    return validation.next_action in {
+        StepValidationDecision.REQUEST_MORE_EVIDENCE,
+        StepValidationDecision.ASK_CLARIFICATION,
+        StepValidationDecision.NEEDS_REPLAN,
+    } or not validation.objective_satisfied or not validation.evidence_sufficient
 
 
 # Allow authoritative intake facts to support local transformations that stay inside the given material.
@@ -1305,6 +1503,8 @@ def _trajectory_level(*, score: float, config: OversightPolicyConfig) -> Oversig
 
 # Return the reason code matching the configured tool risk level.
 def _tool_risk_reason_code(tool_risk_level: str) -> OversightReasonCode:
+    if tool_risk_level == ToolRiskLevel.NONE.value:
+        return OversightReasonCode.TOOL_RISK_NONE
     if tool_risk_level == ToolRiskLevel.LOW.value:
         return OversightReasonCode.TOOL_RISK_LOW
     if tool_risk_level == ToolRiskLevel.HIGH.value:
@@ -1350,6 +1550,8 @@ __all__ = [
     "DynamicPolicyAssessment",
     "DynamicPolicyRecommendedDirective",
     "EvidenceQualityAssessment",
+    "EvidenceRequirementResolution",
+    "EvidenceRequirementSource",
     "EvidenceQualityWeights",
     "OperationalRiskAssessment",
     "OversightAssessment",
@@ -1368,4 +1570,7 @@ __all__ = [
     "evaluate_trajectory_health",
     "get_default_oversight_policy_config_path",
     "load_oversight_policy_config",
+    "resolve_required_evidence_support_context",
+    "_effective_support_check_level",
+    "_output_claim_support_level",
 ]
