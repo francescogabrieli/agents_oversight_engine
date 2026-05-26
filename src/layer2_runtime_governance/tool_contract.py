@@ -24,6 +24,12 @@ class EvidenceSupportLevel(str, Enum):
     PRIMARY_LEGAL = "primary_legal"
 
 
+class EvidenceSourceKind(str, Enum):
+    # EvidenceSourceKind distinguishes between operator-provided task facts and tool observations.
+    INTAKE_PROVIDED = "intake_provided"
+    TOOL_OBSERVATION = "tool_observation"
+
+
 @dataclass(frozen=True)
 class ToolRequest:
     # Tool requests are typed so the actor cannot emit opaque free-form tool calls.
@@ -68,7 +74,8 @@ class ObservedEvidence:
     title: str
     locator: str
     excerpt: str
-    source_tool: ToolName
+    source_kind: EvidenceSourceKind = EvidenceSourceKind.TOOL_OBSERVATION
+    source_tool: ToolName | None = None
     support_level: EvidenceSupportLevel = EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
 
 
@@ -80,6 +87,7 @@ class ToolGatewayPort(Protocol):
 
 
 __all__ = [
+    "EvidenceSourceKind",
     "EvidenceSupportLevel",
     "ObservedEvidence",
     "ToolExecutionResult",

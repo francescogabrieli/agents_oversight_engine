@@ -11,7 +11,7 @@ from layer1_intake import SensitivityLevel
 
 from .actor_contract import ActorResultType, CapabilityAccessMode
 from .state import StepValidation, StepValidationDecision, TaskState
-from .tool_contract import EvidenceSupportLevel
+from .tool_contract import EvidenceSourceKind, EvidenceSupportLevel
 from .tool_gateway import (
     ToolCapability,
     ToolGatewayConfig,
@@ -784,6 +784,8 @@ def _validation_signals_weak_evidence(
 
 # Compare available evidence strength against the semantic/detail needs of the evaluated step.
 def _evidence_support_matches_step_need(*, task_state: TaskState) -> bool:
+    if _output_stays_within_intake_support(task_state=task_state):
+        return True
     available_level = _available_evidence_support_level(task_state=task_state)
     required_level = _required_evidence_support_level(task_state=task_state)
     return _evidence_support_level_rank(available_level) >= _evidence_support_level_rank(required_level)
@@ -807,6 +809,75 @@ def _required_evidence_support_level(*, task_state: TaskState) -> EvidenceSuppor
         if _evidence_support_level_rank(output_level) > _evidence_support_level_rank(required_level):
             return output_level
     return required_level
+
+
+# Allow authoritative intake facts to support local transformations that stay inside the given material.
+def _output_stays_within_intake_support(*, task_state: TaskState) -> bool:
+    actor_result = task_state.actor_result
+    if actor_result is None:
+        return False
+    if actor_result.result_type not in {
+        ActorResultType.INTERMEDIATE_OUTPUT,
+        ActorResultType.FINAL_OUTPUT,
+    }:
+        return False
+
+    validation = _latest_relevant_validation(task_state=task_state)
+    if validation is None:
+        return False
+    if validation.next_action not in {
+        StepValidationDecision.CONTINUE_ACTING,
+        StepValidationDecision.REQUEST_MORE_EVIDENCE,
+        StepValidationDecision.COMPLETE_STEP,
+    }:
+        return False
+
+    if task_state.current_tool_request is not None or actor_result.tool_request is not None:
+        return False
+
+    intake_evidence = [
+        item
+        for item in _meaningful_observed_evidence(task_state=task_state)
+        if item.source_kind == EvidenceSourceKind.INTAKE_PROVIDED
+    ]
+    if not intake_evidence:
+        return False
+
+    scope_text = _step_scope_text(_evaluated_plan_step(task_state=task_state))
+    output_text = (
+        _normalize_output_text_for_support_checks(actor_result.output_text).lower()
+        if actor_result.output_text
+        else ""
+    )
+    combined_text = " ".join(part for part in (scope_text, output_text) if part).lower()
+
+    # External research, compliance, and citation-heavy steps still require stronger support.
+    stronger_support_markers = (
+        "official source",
+        "official sources",
+        "official website",
+        "official eu",
+        "source shortlist",
+        "web search",
+        "fetch",
+        "url",
+        "citation",
+        "citations",
+        "reference",
+        "references",
+        "legal",
+        "regulation",
+        "compliance",
+        "verify against",
+        "check source",
+        "article ",
+        "law",
+        "statute",
+    )
+    if any(marker in combined_text for marker in stronger_support_markers):
+        return False
+
+    return True
 
 
 # Resolve the evaluated semantic plan step for deterministic oversight checks.

@@ -125,7 +125,8 @@ class TraceObservedEvidence:
     title: str
     locator: str
     excerpt: str
-    source_tool: str
+    source_kind: str
+    source_tool: str | None
     support_level: str
 
 
@@ -608,7 +609,8 @@ def _build_observed_evidence(evidence: ObservedEvidence) -> TraceObservedEvidenc
         title=evidence.title,
         locator=evidence.locator,
         excerpt=evidence.excerpt,
-        source_tool=evidence.source_tool.value,
+        source_kind=evidence.source_kind.value,
+        source_tool=evidence.source_tool.value if evidence.source_tool is not None else None,
         support_level=evidence.support_level.value,
     )
 

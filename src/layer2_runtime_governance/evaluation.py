@@ -541,6 +541,7 @@ class _NormalizedToolCall:
 
 @dataclass(frozen=True)
 class _NormalizedObservedEvidence:
+    source_kind: str | None
     support_level: str
 
 
@@ -695,6 +696,7 @@ def _normalize_observed_evidence(
     )
     return tuple(
         _NormalizedObservedEvidence(
+            source_kind=_optional_text(item.get("source_kind")),
             support_level=_require_str(item, "support_level", source_path=source_path),
         )
         for item in items

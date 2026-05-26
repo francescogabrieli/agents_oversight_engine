@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any
@@ -14,7 +15,13 @@ from layer1_intake import (
     TaskSpec,
 )
 
-from .tool_contract import ObservedEvidence, ToolExecutionResult, ToolRequest
+from .tool_contract import (
+    EvidenceSourceKind,
+    EvidenceSupportLevel,
+    ObservedEvidence,
+    ToolExecutionResult,
+    ToolRequest,
+)
 
 if TYPE_CHECKING:
     from .actor_contract import ActorResult, ActorResultType
@@ -341,7 +348,133 @@ class TaskState:
                 == DomainType.EXTERNAL_COMMUNICATION
                 else None
             ),
+            observed_evidence=_build_initial_observed_evidence_from_intake(
+                intake_result.structured_task.task_spec
+            ),
         )
+
+
+# Materialize task-provided facts as initial runtime evidence for later local transformations.
+def _build_initial_observed_evidence_from_intake(task_spec: TaskSpec) -> list[ObservedEvidence]:
+    evidence_items: list[ObservedEvidence] = []
+    seen: set[str] = set()
+    candidate_index = 0
+
+    # Goal text can carry the primary instruction or factual frame for local drafting tasks.
+    for title, raw_text in (
+        ("Task goal", task_spec.goal),
+        ("Task context", task_spec.context),
+    ):
+        for statement in _split_intake_evidence_statements(raw_text):
+            candidate_index += 1
+            _append_intake_evidence_item(
+                evidence_items=evidence_items,
+                seen=seen,
+                evidence_id=f"intake:{candidate_index}",
+                plan_step_id="intake",
+                title=title,
+                excerpt=statement,
+            )
+
+    # Constraints and success criteria often encode authoritative task facts and operator requirements.
+    for label, items in (
+        ("Task constraint", task_spec.constraints),
+        ("Success criterion", task_spec.success_criteria),
+    ):
+        for item in items:
+            candidate_index += 1
+            _append_intake_evidence_item(
+                evidence_items=evidence_items,
+                seen=seen,
+                evidence_id=f"intake:{candidate_index}",
+                plan_step_id="intake",
+                title=label,
+                excerpt=item,
+            )
+
+    return evidence_items
+
+
+# Keep only factual or operationally authoritative intake statements as runtime evidence.
+def _append_intake_evidence_item(
+    *,
+    evidence_items: list[ObservedEvidence],
+    seen: set[str],
+    evidence_id: str,
+    plan_step_id: str,
+    title: str,
+    excerpt: str,
+) -> None:
+    normalized_excerpt = " ".join(excerpt.split())
+    if not normalized_excerpt:
+        return
+    if not _is_authoritative_intake_evidence_text(normalized_excerpt):
+        return
+
+    dedupe_key = normalized_excerpt.lower()
+    if dedupe_key in seen:
+        return
+    seen.add(dedupe_key)
+
+    evidence_items.append(
+        ObservedEvidence(
+            evidence_id=evidence_id,
+            plan_step_id=plan_step_id,
+            title=title,
+            locator="intake://task_spec",
+            excerpt=normalized_excerpt[:1000],
+            source_kind=EvidenceSourceKind.INTAKE_PROVIDED,
+            source_tool=None,
+            support_level=EvidenceSupportLevel.LOCAL_ONLY,
+        )
+    )
+
+
+# Split semi-structured intake text into compact, separately traceable evidence statements.
+def _split_intake_evidence_statements(text: str) -> list[str]:
+    normalized = " ".join(text.split())
+    if not normalized:
+        return []
+    parts = re.split(r"\s*[;•]\s*|\.\s+(?=[A-Z0-9])", normalized)
+    return [part.strip(" .") for part in parts if part and part.strip(" .")]
+
+
+# Exclude generic meta preferences while preserving factual and operational task inputs.
+def _is_authoritative_intake_evidence_text(text: str) -> bool:
+    lowered = text.lower()
+    if lowered in {"none", "n/a"}:
+        return False
+
+    meta_only_markers = (
+        "prefer official sources",
+        "prefer using official sources",
+        "prefer official eu sources",
+        "when referencing compliance/impact context",
+        "if relevant",
+    )
+    if any(marker in lowered for marker in meta_only_markers):
+        factual_markers = (
+            "detected",
+            "observed",
+            "confirmed",
+            "under investigation",
+            "within ",
+            "check ",
+            "verify ",
+            "include ",
+            "ask ",
+            "request ",
+            "report ",
+            "incident",
+            "customer",
+            "tenant",
+            "pipeline",
+            "email",
+        )
+        if not any(marker in lowered for marker in factual_markers):
+            return False
+
+    return len(lowered) >= 8
 
 
 # Recover typed external draft payloads from older checkpoints that restored nested dicts.

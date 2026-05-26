@@ -42,6 +42,7 @@ from .state import (
     TaskState,
 )
 from .tool_contract import (
+    EvidenceSourceKind,
     EvidenceSupportLevel,
     ObservedEvidence,
     ToolExecutionResult,
@@ -189,6 +190,7 @@ def governance(
         judge_service=judge_service,
     )
     governance_decision = combine_governance_assessments(
+        task_state=state,
         policy_input=policy_input,
         static_policy_assessment=static_policy_assessment,
         dynamic_policy_assessment=dynamic_policy_assessment,
@@ -913,11 +915,29 @@ def _apply_governance_decision(
         GovernanceDirective.WAIT_HUMAN_REVIEW,
         GovernanceDirective.ASK_USER_CLARIFICATION,
     }:
+        review_ready = (
+            state.external_communication.review_ready
+            if state.external_communication is not None
+            else False
+        )
         _set_external_communication_phase(
             state,
-            phase=ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED,
-            summary="The draft proposal reached a typed human review gate before any external execution.",
-            review_ready=True,
+            phase=(
+                ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
+                if review_ready
+                else (
+                    ExternalCommunicationPhase.DRAFT_IN_PROGRESS
+                    if state.external_communication is not None
+                    and state.external_communication.draft is not None
+                    else ExternalCommunicationPhase.EVIDENCE_COLLECTION
+                )
+            ),
+            summary=(
+                "The draft proposal reached a typed human review gate before any external execution."
+                if review_ready
+                else "Human input is required while the local draft or evidence collection remains in progress."
+            ),
+            review_ready=review_ready,
         )
         state.human_review_resume_state = _infer_human_review_resume_state(
             state=state,
@@ -1071,6 +1091,7 @@ def _build_observed_evidence_from_tool_result(
                 title=source.title,
                 locator=source.locator,
                 excerpt=(excerpt or "")[:1000],
+                source_kind=EvidenceSourceKind.TOOL_OBSERVATION,
                 source_tool=tool_result.request.tool_name,
                 support_level=_classify_observed_evidence_support_level(
                     tool_name=tool_result.request.tool_name,
@@ -1101,6 +1122,7 @@ def _build_observed_evidence_from_tool_result(
                 title=tool_result.request.tool_name.value,
                 locator=locator,
                 excerpt=(excerpt or "")[:1000],
+                source_kind=EvidenceSourceKind.TOOL_OBSERVATION,
                 source_tool=tool_result.request.tool_name,
                 support_level=_classify_observed_evidence_support_level(
                     tool_name=tool_result.request.tool_name,

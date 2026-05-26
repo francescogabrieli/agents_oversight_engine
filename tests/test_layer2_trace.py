@@ -94,6 +94,7 @@ class Layer2TraceTests(unittest.TestCase):
         self.assertFalse(trace.tool_calls[1].success)
         self.assertEqual(len(trace.observed_evidence), 1)
         self.assertEqual(trace.observed_evidence[0].locator, "mcp://local_test/text_stats")
+        self.assertEqual(trace.observed_evidence[0].source_kind, "tool_observation")
         self.assertEqual(len(trace.governance_decisions), 2)
         self.assertEqual(trace.governance_decisions[0].directive, "continue_read_only")
         self.assertEqual(len(trace.oversight_assessments), 2)

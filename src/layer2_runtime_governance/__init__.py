@@ -168,6 +168,7 @@ from .state import (
     TaskState,
 )
 from .tool_contract import (
+    EvidenceSourceKind,
     EvidenceSupportLevel,
     ObservedEvidence,
     ToolExecutionResult,
@@ -240,6 +241,7 @@ __all__ = [
     "DiskBackedMemorySaver",
     "DynamicPolicyAssessment",
     "DynamicPolicyRecommendedDirective",
+    "EvidenceSourceKind",
     "EvidenceSupportLevel",
     "EvidenceQualityAssessment",
     "EvidenceQualityWeights",

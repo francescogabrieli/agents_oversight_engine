@@ -17,6 +17,7 @@ from .oversight import (
     OversightSignalLevel,
     _available_evidence_support_level,
     _evidence_support_level_rank,
+    _output_stays_within_intake_support,
     _required_evidence_support_level,
 )
 from .state import ExternalCommunicationPhase, TaskState
@@ -382,7 +383,8 @@ def build_judge_user_prompt(
                 "title": item.title,
                 "locator": item.locator,
                 "excerpt": item.excerpt,
-                "source_tool": item.source_tool.value,
+                "source_kind": item.source_kind.value,
+                "source_tool": item.source_tool.value if item.source_tool is not None else None,
                 "support_level": item.support_level.value,
             }
             for item in task_state.observed_evidence
@@ -502,6 +504,8 @@ def _resolve_judge_invocation_context(
 
 # Detect when the current output claims more than the available evidence safely supports.
 def _precision_mismatch_detected(*, task_state: TaskState) -> bool:
+    if _output_stays_within_intake_support(task_state=task_state):
+        return False
     available_level = _available_evidence_support_level(task_state=task_state)
     required_level = _required_evidence_support_level(task_state=task_state)
     return _evidence_support_level_rank(available_level) < _evidence_support_level_rank(required_level)
@@ -521,6 +525,8 @@ def _borderline_completion_detected(*, task_state: TaskState) -> bool:
     validation = actor_result.step_validation
     if validation is None:
         return True
+    if _output_stays_within_intake_support(task_state=task_state):
+        return False
     if not validation.objective_satisfied or not validation.evidence_sufficient:
         return True
     if validation.confidence < task_state.execution_policy.confidence_threshold:

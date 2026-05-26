@@ -8,7 +8,9 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
+from uuid import uuid4
 
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
 
@@ -42,6 +44,7 @@ from layer2_runtime_governance import (
     CapabilityAccessMode,
     DynamicPolicyAssessment,
     DynamicPolicyRecommendedDirective,
+    EvidenceSourceKind,
     EvidenceQualityAssessment,
     ExternalCommunicationDraft,
     ExternalCommunicationPhase,
@@ -153,7 +156,10 @@ class StubActor(ActorPort):
 
     # Drive one deterministic actor/tool/observe loop across two semantic steps.
     def act(self, *, actor_task: ActorTask) -> ActorResult:
-        if actor_task.current_plan_step.step_id == "step_1" and not actor_task.observed_evidence:
+        if actor_task.current_plan_step.step_id == "step_1" and not any(
+            item.source_kind == EvidenceSourceKind.TOOL_OBSERVATION
+            for item in actor_task.observed_evidence
+        ):
             return ActorResult(
                 plan_step_id=actor_task.current_plan_step.step_id,
                 result_type=ActorResultType.PROPOSE_ACTION,
@@ -972,7 +978,9 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertEqual(len(task_state.executed_steps), 2)
         self.assertEqual(task_state.actor_turn_count, 3)
         self.assertEqual(task_state.tool_call_count, 1)
-        self.assertEqual(len(task_state.observed_evidence), 1)
+        self.assertTrue(
+            any(item.source_kind == EvidenceSourceKind.TOOL_OBSERVATION for item in task_state.observed_evidence)
+        )
         self.assertEqual(len(task_state.scratchpad), 4)
         self.assertEqual(len(task_state.step_validations), 2)
         self.assertEqual(len(task_state.governance_history), 3)
@@ -1030,7 +1038,9 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
 
         task_state = result["task_state"]
         self.assertEqual(len(task_state.executed_steps), 2)
-        self.assertEqual(len(task_state.observed_evidence), 1)
+        self.assertTrue(
+            any(item.source_kind == EvidenceSourceKind.TOOL_OBSERVATION for item in task_state.observed_evidence)
+        )
 
         with self.assertRaises(ValueError):
             build_actor_task(task_state=task_state)
@@ -1057,7 +1067,9 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         task_state = result["task_state"]
         self.assertEqual(task_state.current_state, RuntimeState.COMPLETED)
         self.assertEqual(task_state.tool_call_count, 1)
-        self.assertEqual(len(task_state.observed_evidence), 1)
+        self.assertTrue(
+            any(item.source_kind == EvidenceSourceKind.TOOL_OBSERVATION for item in task_state.observed_evidence)
+        )
 
     def test_governance_input_uses_evaluated_step_context(self) -> None:
         task_state = _build_policy_input_task_state(read_only_mode=True)
@@ -1077,6 +1089,18 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertFalse(policy_input.tool_has_url)
         self.assertEqual(policy_input.tool_call_count, 0)
         self.assertEqual(policy_input.observed_evidence_count, 0)
+
+    def test_task_state_bootstrap_materializes_intake_evidence(self) -> None:
+        task_state = TaskState.from_intake(_build_external_communication_intake_result_for_governance())
+
+        self.assertGreater(len(task_state.observed_evidence), 0)
+        self.assertTrue(
+            all(item.source_kind == EvidenceSourceKind.INTAKE_PROVIDED for item in task_state.observed_evidence)
+        )
+        self.assertTrue(all(item.source_tool is None for item in task_state.observed_evidence))
+        self.assertTrue(
+            all(item.support_level == EvidenceSupportLevel.LOCAL_ONLY for item in task_state.observed_evidence)
+        )
 
     def test_opa_http_policy_engine_parses_structured_response_without_network(self) -> None:
         import json
@@ -1918,9 +1942,9 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_run_layer2_flow_persists_runtime_artifacts(self) -> None:
-        temp_dir = REPO_ROOT / "_layer2_runtime_artifacts_test"
+        run_id = uuid4().hex
+        temp_dir = REPO_ROOT / f"_layer2_runtime_artifacts_test_{run_id}"
         artifact_store = RuntimeArtifactStore(root_path=temp_dir)
-        checkpoint_path = temp_dir / "checkpoints.pkl"
         if temp_dir.exists():
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -1928,7 +1952,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             trace = run_layer2_flow(
                 raw_task_text="Find official sources about the DMA and summarize them.",
                 context_hint="Prefer official EU sources.",
-                thread_id="persisted-runtime-test",
+                thread_id=f"persisted-runtime-test-{run_id}",
                 demo_intake_profile="research",
                 planner_service=StubPlanner(),
                 actor_service=StubActor(),
@@ -1936,7 +1960,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
                 replanner_service=StubReplanner(),
                 policy_engine_service=StubPolicyEngine(),
                 artifact_store=artifact_store,
-                checkpointer=build_default_checkpointer(storage_path=checkpoint_path),
+                checkpointer=InMemorySaver(),
             )
 
             paths = artifact_store.build_paths(trace["thread_id"])
@@ -1949,7 +1973,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             dashboard_payload = json.loads(paths.dashboard_snapshot_path.read_text(encoding="utf-8"))
             runtime_summary = json.loads(paths.runtime_summary_path.read_text(encoding="utf-8"))
             self.assertEqual(dashboard_payload["runtime_state"], "completed")
-            self.assertEqual(runtime_summary["thread_id"], "persisted-runtime-test")
+            self.assertEqual(runtime_summary["thread_id"], trace["thread_id"])
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -2379,6 +2403,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         ]
         state.current_plan_step_index = 0
         state.external_communication.phase = ExternalCommunicationPhase.DRAFT_PROPOSAL
+        state.external_communication.review_ready = True
         state.actor_result = ActorResult(
             plan_step_id="step_1",
             result_type=ActorResultType.INTERMEDIATE_OUTPUT,
@@ -2404,6 +2429,54 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
 
         self.assertTrue(result.last_judge_assessment.invoked)
         self.assertEqual(result.last_judge_assessment.evaluated_target, "external_draft")
+
+    def test_governance_softens_intermediate_wait_human_review_to_request_more_evidence(self) -> None:
+        state = TaskState.from_intake(_build_external_communication_intake_result_for_governance())
+        state.current_state = RuntimeState.ACTING
+        state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Draft a first local response using the provided incident facts.",
+                rationale="Use the supplied incident details before gathering any external evidence.",
+                expected_outcome="A partial local draft grounded only in the intake facts.",
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        state.current_plan_step_index = 0
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+            summary="Partial draft prepared from the provided incident facts.",
+            capability_mode=CapabilityAccessMode.NONE,
+            output_text="We are preparing an incident update based on the currently provided facts.",
+            step_validation=StepValidation(
+                plan_step_id="step_1",
+                objective_satisfied=False,
+                evidence_sufficient=False,
+                confidence=0.42,
+                next_action=StepValidationDecision.REQUEST_MORE_EVIDENCE,
+                rationale_summary="More evidence is required before this draft can be finalized.",
+                residual_uncertainty="The runtime should continue locally instead of opening HITL.",
+            ),
+        )
+
+        result = governance(
+            state,
+            policy_engine_service=StubPolicyEngine(),
+            judge_service=StaticJudge(_judge_wait_review_assessment()),
+            thread_id="intermediate-softening",
+        )
+
+        self.assertEqual(
+            result.last_governance_decision.directive,
+            GovernanceDirective.REQUEST_MORE_EVIDENCE,
+        )
+        self.assertEqual(result.current_state, RuntimeState.ACTING)
+        self.assertIsNone(result.pending_human_review_request)
+        self.assertNotEqual(
+            result.external_communication.phase,
+            ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED,
+        )
 
     def test_governance_combiner_prefers_more_conservative_judge(self) -> None:
         state = _build_actor_ready_state_for_judge()
@@ -3059,6 +3132,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
     # Verify source-level observation does not clone one global excerpt across many sources.
     def test_observe_tool_result_uses_single_fallback_evidence_for_multi_source_results(self) -> None:
         task_state = TaskState.from_intake(_build_research_intake_result())
+        task_state.observed_evidence = []
         task_state.plan_steps = [
             PlanStep(
                 step_id="step_1",
@@ -3105,6 +3179,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
     # Empty extraction failures should become an explicit runtime signal for replanning.
     def test_observe_tool_result_marks_extractability_limit_on_empty_fetch(self) -> None:
         task_state = TaskState.from_intake(_build_research_intake_result())
+        task_state.observed_evidence = []
         task_state.plan_steps = [
             PlanStep(
                 step_id="step_1",
@@ -3138,6 +3213,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
     # Search snippets with actual official prose should count as high-level evidence, not pure discovery.
     def test_observe_tool_result_classifies_substantive_web_search_as_high_level_summary(self) -> None:
         task_state = TaskState.from_intake(_build_research_intake_result())
+        task_state.observed_evidence = []
         task_state.plan_steps = [
             PlanStep(
                 step_id="step_1",
@@ -3241,6 +3317,7 @@ def _build_external_communication_intake_result() -> IntakeResult:
 
 def _build_policy_input_task_state(*, read_only_mode: bool = False) -> TaskState:
     state = TaskState.from_intake(_build_research_intake_result(read_only_mode=read_only_mode))
+    state.observed_evidence = []
     state.plan_steps = [
         PlanStep(
             step_id="step_1",
@@ -3279,6 +3356,7 @@ def _build_policy_input_task_state(*, read_only_mode: bool = False) -> TaskState
 
 def _build_high_precision_research_task_state() -> TaskState:
     state = TaskState.from_intake(_build_research_intake_result())
+    state.observed_evidence = []
     state.plan_steps = [
         PlanStep(
             step_id="step_2",
@@ -3327,6 +3405,7 @@ def _build_high_precision_research_task_state() -> TaskState:
 
 def _build_source_shortlist_task_state() -> TaskState:
     state = TaskState.from_intake(_build_research_intake_result())
+    state.observed_evidence = []
     state.plan_steps = [
         PlanStep(
             step_id="replan_step_1",
@@ -3368,6 +3447,7 @@ def _build_source_shortlist_task_state() -> TaskState:
 
 def _build_summary_task_state_with_year_in_citation() -> TaskState:
     state = TaskState.from_intake(_build_research_intake_result())
+    state.observed_evidence = []
     state.plan_steps = [
         PlanStep(
             step_id="step_1",
@@ -3408,6 +3488,7 @@ def _build_summary_task_state_with_year_in_citation() -> TaskState:
 # Build a non-DMA timeline state so the regression covers a different official source task.
 def _build_summary_task_state_with_generic_timeline() -> TaskState:
     state = TaskState.from_intake(_build_research_intake_result())
+    state.observed_evidence = []
     state.plan_steps = [
         PlanStep(
             step_id="step_1",
@@ -3444,6 +3525,7 @@ def _build_summary_task_state_with_generic_timeline() -> TaskState:
 
 def _build_conservative_replan_summary_task_state() -> TaskState:
     state = TaskState.from_intake(_build_research_intake_result())
+    state.observed_evidence = []
     state.plan_steps = [
         PlanStep(
             step_id="replan_step_1",

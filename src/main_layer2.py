@@ -113,8 +113,12 @@ def run_layer2_flow(
         )
 
     if progress_callback is None:
-        final_result = runtime_graph.invoke(
+        runtime_graph.invoke(
             {"intake_result": intake_result, "thread_id": resolved_thread_id},
+            config=config,
+        )
+        final_result = _build_final_result_from_graph_snapshot(
+            runtime_graph=runtime_graph,
             config=config,
         )
     else:
@@ -163,7 +167,11 @@ def resume_layer2_flow(
     )
 
     config = {"configurable": {"thread_id": thread_id}}
-    final_result = runtime_graph.invoke(Command(resume=human_review_decision), config=config)
+    runtime_graph.invoke(Command(resume=human_review_decision), config=config)
+    final_result = _build_final_result_from_graph_snapshot(
+        runtime_graph=runtime_graph,
+        config=config,
+    )
     intake_result = _load_intake_result_from_checkpoint(
         thread_id=thread_id,
         runtime_graph=runtime_graph,
@@ -207,6 +215,20 @@ def _stream_runtime_graph_with_progress(
     if snapshot is not None and getattr(snapshot, "interrupts", None):
         final_result["__interrupt__"] = list(snapshot.interrupts)
 
+    return final_result
+
+
+# Read the post-run graph snapshot so invoke and stream paths share the same final-state contract.
+def _build_final_result_from_graph_snapshot(
+    *,
+    runtime_graph: Any,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    snapshot = runtime_graph.get_state(config)
+    snapshot_values = snapshot.values if snapshot is not None else {}
+    final_result = dict(snapshot_values) if isinstance(snapshot_values, dict) else {}
+    if snapshot is not None and getattr(snapshot, "interrupts", None):
+        final_result["__interrupt__"] = list(snapshot.interrupts)
     return final_result
 
 

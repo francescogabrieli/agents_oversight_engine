@@ -21,7 +21,13 @@ from .openrouter_client import (
     OpenRouterRuntimeSettings,
 )
 from .state import ScratchpadEntry, ScratchpadEntryType, StepValidation, StepValidationDecision
-from .tool_contract import EvidenceSupportLevel, ObservedEvidence, ToolName, ToolRequest
+from .tool_contract import (
+    EvidenceSourceKind,
+    EvidenceSupportLevel,
+    ObservedEvidence,
+    ToolName,
+    ToolRequest,
+)
 
 try:
     from openai import OpenAI
@@ -197,7 +203,9 @@ def build_actor_user_prompt(*, actor_task: ActorTask) -> str:
                 "title": evidence.title,
                 "locator": evidence.locator,
                 "excerpt": evidence.excerpt,
-                "source_tool": evidence.source_tool.value,
+                "source_kind": evidence.source_kind.value,
+                "source_tool": evidence.source_tool.value if evidence.source_tool is not None else None,
+                "support_level": evidence.support_level.value,
             }
             for evidence in actor_task.observed_evidence
         ],
@@ -340,6 +348,8 @@ def _build_actor_execution_hints(*, actor_task: ActorTask) -> dict[str, object]:
 
 # Treat fetched excerpts as direct factual support; source-discovery results stay weaker evidence.
 def _is_direct_fact_support_evidence(evidence: ObservedEvidence) -> bool:
+    if evidence.source_kind == EvidenceSourceKind.INTAKE_PROVIDED:
+        return bool(evidence.excerpt.strip())
     return (
         evidence.source_tool == ToolName.FETCH_URL_TEXT
         and evidence.support_level != EvidenceSupportLevel.SOURCE_DISCOVERY

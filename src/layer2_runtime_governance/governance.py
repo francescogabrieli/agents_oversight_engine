@@ -18,7 +18,7 @@ from .oversight import (
     DynamicPolicyAssessment,
     DynamicPolicyRecommendedDirective,
 )
-from .state import ExternalCommunicationPhase, RuntimeFlag, RuntimeState, TaskState
+from .state import ExternalCommunicationPhase, RuntimeFlag, RuntimeState, StepValidationDecision, TaskState
 from .tool_contract import ToolName
 
 
@@ -354,6 +354,7 @@ def constrains_capability_use(
 # Combine all governance assessments into the one canonical runtime decision record.
 def combine_governance_assessments(
     *,
+    task_state: TaskState,
     policy_input: PolicyEvaluationInput,
     static_policy_assessment: StaticPolicyAssessment,
     dynamic_policy_assessment: DynamicPolicyAssessment | None = None,
@@ -368,6 +369,12 @@ def combine_governance_assessments(
     )
     if _provider_runtime_action_missing(policy_input=policy_input):
         final_directive = GovernanceDirective.REPLAN
+    final_directive = _normalize_intermediate_output_directive(
+        task_state=task_state,
+        policy_input=policy_input,
+        static_policy_assessment=static_policy_assessment,
+        final_directive=final_directive,
+    )
     dynamic_directive = _map_dynamic_directive(
         dynamic_policy_assessment.recommended_directive
         if dynamic_policy_assessment is not None
@@ -433,6 +440,65 @@ def combine_governance_assessments(
     )
 
 
+# Keep governance observable on every turn without opening HITL for recoverable intermediate work.
+def _normalize_intermediate_output_directive(
+    *,
+    task_state: TaskState,
+    policy_input: PolicyEvaluationInput,
+    static_policy_assessment: StaticPolicyAssessment,
+    final_directive: GovernanceDirective,
+) -> GovernanceDirective:
+    if static_policy_assessment.policy_decision in {
+        PolicyDecision.DENY,
+        PolicyDecision.REQUIRE_HUMAN_REVIEW,
+        PolicyDecision.ASK_CLARIFICATION,
+    }:
+        return final_directive
+
+    if policy_input.actor_result_type not in {
+        ActorResultType.INTERMEDIATE_OUTPUT,
+        ActorResultType.FINAL_OUTPUT,
+    }:
+        return final_directive
+
+    if policy_input.external_impact or policy_input.capability_mode == CapabilityAccessMode.WRITE:
+        return final_directive
+
+    if final_directive != GovernanceDirective.WAIT_HUMAN_REVIEW:
+        return final_directive
+
+    validation_action = _resolve_validation_action_for_directive_normalization(task_state=task_state)
+    if validation_action == StepValidationDecision.CONTINUE_ACTING:
+        return GovernanceDirective.CONTINUE
+    if validation_action == StepValidationDecision.REQUEST_MORE_EVIDENCE:
+        return GovernanceDirective.REQUEST_MORE_EVIDENCE
+    if validation_action == StepValidationDecision.NEEDS_REPLAN:
+        return GovernanceDirective.REPLAN
+    if (
+        validation_action == StepValidationDecision.COMPLETE_STEP
+        and task_state.current_state in {RuntimeState.READY_NEXT_STEP, RuntimeState.COMPLETED}
+    ):
+        return GovernanceDirective.CONTINUE
+    return final_directive
+
+
+def _resolve_validation_action_for_directive_normalization(
+    *,
+    task_state: TaskState,
+) -> StepValidationDecision | None:
+    actor_result = task_state.actor_result
+    if actor_result is None:
+        return None
+    if actor_result.result_type not in {
+        ActorResultType.INTERMEDIATE_OUTPUT,
+        ActorResultType.FINAL_OUTPUT,
+    }:
+        return None
+    if actor_result.step_validation is None:
+        return None
+    return actor_result.step_validation.next_action
+
+
 # Treat provider protocol failures as runtime recovery, not operator review.
 def _provider_runtime_action_missing(*, policy_input: PolicyEvaluationInput) -> bool:
     if policy_input.actor_result_type != ActorResultType.BLOCKED:
@@ -448,6 +514,7 @@ def _provider_runtime_action_missing(*, policy_input: PolicyEvaluationInput) -> 
 # Keep the old public builder alive while internally delegating to the new layered combiner.
 def build_governance_decision(
     *,
+    task_state: TaskState | None = None,
     policy_input: PolicyEvaluationInput,
     policy_result: PolicyEvaluationResult,
     oversight_assessment: DynamicPolicyAssessment | None = None,
@@ -465,12 +532,77 @@ def build_governance_decision(
             policy_result=policy_result,
         ),
     )
-    return combine_governance_assessments(
-        policy_input=policy_input,
+    if task_state is not None:
+        return combine_governance_assessments(
+            task_state=task_state,
+            policy_input=policy_input,
+            static_policy_assessment=static_policy_assessment,
+            dynamic_policy_assessment=oversight_assessment,
+            behavioral_assessment=behavioral_assessment,
+            judge_assessment=judge_assessment,
+        )
+
+    final_directive = combine_governance_directives(
         static_policy_assessment=static_policy_assessment,
         dynamic_policy_assessment=oversight_assessment,
         behavioral_assessment=behavioral_assessment,
         judge_assessment=judge_assessment,
+    )
+    return GovernanceDecisionTrace(
+        directive=final_directive,
+        policy_decision=static_policy_assessment.policy_decision,
+        reason_codes=static_policy_assessment.reason_codes,
+        summary=_build_combined_summary(
+            static_policy_assessment=static_policy_assessment,
+            final_directive=final_directive,
+            dynamic_policy_assessment=oversight_assessment,
+            behavioral_assessment=behavioral_assessment,
+            judge_assessment=judge_assessment,
+        ),
+        constrains_capability_use=constrains_capability_use(
+            policy_input=policy_input,
+            static_policy_assessment=static_policy_assessment,
+        )
+        or final_directive != static_policy_assessment.policy_directive,
+        evaluated_actor_result_type=policy_input.actor_result_type,
+        evaluated_tool_name=policy_input.tool_name,
+        policy_engine_name=static_policy_assessment.policy_engine_name,
+        policy_bundle_version=static_policy_assessment.policy_bundle_version,
+        policy_directive=static_policy_assessment.policy_directive,
+        oversight_recommended_directive=_map_dynamic_directive(
+            oversight_assessment.recommended_directive
+            if oversight_assessment is not None
+            else DynamicPolicyRecommendedDirective.CONTINUE
+        ),
+        behavioral_recommended_directive=_map_behavioral_directive(
+            behavioral_assessment.behavioral_recommended_directive
+            if behavioral_assessment is not None
+            else BehavioralRecommendedDirective.CONTINUE
+        ),
+        judge_recommended_directive=_map_judge_directive(
+            judge_assessment.recommendation
+            if judge_assessment is not None
+            else JudgeRecommendedDirective.CONTINUE
+        ),
+        judge_invoked=judge_assessment.invoked if judge_assessment is not None else False,
+        static_policy_summary=static_policy_assessment.summary,
+        dynamic_policy_summary=oversight_assessment.summary if oversight_assessment is not None else None,
+        behavioral_summary=behavioral_assessment.summary if behavioral_assessment is not None else None,
+        judge_summary=judge_assessment.summary if judge_assessment is not None else None,
+        behavioral_similarity_score=(
+            behavioral_assessment.historical_similarity_score
+            if behavioral_assessment is not None
+            else None
+        ),
+        behavioral_deviation_score=(
+            behavioral_assessment.behavior_deviation_score
+            if behavioral_assessment is not None
+            else None
+        ),
+        behavioral_novelty_score=(
+            behavioral_assessment.novelty_score if behavioral_assessment is not None else None
+        ),
+        oversight_summary=oversight_assessment.summary if oversight_assessment is not None else None,
     )
 
 

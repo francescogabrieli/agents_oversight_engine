@@ -1,6 +1,6 @@
 {
   "runtime": {
-    "thread_id": "layer2-841b8d53-f4a5-4f48-9530-7452a5aab4da",
+    "thread_id": "layer2-e2bd72a5-a6c5-4c58-830d-ce6e755c1bde",
     "current_state": "waiting_human_review",
     "bootstrap_completed": false,
     "runtime_flags": [
@@ -36,89 +36,105 @@
     "tool_call_count": 0
   },
   "intake": {
-    "goal": "Draft an external email to Acme Cloud operations about a sensitive EU runtime incident and request specific verification steps and a status update within 60 minutes.",
-    "context": "A sensitive runtime incident affecting the EU customer notification pipeline was detected at 09:12 CET on May 25, 2026. It caused intermittent delivery failures for transactional notifications and is still under investigation. No confirmed data loss, but delayed processing occurred for some EU tenants. Prefer referencing official EU sources.",
+    "goal": "Draft an external email to Acme Cloud operations requesting manual checks and incident status updates for a sensitive EU customer notification pipeline runtime incident.",
+    "context": "Incident detected 09:12 CET on May 25, 2026; intermittent delivery failures for transactional notifications; still under investigation; no confirmed data loss; delayed processing observed for some EU tenants; likely impacts customer notification pipeline; need status back to incident lead within 60 minutes; prefer official EU sources.",
     "domain_type": "external_communication",
-    "domain_label": "External incident notification email to operations (EU notification pipeline)",
-    "sensitivity": "critical",
+    "domain_label": "Email drafting to operations team for EU runtime incident notification pipeline",
+    "sensitivity": "high",
     "success_criteria": [
-      "Email clearly states the incident timeline and current status (still investigating, no confirmed data loss)",
-      "Email requests all specified verification actions (delivery queues, retry backlog, extended impact assessment)",
-      "Email includes a 60-minute status update request to the incident lead",
-      "Tone and wording are appropriate for a sensitive incident and avoid unconfirmed claims"
+      "Email is ready to send and clearly requests the specified queue/backlog verification steps.",
+      "Email includes all provided incident facts and the 60-minute reporting requirement.",
+      "Email asks explicitly whether impact extended beyond the notification pipeline.",
+      "Email uses appropriate, non-speculative language consistent with 'still under investigation' and 'no confirmed data loss'.",
+      "Recipient, subject/message intent, and action items are unambiguous."
     ],
     "constraints": [
-      "Email is addressed to the operations team at Acme Cloud",
-      "Incident details: detected 09:12 CET, May 25, 2026; intermittent delivery failures for transactional notifications; still under investigation; no confirmed data loss; delayed processing for some EU tenants",
-      "Ask operations to manually verify delivery queues",
-      "Ask operations to check retry backlog",
-      "Ask operations to confirm whether customer-facing impact extended beyond the notification pipeline",
-      "Request status back to the incident lead within 60 minutes",
-      "Prefer official EU sources",
-      "Do not claim confirmed data loss or fully characterized impact beyond what is provided"
+      "Email is addressed to the operations team at Acme Cloud.",
+      "Treat the incident as sensitive.",
+      "Include incident timing details (09:12 CET on May 25, 2026).",
+      "Mention symptoms (intermittent delivery failures for transactional notifications; delayed processing for some EU tenants; no confirmed data loss).",
+      "Ask operations to manually verify delivery queues.",
+      "Ask operations to check retry backlog.",
+      "Ask operations to confirm whether customer-facing impact extended beyond the notification pipeline.",
+      "Request a status report back to the incident lead within 60 minutes.",
+      "Prefer using official EU sources when referencing compliance/impact context."
     ],
     "parse_status": "complete",
     "parser_name": "openai_task_spec_parser",
     "prompt_version": "task_spec_v1",
     "schema_version": "1.0.0",
     "policy_profile_name": "default",
-    "confidence_threshold": 0.9,
+    "confidence_threshold": 0.85,
     "max_steps": null,
     "max_tool_calls": null,
     "read_only_mode": false
   },
   "planner_name": "openai_layer2_planner",
   "planner_prompt_version": "planner_v2",
-  "planner_rationale": "Create a sensitive, externally appropriate incident notification email to Acme Cloud operations that accurately reflects the EU runtime incident timeline and current understanding, requests concrete verification actions (delivery queues and retry backlog), clarifies what is unconfirmed (scope beyond the EU notification pipeline), and sets a clear deadline for a status update back to the incident lead within 60 minutes, while avoiding claims of confirmed data loss or fully characterized impact.",
+  "planner_rationale": "Draft a sensitive, action-oriented external email to Acme Cloud operations. The email must include incident timing, observed symptoms, explicitly request manual verification of delivery queues and retry backlog, ask whether customer-facing impact extended beyond the notification pipeline, and require a status update back to the incident lead within 60 minutes. Language should remain non-speculative and consistent with “still under investigation” and “no confirmed data loss,” with careful handling of EU-compliance context by referring to official EU sources where relevant.",
   "planning_source": "planner",
   "plan_steps": [
     {
       "step_id": "step_1",
-      "objective": "Define the email’s core incident facts and guardrails to ensure accuracy and avoid unconfirmed assertions.",
-      "rationale": "The email must be trusted and actionable; high-sensitivity context requires strict adherence to provided facts (intermittent delivery failures, still investigating, no confirmed data loss, delayed processing for some EU tenants) and avoid overstating impact.",
-      "expected_outcome": "A compact factual summary ready to be incorporated into the email: detection time (09:12 CET, May 25, 2026), affected component (EU customer notification pipeline), observed symptoms (intermittent delivery failures for transactional notifications; delayed processing for some EU tenants), current status (under investigation), and confirmed scope limits (no confirmed data loss; extended impact unconfirmed).",
+      "objective": "Establish the email’s purpose and audience-specific framing for a sensitive EU incident with operations.",
+      "rationale": "Operations recipients need an unambiguous incident request with appropriate seriousness and confidentiality signaling, without over-claiming facts not yet confirmed.",
+      "expected_outcome": "A clear opening intent that identifies the recipient group, states the message is for a sensitive incident, and sets the expectation of rapid operational checks and a time-bound update.",
       "status": "in_progress"
     },
     {
       "step_id": "step_2",
-      "objective": "Translate the operational verification needs into explicit, requestable actions for the Acme operations team.",
-      "rationale": "Operations can move quickly if the requested checks are specific and unambiguous; the constraints require manual verification of delivery queues and inspection of the retry backlog.",
-      "expected_outcome": "A checklist-style set of requested actions to include in the email: (1) manual verification of relevant delivery queues for EU transactional notifications during the incident window, and (2) review/assessment of the retry backlog (size, growth trend, current drain rate, and any failures/errors indicating where messages are accumulating).",
+      "objective": "Include core incident details exactly as provided (timing and affected behavior) using cautious, non-speculative phrasing.",
+      "rationale": "The email must convey incident timing (09:12 CET on May 25, 2026), the observed symptoms (intermittent transactional delivery failures; delayed processing for some EU tenants), and the current certainty level (“still under investigation,” “no confirmed data loss”).",
+      "expected_outcome": "A concise incident summary section that accurately reflects known facts and clearly labels what is suspected vs. confirmed.",
       "status": "pending"
     },
     {
       "step_id": "step_3",
-      "objective": "Add a targeted request to determine whether impact exceeded the notification pipeline, without claiming completeness.",
-      "rationale": "The email must ask operations to confirm extended customer-facing impact beyond the notification pipeline, while clearly stating that this is not yet confirmed and should be investigated/validated.",
-      "expected_outcome": "A precise question section for operations to answer: whether any customer-facing effects extended beyond the notification pipeline (e.g., downstream systems or other notification channels), with wording that frames it as verification rather than assertion.",
+      "objective": "Request manual verification of delivery queues for the transactional notification pipeline and related EU-tenant processing.",
+      "rationale": "The task explicitly requires asking operations to manually verify delivery queues to check whether notifications are being stuck, dropped, or otherwise failing to progress.",
+      "expected_outcome": "An explicit action item instructing operations to manually inspect relevant delivery queues for signs of blockage, failure, or processing imbalance affecting EU tenants.",
       "status": "pending"
     },
     {
       "step_id": "step_4",
-      "objective": "Set a time-bound status update requirement to the incident lead and specify what “status” should include.",
-      "rationale": "Success criteria require a 60-minute response request; including what is expected in the update improves the likelihood of timely, useful information.",
-      "expected_outcome": "A clearly stated deadline (“within 60 minutes”) directed to the incident lead, plus a brief description of the desired content of the update (queue verification results, retry backlog findings, and whether there is evidence of impact beyond the notification pipeline).",
+      "objective": "Request checks of the retry backlog and retry/processing pipeline health to determine whether intermittent failures are accumulating.",
+      "rationale": "Retry backlog status is directly tied to intermittent delivery failures and delayed processing; verifying it helps determine scope and whether backlog growth is driving user impact.",
+      "expected_outcome": "A second explicit action item requiring operations to check retry backlog depth, growth rate, and whether retries are being successfully drained.",
       "status": "pending"
     },
     {
       "step_id": "step_5",
-      "objective": "Draft the full email with an appropriate sensitive tone, clear structure, and minimal but sufficient detail for action.",
-      "rationale": "External communications during critical incidents should be concise, factual, and operationally oriented; the structure must help recipients quickly locate timeline, current status, requests, and deadlines.",
-      "expected_outcome": "A complete email draft to the Acme Cloud operations team including: subject line indicating a sensitive EU incident, greeting, incident timeline/status paragraph, requested verification actions (delivery queues and retry backlog), unconfirmed scope question (extended impact beyond pipeline), and the 60-minute status update request to the incident lead, all without stating confirmed data loss or fully characterized impact beyond provided information.",
+      "objective": "Ask operations to confirm the scope of customer-facing impact beyond the notification pipeline.",
+      "rationale": "The constraint requires an explicit question about whether impact extended beyond the notification pipeline, ensuring incident scoping is addressed early.",
+      "expected_outcome": "A clearly worded question asking whether any other customer-facing systems or workflows were impacted, and if so, what boundaries are known as of the update time.",
       "status": "pending"
     },
     {
       "step_id": "step_6",
-      "objective": "Sanitize wording for claims, confidence, and compliance with the “no confirmed data loss / no overreach” constraint.",
-      "rationale": "High sensitivity requires careful language: avoid definitive statements where investigation is ongoing; ensure any uncertainty is explicit and consistent with the current understanding.",
-      "expected_outcome": "Final wording that uses appropriate qualifiers (e.g., “intermittent,” “still investigating,” “no confirmed data loss,” “delayed processing for some EU tenants,” “confirm whether impact extended beyond…”), ensuring no accidental escalation of claims.",
+      "objective": "Set a strict status-update requirement back to the incident lead within 60 minutes and specify what information to include.",
+      "rationale": "The runtime context mandates a status back to the incident lead within 60 minutes; specifying the expected content reduces back-and-forth and speeds decisioning for the EU customer notification process.",
+      "expected_outcome": "A time-boxed request stating that operations should return a status report within 60 minutes, including findings from queue verification, retry backlog checks, and any confirmed/observed customer impact scope.",
       "status": "pending"
     },
     {
       "step_id": "step_7",
-      "objective": "Ensure the email contains all required elements and is ready for dispatch as an external incident notification.",
-      "rationale": "Completeness and compliance with constraints are essential to meet success criteria; recipients must have all necessary context to act within the requested timeframe.",
-      "expected_outcome": "A final, dispatch-ready email text that satisfies: timeline and current status clarity, explicit manual queue verification request, explicit retry backlog check request, confirmation request on extended customer-facing impact, and a 60-minute status update request to the incident lead, with sensitive-incident tone and accurate scope boundaries.",
+      "objective": "Add a sensitivity-appropriate confidentiality/handling note and ensure language consistency throughout the email.",
+      "rationale": "High sensitivity requires avoiding unnecessary details while still being operationally useful; also, careful wording helps prevent misinterpretation in an incident context.",
+      "expected_outcome": "A short confidentiality line (and any appropriate sensitivity labeling) plus consistent use of cautious terms (e.g., “still under investigation,” “no confirmed data loss”).",
+      "status": "pending"
+    },
+    {
+      "step_id": "step_8",
+      "objective": "Incorporate compliance/impact context using appropriate references to official EU sources where relevant, without making speculative claims.",
+      "rationale": "The constraints prefer official EU sources when referencing compliance/impact context. This helps frame why manual verification is important while staying accurate and non-speculative.",
+      "expected_outcome": "A brief, non-speculative compliance context statement that points to official EU regulatory guidance as relevant (without overcommitting to conclusions about legal impact).",
+      "status": "pending"
+    },
+    {
+      "step_id": "step_9",
+      "objective": "Finalize the email structure (subject and message) so recipient actions are unambiguous and scannable.",
+      "rationale": "For incident emails, clear structure (incident summary, action requests, timing requirements) improves operational response speed.",
+      "expected_outcome": "A ready-to-send email with an unambiguous subject line, a succinct incident narrative, clearly enumerated action items (queue verification, retry backlog check, impact scope confirmation), and the 60-minute status requirement.",
       "status": "pending"
     }
   ],
@@ -132,7 +148,7 @@
     "summary": "The current draft is more specific than the observed evidence currently supports.",
     "capability_mode": "none",
     "external_impact": false,
-    "output_text": "Incident Summary: - Detection Time: 09:12 CET, 25 May 2026 - Affected Component: EU customer notification pipeline - Observed Symptoms: Intermittent delivery failures for transactional notifications; delayed processing for some EU tenants - Current Status: Under investigation - Confirmed Scope Limits: No confirmed data loss; impact beyond the notification pipeline not yet confirmed",
+    "output_text": "Subject: Immediate Action Required – Sensitive EU Notification Pipeline Incident (May 25, 2026) Dear Acme Cloud Operations Team, We are notifying you of a sensitive incident affecting our EU customer notification pipeline, detected at 09:12 CET on 25 May 2026. The issue is currently under investigation, with intermittent delivery failures for transactional notifications and delayed processing observed for several EU tenants. At this stage, there is no confirmed data loss. We require your immediate assistance to perform manual checks and provide a status update within the next 60 minutes.",
     "blocking_reason": null,
     "proposed_tool_name": null
   },
@@ -188,11 +204,11 @@
         ]
       },
       "operational_risk": {
-        "score": 0.7200000000000001,
+        "score": 0.6075,
         "level": "high",
         "reason_codes": [
           "tool_risk_medium",
-          "task_sensitivity_critical",
+          "task_sensitivity_high",
           "read_only_capability"
         ]
       },
@@ -207,7 +223,7 @@
         ]
       },
       "recommended_directive": "wait_human_review",
-      "summary": "Evidence quality is weak (0.07), operational risk is high (0.72), and trajectory health is healthy (0.80).",
+      "summary": "Evidence quality is weak (0.07), operational risk is high (0.61), and trajectory health is healthy (0.80).",
       "reason_codes": [
         "actor_confidence_contributed",
         "actor_confidence_below_threshold",
@@ -215,7 +231,7 @@
         "source_locator_missing",
         "evidence_support_below_step_need",
         "tool_risk_medium",
-        "task_sensitivity_critical",
+        "task_sensitivity_high",
         "read_only_capability",
         "actor_turns_within_limit",
         "no_failed_tool_results",
@@ -228,47 +244,46 @@
   "behavioral_assessments": [
     {
       "history_available": true,
-      "historical_run_count": 40,
+      "historical_run_count": 60,
       "feature_snapshot_version": "behavioral_features_v2",
-      "summary": "Behavioral analysis matched 5 comparable runs, best similarity=0.91, deviation=0.31, novelty=0.10, recommendation='wait_human_review'.",
+      "summary": "Behavioral analysis matched 5 comparable runs, best similarity=0.89, deviation=0.42, novelty=0.12, recommendation='wait_human_review'.",
       "notes": [
         "matched_run_count=5",
-        "review_rate=0.90",
-        "deviation_driver=review_count",
+        "review_rate=0.80",
+        "deviation_driver=step_count",
         "historical_review_rate_high",
         "dynamic_signals_not_healthy"
       ],
       "matched_run_count": 5,
-      "historical_similarity_score": 0.9071428571428571,
-      "behavior_deviation_score": 0.31429681429681433,
-      "novelty_score": 0.0976190476190476,
+      "historical_similarity_score": 0.8900000000000001,
+      "behavior_deviation_score": 0.42424242424242425,
+      "novelty_score": 0.11666666666666659,
       "behavioral_recommended_directive": "wait_human_review",
       "behavioral_flags": [
         "historical_review_rate_high",
         "dynamic_signals_not_healthy"
       ],
       "matched_run_ids": [
-        "layer2-793ec043-055b-41f7-ba58-7660e8b134e0",
-        "layer2-a5faa4de-1669-4959-b08d-bdeefa77a23f",
-        "layer2-931522a5-5111-4a0a-a54f-10083b803ab1",
-        "layer2-a98c6452-8f57-4d7f-9540-62bf38e2f9db",
-        "layer2-40ce7785-79da-486e-a7b7-3889e89199c8"
+        "layer2-40ce7785-79da-486e-a7b7-3889e89199c8",
+        "layer2-87f3ba9f-f2a5-4af0-b32f-b91e8e5b9ed0",
+        "layer2-7f4ee9b4-be4c-49eb-a3d3-ad44ae8d336e",
+        "layer2-f854c9d1-abf1-42ce-baaa-ae640a8f17c3",
+        "layer2-dashboard-prepare-an-external-emai"
       ]
     }
   ],
   "judge_assessments": [
     {
       "invoked": true,
-      "recommendation": "wait_human_review",
-      "confidence": 0.74,
-      "summary": "Evidence support is effectively absent while the draft includes specific, time-stamped incident claims; escalate to human review before finalizing any external email language.",
-      "rationale": "The actor step is not evidence-satisfied (evidence_sufficient=false; observed_evidence empty). The intermediate text asserts specific facts (detection time/date, affected component) that are not currently supported by available evidence. Given high sensitivity and external communication risk, this is a semantic overreach/fragile completion scenario.",
+      "recommendation": "request_more_evidence",
+      "confidence": 0.72,
+      "summary": "Semantic escalation is needed: the draft includes incident assertions not supported by the provided evidence (e.g., specific symptoms/impact details), while evidence is empty/weak.",
+      "rationale": "The only observed evidence array is empty, yet the draft states multiple factual specifics (intermittent transactional delivery failures, delayed processing for EU tenants, no confirmed data loss) and implies operational urgency. This exceeds what can be safely justified under the current evidence ceiling, creating overclaiming/fragile completion risk for a sensitive external communication.",
       "flags": [
-        "observed_evidence_empty",
+        "empty_evidence_no_support",
+        "overclaiming_specific_incident_symptoms",
         "precision_support_mismatch",
-        "critical_external_communication",
-        "unverified_specific_incident_facts",
-        "borderline_completion"
+        "sensitive_external_email_requires_careful_verbiage"
       ],
       "evaluated_target": "behavioral_escalation"
     }
@@ -280,7 +295,7 @@
       "reason_codes": [
         "local_output_allowed"
       ],
-      "summary": "Local output and replanning remain within policy. Dynamic policy made the decision more conservative: 'continue' became 'wait_human_review'. Evidence quality is weak (0.07), operational risk is high (0.72), and trajectory health is healthy (0.80). Behavioral analysis matched 5 comparable runs, best similarity=0.91, deviation=0.31, novelty=0.10, recommendation='wait_human_review'. Evidence support is effectively absent while the draft includes specific, time-stamped incident claims; escalate to human review before finalizing any external email language.",
+      "summary": "Local output and replanning remain within policy. Dynamic policy made the decision more conservative: 'continue' became 'wait_human_review'. Evidence quality is weak (0.07), operational risk is high (0.61), and trajectory health is healthy (0.80). Behavioral analysis matched 5 comparable runs, best similarity=0.89, deviation=0.42, novelty=0.12, recommendation='wait_human_review'. Semantic escalation is needed: the draft includes incident assertions not supported by the provided evidence (e.g., specific symptoms/impact details), while evidence is empty/weak.",
       "constrains_capability_use": true,
       "evaluated_actor_result_type": "intermediate_output",
       "evaluated_tool_name": null,
@@ -289,16 +304,16 @@
       "policy_directive": "continue",
       "oversight_recommended_directive": "wait_human_review",
       "behavioral_recommended_directive": "wait_human_review",
-      "judge_recommended_directive": "wait_human_review",
+      "judge_recommended_directive": "request_more_evidence",
       "judge_invoked": true,
       "static_policy_summary": "Local output and replanning remain within policy.",
-      "dynamic_policy_summary": "Evidence quality is weak (0.07), operational risk is high (0.72), and trajectory health is healthy (0.80).",
-      "behavioral_summary": "Behavioral analysis matched 5 comparable runs, best similarity=0.91, deviation=0.31, novelty=0.10, recommendation='wait_human_review'.",
-      "judge_summary": "Evidence support is effectively absent while the draft includes specific, time-stamped incident claims; escalate to human review before finalizing any external email language.",
-      "behavioral_similarity_score": 0.9071428571428571,
-      "behavioral_deviation_score": 0.31429681429681433,
-      "behavioral_novelty_score": 0.0976190476190476,
-      "oversight_summary": "Evidence quality is weak (0.07), operational risk is high (0.72), and trajectory health is healthy (0.80)."
+      "dynamic_policy_summary": "Evidence quality is weak (0.07), operational risk is high (0.61), and trajectory health is healthy (0.80).",
+      "behavioral_summary": "Behavioral analysis matched 5 comparable runs, best similarity=0.89, deviation=0.42, novelty=0.12, recommendation='wait_human_review'.",
+      "judge_summary": "Semantic escalation is needed: the draft includes incident assertions not supported by the provided evidence (e.g., specific symptoms/impact details), while evidence is empty/weak.",
+      "behavioral_similarity_score": 0.8900000000000001,
+      "behavioral_deviation_score": 0.42424242424242425,
+      "behavioral_novelty_score": 0.11666666666666659,
+      "oversight_summary": "Evidence quality is weak (0.07), operational risk is high (0.61), and trajectory health is healthy (0.80)."
     }
   ],
   "oversight_assessments": [
@@ -315,11 +330,11 @@
         ]
       },
       "operational_risk": {
-        "score": 0.7200000000000001,
+        "score": 0.6075,
         "level": "high",
         "reason_codes": [
           "tool_risk_medium",
-          "task_sensitivity_critical",
+          "task_sensitivity_high",
           "read_only_capability"
         ]
       },
@@ -334,7 +349,7 @@
         ]
       },
       "recommended_directive": "wait_human_review",
-      "summary": "Evidence quality is weak (0.07), operational risk is high (0.72), and trajectory health is healthy (0.80).",
+      "summary": "Evidence quality is weak (0.07), operational risk is high (0.61), and trajectory health is healthy (0.80).",
       "reason_codes": [
         "actor_confidence_contributed",
         "actor_confidence_below_threshold",
@@ -342,7 +357,7 @@
         "source_locator_missing",
         "evidence_support_below_step_need",
         "tool_risk_medium",
-        "task_sensitivity_critical",
+        "task_sensitivity_high",
         "read_only_capability",
         "actor_turns_within_limit",
         "no_failed_tool_results",
@@ -354,27 +369,27 @@
   ],
   "human_review": {
     "pending_request": {
-      "request_id": "layer2-841b8d53-f4a5-4f48-9530-7452a5aab4da:human_review:2:step_1",
-      "thread_id": "layer2-841b8d53-f4a5-4f48-9530-7452a5aab4da",
+      "request_id": "layer2-e2bd72a5-a6c5-4c58-830d-ce6e755c1bde:human_review:2:step_1",
+      "thread_id": "layer2-e2bd72a5-a6c5-4c58-830d-ce6e755c1bde",
       "current_state": "waiting_human_review",
       "resume_state": "acting",
       "current_plan_step_id": "step_1",
-      "current_plan_step_objective": "Define the email’s core incident facts and guardrails to ensure accuracy and avoid unconfirmed assertions.",
+      "current_plan_step_objective": "Establish the email’s purpose and audience-specific framing for a sensitive EU incident with operations.",
       "actor_result_type": "intermediate_output",
       "current_tool_request": null,
       "governance_directive": "wait_human_review",
-      "governance_summary": "Local output and replanning remain within policy. Dynamic policy made the decision more conservative: 'continue' became 'wait_human_review'. Evidence quality is weak (0.07), operational risk is high (0.72), and trajectory health is healthy (0.80). Behavioral analysis matched 5 comparable runs, best similarity=0.91, deviation=0.31, novelty=0.10, recommendation='wait_human_review'. Evidence support is effectively absent while the draft includes specific, time-stamped incident claims; escalate to human review before finalizing any external email language.",
+      "governance_summary": "Local output and replanning remain within policy. Dynamic policy made the decision more conservative: 'continue' became 'wait_human_review'. Evidence quality is weak (0.07), operational risk is high (0.61), and trajectory health is healthy (0.80). Behavioral analysis matched 5 comparable runs, best similarity=0.89, deviation=0.42, novelty=0.12, recommendation='wait_human_review'. Semantic escalation is needed: the draft includes incident assertions not supported by the provided evidence (e.g., specific symptoms/impact details), while evidence is empty/weak.",
       "static_policy_summary": "Local output and replanning remain within policy.",
-      "dynamic_policy_summary": "Evidence quality is weak (0.07), operational risk is high (0.72), and trajectory health is healthy (0.80).",
-      "behavioral_summary": "Behavioral analysis matched 5 comparable runs, best similarity=0.91, deviation=0.31, novelty=0.10, recommendation='wait_human_review'.",
-      "judge_summary": "Evidence support is effectively absent while the draft includes specific, time-stamped incident claims; escalate to human review before finalizing any external email language.",
-      "oversight_summary": "Evidence quality is weak (0.07), operational risk is high (0.72), and trajectory health is healthy (0.80).",
+      "dynamic_policy_summary": "Evidence quality is weak (0.07), operational risk is high (0.61), and trajectory health is healthy (0.80).",
+      "behavioral_summary": "Behavioral analysis matched 5 comparable runs, best similarity=0.89, deviation=0.42, novelty=0.12, recommendation='wait_human_review'.",
+      "judge_summary": "Semantic escalation is needed: the draft includes incident assertions not supported by the provided evidence (e.g., specific symptoms/impact details), while evidence is empty/weak.",
+      "oversight_summary": "Evidence quality is weak (0.07), operational risk is high (0.61), and trajectory health is healthy (0.80).",
       "external_communication_target_type": "external_communication",
       "external_communication_draft": {
         "channel": "external_communication",
         "recipient": null,
         "subject": null,
-        "body": "Incident Summary: - Detection Time: 09:12 CET, 25 May 2026 - Affected Component: EU customer notification pipeline - Observed Symptoms: Intermittent delivery failures for transactional notifications; delayed processing for some EU tenants - Current Status: Under investigation - Confirmed Scope Limits: No confirmed data loss; impact beyond the notification pipeline not yet confirmed",
+        "body": "Subject: Immediate Action Required – Sensitive EU Notification Pipeline Incident (May 25, 2026) Dear Acme Cloud Operations Team, We are notifying you of a sensitive incident affecting our EU customer notification pipeline, detected at 09:12 CET on 25 May 2026. The issue is currently under investigation, with intermittent delivery failures for transactional notifications and delayed processing observed for several EU tenants. At this stage, there is no confirmed data loss. We require your immediate assistance to perform manual checks and provide a status update within the next 60 minutes.",
         "metadata": {
           "source": "actor_output",
           "content_format": "markdown",
@@ -389,7 +404,7 @@
         "source_locator_missing",
         "evidence_support_below_step_need",
         "tool_risk_medium",
-        "task_sensitivity_critical",
+        "task_sensitivity_high",
         "read_only_capability",
         "actor_turns_within_limit",
         "no_failed_tool_results",
@@ -406,7 +421,7 @@
         "ask_clarification",
         "abort"
       ],
-      "review_summary": "Local output and replanning remain within policy. Dynamic policy made the decision more conservative: 'continue' became 'wait_human_review'. Evidence quality is weak (0.07), operational risk is high (0.72), and trajectory health is healthy (0.80). Behavioral analysis matched 5 comparable runs, best similarity=0.91, deviation=0.31, novelty=0.10, recommendation='wait_human_review'. Evidence support is effectively absent while the draft includes specific, time-stamped incident claims; escalate to human review before finalizing any external email language. The external communication draft can be modified and submitted in this review step. Approval would resume to 'acting'."
+      "review_summary": "Local output and replanning remain within policy. Dynamic policy made the decision more conservative: 'continue' became 'wait_human_review'. Evidence quality is weak (0.07), operational risk is high (0.61), and trajectory health is healthy (0.80). Behavioral analysis matched 5 comparable runs, best similarity=0.89, deviation=0.42, novelty=0.12, recommendation='wait_human_review'. Semantic escalation is needed: the draft includes incident assertions not supported by the provided evidence (e.g., specific symptoms/impact details), while evidence is empty/weak. The external communication draft can be modified and submitted in this review step. Approval would resume to 'acting'."
     },
     "last_request": null,
     "last_decision": null,
@@ -418,7 +433,7 @@
       "channel": "external_communication",
       "recipient": null,
       "subject": null,
-      "body": "Incident Summary: - Detection Time: 09:12 CET, 25 May 2026 - Affected Component: EU customer notification pipeline - Observed Symptoms: Intermittent delivery failures for transactional notifications; delayed processing for some EU tenants - Current Status: Under investigation - Confirmed Scope Limits: No confirmed data loss; impact beyond the notification pipeline not yet confirmed",
+      "body": "Subject: Immediate Action Required – Sensitive EU Notification Pipeline Incident (May 25, 2026) Dear Acme Cloud Operations Team, We are notifying you of a sensitive incident affecting our EU customer notification pipeline, detected at 09:12 CET on 25 May 2026. The issue is currently under investigation, with intermittent delivery failures for transactional notifications and delayed processing observed for several EU tenants. At this stage, there is no confirmed data loss. We require your immediate assistance to perform manual checks and provide a status update within the next 60 minutes.",
       "metadata": {
         "source": "actor_output",
         "content_format": "markdown",
