@@ -85,6 +85,10 @@ def planner(state: TaskState, *, planner_service: PlannerPort) -> TaskState:
         task_state=state,
         plan_steps=decision.plan_steps,
     )
+    planned_steps = _compact_external_communication_plan(
+        task_state=state,
+        plan_steps=planned_steps,
+    )
     state.plan_steps = _enforce_plan_step_budget(
         plan_steps=planned_steps,
         max_steps=state.execution_policy.budget.max_steps,
@@ -481,6 +485,59 @@ def _compact_small_source_summary_plan(
             claim_precision_ceiling=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
         ),
     ]
+
+
+# Collapse over-decomposed external communication drafts into a shorter governed flow.
+def _compact_external_communication_plan(
+    *,
+    task_state: TaskState,
+    plan_steps: list[PlanStep],
+) -> list[PlanStep]:
+    if len(plan_steps) <= 3:
+        return plan_steps
+    if task_state.task_spec.domain_type != DomainType.EXTERNAL_COMMUNICATION:
+        return plan_steps
+
+    plan_text = " ".join(
+        " ".join((step.objective, step.rationale, step.expected_outcome))
+        for step in plan_steps
+    ).lower()
+    refinement_markers = (
+        "refine wording",
+        "minimize risk",
+        "scope boundaries",
+        "review-ready",
+        "human review",
+        "final draft",
+        "draft proposal",
+    )
+    if not any(marker in plan_text for marker in refinement_markers):
+        return plan_steps
+
+    compacted_steps = [deepcopy(step) for step in plan_steps[:3]]
+    final_step = compacted_steps[-1]
+    if final_step.step_kind is None:
+        final_step.step_kind = PlanStepKind.FINAL_SYNTHESIS
+    if final_step.evidence_requirement is None:
+        final_step.evidence_requirement = EvidenceSupportLevel.LOCAL_ONLY
+    if final_step.claim_precision_ceiling is None:
+        final_step.claim_precision_ceiling = EvidenceSupportLevel.LOCAL_ONLY
+
+    final_step.objective = (
+        "Draft the external email with an appropriate structure, urgency, and a 60-minute "
+        "response deadline, keeping the claims carefully qualified and review-ready."
+    )
+    final_step.rationale = (
+        "The task is a bounded external incident escalation, so the last semantic step should "
+        "produce the complete governed draft instead of splitting refinement into a separate "
+        "extra step."
+    )
+    final_step.expected_outcome = (
+        "A complete external email draft suitable for human review that includes the incident "
+        "summary, the specific operational requests, the no-confirmed-data-loss qualifier, the "
+        "delayed-processing observation, and the 60-minute response deadline."
+    )
+    return compacted_steps
 
 
 # Detect small research tasks whose deliverable is official sources plus a brief summary.

@@ -47,6 +47,7 @@ It already includes:
 - durable local LangGraph checkpoint persistence and per-thread runtime artifacts on disk
 - typed `external_communication` phase tracking for evidence, draft, review/edit, approval, and blocked states
 - the external communication draft body is taken from the latest governed draft output for the branch, while the trace retains the canonical final body and diagnostics for claim precision vs typed evidence requirements
+- over-decomposed external communication plans may be compacted to a shorter governed draft flow when the planner adds a redundant refinement step after the review-ready draft
 - typed runtime trace export through `trace.py`, surfaced by `src/main_layer2.py`
 - offline trace evaluation and reporting through `evaluation.py`, surfaced by `src/main_layer2_evaluation.py`
 
