@@ -1,0 +1,74 @@
+export type ReviewInboxEntry = {
+  thread_id: string;
+  runtime_state: string | null;
+  updated_at: string | null;
+  task_goal: string | null;
+  review_summary: string | null;
+  allowed_decisions: string[];
+  request_id: string | null;
+  external_communication_phase: string | null;
+};
+
+export type DashboardPlanStep = {
+  step_id: string;
+  objective: string;
+  rationale: string;
+  expected_outcome: string;
+  status: string;
+};
+
+export type DashboardPanel = Record<string, unknown>;
+
+export type HumanReviewPendingRequest = {
+  request_id: string;
+  review_summary?: string | null;
+  allowed_decisions: string[];
+  external_communication_draft?: ExternalCommunicationDraft | null;
+};
+
+export type ExternalCommunicationDraft = {
+  channel: string;
+  recipient?: string | null;
+  subject?: string | null;
+  body: string;
+  metadata: Record<string, unknown>;
+};
+
+export type DashboardSnapshot = {
+  runtime_state: string;
+  resume_state?: string | null;
+  has_pending_review: boolean;
+  is_terminal: boolean;
+  reason_codes: string[];
+  current_plan_step?: DashboardPlanStep | null;
+  governance?: DashboardPanel | null;
+  oversight?: DashboardPanel | null;
+  behavioral?: DashboardPanel | null;
+  external_communication?: DashboardPanel | null;
+  human_review?: {
+    pending_request?: HumanReviewPendingRequest | null;
+    allowed_decisions?: string[];
+    review_summary?: string | null;
+  } | null;
+};
+
+export type ReviewDetailResponse = {
+  thread_id: string;
+  runtime_summary?: Record<string, unknown> | null;
+  dashboard_snapshot?: DashboardSnapshot | null;
+  pending_human_review?: HumanReviewPendingRequest | null;
+  operator_feedback?: string;
+};
+
+export type HumanReviewDecisionPayload = {
+  thread_id: string;
+  request_id: string;
+  decision_type: string;
+  reviewer_id?: string;
+  note?: string;
+  clarification_text?: string;
+  external_communication_edit?: {
+    note?: string;
+    draft: ExternalCommunicationDraft;
+  };
+};

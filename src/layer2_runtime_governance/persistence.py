@@ -185,11 +185,30 @@ class RuntimeArtifactStore:
         paths.runtime_summary_path.write_text(
             json.dumps(
                 {
-                    "artifact_version": "layer2_runtime_artifacts_v1",
+                    "artifact_version": "layer2_runtime_artifacts_v2",
                     "thread_id": thread_id,
                     "runtime_state": task_state.current_state.value,
                     "runtime_thread_id": task_state.runtime_thread_id,
                     "has_pending_human_review": task_state.pending_human_review_request is not None,
+                    "task_goal": intake_result.structured_task.task_spec.goal,
+                    "review_summary": (
+                        task_state.pending_human_review_request.review_summary
+                        if task_state.pending_human_review_request is not None
+                        else None
+                    ),
+                    "pending_request_id": (
+                        task_state.pending_human_review_request.request_id
+                        if task_state.pending_human_review_request is not None
+                        else None
+                    ),
+                    "allowed_decisions": (
+                        [
+                            decision.value
+                            for decision in task_state.pending_human_review_request.allowed_decisions
+                        ]
+                        if task_state.pending_human_review_request is not None
+                        else []
+                    ),
                     "external_communication_phase": (
                         task_state.external_communication.phase.value
                         if task_state.external_communication is not None
@@ -229,6 +248,34 @@ class RuntimeArtifactStore:
     # Expose whether persisted artifacts already exist for one thread.
     def exists(self, thread_id: str) -> bool:
         return self.build_paths(thread_id).thread_dir.exists()
+
+    # List thread ids that already have a persisted artifact directory.
+    def list_thread_ids(self) -> list[str]:
+        if not self.root_path.exists():
+            return []
+        return sorted(path.name for path in self.root_path.iterdir() if path.is_dir())
+
+    # Read the persisted runtime summary for one thread when available.
+    def read_runtime_summary(self, thread_id: str) -> dict[str, Any] | None:
+        return self._read_json_artifact(self.build_paths(thread_id).runtime_summary_path)
+
+    # Read the persisted dashboard snapshot for one thread when available.
+    def read_dashboard_snapshot(self, thread_id: str) -> dict[str, Any] | None:
+        return self._read_json_artifact(self.build_paths(thread_id).dashboard_snapshot_path)
+
+    # Read the persisted pending human review payload for one thread when available.
+    def read_pending_human_review(self, thread_id: str) -> dict[str, Any] | None:
+        return self._read_json_artifact(self.build_paths(thread_id).pending_human_review_path)
+
+    # Keep artifact reads defensive so incomplete runtime writes do not break the dashboard.
+    def _read_json_artifact(self, path: Path) -> dict[str, Any] | None:
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        return payload if isinstance(payload, dict) else None
 
 
 # Persist the current runtime artifacts through the default local store.

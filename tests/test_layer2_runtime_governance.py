@@ -1960,6 +1960,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
                 tool_gateway_service=StubToolGateway(),
                 replanner_service=StubReplanner(),
                 policy_engine_service=StubPolicyEngine(),
+                judge_service=StaticJudge(_judge_wait_review_assessment()),
                 artifact_store=artifact_store,
                 checkpointer=InMemorySaver(),
             )
@@ -1975,6 +1976,14 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             runtime_summary = json.loads(paths.runtime_summary_path.read_text(encoding="utf-8"))
             self.assertEqual(dashboard_payload["runtime_state"], "completed")
             self.assertEqual(runtime_summary["thread_id"], trace["thread_id"])
+            self.assertEqual(runtime_summary["artifact_version"], "layer2_runtime_artifacts_v2")
+            self.assertEqual(
+                runtime_summary["task_goal"],
+                "Find official sources about the DMA and summarize them.",
+            )
+            self.assertEqual(runtime_summary["review_summary"], None)
+            self.assertEqual(runtime_summary["pending_request_id"], None)
+            self.assertEqual(runtime_summary["allowed_decisions"], [])
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 

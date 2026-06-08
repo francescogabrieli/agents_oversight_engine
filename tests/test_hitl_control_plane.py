@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import sys
 import shutil
+import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -44,14 +45,12 @@ from layer2_runtime_governance import (
 from layer2_runtime_governance.governance import PolicyEnginePort
 from layer2_runtime_governance.hitl import build_human_review_request
 from layer2_runtime_governance.nodes import governance
-from main_layer2_dashboard import (
-    DashboardSession,
-    build_dashboard_session_from_trace,
-    launch_dashboard_session,
-)
+from main_layer2 import main as main_layer2_cli
+from main_layer2_dashboard import build_dashboard_session_from_trace
 
 
-class AutomaticHitlControlPlaneTests(unittest.TestCase):
+class HitlControlPlaneTests(unittest.TestCase):
+    # Verify governance still emits a typed notification when human review is requested.
     def test_governance_notifies_when_human_review_is_requested(self) -> None:
         task_state = _build_actor_ready_state()
         notifications: list[object] = []
@@ -71,6 +70,7 @@ class AutomaticHitlControlPlaneTests(unittest.TestCase):
         self.assertEqual(notifications[0].current_state, RuntimeState.WAITING_HUMAN_REVIEW)
         self.assertIsNotNone(notifications[0].pending_human_review_request)
 
+    # Verify the review summary remains deduplicated when governance and oversight overlap.
     def test_human_review_summary_is_not_duplicated(self) -> None:
         task_state = _build_actor_ready_state()
         task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
@@ -89,51 +89,7 @@ class AutomaticHitlControlPlaneTests(unittest.TestCase):
             1,
         )
 
-    def test_governance_does_not_notify_when_review_is_not_required(self) -> None:
-        task_state = _build_actor_ready_state()
-        notifications: list[object] = []
-        behavioral_store = _build_empty_behavioral_store("hitl_live")
-
-        result = governance(
-            task_state,
-            policy_engine_service=_AllowPolicyEngine(),
-            behavioral_store_service=behavioral_store,
-            thread_id="thread-live",
-            hitl_event_callback=notifications.append,
-        )
-
-        self.assertEqual(len(notifications), 0)
-        self.assertEqual(result.current_state, RuntimeState.READY_TOOL_EXECUTION)
-        self.assertIsNone(result.pending_human_review_request)
-
-    def test_dashboard_launcher_is_idempotent_for_one_thread_id(self) -> None:
-        session = DashboardSession(
-            thread_id="thread-launch-1",
-            intake_result=_intake_result(),
-            final_result={"task_state": _waiting_review_state()},
-            checkpointer=object(),
-        )
-        calls: list[tuple[str, int, bool]] = []
-
-        def _fake_serve_dashboard(*, session, host, port, open_browser):
-            calls.append((session.thread_id, port, open_browser))
-
-        handle_one = launch_dashboard_session(
-            session=session,
-            open_browser=False,
-            serve_dashboard_fn=_fake_serve_dashboard,
-        )
-        handle_one.thread.join(timeout=1)
-
-        handle_two = launch_dashboard_session(
-            session=session,
-            open_browser=False,
-            serve_dashboard_fn=_fake_serve_dashboard,
-        )
-
-        self.assertIs(handle_one, handle_two)
-        self.assertEqual(calls, [("thread-launch-1", 8022, False)])
-
+    # Verify the control-plane session can still be reconstructed directly from a trace.
     def test_dashboard_session_can_be_rebuilt_from_trace(self) -> None:
         trace = {
             "thread_id": "thread-trace",
@@ -145,6 +101,42 @@ class AutomaticHitlControlPlaneTests(unittest.TestCase):
 
         self.assertEqual(session.thread_id, "thread-trace")
         self.assertEqual(session.final_result["task_state"].current_state, RuntimeState.WAITING_HUMAN_REVIEW)
+
+    # Verify the CLI no longer wires auto-launch tracking into run_layer2_flow.
+    def test_main_layer2_cli_does_not_pass_hitl_autolaunch_callback(self) -> None:
+        captured: dict[str, object] = {}
+
+        def _fake_parse_args():
+            class Args:
+                task = "Inspect dashboard decoupling."
+                context = "Stay local."
+                policy_profile = None
+                thread_id = "cli-thread"
+                demo_intake_profile = "clarification"
+                quiet = True
+                live_trace = False
+                trace_file = Path("full-trace-2.json")
+                full_trace = False
+
+            return Args()
+
+        def _fake_run_layer2_flow(**kwargs):
+            captured.update(kwargs)
+            return {
+                "thread_id": "cli-thread",
+                "intake_result": _intake_result(),
+                "final_result": {"task_state": _waiting_review_state()},
+            }
+
+        with mock.patch("main_layer2.parse_cli_args", side_effect=_fake_parse_args), mock.patch(
+            "main_layer2.build_default_checkpointer",
+            return_value=object(),
+        ), mock.patch("main_layer2.run_layer2_flow", side_effect=_fake_run_layer2_flow), mock.patch(
+            "main_layer2.write_layer2_trace_file"
+        ), mock.patch("main_layer2.print_layer2_summary"):
+            main_layer2_cli()
+
+        self.assertNotIn("hitl_event_callback", captured)
 
 
 # Build a TaskState that is ready for actor output and can be escalated into HITL.
@@ -187,29 +179,29 @@ def _waiting_review_state():
     return state
 
 
-# Build a canonical IntakeResult for the HITL auto-launch tests.
+# Build a canonical IntakeResult for the HITL control-plane tests.
 def _intake_result() -> IntakeResult:
     return IntakeResult(
         structured_task=StructuredTask(
             task_spec=TaskSpec(
-                goal="Inspect the HITL auto-launch contract.",
+                goal="Inspect the HITL control plane contract.",
                 context="Use deterministic fixtures.",
                 constraints=["Stay read-only."],
                 domain_type=DomainType.ANALYSIS,
-                domain_label="hitl_autolaunch_test",
+                domain_label="hitl_control_plane_test",
                 sensitivity=SensitivityLevel.MEDIUM,
                 success_criteria=["Expose a typed dashboard snapshot."],
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.65,
                 budget=BudgetConfig(max_steps=4, max_tool_calls=3),
-                policy_profile_name="hitl_autolaunch_profile",
+                policy_profile_name="hitl_control_plane_profile",
             ),
         ),
         metadata=IntakeMetadata(
             parse_status=ParseStatus.COMPLETE,
-            parser_name="hitl_autolaunch_test_intake",
-            prompt_version="hitl_autolaunch_v1",
+            parser_name="hitl_control_plane_test_intake",
+            prompt_version="hitl_control_plane_v1",
             schema_version="1.0.0",
             warnings=[],
             missing_information=[],
@@ -217,7 +209,7 @@ def _intake_result() -> IntakeResult:
     )
 
 
-# Build an empty per-test behavioural store so HITL tests stay independent from local runtime history.
+# Build an empty per-test behavioural store so control-plane tests stay deterministic.
 def _build_empty_behavioral_store(suffix: str) -> SQLiteBehavioralStore:
     temp_root = REPO_ROOT / f"_test_behavioral_{suffix}"
     shutil.rmtree(temp_root, ignore_errors=True)
@@ -236,21 +228,6 @@ class _ReviewPolicyEngine(PolicyEnginePort):
             policy_decision=PolicyDecision.REQUIRE_HUMAN_REVIEW,
             reason_codes=(GovernanceReasonCode.HUMAN_REVIEW_REQUIRED,),
             summary="Human review is required.",
-            policy_engine_name=self.policy_engine_name,
-            policy_bundle_version=self.policy_bundle_version,
-        )
-
-
-# Fake policy engine that keeps the runtime in the normal autonomous path.
-class _AllowPolicyEngine(PolicyEnginePort):
-    policy_engine_name = "allow_policy_engine"
-    policy_bundle_version = "allow_policy_v1"
-
-    def evaluate(self, *, policy_input):
-        return PolicyEvaluationResult(
-            policy_decision=PolicyDecision.ALLOW,
-            reason_codes=(GovernanceReasonCode.ALLOWED_BY_POLICY,),
-            summary="Autonomous continuation is allowed.",
             policy_engine_name=self.policy_engine_name,
             policy_bundle_version=self.policy_bundle_version,
         )

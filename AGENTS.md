@@ -65,6 +65,7 @@ Supporting material lives in:
 - `architecture/`
 - `configs/`
 - `docs/`
+- `frontend/dashboard`
 - `tests/`
 
 
@@ -191,7 +192,8 @@ Current design:
 - `trace.py` defines the typed, JSON-exportable Layer 2 runtime trace contract used for debugging, thesis evidence, HITL payloads, and evaluation, including resolved evidence-requirement provenance for each plan step
 - `evaluation.py` defines the offline trace evaluation pipeline that reads exported trace JSON and produces JSON and Markdown reports, including typed-vs-heuristic evidence mismatch accounting
 - `hitl_dashboard.py` defines the dashboard-facing snapshot model derived from `TaskState`, governance, oversight, and HITL review payloads
-- `main_layer2_dashboard.py` now acts as a single-run operator control plane with typed resume actions, inline validation feedback, and rich edit support for `external_communication`
+- `main_layer2_dashboard.py` now acts as a standalone multi-thread HITL control plane backend that serves the React dashboard build, exposes the review inbox/detail/resume API, and resolves resume actions from persisted checkpoints on demand
+- `frontend/dashboard` contains the standalone React + TypeScript + Tailwind + daisyUI dashboard frontend that is built into static assets and served by `main_layer2_dashboard.py`
 - `configs/layer2_oversight_policy.json` defines the explicit weights, thresholds, risk scores, sensitivity multipliers, and trajectory penalties used by the dynamic policy layer
 - `runtime_warnings.py` centralizes warning suppression needed before importing selected LangGraph/LangChain dependencies
 - `graph.py` contains the current LangGraph wiring for the planner/actor/governance/tool/replanner/human-review loop:
@@ -364,7 +366,8 @@ Current relevant files:
 - `main_layer2_evaluation.py` is the offline, trace-only evaluation entrypoint and must stay decoupled from the live runtime CLI
 - `ABORTED` is the hard-denial runtime state for governance decisions that must not be conflated with review
 - HITL is wired as `interrupt / resume`; governance now pauses in typed states and resumes from typed human decisions
-- the local Layer 2 CLI auto-launches the HITL control plane on the first `WAITING_HUMAN_REVIEW` transition for a thread, reusing the same dashboard session and checkpoint store
+- the local Layer 2 CLI no longer auto-launches the HITL control plane; the standalone dashboard process discovers new `WAITING_HUMAN_REVIEW` threads by polling persisted runtime artifacts
+- `runtime_summary.json` is now inbox-oriented and includes `task_goal`, `review_summary`, `pending_request_id`, `allowed_decisions`, `external_communication_phase`, `has_pending_human_review`, and `updated_at`
 
 ### HITL Rules
 
@@ -434,16 +437,22 @@ Run Layer 2 bootstrap, planner, actor, tool loop, and replanner with determinist
 .\.venv\Scripts\python.exe src\main_layer2.py --demo-intake-profile research --task "Find official sources about the Digital Markets Act and produce a short summary."
 ```
 
-Run the local HITL control plane dashboard:
+Install the standalone HITL dashboard frontend dependencies:
 
 ```powershell
-.\.venv\Scripts\python.exe src\main_layer2_dashboard.py --demo-intake-profile clarification --task "Find official sources about the Digital Markets Act and produce a short summary."
+npm install --prefix frontend/dashboard
 ```
 
-Reload the local HITL control plane dashboard from a persisted thread:
+Build the standalone HITL dashboard frontend:
 
 ```powershell
-.\.venv\Scripts\python.exe src\main_layer2_dashboard.py --load-thread-id <thread_id>
+npm run build --prefix frontend/dashboard
+```
+
+Run the standalone local HITL control plane dashboard:
+
+```powershell
+.\.venv\Scripts\python.exe src\main_layer2_dashboard.py --open-browser
 ```
 
 

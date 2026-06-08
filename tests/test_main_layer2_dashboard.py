@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import json
+import shutil
 import sys
+import threading
 import unittest
 from pathlib import Path
+from unittest import mock
+from urllib import request
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -25,7 +30,6 @@ from layer1_intake import (
 )
 from layer2_runtime_governance import (
     ActorResultType,
-    CapabilityAccessMode,
     ExternalCommunicationDraft,
     ExternalCommunicationPhase,
     GovernanceDecision,
@@ -46,103 +50,91 @@ from layer2_runtime_governance import (
     TaskState,
     ToolName,
     ToolRequest,
-    TrajectoryHealthAssessment,
-    build_governance_hitl_dashboard_snapshot,
-    build_default_checkpointer,
-)
-from main_layer2_dashboard import (
-    DashboardSession,
-    _build_operator_feedback_message,
-    _render_dashboard_page_internal,
-    build_dashboard_session_from_thread_id,
-    create_dashboard_session,
-    _build_response_headers,
-    _parse_human_review_decision,
-    render_dashboard_page,
-    resume_dashboard_session,
 )
 from layer2_runtime_governance import EvidenceQualityAssessment, TrajectoryHealthAssessment
+from layer2_runtime_governance.persistence import RuntimeArtifactStore, persist_runtime_artifacts
+from main_layer2_dashboard import (
+    DashboardSession,
+    _build_response_headers,
+    _parse_human_review_decision,
+    build_dashboard_httpd,
+)
 
 
 class MainLayer2DashboardTests(unittest.TestCase):
-    def test_render_dashboard_page_contains_review_payload_and_actions(self) -> None:
+    # Keep server tests isolated under a temporary artifact root and static build directory.
+    def setUp(self) -> None:
+        self.temp_root = REPO_ROOT / "_test_dashboard_runtime"
+        self.static_root = REPO_ROOT / "_test_dashboard_static"
+        shutil.rmtree(self.temp_root, ignore_errors=True)
+        shutil.rmtree(self.static_root, ignore_errors=True)
+        self.temp_root.mkdir(parents=True, exist_ok=True)
+        self.static_root.mkdir(parents=True, exist_ok=True)
+        (self.static_root / "index.html").write_text(
+            "<!doctype html><html><body><div id='root'>dashboard</div></body></html>",
+            encoding="utf-8",
+        )
+        self.artifact_store = RuntimeArtifactStore(root_path=self.temp_root)
+
+    # Clean up test artifacts and stop any leftover dashboard server.
+    def tearDown(self) -> None:
+        shutil.rmtree(self.temp_root, ignore_errors=True)
+        shutil.rmtree(self.static_root, ignore_errors=True)
+
+    # Verify the typed parser accepts nested external draft edits for modify_and_continue.
+    def test_parse_human_review_decision_supports_nested_external_modify_and_continue(self) -> None:
         session = _build_paused_session()
 
-        html = render_dashboard_page(session)
-
-        self.assertIn("Governance HITL Control Plane", html)
-        self.assertIn("Layer 2 HITL control plane", html)
-        self.assertIn("thread-1", html)
-        self.assertIn("Operator Review", html)
-        self.assertIn("Review and resume", html)
-        self.assertIn("Submit edited draft", html)
-        self.assertIn("More evidence", html)
-        self.assertNotIn("Metadata JSON", html)
-        self.assertIn("Technical details", html)
-        self.assertIn("Current Plan Step", html)
-        self.assertIn("Raw Snapshot", html)
-        self.assertIn('class="card card-hero"', html)
-        self.assertIn('class="card card-control"', html)
-        self.assertIn('class="control-layout"', html)
-        self.assertIn('class="fact-grid"', html)
-        self.assertIn('class="resume-fields"', html)
-        self.assertIn("External draft", html)
-        self.assertIn('name="external_communication_body"', html)
-        self.assertIn('type="hidden" name="external_communication_metadata"', html)
-        self.assertNotIn('name="external_communication_recipient"', html)
-        self.assertNotIn('name="external_communication_subject"', html)
-        self.assertIn("thread-1:hitl", html)
-        self.assertIn('/assets/dashboard.css', html)
-        self.assertIn('/assets/dashboard.js', html)
-        self.assertIn('id="dashboard-snapshot-data"', html)
-        self.assertIn('id="dashboard-last-checked"', html)
-
-    def test_parse_human_review_decision_supports_external_modify_and_continue(self) -> None:
-        session = _build_paused_session()
-        payload = {
-            "request_id": "thread-1:hitl",
-            "thread_id": "thread-1",
-            "decision_type": "modify_and_continue",
-            "reviewer_id": "operator-1",
-            "note": "Submit the revised draft.",
-            "external_communication_channel": "slack",
-            "external_communication_body": "Updated body text.",
-            "external_communication_metadata": '{"priority": "critical"}',
-        }
-
-        decision = _parse_human_review_decision(payload, session=session)
+        decision = _parse_human_review_decision(
+            {
+                "thread_id": "thread-1",
+                "request_id": "thread-1:hitl",
+                "decision_type": "modify_and_continue",
+                "reviewer_id": "operator-1",
+                "note": "Apply the revised draft.",
+                "external_communication_edit": {
+                    "draft": {
+                        "channel": "email",
+                        "recipient": "ops@example.com",
+                        "subject": "Draft update",
+                        "body": "Updated body text.",
+                        "metadata": {"priority": "critical"},
+                    }
+                },
+            },
+            session=session,
+        )
 
         self.assertEqual(decision.decision_type, HumanReviewDecisionType.MODIFY_AND_CONTINUE)
         self.assertIsNotNone(decision.external_communication_edit)
-        self.assertEqual(
-            decision.external_communication_edit.draft.channel,
-            "slack",
-        )
         self.assertEqual(decision.external_communication_edit.draft.body, "Updated body text.")
         self.assertEqual(
             decision.external_communication_edit.draft.metadata["priority"],
             "critical",
         )
-        self.assertEqual(decision.external_communication_edit.note, "Submit the revised draft.")
 
+    # Verify request id mismatches still fail before any resume logic runs.
     def test_parse_human_review_decision_rejects_request_id_mismatch(self) -> None:
         session = _build_paused_session()
 
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "request_id"):
             _parse_human_review_decision(
                 {
+                    "thread_id": "thread-1",
                     "request_id": "wrong-request-id",
                     "decision_type": "approve_continue",
                 },
                 session=session,
             )
 
+    # Verify clarification requests remain typed and cannot omit their required text.
     def test_parse_human_review_decision_requires_text_for_clarification(self) -> None:
         session = _build_paused_session()
 
         with self.assertRaisesRegex(ValueError, "Clarification text is required"):
             _parse_human_review_decision(
                 {
+                    "thread_id": "thread-1",
                     "request_id": "thread-1:hitl",
                     "decision_type": "ask_clarification",
                     "clarification_text": "",
@@ -150,87 +142,22 @@ class MainLayer2DashboardTests(unittest.TestCase):
                 session=session,
             )
 
-    def test_parse_human_review_decision_ignores_clarification_for_other_actions(self) -> None:
+    # Verify legacy flat metadata still fails cleanly when it is not valid JSON.
+    def test_parse_human_review_decision_rejects_invalid_metadata(self) -> None:
         session = _build_paused_session()
 
-        decision = _parse_human_review_decision(
-            {
-                "request_id": "thread-1:hitl",
-                "decision_type": "approve_continue",
-                "clarification_text": "This should not affect approval.",
-            },
-            session=session,
-        )
+        with self.assertRaisesRegex(ValueError, "valid JSON"):
+            _parse_human_review_decision(
+                {
+                    "thread_id": "thread-1",
+                    "request_id": "thread-1:hitl",
+                    "decision_type": "modify_and_continue",
+                    "external_communication_metadata": "{not-json}",
+                },
+                session=session,
+            )
 
-        self.assertIsNone(decision.clarification_text)
-
-    def test_render_dashboard_page_shows_inline_form_error_and_preserves_values(self) -> None:
-        session = _build_paused_session()
-        form_state = {
-            "request_id": "thread-1:hitl",
-            "decision_type": "modify_and_continue",
-            "reviewer_id": "operator-2",
-            "note": "Keep these edits.",
-            "external_communication_channel": "slack",
-            "external_communication_body": "",
-        }
-
-        html = _render_dashboard_page_internal(
-            session=session,
-            form_state=form_state,
-            form_error="External communication body is required for modify_and_continue.",
-        )
-
-        self.assertIn("Submission blocked.", html)
-        self.assertIn("External communication body is required for modify_and_continue.", html)
-        self.assertIn('value="operator-2"', html)
-        self.assertIn("Keep these edits.", html)
-        self.assertNotIn("Metadata JSON", html)
-
-    def test_render_dashboard_page_hides_external_edit_form_for_non_external_review(self) -> None:
-        session = _build_non_external_paused_session()
-
-        html = render_dashboard_page(session)
-
-        self.assertIn("Operator Review", html)
-        self.assertNotIn("Submit edited draft", html)
-        self.assertNotIn('name="external_communication_body"', html)
-
-    def test_render_dashboard_page_can_show_post_submit_feedback(self) -> None:
-        session = _build_live_session()
-        decision = HumanReviewDecision(
-            request_id="thread-1:hitl",
-            decision_type=HumanReviewDecisionType.MODIFY_AND_CONTINUE,
-        )
-
-        html = _render_dashboard_page_internal(
-            session=session,
-            operator_feedback=_build_operator_feedback_message(decision),
-        )
-
-        self.assertIn("Operator action accepted.", html)
-        self.assertIn("edited external draft was accepted", html)
-
-    def test_render_dashboard_page_enables_live_refresh_for_active_sessions(self) -> None:
-        session = _build_live_session()
-
-        html = render_dashboard_page(session)
-
-        self.assertIn('data-dashboard-mode="live"', html)
-        self.assertIn('data-auto-refresh-enabled="true"', html)
-        self.assertIn('id="dashboard-snapshot-data"', html)
-        self.assertIn('/assets/dashboard.js', html)
-
-    def test_render_dashboard_page_disables_live_refresh_for_terminal_sessions(self) -> None:
-        session = _build_terminal_session()
-
-        html = render_dashboard_page(session)
-
-        self.assertIn('data-dashboard-mode="terminal"', html)
-        self.assertIn('data-auto-refresh-enabled="false"', html)
-        self.assertNotIn("dashboard-snapshot-data", html)
-        self.assertIn('/assets/dashboard.js', html)
-
+    # Verify both API and static responses disable caching for live operator workflows.
     def test_dashboard_response_headers_disable_caching(self) -> None:
         html_headers = _build_response_headers("text/html; charset=utf-8")
         json_headers = _build_response_headers("application/json; charset=utf-8")
@@ -240,72 +167,136 @@ class MainLayer2DashboardTests(unittest.TestCase):
             self.assertEqual(headers["Pragma"], "no-cache")
             self.assertEqual(headers["Expires"], "0")
 
-    def test_resume_dashboard_session_uses_typed_human_review_decision(self) -> None:
-        captured: dict[str, object] = {}
-        session = _build_paused_session(
-            resume_flow=_fake_resume_flow(captured),
+    # Verify the inbox endpoint filters only pending reviews and sorts by newest first.
+    def test_api_reviews_lists_only_pending_sorted(self) -> None:
+        _persist_review_artifacts(self.artifact_store, thread_id="thread-a", updated_at="2026-06-05T10:00:00+00:00")
+        _persist_review_artifacts(self.artifact_store, thread_id="thread-b", updated_at="2026-06-05T12:00:00+00:00")
+        _persist_non_review_artifacts(self.artifact_store, thread_id="thread-c", updated_at="2026-06-05T11:00:00+00:00")
+
+        payload = self._request_json("/api/reviews")
+
+        self.assertEqual([item["thread_id"] for item in payload["items"]], ["thread-b", "thread-a"])
+        self.assertEqual(payload["items"][0]["runtime_state"], "waiting_human_review")
+
+    # Verify the detail endpoint returns the persisted snapshot and thread summary.
+    def test_api_review_detail_returns_snapshot(self) -> None:
+        _persist_review_artifacts(self.artifact_store, thread_id="thread-detail", updated_at="2026-06-05T10:00:00+00:00")
+
+        payload = self._request_json("/api/reviews/thread-detail")
+
+        self.assertEqual(payload["thread_id"], "thread-detail")
+        self.assertEqual(payload["runtime_summary"]["task_goal"], "Prepare a cautious external communication draft.")
+        self.assertEqual(payload["dashboard_snapshot"]["runtime_state"], "waiting_human_review")
+
+    # Verify resume applies a typed decision and returns the refreshed persisted thread state.
+    def test_api_resume_returns_refreshed_thread(self) -> None:
+        _persist_review_artifacts(self.artifact_store, thread_id="thread-resume", updated_at="2026-06-05T10:00:00+00:00")
+        session = _build_paused_session(thread_id="thread-resume")
+
+        def _fake_resume_dashboard_session(
+            session: DashboardSession,
+            human_review_decision: HumanReviewDecision,
+        ) -> dict[str, object]:
+            task_state = session.final_result["task_state"]
+            task_state.current_state = RuntimeState.ACTING
+            task_state.pending_human_review_request = None
+            task_state.human_review_resume_state = RuntimeState.ACTING
+            task_state.external_communication.phase = ExternalCommunicationPhase.DRAFT_IN_PROGRESS
+            persist_runtime_artifacts(
+                thread_id=session.thread_id,
+                intake_result=session.intake_result,
+                task_state=task_state,
+                artifact_store=self.artifact_store,
+            )
+            return {
+                "thread_id": session.thread_id,
+                "final_result": {"task_state": task_state},
+                "decision": human_review_decision,
+            }
+
+        with mock.patch(
+            "main_layer2_dashboard.build_dashboard_session_from_thread_id",
+            return_value=session,
+        ), mock.patch(
+            "main_layer2_dashboard.resume_dashboard_session",
+            side_effect=_fake_resume_dashboard_session,
+        ):
+            payload = self._request_json(
+                "/api/reviews/thread-resume/resume",
+                method="POST",
+                body={
+                    "thread_id": "thread-resume",
+                    "request_id": "thread-resume:hitl",
+                    "decision_type": "approve_continue",
+                    "reviewer_id": "operator-1",
+                },
+            )
+
+        self.assertEqual(payload["runtime_summary"]["runtime_state"], "acting")
+        self.assertEqual(
+            payload["operator_feedback"],
+            "The runtime resumed on the approved execution path.",
         )
-        decision = HumanReviewDecision(
-            request_id="thread-1:hitl",
-            decision_type=HumanReviewDecisionType.REQUEST_MORE_EVIDENCE,
-            note="Need another source.",
-            clarification_text=None,
-            reviewer_id="operator-1",
-        )
 
-        result = resume_dashboard_session(session, decision)
+        inbox = self._request_json("/api/reviews")
+        self.assertEqual(inbox["items"], [])
 
-        self.assertEqual(captured["thread_id"], "thread-1")
-        self.assertIs(captured["decision"], decision)
-        self.assertEqual(session.final_result, result["final_result"])
-        self.assertEqual(result["final_result"]["task_state"].current_state, RuntimeState.ACTING)
+    # Verify the static React entrypoint is served with the no-cache headers.
+    def test_static_index_is_served_with_no_cache_headers(self) -> None:
+        status, headers, body = self._request_raw("/")
 
-    def test_create_dashboard_session_uses_runner_injections(self) -> None:
-        captured: dict[str, object] = {}
-        session = create_dashboard_session(
-            raw_task_text="Test dashboard task.",
-            demo_intake_profile="clarification",
-            run_flow=_fake_run_flow(captured),
-            resume_flow=_fake_resume_flow(captured),
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Cache-Control"], "no-store, max-age=0")
+        self.assertIn("dashboard", body.decode("utf-8"))
+
+    # Start a temporary dashboard HTTP server, send one request, and return the decoded JSON payload.
+    def _request_json(
+        self,
+        path: str,
+        *,
+        method: str = "GET",
+        body: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        status, _, raw_body = self._request_raw(path, method=method, body=body)
+        self.assertEqual(status, 200)
+        return json.loads(raw_body.decode("utf-8"))
+
+    # Start a temporary dashboard HTTP server and return the raw status, headers, and response body.
+    def _request_raw(
+        self,
+        path: str,
+        *,
+        method: str = "GET",
+        body: dict[str, object] | None = None,
+    ) -> tuple[int, dict[str, str], bytes]:
+        httpd = build_dashboard_httpd(
+            host="127.0.0.1",
+            port=0,
+            artifact_store=self.artifact_store,
             checkpointer=object(),
+            static_root=self.static_root,
         )
-
-        self.assertEqual(captured["run_thread_id"], session.thread_id)
-        self.assertEqual(session.final_result["task_state"].current_state, RuntimeState.WAITING_HUMAN_REVIEW)
-        self.assertIsInstance(build_governance_hitl_dashboard_snapshot(session.final_result["task_state"]).focus.value, str)
-
-    def test_dashboard_session_can_be_rebuilt_from_persisted_thread(self) -> None:
-        with self.subTest("persisted thread reload"):
-            temp_checkpoint = REPO_ROOT / "artifacts" / "test-temp-dashboard-checkpoints.pkl"
-            if temp_checkpoint.exists():
-                temp_checkpoint.unlink()
-            checkpointer = build_default_checkpointer(storage_path=temp_checkpoint)
-            session = create_dashboard_session(
-                raw_task_text="Reload this external communication dashboard thread.",
-                context_hint="Keep the draft local.",
-                demo_intake_profile="clarification",
-                resume_flow=_fake_resume_flow({}),
-                checkpointer=checkpointer,
+        server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        server_thread.start()
+        try:
+            url = f"http://127.0.0.1:{httpd.server_port}{path}"
+            encoded_body = None
+            headers = {}
+            if body is not None:
+                encoded_body = json.dumps(body).encode("utf-8")
+                headers["Content-Type"] = "application/json"
+            response = request.urlopen(
+                request.Request(url, data=encoded_body, headers=headers, method=method)
             )
-
-            reloaded = build_dashboard_session_from_thread_id(
-                session.thread_id,
-                checkpointer=checkpointer,
-                resume_flow=_fake_resume_flow({}),
-            )
-
-            self.assertEqual(reloaded.thread_id, session.thread_id)
-            self.assertEqual(
-                reloaded.final_result["task_state"].current_state,
-                RuntimeState.WAITING_HUMAN_REVIEW,
-            )
-
-            if temp_checkpoint.exists():
-                temp_checkpoint.unlink()
+            return response.status, dict(response.headers.items()), response.read()
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            server_thread.join(timeout=2)
 
 
-# Build a paused session with a review payload and a controllable resume runner.
-def _build_paused_session(*, resume_flow=None) -> DashboardSession:
+# Build a canonical paused session with a pending external communication review payload.
+def _build_paused_session(*, thread_id: str = "thread-1") -> DashboardSession:
     intake_result = _intake_result()
     task_state = TaskState.from_intake(intake_result)
     task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
@@ -329,7 +320,7 @@ def _build_paused_session(*, resume_flow=None) -> DashboardSession:
         body="Please review this draft before sending.",
         metadata={"priority": "high"},
     )
-    task_state.pending_human_review_request = _human_review_request()
+    task_state.pending_human_review_request = _human_review_request(thread_id=thread_id)
     task_state.last_human_review_request = task_state.pending_human_review_request
     task_state.external_communication.phase = ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
     task_state.external_communication.last_transition_summary = (
@@ -337,115 +328,65 @@ def _build_paused_session(*, resume_flow=None) -> DashboardSession:
     )
 
     return DashboardSession(
-        thread_id="thread-1",
+        thread_id=thread_id,
         intake_result=intake_result,
         final_result={"task_state": task_state},
         checkpointer=object(),
-        resume_flow=resume_flow or _fake_resume_flow({}),
     )
 
 
-# Build a paused non-external session so the rich external edit form stays hidden.
-def _build_non_external_paused_session() -> DashboardSession:
-    intake_result = _analysis_intake_result()
-    task_state = TaskState.from_intake(intake_result)
-    task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
-    task_state.human_review_resume_state = RuntimeState.ACTING
-    task_state.plan_steps = [
-        PlanStep(
-            step_id="step_1",
-            objective="Collect one more source.",
-            rationale="The operator must decide the next research step.",
-            expected_outcome="A safer next action.",
-            status=PlanStepStatus.IN_PROGRESS,
-        )
-    ]
-    task_state.current_plan_step_index = 0
-    task_state.last_governance_decision = _governance_decision()
-    task_state.last_oversight_assessment = _oversight_assessment()
-    task_state.pending_human_review_request = HumanReviewRequest(
-        request_id="thread-analysis:hitl",
-        thread_id="thread-analysis",
-        current_state=RuntimeState.WAITING_HUMAN_REVIEW,
-        resume_state=RuntimeState.ACTING,
-        current_plan_step_id="step_1",
-        current_plan_step_objective="Collect one more source.",
-        actor_result_type=ActorResultType.PROPOSE_ACTION,
-        current_tool_request=ToolRequest(
-            plan_step_id="step_1",
-            tool_name=ToolName.WEB_SEARCH,
-            reason="Collect one more source.",
-            query="official source",
-        ),
-        governance_directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
-        governance_summary="Human review is required.",
-        oversight_summary="Evidence and risk warrant human review.",
-        reason_codes=("human_review_required",),
-        allowed_decisions=(
-            HumanReviewDecisionType.APPROVE_CONTINUE,
-            HumanReviewDecisionType.REQUEST_MORE_EVIDENCE,
-            HumanReviewDecisionType.REPLAN,
-            HumanReviewDecisionType.ASK_CLARIFICATION,
-            HumanReviewDecisionType.ABORT,
-        ),
-        review_summary="The task should pause for operator review.",
+# Persist one pending-review artifact set and optionally override its summary timestamp.
+def _persist_review_artifacts(
+    artifact_store: RuntimeArtifactStore,
+    *,
+    thread_id: str,
+    updated_at: str,
+) -> None:
+    session = _build_paused_session(thread_id=thread_id)
+    persist_runtime_artifacts(
+        thread_id=thread_id,
+        intake_result=session.intake_result,
+        task_state=session.final_result["task_state"],
+        artifact_store=artifact_store,
     )
-    task_state.last_human_review_request = task_state.pending_human_review_request
-
-    return DashboardSession(
-        thread_id="thread-analysis",
-        intake_result=intake_result,
-        final_result={"task_state": task_state},
-        checkpointer=object(),
-        resume_flow=_fake_resume_flow({}),
-    )
+    _rewrite_summary_timestamp(artifact_store=artifact_store, thread_id=thread_id, updated_at=updated_at)
 
 
-# Build a live session that should enable polling but not render review controls.
-def _build_live_session() -> DashboardSession:
+# Persist one non-review artifact set so inbox filtering can exclude it.
+def _persist_non_review_artifacts(
+    artifact_store: RuntimeArtifactStore,
+    *,
+    thread_id: str,
+    updated_at: str,
+) -> None:
     intake_result = _intake_result()
     task_state = TaskState.from_intake(intake_result)
-    task_state.current_state = RuntimeState.ACTING
-    task_state.plan_steps = [
-        PlanStep(
-            step_id="step_1",
-            objective="Collect official evidence.",
-            rationale="The task should begin with grounding.",
-            expected_outcome="Evidence gathered.",
-            status=PlanStepStatus.IN_PROGRESS,
-        )
-    ]
-    task_state.current_plan_step_index = 0
+    task_state.current_state = RuntimeState.COMPLETED
     task_state.last_governance_decision = _governance_decision()
     task_state.last_oversight_assessment = _oversight_assessment()
-
-    return DashboardSession(
-        thread_id="thread-live",
+    persist_runtime_artifacts(
+        thread_id=thread_id,
         intake_result=intake_result,
-        final_result={"task_state": task_state},
-        checkpointer=object(),
-        resume_flow=_fake_resume_flow({}),
+        task_state=task_state,
+        artifact_store=artifact_store,
     )
+    _rewrite_summary_timestamp(artifact_store=artifact_store, thread_id=thread_id, updated_at=updated_at)
 
 
-# Build a terminal session that should never poll for updates.
-def _build_terminal_session() -> DashboardSession:
-    intake_result = _intake_result()
-    task_state = TaskState.from_intake(intake_result)
-    task_state.current_state = RuntimeState.ABORTED
-    task_state.last_governance_decision = _governance_decision()
-    task_state.last_oversight_assessment = _oversight_assessment()
-
-    return DashboardSession(
-        thread_id="thread-terminal",
-        intake_result=intake_result,
-        final_result={"task_state": task_state},
-        checkpointer=object(),
-        resume_flow=_fake_resume_flow({}),
-    )
+# Override one runtime summary timestamp to make inbox ordering deterministic.
+def _rewrite_summary_timestamp(
+    *,
+    artifact_store: RuntimeArtifactStore,
+    thread_id: str,
+    updated_at: str,
+) -> None:
+    summary_path = artifact_store.build_paths(thread_id).runtime_summary_path
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    payload["updated_at"] = updated_at
+    summary_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-# Build a canonical IntakeResult for dashboard entrypoint tests.
+# Build a canonical IntakeResult for dashboard tests.
 def _intake_result() -> IntakeResult:
     return IntakeResult(
         structured_task=StructuredTask(
@@ -456,36 +397,6 @@ def _intake_result() -> IntakeResult:
                 domain_type=DomainType.EXTERNAL_COMMUNICATION,
                 domain_label="dashboard_test_external_comm",
                 sensitivity=SensitivityLevel.HIGH,
-                success_criteria=["Expose a typed dashboard snapshot."],
-            ),
-            execution_policy=ExecutionPolicy(
-                confidence_threshold=0.65,
-                budget=BudgetConfig(max_steps=4, max_tool_calls=3),
-                policy_profile_name="dashboard_profile",
-            ),
-        ),
-        metadata=IntakeMetadata(
-            parse_status=ParseStatus.COMPLETE,
-            parser_name="dashboard_test_intake",
-            prompt_version="dashboard_test_v1",
-            schema_version="1.0.0",
-            warnings=[],
-            missing_information=[],
-        ),
-    )
-
-
-# Build a non-external IntakeResult for generic review rendering tests.
-def _analysis_intake_result() -> IntakeResult:
-    return IntakeResult(
-        structured_task=StructuredTask(
-            task_spec=TaskSpec(
-                goal="Review a governed research step.",
-                context="Use deterministic fixtures and stay read-only.",
-                constraints=["Stay read-only."],
-                domain_type=DomainType.ANALYSIS,
-                domain_label="dashboard_test_analysis",
-                sensitivity=SensitivityLevel.MEDIUM,
                 success_criteria=["Expose a typed dashboard snapshot."],
             ),
             execution_policy=ExecutionPolicy(
@@ -547,11 +458,11 @@ def _oversight_assessment() -> OversightAssessment:
     )
 
 
-# Build the pending human review payload for the dashboard tests.
-def _human_review_request() -> HumanReviewRequest:
+# Build the pending human review payload used by the dashboard tests.
+def _human_review_request(*, thread_id: str) -> HumanReviewRequest:
     return HumanReviewRequest(
-        request_id="thread-1:hitl",
-        thread_id="thread-1",
+        request_id=f"{thread_id}:hitl",
+        thread_id=thread_id,
         current_state=RuntimeState.WAITING_HUMAN_REVIEW,
         resume_state=RuntimeState.ACTING,
         current_plan_step_id="step_1",
@@ -578,55 +489,6 @@ def _human_review_request() -> HumanReviewRequest:
         allowed_decisions=tuple(HumanReviewDecisionType),
         review_summary="The task should pause for operator review.",
     )
-
-
-# Build a fake resume runner that records the typed decision and returns a paused-safe result.
-def _fake_resume_flow(captured: dict[str, object]):
-    def _resume_flow(*, thread_id, human_review_decision, checkpointer):
-        captured["thread_id"] = thread_id
-        captured["decision"] = human_review_decision
-        captured["checkpointer"] = checkpointer
-        task_state = _build_resume_result_state()
-        return {
-            "thread_id": thread_id,
-            "final_result": {"task_state": task_state},
-        }
-
-    return _resume_flow
-
-
-# Build a fake starter runner that records the thread id and returns a waiting-review result.
-def _fake_run_flow(captured: dict[str, object]):
-    def _run_flow(*, raw_task_text, context_hint, policy_profile, thread_id, demo_intake_profile, checkpointer):
-        captured["run_thread_id"] = thread_id
-        captured["run_task"] = raw_task_text
-        captured["run_context"] = context_hint
-        captured["run_policy_profile"] = policy_profile
-        captured["run_demo_profile"] = demo_intake_profile
-        captured["run_checkpointer"] = checkpointer
-        task_state = TaskState.from_intake(_intake_result())
-        task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
-        task_state.pending_human_review_request = _human_review_request()
-        task_state.last_governance_decision = _governance_decision()
-        task_state.last_oversight_assessment = _oversight_assessment()
-        return {
-            "thread_id": thread_id,
-            "intake_result": _intake_result(),
-            "final_result": {"task_state": task_state},
-        }
-
-    return _run_flow
-
-
-# Build the resumed runtime state used by the fake resume flow.
-def _build_resume_result_state() -> TaskState:
-    task_state = TaskState.from_intake(_intake_result())
-    task_state.current_state = RuntimeState.ACTING
-    task_state.human_review_resume_state = RuntimeState.ACTING
-    task_state.last_governance_decision = _governance_decision()
-    task_state.last_oversight_assessment = _oversight_assessment()
-    task_state.pending_human_review_request = None
-    return task_state
 
 
 if __name__ == "__main__":

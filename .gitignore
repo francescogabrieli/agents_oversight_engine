@@ -15,12 +15,14 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+*.tsbuildinfo
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
 .coverage.*
 htmlcov/
+node_modules/
 
 # IDE / editor
 .vscode/
@@ -34,3 +36,9 @@ langgraph_documentation.md
 # Runtime artifacts
 artifacts/
 .codex/
+
+# Frontend generated files
+frontend/dashboard/vite.config.js
+frontend/dashboard/vite.config.d.ts
+frontend/dashboard/tailwind.config.js
+frontend/dashboard/tailwind.config.d.ts
