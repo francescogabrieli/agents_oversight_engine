@@ -837,6 +837,12 @@ def _guard_completion_against_unsupported_precision(
     if not isinstance(output_text, str) or not output_text.strip():
         return arguments
 
+    if _output_stays_within_authoritative_intake_support(
+        actor_task=actor_task,
+        output_text=output_text,
+    ):
+        return arguments
+
     precision_markers = _extract_precision_claim_markers(text=output_text)
     available_level = _max_available_evidence_support_level(actor_task=actor_task)
     required_level = _required_evidence_support_level(
@@ -884,6 +890,131 @@ def _guard_completion_against_unsupported_precision(
         "finalizing more specific legal or factual claims."
     )
     return guarded_arguments
+
+
+# Allow exact task-provided facts to support local drafting without requiring external excerpts.
+def _output_stays_within_authoritative_intake_support(
+    *,
+    actor_task: ActorTask,
+    output_text: str,
+) -> bool:
+    intake_evidence = [
+        evidence
+        for evidence in actor_task.observed_evidence
+        if evidence.source_kind == EvidenceSourceKind.INTAKE_PROVIDED
+        and evidence.excerpt.strip()
+    ]
+    if not intake_evidence:
+        return False
+
+    local_step_text = " ".join(
+        part.strip()
+        for part in (
+            actor_task.current_plan_step.objective,
+            actor_task.current_plan_step.expected_outcome,
+            actor_task.current_plan_step.rationale,
+        )
+        if part and part.strip()
+    ).lower()
+    normalized_output = _normalize_output_text_for_precision_checks(output_text).lower()
+    support_requirement_text = f"{local_step_text} {normalized_output}"
+
+    # External-source requirements must come from the current step or output, not global task preferences.
+    external_support_markers = (
+        "official source",
+        "official sources",
+        "official website",
+        "official eu",
+        "source shortlist",
+        "web search",
+        "fetch",
+        "url",
+        "citation",
+        "citations",
+        "reference",
+        "references",
+        "legal",
+        "regulation",
+        "compliance",
+        "verify against",
+        "check source",
+        "article ",
+        "law",
+        "statute",
+    )
+    if any(marker in support_requirement_text for marker in external_support_markers):
+        return False
+
+    output_claims = _extract_local_precision_claims(text=normalized_output)
+    if not output_claims:
+        return True
+
+    intake_text = " ".join(evidence.excerpt.lower() for evidence in intake_evidence)
+    return all(
+        _intake_text_supports_local_precision_claim(
+            intake_text=intake_text,
+            claim=claim,
+        )
+        for claim in output_claims
+    )
+
+
+# Extract local date/time/numeric details that can be checked against task-provided facts.
+def _extract_local_precision_claims(*, text: str) -> list[str]:
+    claims: list[str] = []
+    patterns = (
+        r"\b(?:19|20)\d{2}\b",
+        r"\b\d{1,2}:\d{2}\s*(?:cet|cest|utc|gmt)?\b",
+        r"\b\d{1,2}\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+(?:19|20)\d{2}\b",
+        r"\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},\s*(?:19|20)\d{2}\b",
+        r"\bwithin\s+\d+\s+minutes?\b",
+        r"\b\d+\s+minutes?\b",
+    )
+    for pattern in patterns:
+        claims.extend(match.group(0).lower() for match in re.finditer(pattern, text, flags=re.IGNORECASE))
+    return sorted(set(claims))
+
+
+# Match equivalent local date spellings without treating reformatted intake facts as new claims.
+def _intake_text_supports_local_precision_claim(
+    *,
+    intake_text: str,
+    claim: str,
+) -> bool:
+    if claim in intake_text:
+        return True
+
+    day_first = re.fullmatch(
+        r"(\d{1,2})\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+((?:19|20)\d{2})",
+        claim,
+        flags=re.IGNORECASE,
+    )
+    if day_first is not None:
+        day, month, year = day_first.groups()
+        return bool(
+            re.search(
+                rf"\b{month}\s+0?{day},?\s+{year}\b",
+                intake_text,
+                flags=re.IGNORECASE,
+            )
+        )
+
+    month_first = re.fullmatch(
+        r"(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2}),?\s+((?:19|20)\d{2})",
+        claim,
+        flags=re.IGNORECASE,
+    )
+    if month_first is not None:
+        month, day, year = month_first.groups()
+        return bool(
+            re.search(
+                rf"\b0?{day}\s+{month}\s+{year}\b",
+                intake_text,
+                flags=re.IGNORECASE,
+            )
+        )
+
+    return False
 
 
 class OpenAIActor(ActorPort):

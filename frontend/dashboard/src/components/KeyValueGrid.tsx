@@ -4,23 +4,31 @@ type KeyValueGridProps = {
 };
 
 export function KeyValueGrid({ title, values }: KeyValueGridProps) {
+  // filter out entirely empty values so the grid doesn't look padded with n/a tiles
+  const entries = values.filter(
+    (e) => e.value !== null && e.value !== undefined && e.value !== "",
+  );
+
   return (
-    <section className="panel-card">
-      <div className="card-body">
-        <h2 className="panel-title">{title}</h2>
-        <div className="grid gap-3 md:grid-cols-2">
-          {values.map((entry) => (
-            <div key={entry.label} className="data-chip">
-              <div className="data-chip-label">{entry.label}</div>
-              <div className="data-chip-value">
-                {entry.value === null || entry.value === undefined || entry.value === ""
-                  ? "n/a"
-                  : String(entry.value)}
-              </div>
+    <div className="card">
+      <div className="card-header">
+        <h2 className="card-title">{title}</h2>
+      </div>
+      {entries.length === 0 ? (
+        <div className="card-body" style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>
+          No data available.
+        </div>
+      ) : (
+        <div className="kv-grid kv-grid-2col" style={{ borderRadius: 0, border: "none", borderTop: "1px solid var(--border-soft)" }}>
+          {entries.map((entry) => (
+            <div key={entry.label} className="kv-entry">
+              <div className="kv-label">{entry.label}</div>
+              <div className="kv-value">{String(entry.value)}</div>
             </div>
           ))}
         </div>
-      </div>
-    </section>
+      )}
+    </div>
   );
 }
+

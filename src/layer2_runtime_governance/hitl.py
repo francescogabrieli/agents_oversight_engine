@@ -29,7 +29,7 @@ from .state import (
 # Build the canonical human review request from the current runtime state.
 def build_human_review_request(*, state: TaskState, thread_id: str) -> HumanReviewRequest:
     normalize_task_state_serialization(state)
-    current_plan_step = state.current_plan_step
+    current_plan_step = _resolve_review_plan_step(state)
     governance_decision = state.last_governance_decision
     dynamic_policy_assessment = state.last_dynamic_policy_assessment or state.last_oversight_assessment
     behavioral_assessment = state.last_behavioral_assessment
@@ -279,8 +279,26 @@ def _apply_human_review_decision(
 
 # Build a stable request id so replay and resume stay aligned across checkpoints.
 def _build_request_id(*, state: TaskState, thread_id: str) -> str:
-    current_step = state.current_plan_step.step_id if state.current_plan_step is not None else "no_step"
+    review_step = _resolve_review_plan_step(state)
+    current_step = review_step.step_id if review_step is not None else "no_step"
     return f"{thread_id}:human_review:{state.step_index}:{current_step}"
+
+
+# Resolve the plan step being reviewed, which may be the just-completed actor step after cursor advance.
+def _resolve_review_plan_step(state: TaskState):
+    actor_result = state.actor_result
+    if (
+        actor_result is not None
+        and actor_result.plan_step_id
+        and state.external_communication is not None
+        and state.external_communication.draft is not None
+        and state.external_communication.review_ready
+    ):
+        for step in state.plan_steps:
+            if step.step_id == actor_result.plan_step_id:
+                return step
+
+    return state.current_plan_step
 
 
 # Resolve the runtime state the graph should return to after approval.

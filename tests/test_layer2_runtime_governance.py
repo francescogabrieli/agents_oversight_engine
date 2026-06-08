@@ -616,6 +616,27 @@ class StubReplanner(ReplannerPort):
         )
 
 
+class CollidingReplanner(ReplannerPort):
+    replanner_name = "colliding_replanner"
+    prompt_version = "colliding_replanner_v1"
+
+    # Return a colliding ID to verify the runtime normalizes replacement trajectories.
+    def replan(self, *, task_state) -> ReplanDecision:
+        return ReplanDecision(
+            replacement_steps=[
+                PlanStep(
+                    step_id="replan_step_1",
+                    objective="Replacement step with a generated ID that already exists.",
+                    rationale="The OpenAI replanner starts IDs from one for each replan call.",
+                    expected_outcome="A replacement step with a unique runtime ID.",
+                )
+            ],
+            rationale="Returned an intentionally colliding replacement ID.",
+            replanner_name=self.replanner_name,
+            prompt_version=self.prompt_version,
+        )
+
+
 class FakeParsedReplanResponse:
     # Minimal fake response object matching the OpenAI SDK parsed response shape.
     def __init__(self, output_parsed) -> None:
@@ -696,6 +717,35 @@ class _FakeOpenRouterUnsupportedPrecisionCompletionClient:
                 "objective_satisfied": True,
                 "evidence_sufficient": True,
                 "confidence": 0.86,
+            },
+        }
+
+
+class _FakeOpenRouterIntakeSupportedExternalDraftClient:
+    # Return a local external draft that only restates facts supplied by Layer 1 intake.
+    def complete_tool_call(self, **kwargs):
+        return {
+            "tool_name": "emit_step_completed",
+            "arguments": {
+                "summary": "Drafted the local incident email from intake facts.",
+                "output_text": (
+                    "Subject: Immediate Verification Needed - EU Notification Pipeline Incident "
+                    "(Detected 09:12 CET, 25 May 2026)\n\n"
+                    "Known Facts:\n"
+                    "- Intermittent delivery failures were observed for transactional notifications.\n"
+                    "- The incident remains under investigation.\n"
+                    "- No confirmed data loss has been identified.\n\n"
+                    "Please verify delivery queues, check the retry backlog, confirm whether "
+                    "customer-facing impact extended beyond the notification pipeline, and send "
+                    "status back to the incident lead within 60 minutes under the requested "
+                    "60-minute response deadline."
+                ),
+                "completion_rationale": (
+                    "The draft restates the task-provided incident facts and requested checks."
+                ),
+                "objective_satisfied": True,
+                "evidence_sufficient": True,
+                "confidence": 0.88,
             },
         }
 
@@ -2580,6 +2630,42 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertIsNone(replanned_state.current_tool_request)
         self.assertEqual(replanned_state.current_plan_step.step_id, "step_1_replanned")
 
+    def test_replanner_renames_replacement_steps_that_collide_with_completed_history(self) -> None:
+        state = _build_replanning_task_state()
+        state.plan_steps = [
+            PlanStep(
+                step_id="replan_step_1",
+                objective="Already completed recovery step.",
+                rationale="Completed replanned history must stay immutable.",
+                expected_outcome="Completed output.",
+                status=PlanStepStatus.COMPLETED,
+            ),
+            PlanStep(
+                step_id="replan_step_2",
+                objective="Blocked current recovery step.",
+                rationale="The current step needs another replacement.",
+                expected_outcome="A safer replacement.",
+                status=PlanStepStatus.BLOCKED,
+            ),
+        ]
+        state.current_plan_step_index = 1
+        state.actor_result = ActorResult(
+            plan_step_id="replan_step_2",
+            result_type=ActorResultType.NEEDS_REPLAN,
+            summary="The current replacement is still too broad.",
+            capability_mode=CapabilityAccessMode.NONE,
+            blocking_reason="Need another narrower step.",
+        )
+
+        replanned_state = replanner(state, replanner_service=CollidingReplanner())
+
+        self.assertEqual(replanned_state.plan_steps[0].step_id, "replan_step_1")
+        self.assertEqual(replanned_state.current_plan_step.step_id, "replan_step_2")
+        self.assertEqual(
+            len({step.step_id for step in replanned_state.plan_steps}),
+            len(replanned_state.plan_steps),
+        )
+
     def test_openai_replanner_converts_structured_payload_without_network(self) -> None:
         from layer2_runtime_governance.replanning import _ReplanningPayload, _ReplanStepPayload
 
@@ -2919,6 +3005,31 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertIn("more specific than the observed evidence", result.summary.lower())
         self.assertIsNotNone(result.step_validation.residual_uncertainty)
         self.assertIn("more specific legal or factual claims", result.step_validation.residual_uncertainty)
+
+    def test_openrouter_completion_allows_precise_facts_from_intake(self) -> None:
+        actor = OpenRouterActor(
+            settings=OpenRouterActorSettings(
+                model="openai/gpt-oss-120b:free",
+                api_key="test-key",
+                base_url="https://openrouter.ai/api/v1",
+                timeout_seconds=1.0,
+            )
+        )
+        actor._client = _FakeOpenRouterIntakeSupportedExternalDraftClient()  # type: ignore[attr-defined]
+        state = _build_external_incident_draft_task_state()
+        actor_task = build_actor_task(task_state=state)
+
+        result = actor.act(actor_task=actor_task)
+
+        self.assertEqual(result.result_type, ActorResultType.INTERMEDIATE_OUTPUT)
+        self.assertIsNotNone(result.step_validation)
+        self.assertTrue(result.step_validation.objective_satisfied)
+        self.assertTrue(result.step_validation.evidence_sufficient)
+        self.assertEqual(
+            result.step_validation.next_action,
+            StepValidationDecision.COMPLETE_STEP,
+        )
+        self.assertNotIn("more specific than the observed evidence", result.summary.lower())
 
     # Internal trace markers should be removed from user-facing completion text.
     def test_openrouter_completion_sanitizes_internal_trace_refs(self) -> None:
@@ -3345,6 +3456,75 @@ def _build_external_communication_intake_result() -> IntakeResult:
             schema_version="1.0.0",
         ),
     )
+
+
+# Build the incident-style external communication intake that exercises local fact support.
+def _build_external_incident_intake_result() -> IntakeResult:
+    return IntakeResult(
+        structured_task=StructuredTask(
+            task_spec=TaskSpec(
+                goal=(
+                    "Draft an external email to Acme Cloud operations requesting manual "
+                    "verification and status update for a sensitive EU customer notification "
+                    "pipeline incident."
+                ),
+                context=(
+                    "A sensitive runtime incident affecting the EU customer notification "
+                    "pipeline was detected at 09:12 CET on May 25, 2026; it caused "
+                    "intermittent delivery failures for transactional notifications and "
+                    "remains under investigation. No confirmed data loss, but delayed "
+                    "processing was observed for some EU tenants."
+                ),
+                constraints=[
+                    "Target recipient: operations team at Acme Cloud",
+                    "Ask operations to manually verify delivery queues",
+                    "Ask operations to check retry backlog",
+                    "Ask operations to confirm whether customer-facing impact extended beyond the notification pipeline",
+                    "Request a status report back to the incident lead within 60 minutes",
+                ],
+                domain_type=DomainType.EXTERNAL_COMMUNICATION,
+                domain_label="incident_operations_status_request",
+                sensitivity=SensitivityLevel.CRITICAL,
+                success_criteria=[
+                    "Includes all incident details provided and clearly states current investigation status",
+                    "Lists the specific verification/check requests",
+                    "Uses appropriate, cautious language given no confirmed data loss and ongoing investigation",
+                ],
+            ),
+            execution_policy=ExecutionPolicy(
+                confidence_threshold=0.9,
+                budget=BudgetConfig(max_steps=None, max_tool_calls=None),
+                read_only_mode=False,
+            ),
+        ),
+        metadata=IntakeMetadata(
+            parse_status=ParseStatus.COMPLETE,
+            parser_name="stub_parser",
+            prompt_version="test_v1",
+            schema_version="1.0.0",
+        ),
+    )
+
+
+# Build one actor-ready task state for the incident local-draft precision regression.
+def _build_external_incident_draft_task_state() -> TaskState:
+    state = TaskState.from_intake(_build_external_incident_intake_result())
+    state.current_state = RuntimeState.ACTING
+    state.plan_steps = [
+        PlanStep(
+            step_id="step_1",
+            objective="Draft the Known Facts and Action Requested sections from provided context.",
+            rationale="The draft must stay within the local incident facts supplied by intake.",
+            expected_outcome="A cautious incident email draft using only task-provided facts.",
+            step_kind=PlanStepKind.DETAILED_EXTRACTION,
+            evidence_requirement=EvidenceSupportLevel.LOCAL_ONLY,
+            claim_precision_ceiling=EvidenceSupportLevel.LOCAL_ONLY,
+            status=PlanStepStatus.IN_PROGRESS,
+        )
+    ]
+    state.current_plan_step_index = 0
+    state.actor_turn_count = 1
+    return state
 
 
 def _build_policy_input_task_state(*, read_only_mode: bool = False) -> TaskState:

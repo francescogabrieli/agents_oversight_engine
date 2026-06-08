@@ -397,7 +397,10 @@ def replanner(state: TaskState, *, replanner_service: ReplannerPort) -> TaskStat
         step for step in state.plan_steps if step.status == PlanStepStatus.COMPLETED
     ]
 
-    replacement_steps = list(decision.replacement_steps)
+    replacement_steps = _dedupe_replacement_step_ids(
+        replacement_steps=list(decision.replacement_steps),
+        existing_step_ids={step.step_id for step in completed_steps},
+    )
     if replacement_steps:
         # The first replacement step becomes the next executable actor target.
         replacement_steps[0].status = PlanStepStatus.IN_PROGRESS
@@ -420,6 +423,39 @@ def replanner(state: TaskState, *, replanner_service: ReplannerPort) -> TaskStat
         summary="Replanner replaced the current/pending trajectory after actor replan request.",
     )
     return state
+
+
+# Keep replanned trajectories addressable when completed history already has replan_step IDs.
+def _dedupe_replacement_step_ids(
+    *,
+    replacement_steps: list[PlanStep],
+    existing_step_ids: set[str],
+) -> list[PlanStep]:
+    if not replacement_steps:
+        return []
+
+    used_ids = set(existing_step_ids)
+    next_replan_index = _next_replan_step_index(used_ids)
+    normalized_steps: list[PlanStep] = []
+    for step in replacement_steps:
+        if step.step_id in used_ids:
+            step.step_id = f"replan_step_{next_replan_index}"
+            next_replan_index += 1
+        used_ids.add(step.step_id)
+        normalized_steps.append(step)
+    return normalized_steps
+
+
+# Find the next monotonic replan step suffix already absent from the plan history.
+def _next_replan_step_index(existing_step_ids: set[str]) -> int:
+    max_index = 0
+    for step_id in existing_step_ids:
+        if not step_id.startswith("replan_step_"):
+            continue
+        suffix = step_id.removeprefix("replan_step_")
+        if suffix.isdigit():
+            max_index = max(max_index, int(suffix))
+    return max_index + 1
 
 
 

@@ -10,6 +10,16 @@ type DecisionFormProps = {
   onSubmit: (payload: HumanReviewDecisionPayload) => Promise<void>;
 };
 
+const DECISION_LABELS: Record<string, string> = {
+  approve_continue: "Approve",
+  approve_continue_read_only: "Approve read-only",
+  modify_and_continue: "Modify",
+  request_more_evidence: "More evidence",
+  replan: "Replan",
+  ask_clarification: "Clarify",
+  abort: "Abort",
+};
+
 function prettyMetadata(metadata: Record<string, unknown>) {
   return JSON.stringify(metadata, null, 2);
 }
@@ -39,9 +49,10 @@ export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
     setDraftMetadata(prettyMetadata(draft?.metadata ?? {}));
   }, [draft]);
 
-  if (!pendingRequest) {
-    return null;
-  }
+  if (!pendingRequest) return null;
+
+  const isModify = decisionType === "modify_and_continue";
+  const isClarification = decisionType === "ask_clarification";
 
   const submit = async () => {
     setSubmitting(true);
@@ -53,11 +64,10 @@ export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
         decision_type: decisionType,
         reviewer_id: reviewerId,
         note: note || undefined,
-        clarification_text:
-          decisionType === "ask_clarification" ? clarificationText || undefined : undefined,
+        clarification_text: isClarification ? clarificationText || undefined : undefined,
       };
 
-      if (decisionType === "modify_and_continue") {
+      if (isModify) {
         let parsedMetadata: Record<string, unknown> = {};
         try {
           parsedMetadata = JSON.parse(draftMetadata || "{}") as Record<string, unknown>;
@@ -85,92 +95,99 @@ export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
   };
 
   return (
-    <section className="panel-card panel-card-accent">
-      <div className="card-body gap-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="panel-eyebrow">Operator Review</p>
-            <h2 className="panel-title">Review and resume</h2>
-            <p className="text-sm text-slate-600">
-              Submit one typed decision against request <code>{pendingRequest.request_id}</code>.
-            </p>
-          </div>
-          <div className="badge badge-warning badge-outline px-4 py-3 font-semibold">
-            {allowedDecisions.length} allowed decisions
-          </div>
+    <section className="card card-accent">
+      <div className="card-header">
+        <h2 className="card-title">Actions</h2>
+      </div>
+      <div className="card-body review-actions-body">
+        <div className="decision-button-grid">
+          {allowedDecisions.map((decision) => (
+            <button
+              key={decision}
+              type="button"
+              onClick={() => setDecisionType(decision)}
+              className={decision === decisionType ? "btn btn-sm decision-active" : "btn btn-sm btn-ghost"}
+            >
+              {DECISION_LABELS[decision] ?? decision}
+            </button>
+          ))}
         </div>
 
-        <label className="form-control">
-          <span className="label-text font-semibold">Decision</span>
-          <select
-            className="select select-bordered mt-2"
-            value={decisionType}
-            onChange={(event) => setDecisionType(event.target.value)}
-          >
-            {allowedDecisions.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="form-control">
-            <span className="label-text font-semibold">Reviewer</span>
-            <input
-              className="input input-bordered mt-2"
-              value={reviewerId}
-              onChange={(event) => setReviewerId(event.target.value)}
-            />
-          </label>
-          <label className="form-control">
-            <span className="label-text font-semibold">Note</span>
-            <input
-              className="input input-bordered mt-2"
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-            />
-          </label>
-        </div>
-
-        {decisionType === "ask_clarification" ? (
-          <label className="form-control">
-            <span className="label-text font-semibold">Clarification text</span>
+        {isClarification ? (
+          <div className="form-field">
+            <label className="form-label">Clarification text</label>
             <textarea
-              className="textarea textarea-bordered mt-2 min-h-28"
+              className="form-textarea"
+              style={{ minHeight: 96 }}
               value={clarificationText}
               onChange={(event) => setClarificationText(event.target.value)}
+              placeholder="Describe what clarification is needed..."
             />
-          </label>
+          </div>
         ) : null}
 
-        {decisionType === "modify_and_continue" && draft ? (
-          <div className="grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
-            <label className="form-control">
-              <span className="label-text font-semibold">External draft body</span>
+        {isModify && draft ? (
+          <div className="edit-draft-panel">
+            <p className="section-label" style={{ margin: 0 }}>Edit produced text</p>
+            <div className="form-field">
               <textarea
-                className="textarea textarea-bordered mt-2 min-h-56 font-mono text-sm"
+                className="form-textarea form-textarea-mono"
+                style={{ minHeight: 260 }}
                 value={draftBody}
                 onChange={(event) => setDraftBody(event.target.value)}
               />
-            </label>
-            <label className="form-control">
-              <span className="label-text font-semibold">Draft metadata</span>
-              <textarea
-                className="textarea textarea-bordered mt-2 min-h-28 font-mono text-xs"
-                value={draftMetadata}
-                onChange={(event) => setDraftMetadata(event.target.value)}
-              />
-            </label>
+            </div>
           </div>
         ) : null}
 
-        {error ? <div className="alert alert-error text-sm">{error}</div> : null}
+        {error ? <div className="alert alert-error">{error}</div> : null}
 
-        <button className="btn btn-primary self-start font-semibold" disabled={submitting} onClick={submit}>
-          {submitting ? "Submitting..." : "Submit decision"}
-        </button>
+        <div className="action-submit-row">
+          <button className="btn btn-primary" disabled={submitting} onClick={submit}>
+            {submitting ? "Submitting..." : "Submit decision"}
+          </button>
+        </div>
+
+        <details className="technical-details action-options">
+          <summary className="technical-details-summary">Advanced options</summary>
+          <div className="technical-details-body">
+            <div className="operator-options-grid">
+              <div className="form-field">
+                <label className="form-label">Reviewer ID</label>
+                <input
+                  className="form-input"
+                  value={reviewerId}
+                  onChange={(event) => setReviewerId(event.target.value)}
+                />
+              </div>
+              <div className="form-field">
+                <label className="form-label">
+                  Note <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(optional)</span>
+                </label>
+                <input
+                  className="form-input"
+                  value={note}
+                  onChange={(event) => setNote(event.target.value)}
+                  placeholder="Internal note..."
+                />
+              </div>
+            </div>
+            {isModify && draft ? (
+              <div className="form-field">
+                <label className="form-label">
+                  Metadata <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(JSON)</span>
+                </label>
+                <textarea
+                  className="form-textarea form-textarea-mono"
+                  style={{ minHeight: 80 }}
+                  value={draftMetadata}
+                  onChange={(event) => setDraftMetadata(event.target.value)}
+                />
+              </div>
+            ) : null}
+            <div className="review-request-id">{pendingRequest.request_id}</div>
+          </div>
+        </details>
       </div>
     </section>
   );
