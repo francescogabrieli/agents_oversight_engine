@@ -193,6 +193,9 @@ Current design:
 - `evaluation.py` defines the offline trace evaluation pipeline that reads exported trace JSON and produces JSON and Markdown reports, including typed-vs-heuristic evidence mismatch accounting
 - `hitl_dashboard.py` defines the dashboard-facing snapshot model derived from `TaskState`, governance, oversight, and HITL review payloads
 - `main_layer2_dashboard.py` now acts as a standalone multi-thread HITL control plane backend that serves the React dashboard build, exposes the review inbox/detail/resume API, and resolves resume actions from persisted checkpoints on demand
+- `main_layer2_dashboard.py` now also persists post-resume artifacts through the same runtime artifact store used by the dashboard inbox/detail API, so HITL decisions immediately refresh the observed thread state after agent continuation
+- `main_layer2_dashboard.py` now refreshes the disk-backed checkpoint view before rebuilding a persisted thread, so the standalone dashboard can resume runs created by a separate `main_layer2.py` process without stale in-memory checkpoint state
+- the dashboard review inbox is intentionally action-oriented and now hides pending-review threads whose persisted `updated_at` is older than 2 minutes; old artifacts remain on disk and detail views can still be resolved directly by thread id
 - `frontend/dashboard` contains the standalone React + TypeScript + Tailwind + daisyUI dashboard frontend that is built into static assets and served by `main_layer2_dashboard.py`
 - `configs/layer2_oversight_policy.json` defines the explicit weights, thresholds, risk scores, sensitivity multipliers, and trajectory penalties used by the dynamic policy layer
 - `runtime_warnings.py` centralizes warning suppression needed before importing selected LangGraph/LangChain dependencies

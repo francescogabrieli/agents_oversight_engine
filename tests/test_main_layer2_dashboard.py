@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import json
 import shutil
 import sys
@@ -57,7 +58,9 @@ from main_layer2_dashboard import (
     DashboardSession,
     _build_response_headers,
     _parse_human_review_decision,
+    build_dashboard_session_from_thread_id,
     build_dashboard_httpd,
+    resume_dashboard_session,
 )
 
 
@@ -169,14 +172,45 @@ class MainLayer2DashboardTests(unittest.TestCase):
 
     # Verify the inbox endpoint filters only pending reviews and sorts by newest first.
     def test_api_reviews_lists_only_pending_sorted(self) -> None:
-        _persist_review_artifacts(self.artifact_store, thread_id="thread-a", updated_at="2026-06-05T10:00:00+00:00")
-        _persist_review_artifacts(self.artifact_store, thread_id="thread-b", updated_at="2026-06-05T12:00:00+00:00")
-        _persist_non_review_artifacts(self.artifact_store, thread_id="thread-c", updated_at="2026-06-05T11:00:00+00:00")
+        now = datetime.now(timezone.utc)
+        _persist_review_artifacts(
+            self.artifact_store,
+            thread_id="thread-a",
+            updated_at=(now - timedelta(seconds=90)).isoformat(timespec="seconds"),
+        )
+        _persist_review_artifacts(
+            self.artifact_store,
+            thread_id="thread-b",
+            updated_at=(now - timedelta(seconds=30)).isoformat(timespec="seconds"),
+        )
+        _persist_non_review_artifacts(
+            self.artifact_store,
+            thread_id="thread-c",
+            updated_at=(now - timedelta(seconds=45)).isoformat(timespec="seconds"),
+        )
 
         payload = self._request_json("/api/reviews")
 
         self.assertEqual([item["thread_id"] for item in payload["items"]], ["thread-b", "thread-a"])
         self.assertEqual(payload["items"][0]["runtime_state"], "waiting_human_review")
+
+    # Verify stale pending reviews fall out of the inbox after the operational cutoff.
+    def test_api_reviews_excludes_stale_pending_threads(self) -> None:
+        now = datetime.now(timezone.utc)
+        _persist_review_artifacts(
+            self.artifact_store,
+            thread_id="thread-fresh",
+            updated_at=(now - timedelta(seconds=45)).isoformat(timespec="seconds"),
+        )
+        _persist_review_artifacts(
+            self.artifact_store,
+            thread_id="thread-stale",
+            updated_at=(now - timedelta(minutes=3)).isoformat(timespec="seconds"),
+        )
+
+        payload = self._request_json("/api/reviews")
+
+        self.assertEqual([item["thread_id"] for item in payload["items"]], ["thread-fresh"])
 
     # Verify the detail endpoint returns the persisted snapshot and thread summary.
     def test_api_review_detail_returns_snapshot(self) -> None:
@@ -187,6 +221,45 @@ class MainLayer2DashboardTests(unittest.TestCase):
         self.assertEqual(payload["thread_id"], "thread-detail")
         self.assertEqual(payload["runtime_summary"]["task_goal"], "Prepare a cautious external communication draft.")
         self.assertEqual(payload["dashboard_snapshot"]["runtime_state"], "waiting_human_review")
+
+    # Verify dashboard resume/session loading refreshes a stale cross-process checkpointer view.
+    def test_build_dashboard_session_refreshes_stale_checkpointer_view(self) -> None:
+        task_state = _build_paused_session(thread_id="thread-refresh").final_result["task_state"]
+
+        class _RefreshableCheckpointer:
+            def __init__(self) -> None:
+                self.refreshed = False
+
+            def refresh_from_disk(self) -> None:
+                self.refreshed = True
+
+        class _FakeGraph:
+            def __init__(self, checkpointer) -> None:
+                self.checkpointer = checkpointer
+
+            def get_state(self, _config):
+                values = (
+                    {"task_state": task_state}
+                    if self.checkpointer.refreshed
+                    else {"intake_result": task_state.intake_payload, "thread_id": "thread-refresh"}
+                )
+                return mock.Mock(values=values)
+
+        checkpointer = _RefreshableCheckpointer()
+
+        with mock.patch(
+            "main_layer2_dashboard.build_runtime_graph",
+            side_effect=lambda checkpointer: _FakeGraph(checkpointer),
+        ):
+            session = build_dashboard_session_from_thread_id(
+                "thread-refresh",
+                checkpointer=checkpointer,
+                artifact_store=self.artifact_store,
+            )
+
+        self.assertTrue(checkpointer.refreshed)
+        self.assertEqual(session.thread_id, "thread-refresh")
+        self.assertEqual(session.final_result["task_state"].current_state, RuntimeState.WAITING_HUMAN_REVIEW)
 
     # Verify resume applies a typed decision and returns the refreshed persisted thread state.
     def test_api_resume_returns_refreshed_thread(self) -> None:
@@ -240,6 +313,36 @@ class MainLayer2DashboardTests(unittest.TestCase):
 
         inbox = self._request_json("/api/reviews")
         self.assertEqual(inbox["items"], [])
+
+    # Verify the dashboard forwards resume persistence through its bound artifact store.
+    def test_resume_dashboard_session_uses_session_artifact_store(self) -> None:
+        session = _build_paused_session(
+            thread_id="thread-forward-store",
+            artifact_store=self.artifact_store,
+        )
+        captured: dict[str, object] = {}
+        pending_request = session.final_result["task_state"].pending_human_review_request
+        assert pending_request is not None
+        decision = HumanReviewDecision(
+            request_id=pending_request.request_id,
+            decision_type=HumanReviewDecisionType.APPROVE_CONTINUE,
+            reviewer_id="operator-1",
+        )
+
+        def _resume_flow(**kwargs):
+            captured.update(kwargs)
+            return {
+                "thread_id": session.thread_id,
+                "final_result": {"task_state": session.final_result["task_state"]},
+            }
+
+        session.resume_flow = _resume_flow
+
+        resume_dashboard_session(session, decision)
+
+        self.assertIs(captured["artifact_store"], self.artifact_store)
+        self.assertEqual(captured["thread_id"], "thread-forward-store")
+        self.assertEqual(captured["human_review_decision"], decision)
 
     # Verify the static React entrypoint is served with the no-cache headers.
     def test_static_index_is_served_with_no_cache_headers(self) -> None:
@@ -296,7 +399,11 @@ class MainLayer2DashboardTests(unittest.TestCase):
 
 
 # Build a canonical paused session with a pending external communication review payload.
-def _build_paused_session(*, thread_id: str = "thread-1") -> DashboardSession:
+def _build_paused_session(
+    *,
+    thread_id: str = "thread-1",
+    artifact_store: RuntimeArtifactStore | None = None,
+) -> DashboardSession:
     intake_result = _intake_result()
     task_state = TaskState.from_intake(intake_result)
     task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
@@ -332,6 +439,7 @@ def _build_paused_session(*, thread_id: str = "thread-1") -> DashboardSession:
         intake_result=intake_result,
         final_result={"task_state": task_state},
         checkpointer=object(),
+        artifact_store=artifact_store or RuntimeArtifactStore(root_path=REPO_ROOT / "_test_dashboard_session_runtime"),
     )
 
 

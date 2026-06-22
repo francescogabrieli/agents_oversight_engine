@@ -49,7 +49,7 @@ export function ReviewThreadPage() {
           Back to inbox
         </Link>
         <div className="review-header-main">
-          <div className="review-title-block">
+          <div>
             <p className="page-header-eyebrow">Human review</p>
             <h1 className="review-title">{taskGoal ?? "Review pending task"}</h1>
           </div>
@@ -72,10 +72,10 @@ export function ReviewThreadPage() {
       {detail && snapshot ? (
         <>
           {draftBody ? (
-            <section className="card output-card">
+            <section className="card card-info">
               <div className="card-header">
                 <h2 className="card-title">Produced text</h2>
-                <span className="badge badge-neutral">
+                <span className="badge badge-info">
                   {pendingRequest?.external_communication_draft?.channel ?? "draft"}
                 </span>
               </div>

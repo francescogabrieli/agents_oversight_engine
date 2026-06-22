@@ -3,32 +3,67 @@ type KeyValueGridProps = {
   values: Array<{ label: string; value: string | number | null | undefined }>;
 };
 
+const MONO_RE = /^(thread_|req_|step_|run_|[a-z][a-z0-9]*(?:_[a-z0-9]+){2,}$)/;
+const STATUS_BADGE: Record<string, "badge-waiting" | "badge-completed" | "badge-aborted" | "badge-info" | "badge-default" | "badge-neutral"> = {
+  waiting_human_review: "badge-waiting",
+  completed:            "badge-completed",
+  aborted:              "badge-aborted",
+  yes:                  "badge-completed",
+  no:                   "badge-neutral",
+  escalate:             "badge-waiting",
+  uncertain:            "badge-info",
+  pending:              "badge-waiting",
+};
+
+function isLongValue(value: string) {
+  return value.length > 55 || value.includes(" ") || value.includes("\n");
+}
+
+function isMono(value: string) {
+  return MONO_RE.test(value) || /^[\d.]+$/.test(value);
+}
+
+function ValueCell({ raw }: { raw: string }) {
+  const trimmed = raw.trim().toLowerCase();
+  const badgeVariant = STATUS_BADGE[trimmed];
+  if (badgeVariant) {
+    return <span className={`badge ${badgeVariant}`}>{raw}</span>;
+  }
+  if (isMono(raw)) {
+    return <div className="kv-value kv-value-mono">{raw}</div>;
+  }
+  return <div className="kv-value">{raw}</div>;
+}
+
 export function KeyValueGrid({ title, values }: KeyValueGridProps) {
-  // filter out entirely empty values so the grid doesn't look padded with n/a tiles
   const entries = values.filter(
     (e) => e.value !== null && e.value !== undefined && e.value !== "",
   );
 
   return (
-    <div className="card">
-      <div className="card-header">
-        <h2 className="card-title">{title}</h2>
-      </div>
+    <div className="kv-section">
+      <p className="kv-section-title">{title}</p>
       {entries.length === 0 ? (
-        <div className="card-body" style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>
-          No data available.
+        <div className="kv-grid">
+          <div className="kv-empty">No data available.</div>
         </div>
       ) : (
-        <div className="kv-grid kv-grid-2col" style={{ borderRadius: 0, border: "none", borderTop: "1px solid var(--border-soft)" }}>
-          {entries.map((entry) => (
-            <div key={entry.label} className="kv-entry">
-              <div className="kv-label">{entry.label}</div>
-              <div className="kv-value">{String(entry.value)}</div>
-            </div>
-          ))}
+        <div className="kv-grid kv-grid-2col">
+          {entries.map((entry) => {
+            const raw = String(entry.value);
+            const full = isLongValue(raw);
+            return (
+              <div
+                key={entry.label}
+                className={full ? "kv-entry kv-entry-full" : "kv-entry"}
+              >
+                <div className="kv-label">{entry.label}</div>
+                <ValueCell raw={raw} />
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
-

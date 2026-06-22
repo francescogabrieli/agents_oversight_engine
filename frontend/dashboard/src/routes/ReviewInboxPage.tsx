@@ -1,16 +1,36 @@
-import { useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchReviewInbox } from "../api";
 import { usePolledResource } from "../hooks";
 import type { ReviewInboxEntry } from "../types";
 
-const STALE_REVIEW_MS = 7 * 24 * 60 * 60 * 1000;
+function statusClass(runtimeState: string | null) {
+  if (runtimeState === "waiting_human_review") return "inbox-row-status inbox-row-status-waiting";
+  if (runtimeState === "completed") return "inbox-row-status inbox-row-status-completed";
+  if (runtimeState === "aborted") return "inbox-row-status inbox-row-status-aborted";
+  return "inbox-row-status inbox-row-status-default";
+}
 
-function accentClass(runtimeState: string | null) {
-  if (runtimeState === "waiting_human_review") return "inbox-row-accent";
-  if (runtimeState === "completed") return "inbox-row-accent inbox-row-accent-completed";
-  if (runtimeState === "aborted") return "inbox-row-accent inbox-row-accent-aborted";
-  return "inbox-row-accent inbox-row-accent-default";
+function statusIcon(runtimeState: string | null) {
+  if (runtimeState === "waiting_human_review") return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+    </svg>
+  );
+  if (runtimeState === "completed") return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="20 6 9 17 4 12"/>
+    </svg>
+  );
+  if (runtimeState === "aborted") return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+    </svg>
+  );
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"/>
+    </svg>
+  );
 }
 
 function badgeClass(runtimeState: string | null) {
@@ -18,13 +38,6 @@ function badgeClass(runtimeState: string | null) {
   if (runtimeState === "completed") return "badge badge-completed";
   if (runtimeState === "aborted") return "badge badge-aborted";
   return "badge badge-default";
-}
-
-function isStaleReview(item: ReviewInboxEntry) {
-  if (!item.updated_at) return true;
-  const ts = Date.parse(item.updated_at);
-  if (Number.isNaN(ts)) return true;
-  return Date.now() - ts > STALE_REVIEW_MS;
 }
 
 function formatTimestamp(value: string | null) {
@@ -45,10 +58,12 @@ function InboxRow({ item }: { item: ReviewInboxEntry }) {
       to={`/threads/${encodeURIComponent(item.thread_id)}`}
       className="inbox-row"
     >
-      <div className={accentClass(item.runtime_state)} />
+      <div className={statusClass(item.runtime_state)}>
+        {statusIcon(item.runtime_state)}
+      </div>
       <div className="inbox-row-body">
         <div className="inbox-row-top">
-          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <div className="inbox-row-left">
             <span className={badgeClass(item.runtime_state)}>
               {item.runtime_state ?? "unknown"}
             </span>
@@ -80,51 +95,45 @@ function InboxRow({ item }: { item: ReviewInboxEntry }) {
 export function ReviewInboxPage() {
   const { data, error, loading } = usePolledResource(fetchReviewInbox, []);
   const items = data ?? [];
-  const [showArchived, setShowArchived] = useState(false);
-  const activeItems = items.filter((item) => !isStaleReview(item));
-  const archivedItems = items.filter((item) => isStaleReview(item));
 
   return (
     <div style={{ display: "grid", gap: 20 }}>
-      {/* page header */}
       <div className="page-header">
         <p className="page-header-eyebrow">Human-in-the-loop</p>
-        <h1 className="page-header-title">Review Inbox</h1>
+        <h1 className="page-header-title">Review inbox</h1>
         <p className="page-header-sub">
           Active threads waiting for operator review. Polling every 2&nbsp;seconds.
         </p>
       </div>
 
-      {/* stats bar */}
       <div className="stat-row">
         <div className="stat-item">
-          <span className="stat-label">Active pending</span>
-          <span className="stat-value">{loading ? "—" : activeItems.length}</span>
+          <div className="stat-label">Active pending</div>
+          <div className="stat-value">{loading ? "—" : items.length}</div>
         </div>
         <div className="stat-item">
-          <span className="stat-label">Archived pending</span>
-          <span className="stat-value">{loading ? "—" : archivedItems.length}</span>
+          <div className="stat-label">Inbox cutoff</div>
+          <div className="stat-value">2 min</div>
         </div>
         <div className="stat-item">
-          <span className="stat-label">Total loaded</span>
-          <span className="stat-value">{loading ? "—" : items.length}</span>
+          <div className="stat-label">Polling</div>
+          <div className="stat-value">2 sec</div>
         </div>
       </div>
 
       {error ? <div className="alert alert-error">{error}</div> : null}
 
-      {/* active queue */}
       <div className="card">
         <div className="card-header">
           <h2 className="card-title">Active queue</h2>
-          <span className="badge badge-waiting">{activeItems.length} pending</span>
+          <span className="badge badge-waiting">{items.length} pending</span>
         </div>
         <div className="card-body">
-          {loading && activeItems.length === 0 ? (
+          {loading && items.length === 0 ? (
             <div className="skeleton" style={{ height: 72 }} />
           ) : null}
 
-          {!loading && activeItems.length === 0 ? (
+          {!loading && items.length === 0 ? (
             <div className="empty-state">
               <span className="empty-state-icon">✓</span>
               No pending reviews in the active queue.
@@ -132,37 +141,12 @@ export function ReviewInboxPage() {
           ) : null}
 
           <div className="inbox-list">
-            {activeItems.map((item) => (
+            {items.map((item) => (
               <InboxRow key={item.thread_id} item={item} />
             ))}
           </div>
         </div>
       </div>
-
-      {/* archive */}
-      {archivedItems.length > 0 ? (
-        <div className="archive-section">
-          <div className="archive-toggle-bar">
-            <span className="archive-toggle-label">
-              Archived — {archivedItems.length} older pending run{archivedItems.length !== 1 ? "s" : ""} (&gt;7 days)
-            </span>
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={() => setShowArchived((v) => !v)}
-            >
-              {showArchived ? "Hide" : "Show"}
-            </button>
-          </div>
-          {showArchived ? (
-            <div className="inbox-list" style={{ marginTop: 8 }}>
-              {archivedItems.map((item) => (
-                <InboxRow key={item.thread_id} item={item} />
-              ))}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   );
 }
-

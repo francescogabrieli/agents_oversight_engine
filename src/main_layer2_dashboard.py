@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import json
 import mimetypes
 import threading
@@ -36,6 +37,10 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8022
 
 
+# Hide stale pending reviews from the inbox after a short operational cutoff.
+REVIEW_INBOX_CUTOFF = timedelta(minutes=2)
+
+
 # Resolve the built React application relative to the repo root.
 DEFAULT_STATIC_ROOT = Path(__file__).resolve().parents[1] / "frontend" / "dashboard" / "dist"
 
@@ -51,6 +56,7 @@ class DashboardSession:
     intake_result: IntakeResult
     final_result: dict[str, Any]
     checkpointer: Any
+    artifact_store: RuntimeArtifactStore
     resume_flow: DashboardRunner = resume_layer2_flow
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
@@ -64,11 +70,19 @@ class DashboardServerContext:
     static_root: Path
 
 
+# Refresh long-lived checkpoint views so the dashboard sees threads written by the runtime process.
+def _refresh_checkpointer_view(checkpointer: Any) -> None:
+    refresh = getattr(checkpointer, "refresh_from_disk", None)
+    if callable(refresh):
+        refresh()
+
+
 # Rebuild a checkpoint-backed dashboard session from an in-memory trace payload.
 def build_dashboard_session_from_trace(
     trace: dict[str, Any],
     *,
     checkpointer: Any,
+    artifact_store: RuntimeArtifactStore | None = None,
     resume_flow: DashboardRunner = resume_layer2_flow,
 ) -> DashboardSession:
     return DashboardSession(
@@ -76,6 +90,7 @@ def build_dashboard_session_from_trace(
         intake_result=trace["intake_result"],
         final_result=trace["final_result"],
         checkpointer=checkpointer,
+        artifact_store=artifact_store or RuntimeArtifactStore(),
         resume_flow=resume_flow,
     )
 
@@ -85,9 +100,12 @@ def build_dashboard_session_from_thread_id(
     thread_id: str,
     *,
     checkpointer: Any | None = None,
+    artifact_store: RuntimeArtifactStore | None = None,
     resume_flow: DashboardRunner = resume_layer2_flow,
 ) -> DashboardSession:
     resolved_checkpointer = checkpointer or build_default_checkpointer()
+    resolved_artifact_store = artifact_store or RuntimeArtifactStore()
+    _refresh_checkpointer_view(resolved_checkpointer)
     runtime_graph = build_runtime_graph(checkpointer=resolved_checkpointer)
     snapshot = runtime_graph.get_state({"configurable": {"thread_id": thread_id}})
     snapshot_values = snapshot.values if snapshot is not None else {}
@@ -103,6 +121,7 @@ def build_dashboard_session_from_thread_id(
         intake_result=task_state.intake_payload,
         final_result=dict(snapshot_values),
         checkpointer=resolved_checkpointer,
+        artifact_store=resolved_artifact_store,
         resume_flow=resume_flow,
     )
 
@@ -113,10 +132,12 @@ def resume_dashboard_session(
     human_review_decision: HumanReviewDecision,
 ) -> dict[str, Any]:
     with session.lock:
+        # Persist resume artifacts through the same store the dashboard is reading from.
         final_result = session.resume_flow(
             thread_id=session.thread_id,
             human_review_decision=human_review_decision,
             checkpointer=session.checkpointer,
+            artifact_store=session.artifact_store,
         )
         session.final_result = final_result["final_result"]
         return final_result
@@ -330,6 +351,10 @@ def _build_review_inbox_entry(
     dashboard_snapshot: dict[str, Any] | None,
     pending_review: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
+    updated_at = _parse_runtime_summary_updated_at(runtime_summary)
+    if updated_at is None or _is_review_inbox_entry_stale(updated_at):
+        return None
+
     pending_request = pending_review
     if pending_request is None and isinstance(dashboard_snapshot, dict):
         human_review = dashboard_snapshot.get("human_review")
@@ -367,7 +392,7 @@ def _build_review_inbox_entry(
             if isinstance(dashboard_snapshot, dict)
             else None
         ),
-        "updated_at": runtime_summary.get("updated_at") if isinstance(runtime_summary, dict) else None,
+        "updated_at": updated_at.isoformat(timespec="seconds"),
         "task_goal": runtime_summary.get("task_goal") if isinstance(runtime_summary, dict) else None,
         "review_summary": (
             runtime_summary.get("review_summary")
@@ -386,6 +411,37 @@ def _build_review_inbox_entry(
         ),
         "external_communication_phase": external_communication_phase,
     }
+
+
+# Parse the runtime summary timestamp defensively so stale inbox entries can be filtered.
+def _parse_runtime_summary_updated_at(
+    runtime_summary: dict[str, Any] | None,
+) -> datetime | None:
+    if not isinstance(runtime_summary, dict):
+        return None
+
+    raw_updated_at = runtime_summary.get("updated_at")
+    if not isinstance(raw_updated_at, str) or not raw_updated_at.strip():
+        return None
+
+    normalized = raw_updated_at.strip()
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+
+    return parsed.astimezone(timezone.utc)
+
+
+# Keep the inbox focused on currently actionable reviews only.
+def _is_review_inbox_entry_stale(updated_at: datetime) -> bool:
+    return datetime.now(timezone.utc) - updated_at > REVIEW_INBOX_CUTOFF
 
 
 # Load the pending-review inbox by scanning persisted runtime artifact directories.
@@ -522,6 +578,7 @@ def _build_request_handler(*, context: DashboardServerContext):
                 session = build_dashboard_session_from_thread_id(
                     thread_id,
                     checkpointer=self.server_context.checkpointer,
+                    artifact_store=self.server_context.artifact_store,
                     resume_flow=self.server_context.resume_flow,
                 )
                 payload = _read_json_request(self)

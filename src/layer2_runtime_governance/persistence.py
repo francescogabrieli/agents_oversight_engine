@@ -83,6 +83,14 @@ class DiskBackedMemorySaver(InMemorySaver):
             super().delete_thread(thread_id)
             self._sync_to_disk()
 
+    # Reload persisted checkpoint contents so long-lived processes can observe external writes.
+    def refresh_from_disk(self) -> None:
+        with self._lock:
+            self.storage = defaultdict(lambda: defaultdict(dict))
+            self.writes = defaultdict(dict)
+            self.blobs = {}
+            self._load_from_disk()
+
     # Load previously persisted saver contents back into the in-memory structures.
     def _load_from_disk(self) -> None:
         if not self.storage_path.exists():
