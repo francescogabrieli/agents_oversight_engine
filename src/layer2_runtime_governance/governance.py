@@ -147,6 +147,8 @@ class GovernanceDecisionTrace:
     combiner_rejected_alternatives: dict[str, str] | None = None
     combiner_safety_invariants_checked: tuple[str, ...] = ()
     combiner_signals: tuple[dict[str, Any], ...] = ()
+    combiner_normalized_directive: str | None = None
+    combiner_normalization_reason: str | None = None
 
 
 # Keep the legacy public name stable while the internal model becomes more explicit.
@@ -337,9 +339,10 @@ def derive_governance_directive(
         return GovernanceDirective.ASK_USER_CLARIFICATION
     if policy_input.actor_result_type == ActorResultType.NEEDS_REPLAN:
         return GovernanceDirective.REPLAN
+    if resolved_policy_decision == PolicyDecision.ALLOW_READ_ONLY:
+        # Preserve the static read-only envelope even when the current actor turn is not a tool proposal.
+        return GovernanceDirective.CONTINUE_READ_ONLY
     if policy_input.actor_result_type == ActorResultType.PROPOSE_ACTION:
-        if resolved_policy_decision == PolicyDecision.ALLOW_READ_ONLY:
-            return GovernanceDirective.CONTINUE_READ_ONLY
         return GovernanceDirective.CONTINUE
     return GovernanceDirective.CONTINUE
 
@@ -389,11 +392,17 @@ def combine_governance_assessments(
         repeated_provider_failure=repeated_provider_failure,
         provider_runtime_action_missing=_provider_runtime_action_missing(policy_input=policy_input),
     )
-    final_directive = combiner_result.final_directive
+    combiner_directive = combiner_result.final_directive
     final_directive = _normalize_intermediate_output_directive(
         task_state=task_state,
         policy_input=policy_input,
         static_policy_assessment=static_policy_assessment,
+        final_directive=combiner_directive,
+    )
+    normalization_reason = _build_combiner_normalization_reason(
+        task_state=task_state,
+        policy_input=policy_input,
+        combiner_directive=combiner_directive,
         final_directive=final_directive,
     )
     dynamic_directive = _map_dynamic_directive(
@@ -418,6 +427,8 @@ def combine_governance_assessments(
         behavioral_assessment=behavioral_assessment,
         judge_assessment=judge_assessment,
         combiner_selected_reason=combiner_result.selected_reason,
+        combiner_directive=combiner_directive,
+        combiner_normalization_reason=normalization_reason,
     )
     summary_suffixes: list[str] = []
     if repeated_recovery and final_directive == GovernanceDirective.REPLAN:
@@ -498,6 +509,10 @@ def combine_governance_assessments(
             }
             for signal in combiner_result.signals
         ),
+        combiner_normalized_directive=(
+            combiner_directive.value if final_directive != combiner_directive else None
+        ),
+        combiner_normalization_reason=normalization_reason,
     )
 
 
@@ -538,6 +553,31 @@ def _normalize_intermediate_output_directive(
     ):
         return GovernanceDirective.CONTINUE
     return final_directive
+
+
+# Keep post-combiner normalization explicit in summaries and traces.
+def _build_combiner_normalization_reason(
+    *,
+    task_state: TaskState,
+    policy_input: PolicyEvaluationInput,
+    combiner_directive: GovernanceDirective,
+    final_directive: GovernanceDirective,
+) -> str | None:
+    if final_directive == combiner_directive:
+        return None
+
+    validation_action = _resolve_validation_action_for_directive_normalization(task_state=task_state)
+    validation_text = (
+        f"Typed step validation selected '{validation_action.value}'."
+        if validation_action is not None
+        else "Typed step validation exposed an automatic recovery path."
+    )
+    return (
+        "Post-combiner normalization changed the directive from "
+        f"'{combiner_directive.value}' to '{final_directive.value}' because the actor output "
+        "was intermediate, non-external, non-write, and "
+        f"{validation_text}"
+    )
 
 
 def _resolve_validation_action_for_directive_normalization(
@@ -657,6 +697,7 @@ def build_governance_decision(
         dynamic_policy_assessment=oversight_assessment,
         behavioral_assessment=behavioral_assessment,
         judge_assessment=judge_assessment,
+        external_impact=policy_input.external_impact,
         validation_allows_completion=False,
     )
     final_directive = combiner_result.final_directive
@@ -671,6 +712,8 @@ def build_governance_decision(
             behavioral_assessment=behavioral_assessment,
             judge_assessment=judge_assessment,
             combiner_selected_reason=combiner_result.selected_reason,
+            combiner_directive=combiner_result.final_directive,
+            combiner_normalization_reason=None,
         ),
         constrains_capability_use=constrains_capability_use(
             policy_input=policy_input,
@@ -739,6 +782,8 @@ def build_governance_decision(
             }
             for signal in combiner_result.signals
         ),
+        combiner_normalized_directive=None,
+        combiner_normalization_reason=None,
     )
 
 
@@ -842,10 +887,13 @@ def _build_combined_summary(
     behavioral_assessment: BehavioralAssessment | None,
     judge_assessment: JudgeAssessment | None = None,
     combiner_selected_reason: str | None = None,
+    combiner_directive: GovernanceDirective | None = None,
+    combiner_normalization_reason: str | None = None,
 ) -> str:
     summary_parts = [static_policy_assessment.summary]
     if dynamic_policy_assessment is not None:
-        if final_directive == static_policy_assessment.policy_directive:
+        effective_combiner_directive = combiner_directive or final_directive
+        if effective_combiner_directive == static_policy_assessment.policy_directive:
             summary_parts.append(
                 "Dynamic policy preserved the static directive "
                 f"'{static_policy_assessment.policy_directive.value}'."
@@ -853,7 +901,8 @@ def _build_combined_summary(
         else:
             summary_parts.append(
                 "Dynamic policy made the decision more conservative: "
-                f"'{static_policy_assessment.policy_directive.value}' became '{final_directive.value}'."
+                f"'{static_policy_assessment.policy_directive.value}' became "
+                f"'{effective_combiner_directive.value}'."
             )
         summary_parts.append(dynamic_policy_assessment.summary)
     if behavioral_assessment is not None:
@@ -862,6 +911,8 @@ def _build_combined_summary(
         summary_parts.append(judge_assessment.summary)
     if combiner_selected_reason:
         summary_parts.append(f"Combiner rationale: {combiner_selected_reason}")
+    if combiner_normalization_reason:
+        summary_parts.append(combiner_normalization_reason)
     return " ".join(summary_parts)
 
 

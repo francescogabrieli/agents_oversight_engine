@@ -174,6 +174,8 @@ class TraceGovernanceDecision:
     combiner_rejected_alternatives: dict[str, str] | None
     combiner_safety_invariants_checked: tuple[str, ...]
     combiner_signals: tuple[dict[str, Any], ...]
+    combiner_normalized_directive: str | None
+    combiner_normalization_reason: str | None
 
 
 @dataclass(frozen=True)
@@ -698,6 +700,8 @@ def _build_governance_decision(decision: GovernanceDecision) -> TraceGovernanceD
         combiner_rejected_alternatives=decision.combiner_rejected_alternatives,
         combiner_safety_invariants_checked=decision.combiner_safety_invariants_checked,
         combiner_signals=decision.combiner_signals,
+        combiner_normalized_directive=decision.combiner_normalized_directive,
+        combiner_normalization_reason=decision.combiner_normalization_reason,
     )
 
 
