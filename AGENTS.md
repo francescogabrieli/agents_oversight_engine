@@ -44,6 +44,7 @@ It already includes:
 - behavioural similarity, deviation, and novelty scoring with conservative escalation recommendations
 - selective `LLM-as-a-judge` assessments for fragile outputs and risky draft states
 - weighted adaptive escalation combining dynamic policy, behavioural, and judge signals without overriding OPA hard decisions
+- Minimal Safe Intervention decision combiner with explicit trace visibility for post-combiner normalization and preserved read-only constraints
 - typed human-review requests and decisions with LangGraph `interrupt / resume`
 - durable local LangGraph checkpoint persistence and per-thread runtime artifacts on disk
 - typed `external_communication` phase tracking for evidence, draft, review/edit, approval, and blocked states
@@ -183,6 +184,7 @@ Current design:
 - `configs/layer2_tool_gateway.json` is the active Tool Gateway registry for configured native, HTTP, OpenAI, and MCP-backed tools
 - MCP is usable as a governed backend behind the Tool Gateway; the actor must never call MCP servers directly
 - `governance.py` defines the typed static-policy contracts, OPA HTTP policy engine, weighted decision combiner, and final governance decision trace used after actor execution
+- `governance.py` now also records when post-combiner normalization changes the directive so trace and summary stay aligned with the actual runtime decision
 - `behavioral.py` defines the behavioural foundation contract, SQLite-backed historical read model, similarity/deviation/novelty scoring, and conservative behavioural recommendations
 - `judge.py` defines the selective semantic judge port, invocation policy, and typed judge assessments
 - `oversight.py` defines deterministic dynamic policy assessment for `evidence_quality`, `operational_risk`, and `trajectory_health`, plus the recommendation consumed by governance
@@ -316,6 +318,7 @@ Current relevant files:
 - the active baseline also includes the real `replanner` branch triggered by `NEEDS_REPLAN`
 - the active baseline also includes a typed governance branch after `actor` that can continue, replan, escalate, or abort
 - governance now combines five explicit internal layers: static policy, deterministic dynamic policy, behavioural intelligence, selective judge review, and a deterministic decision combiner; OPA denials, required review, and clarification decisions remain non-negotiable
+- the decision combiner preserves the static read-only envelope as an explicit trace signal and records post-combiner normalization when a recoverable intermediate output is downgraded from `wait_human_review`
 - adaptive governance escalation is now weighted: dynamic policy, behavioural, and judge signals each contribute explicit authority, and no single advisory layer should force `WAIT_HUMAN_REVIEW` on its own unless the weighted threshold is met
 - governance still evaluates every actor turn, but intermediate local outputs that explicitly remain in recovery (`continue_acting` / `request_more_evidence`) should prefer local continuation over premature human-review escalation unless a hard policy or explicit blocking condition requires review
 - external communication drafts are explicit runtime state; the operator-facing payload is a single markdown body, while policy distinguishes between partial draft assembly and review-ready governed drafts before opening HITL

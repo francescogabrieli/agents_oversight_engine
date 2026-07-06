@@ -90,6 +90,8 @@ Dettagli rilevanti:
 - `behavioral` produce similarity, deviation e novelty score su memoria SQLite locale
 - il `judge` e selettivo e puo restare `disabled` mantenendo il contratto typed
 - il `decision_combiner` usa escalation pesata: i layer advisory non possono scavalcare da soli la static policy
+- se il combiner propone `wait_human_review` ma la governance normalizza il turn intermedio verso `continue` o `request_more_evidence`, la trace conserva sia la direttiva originale del combiner sia la normalizzazione post-combiner
+- il caso `allow_read_only` mantiene visibile il vincolo read-only anche quando la direttiva finale diventa piu conservativa di `continue_read_only`
 
 Effetto pratico sul task reale:
 - se l'evidenza raccolta supporta solo un summary alto livello, il runtime deve abbassare la precisione del testo
@@ -129,9 +131,10 @@ Artifact chiave:
 A fine run:
 
 1. `trace.py` esporta la trace tipizzata dal solo `TaskState`
-2. `persistence.py` aggiorna artifact per dashboard e replay
-3. `behavioral.py` persiste il read model storico locale
-4. `src/main_layer2_evaluation.py` puo leggere la trace offline senza dipendere dal runtime live
+2. la governance trace espone anche il motivo della normalizzazione post-combiner quando la direttiva finale differisce da quella scelta dal combiner
+3. `persistence.py` aggiorna artifact per dashboard e replay
+4. `behavioral.py` persiste il read model storico locale
+5. `src/main_layer2_evaluation.py` puo leggere la trace offline senza dipendere dal runtime live
 
 Questo chiude il ciclo e2e reale:
 
