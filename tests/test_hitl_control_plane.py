@@ -46,6 +46,7 @@ from layer2_runtime_governance.governance import PolicyEnginePort
 from layer2_runtime_governance.hitl import build_human_review_request
 from layer2_runtime_governance.nodes import governance
 from main_layer2 import main as main_layer2_cli
+from main_layer2 import resume_layer2_flow
 from main_layer2_dashboard import build_dashboard_session_from_trace
 
 
@@ -137,6 +138,30 @@ class HitlControlPlaneTests(unittest.TestCase):
             main_layer2_cli()
 
         self.assertNotIn("hitl_event_callback", captured)
+
+    # Verify resume keeps the direct invoke result when the refreshed snapshot omits task_state.
+    def test_resume_layer2_flow_prefers_invoke_result_over_partial_snapshot(self) -> None:
+        resumed_state = _waiting_review_state()
+        resumed_state.current_state = RuntimeState.COMPLETED
+
+        class _FakeGraph:
+            def invoke(self, _command, config=None):
+                return {"task_state": resumed_state}
+
+            def get_state(self, _config):
+                return mock.Mock(values={"thread_id": "thread-resume-only"}, interrupts=[])
+
+        with mock.patch("main_layer2.build_runtime_graph", return_value=_FakeGraph()):
+            trace = resume_layer2_flow(
+                thread_id="thread-resume-only",
+                human_review_decision={
+                    "request_id": "thread-resume-only:hitl",
+                    "decision_type": "approve_continue",
+                },
+            )
+
+        self.assertIs(trace["final_result"]["task_state"], resumed_state)
+        self.assertEqual(trace["intake_result"], resumed_state.intake_payload)
 
 
 # Build a TaskState that is ready for actor output and can be escalated into HITL.

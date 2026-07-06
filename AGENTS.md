@@ -366,11 +366,13 @@ Current relevant files:
 - trajectory-health turn pressure should stay forgiving enough that short source-plus-summary tasks can make a few recovery turns without being forced into replanning
 - runtime trace export must be read-only over `TaskState`; it must not mutate runtime state or become a parallel source of truth
 - `main_layer2.py` may print trace views, but reusable trace construction belongs in `trace.py`
+- `resume_layer2_flow` should prefer the direct LangGraph `invoke(Command(resume=...))` result when it contains the canonical `task_state`, because interrupted checkpoints may briefly expose only a partial snapshot wrapper during resume
 - `main_layer2_evaluation.py` is the offline, trace-only evaluation entrypoint and must stay decoupled from the live runtime CLI
 - `ABORTED` is the hard-denial runtime state for governance decisions that must not be conflated with review
 - HITL is wired as `interrupt / resume`; governance now pauses in typed states and resumes from typed human decisions
 - the local Layer 2 CLI no longer auto-launches the HITL control plane; the standalone dashboard process discovers new `WAITING_HUMAN_REVIEW` threads by polling persisted runtime artifacts
 - `runtime_summary.json` is now inbox-oriented and includes `task_goal`, `review_summary`, `pending_request_id`, `allowed_decisions`, `external_communication_phase`, `has_pending_human_review`, and `updated_at`
+- the standalone dashboard may now rebuild a pending review session from `pending_human_review.json` even when the refreshed checkpoint snapshot does not yet expose the full canonical `task_state`
 
 ### HITL Rules
 

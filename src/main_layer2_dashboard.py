@@ -15,11 +15,16 @@ from urllib.parse import urlparse
 
 from layer1_intake import IntakeResult
 from layer2_runtime_governance import (
+    ActorResultType,
     ExternalCommunicationDraft,
+    GovernanceDirective,
     HumanReviewDecision,
     HumanReviewDecisionType,
     HumanReviewExternalEdit,
     HumanReviewRequest,
+    RuntimeState,
+    ToolName,
+    ToolRequest,
     build_default_checkpointer,
     build_runtime_graph,
 )
@@ -53,7 +58,7 @@ DashboardRunner = Callable[..., dict[str, Any]]
 class DashboardSession:
     # Keep the typed session shape available for checkpoint-backed resume flows.
     thread_id: str
-    intake_result: IntakeResult
+    intake_result: IntakeResult | None
     final_result: dict[str, Any]
     checkpointer: Any
     artifact_store: RuntimeArtifactStore
@@ -113,13 +118,24 @@ def build_dashboard_session_from_thread_id(
         raise ValueError(f"No persisted runtime state is available for thread '{thread_id}'.")
 
     task_state = snapshot_values.get("task_state")
-    if not isinstance(task_state, TaskState):
-        raise ValueError(f"Persisted thread '{thread_id}' does not contain a canonical task_state.")
+    if isinstance(task_state, TaskState):
+        return DashboardSession(
+            thread_id=thread_id,
+            intake_result=task_state.intake_payload,
+            final_result=dict(snapshot_values),
+            checkpointer=resolved_checkpointer,
+            artifact_store=resolved_artifact_store,
+            resume_flow=resume_flow,
+        )
 
+    # Fall back to the persisted HITL artifact when the checkpoint snapshot only exposes wrapper fields.
+    pending_review_payload = resolved_artifact_store.read_pending_human_review(thread_id)
+    if pending_review_payload is None:
+        raise ValueError(f"Persisted thread '{thread_id}' does not contain a canonical task_state.")
     return DashboardSession(
         thread_id=thread_id,
-        intake_result=task_state.intake_payload,
-        final_result=dict(snapshot_values),
+        intake_result=None,
+        final_result={"pending_human_review_request": _coerce_human_review_request(pending_review_payload)},
         checkpointer=resolved_checkpointer,
         artifact_store=resolved_artifact_store,
         resume_flow=resume_flow,
@@ -150,6 +166,22 @@ def get_dashboard_task_state(session: DashboardSession) -> TaskState:
         if not isinstance(task_state, TaskState):
             raise ValueError("Dashboard session does not contain a canonical task_state.")
         return task_state
+
+
+# Recover the pending review payload even when the checkpoint snapshot is missing the full TaskState.
+def get_dashboard_pending_review_request(session: DashboardSession) -> HumanReviewRequest:
+    with session.lock:
+        task_state = session.final_result.get("task_state")
+        if isinstance(task_state, TaskState):
+            pending_request = task_state.pending_human_review_request
+            if pending_request is None:
+                raise ValueError("No pending human review request is available.")
+            return pending_request
+
+        pending_request = session.final_result.get("pending_human_review_request")
+        if isinstance(pending_request, HumanReviewRequest):
+            return pending_request
+        raise ValueError("No pending human review request is available.")
 
 
 # Build cache-control headers that keep both API and static responses fresh.
@@ -246,10 +278,7 @@ def _parse_human_review_decision(
     *,
     session: DashboardSession,
 ) -> HumanReviewDecision:
-    task_state = get_dashboard_task_state(session)
-    pending_request = task_state.pending_human_review_request
-    if pending_request is None:
-        raise ValueError("No pending human review request is available.")
+    pending_request = get_dashboard_pending_review_request(session)
 
     payload_thread_id = _optional_text(payload.get("thread_id"))
     if payload_thread_id is not None and payload_thread_id != session.thread_id:
@@ -291,6 +320,132 @@ def _parse_human_review_decision(
         clarification_text=clarification_text,
         external_communication_edit=external_edit,
         reviewer_id=_optional_text(payload.get("reviewer_id")),
+    )
+
+
+# Rebuild a typed ToolRequest from the JSON-safe dashboard artifact payload.
+def _coerce_tool_request(payload: Any) -> ToolRequest | None:
+    if payload is None or isinstance(payload, ToolRequest):
+        return payload
+    if not isinstance(payload, dict):
+        raise ValueError("Pending tool request payload must be a JSON object.")
+
+    tool_name_value = _optional_text(payload.get("tool_name"))
+    if tool_name_value is None:
+        raise ValueError("Pending tool request payload is missing tool_name.")
+
+    plan_step_id = _optional_text(payload.get("plan_step_id"))
+    reason = _optional_text(payload.get("reason"))
+    if plan_step_id is None or reason is None:
+        raise ValueError("Pending tool request payload is incomplete.")
+
+    try:
+        tool_name = ToolName(tool_name_value)
+    except ValueError as exc:
+        raise ValueError(f"Unsupported pending tool name: {tool_name_value}") from exc
+
+    return ToolRequest(
+        plan_step_id=plan_step_id,
+        tool_name=tool_name,
+        reason=reason,
+        query=_optional_text(payload.get("query")),
+        url=_optional_text(payload.get("url")),
+        text=_optional_text(payload.get("text")),
+        path=_optional_text(payload.get("path")),
+        expression=_optional_text(payload.get("expression")),
+        timezone=_optional_text(payload.get("timezone")),
+        limit=payload.get("limit") if isinstance(payload.get("limit"), int) else None,
+        max_results=payload.get("max_results") if isinstance(payload.get("max_results"), int) else 5,
+        extractive_goal=_optional_text(payload.get("extractive_goal")),
+    )
+
+
+# Rebuild a typed HumanReviewRequest from the JSON-safe persisted HITL payload.
+def _coerce_human_review_request(payload: Any) -> HumanReviewRequest:
+    if isinstance(payload, HumanReviewRequest):
+        return payload
+    if not isinstance(payload, dict):
+        raise ValueError("Pending human review payload must be a JSON object.")
+
+    request_id = _optional_text(payload.get("request_id"))
+    thread_id = _optional_text(payload.get("thread_id"))
+    current_state_value = _optional_text(payload.get("current_state"))
+    resume_state_value = _optional_text(payload.get("resume_state"))
+    if request_id is None or thread_id is None or current_state_value is None or resume_state_value is None:
+        raise ValueError("Pending human review payload is incomplete.")
+
+    actor_result_type_value = _optional_text(payload.get("actor_result_type"))
+    governance_directive_value = _optional_text(payload.get("governance_directive"))
+    allowed_decisions = payload.get("allowed_decisions")
+    allowed_decisions = allowed_decisions if isinstance(allowed_decisions, list) else []
+
+    try:
+        current_state = RuntimeState(current_state_value)
+        resume_state = RuntimeState(resume_state_value)
+        actor_result_type = (
+            ActorResultType(actor_result_type_value) if actor_result_type_value is not None else None
+        )
+        governance_directive = (
+            GovernanceDirective(governance_directive_value)
+            if governance_directive_value is not None
+            else None
+        )
+        allowed_decision_values = tuple(HumanReviewDecisionType(value) for value in allowed_decisions)
+    except ValueError as exc:
+        raise ValueError("Pending human review payload contains unsupported enum values.") from exc
+
+    return HumanReviewRequest(
+        request_id=request_id,
+        thread_id=thread_id,
+        current_state=current_state,
+        resume_state=resume_state,
+        current_plan_step_id=_optional_text(payload.get("current_plan_step_id")),
+        current_plan_step_objective=_optional_text(payload.get("current_plan_step_objective")),
+        actor_result_type=actor_result_type,
+        current_tool_request=_coerce_tool_request(payload.get("current_tool_request")),
+        governance_directive=governance_directive,
+        governance_summary=_optional_text(payload.get("governance_summary")),
+        static_policy_summary=_optional_text(payload.get("static_policy_summary")),
+        dynamic_policy_summary=_optional_text(payload.get("dynamic_policy_summary")),
+        behavioral_summary=_optional_text(payload.get("behavioral_summary")),
+        judge_summary=_optional_text(payload.get("judge_summary")),
+        oversight_summary=_optional_text(payload.get("oversight_summary")),
+        external_communication_target_type=_optional_text(payload.get("external_communication_target_type")),
+        external_communication_draft=_coerce_external_communication_draft(
+            payload.get("external_communication_draft")
+        ),
+        reason_codes=tuple(str(value) for value in payload.get("reason_codes", []) if isinstance(value, str)),
+        allowed_decisions=allowed_decision_values,
+        review_summary=_optional_text(payload.get("review_summary")),
+    )
+
+
+# Rebuild a typed external draft from the JSON-safe persisted HITL payload.
+def _coerce_external_communication_draft(payload: Any) -> ExternalCommunicationDraft | None:
+    if payload is None or isinstance(payload, ExternalCommunicationDraft):
+        return payload
+    if not isinstance(payload, dict):
+        raise ValueError("Pending external communication draft payload must be a JSON object.")
+
+    channel = _optional_text(payload.get("channel"))
+    body = _optional_text(payload.get("body"))
+    if channel is None or body is None:
+        raise ValueError("Pending external communication draft payload is incomplete.")
+
+    metadata = payload.get("metadata")
+    if metadata is None:
+        metadata_payload: dict[str, Any] = {}
+    elif isinstance(metadata, dict):
+        metadata_payload = {str(key): item for key, item in metadata.items()}
+    else:
+        raise ValueError("Pending external communication draft metadata must be a JSON object.")
+
+    return ExternalCommunicationDraft(
+        channel=channel,
+        recipient=_optional_text(payload.get("recipient")),
+        subject=_optional_text(payload.get("subject")),
+        body=body,
+        metadata=metadata_payload,
     )
 
 

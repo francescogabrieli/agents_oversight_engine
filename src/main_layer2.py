@@ -169,15 +169,22 @@ def resume_layer2_flow(
     )
 
     config = {"configurable": {"thread_id": thread_id}}
-    runtime_graph.invoke(Command(resume=human_review_decision), config=config)
-    final_result = _build_final_result_from_graph_snapshot(
+    # Prefer the direct invoke result because interrupted checkpoints can expose a partial snapshot view.
+    resume_result = runtime_graph.invoke(Command(resume=human_review_decision), config=config)
+    snapshot_result = _build_final_result_from_graph_snapshot(
         runtime_graph=runtime_graph,
         config=config,
     )
-    intake_result = _load_intake_result_from_checkpoint(
-        thread_id=thread_id,
-        runtime_graph=runtime_graph,
+    final_result = _resolve_resume_final_result(
+        resume_result=resume_result,
+        snapshot_result=snapshot_result,
     )
+    intake_result = _load_intake_result_from_final_result(final_result)
+    if intake_result is None:
+        intake_result = _load_intake_result_from_checkpoint(
+            thread_id=thread_id,
+            runtime_graph=runtime_graph,
+        )
     trace = {
         "thread_id": thread_id,
         "final_result": final_result,
@@ -186,6 +193,21 @@ def resume_layer2_flow(
         trace["intake_result"] = intake_result
         _persist_runtime_artifacts_from_trace(trace, artifact_store=artifact_store)
     return trace
+
+
+# Reuse the canonical invoke output when it contains the typed runtime state.
+def _resolve_resume_final_result(
+    *,
+    resume_result: Any,
+    snapshot_result: dict[str, Any],
+) -> dict[str, Any]:
+    if isinstance(resume_result, dict):
+        resolved = dict(resume_result)
+        if "__interrupt__" not in resolved and "__interrupt__" in snapshot_result:
+            resolved["__interrupt__"] = snapshot_result["__interrupt__"]
+        if isinstance(resolved.get("task_state"), TaskState):
+            return resolved
+    return snapshot_result
 
 
 # Stream graph updates so the CLI can show progress during long LLM/tool calls.
@@ -406,6 +428,14 @@ def _load_intake_result_from_checkpoint(
     if not isinstance(snapshot_values, dict):
         return None
     task_state = snapshot_values.get("task_state")
+    if not isinstance(task_state, TaskState):
+        return None
+    return task_state.intake_payload
+
+
+# Recover the intake payload directly from an already-resolved runtime result when possible.
+def _load_intake_result_from_final_result(final_result: dict[str, Any]) -> IntakeResult | None:
+    task_state = final_result.get("task_state")
     if not isinstance(task_state, TaskState):
         return None
     return task_state.intake_payload

@@ -261,6 +261,46 @@ class MainLayer2DashboardTests(unittest.TestCase):
         self.assertEqual(session.thread_id, "thread-refresh")
         self.assertEqual(session.final_result["task_state"].current_state, RuntimeState.WAITING_HUMAN_REVIEW)
 
+    # Verify session loading can fall back to the persisted HITL payload when the checkpoint lacks task_state.
+    def test_build_dashboard_session_falls_back_to_persisted_pending_review(self) -> None:
+        _persist_review_artifacts(
+            self.artifact_store,
+            thread_id="thread-artifact-fallback",
+            updated_at="2026-06-05T10:00:00+00:00",
+        )
+
+        class _RefreshableCheckpointer:
+            def refresh_from_disk(self) -> None:
+                return None
+
+        class _FakeGraph:
+            def get_state(self, _config):
+                return mock.Mock(values={"thread_id": "thread-artifact-fallback"})
+
+        with mock.patch(
+            "main_layer2_dashboard.build_runtime_graph",
+            side_effect=lambda checkpointer: _FakeGraph(),
+        ):
+            session = build_dashboard_session_from_thread_id(
+                "thread-artifact-fallback",
+                checkpointer=_RefreshableCheckpointer(),
+                artifact_store=self.artifact_store,
+            )
+
+        decision = _parse_human_review_decision(
+            {
+                "thread_id": "thread-artifact-fallback",
+                "request_id": "thread-artifact-fallback:hitl",
+                "decision_type": "approve_continue",
+            },
+            session=session,
+        )
+        pending_request = session.final_result["pending_human_review_request"]
+
+        self.assertIsNone(session.intake_result)
+        self.assertEqual(pending_request.thread_id, "thread-artifact-fallback")
+        self.assertEqual(decision.decision_type, HumanReviewDecisionType.APPROVE_CONTINUE)
+
     # Verify resume applies a typed decision and returns the refreshed persisted thread state.
     def test_api_resume_returns_refreshed_thread(self) -> None:
         _persist_review_artifacts(self.artifact_store, thread_id="thread-resume", updated_at="2026-06-05T10:00:00+00:00")
