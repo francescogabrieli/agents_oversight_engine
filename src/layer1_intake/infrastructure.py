@@ -11,6 +11,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from llm_retry import llm_retry
+
 from .models import (
     DomainType,
     InvalidTaskSpecError,
@@ -193,22 +195,9 @@ class OpenAITaskSpecParser(TaskSpecParserPort):
     def parse(self, *, raw_task_text: str, context_hint: str | None = None) -> TaskSpec:
         # Ask OpenAI for a typed extraction payload and convert it into the domain model.
         try:
-            response = self._client.responses.parse(
-                model=self._settings.model,
-                input=[
-                    {
-                        "role": "system",
-                        "content": build_task_spec_system_prompt(),
-                    },
-                    {
-                        "role": "user",
-                        "content": build_task_spec_user_prompt(
-                            raw_task_text=raw_task_text,
-                            context_hint=context_hint,
-                        ),
-                    },
-                ],
-                text_format=TaskSpecExtractionPayload,
+            response = self._request_parse_response(
+                raw_task_text=raw_task_text,
+                context_hint=context_hint,
             )
         except Exception as exc:  # pragma: no cover - network/client errors
             raise InvalidTaskSpecError(f"OpenAI parser request failed: {exc}") from exc
@@ -223,6 +212,27 @@ class OpenAITaskSpecParser(TaskSpecParserPort):
             raise InvalidTaskSpecError(
                 f"Structured output could not be converted to TaskSpec: {exc}"
             ) from exc
+
+    # Retry only transient provider failures so demos do not crash on one 429/503.
+    @llm_retry
+    def _request_parse_response(self, *, raw_task_text: str, context_hint: str | None) -> object:
+        return self._client.responses.parse(
+            model=self._settings.model,
+            input=[
+                {
+                    "role": "system",
+                    "content": build_task_spec_system_prompt(),
+                },
+                {
+                    "role": "user",
+                    "content": build_task_spec_user_prompt(
+                        raw_task_text=raw_task_text,
+                        context_hint=context_hint,
+                    ),
+                },
+            ],
+            text_format=TaskSpecExtractionPayload,
+        )
 
 
 class JsonExecutionPolicyRepository(ExecutionPolicyRepositoryPort):

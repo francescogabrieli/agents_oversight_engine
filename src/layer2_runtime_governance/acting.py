@@ -8,6 +8,8 @@ from types import SimpleNamespace
 from pathlib import Path
 from typing import Any
 
+from llm_retry import llm_retry
+
 from .actor_contract import (
     ActorPort,
     ActorResult,
@@ -1043,23 +1045,7 @@ class OpenAIActor(ActorPort):
     def act(self, *, actor_task: ActorTask) -> ActorResult:
         # Keep the actor to one tool call so the runtime can validate a single typed outcome per turn.
         try:
-            response = self._client.responses.create(
-                model=self._settings.model,
-                input=[
-                    {
-                        "role": "system",
-                        "content": build_actor_system_prompt(),
-                    },
-                    {
-                        "role": "user",
-                        "content": build_actor_user_prompt(actor_task=actor_task),
-                    },
-                ],
-                tools=_build_actor_runtime_tools(),
-                tool_choice="required",
-                parallel_tool_calls=False,
-                max_tool_calls=1,
-            )
+            response = self._request_actor_response(actor_task=actor_task)
         except Exception as exc:  # pragma: no cover - network/client errors
             raise ActorExecutionError(f"Actor request failed: {exc}") from exc
 
@@ -1067,6 +1053,27 @@ class OpenAIActor(ActorPort):
         return _convert_tool_call_to_actor_result(
             actor_task=actor_task,
             tool_call=tool_call,
+        )
+
+    # Retry only transient provider failures so one 429/503 does not abort the actor turn.
+    @llm_retry
+    def _request_actor_response(self, *, actor_task: ActorTask) -> object:
+        return self._client.responses.create(
+            model=self._settings.model,
+            input=[
+                {
+                    "role": "system",
+                    "content": build_actor_system_prompt(),
+                },
+                {
+                    "role": "user",
+                    "content": build_actor_user_prompt(actor_task=actor_task),
+                },
+            ],
+            tools=_build_actor_runtime_tools(),
+            tool_choice="required",
+            parallel_tool_calls=False,
+            max_tool_calls=1,
         )
 
 

@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import shutil
@@ -7,6 +8,7 @@ import unittest
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -107,7 +109,11 @@ from layer2_runtime_governance.replanning import (
     build_replanner_system_prompt,
     build_replanner_user_prompt,
 )
-from layer2_runtime_governance.planning import OpenAIPlannerSettings, build_planner_system_prompt
+from layer2_runtime_governance.planning import (
+    OpenAIPlanner,
+    OpenAIPlannerSettings,
+    build_planner_system_prompt,
+)
 from layer2_runtime_governance.acting import build_actor_system_prompt, build_actor_user_prompt
 from layer2_runtime_governance.governance import (
     OPAHttpPolicyEngine,
@@ -660,6 +666,42 @@ class FakeReplannerClient:
         self.responses = FakeReplannerResponses(output_parsed)
 
 
+class _RetryableStatusError(RuntimeError):
+    # Expose an HTTP-like status code without importing provider-specific error types.
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class _FakeParsedPlannerResponse:
+    # Mirror the OpenAI parsed response shape used by the planner.
+    def __init__(self, output_parsed) -> None:
+        self.output_parsed = output_parsed
+
+
+class _FlakyPlannerResponses:
+    # Fail with retryable status codes before returning one valid planner payload.
+    def __init__(self, output_parsed, failures: list[int]) -> None:
+        self.output_parsed = output_parsed
+        self.failures = list(failures)
+        self.call_count = 0
+        self.last_kwargs = None
+
+    def parse(self, **kwargs):
+        self.call_count += 1
+        if self.failures:
+            status_code = self.failures.pop(0)
+            raise _RetryableStatusError(status_code, f"transient failure {status_code}")
+        self.last_kwargs = kwargs
+        return _FakeParsedPlannerResponse(self.output_parsed)
+
+
+class _FlakyPlannerClient:
+    # Expose the responses.parse surface used by OpenAIPlanner.
+    def __init__(self, output_parsed, failures: list[int]) -> None:
+        self.responses = _FlakyPlannerResponses(output_parsed, failures)
+
+
 class _FakeOpenRouterClient:
     # Return one cloud actor JSON action without touching the OpenRouter service.
     def complete_tool_call(self, **kwargs):
@@ -944,6 +986,21 @@ class _FakeOpenRouterEmptyResponseClient:
         raise openrouter_client_module.OpenRouterRuntimeError(
             "OpenRouter returned no tool call and no assistant content. finish_reason='stop'."
         )
+
+
+class _FakeOpenRouterHTTPResponse:
+    # Mirror the minimal response interface consumed by urlopen context managers.
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self._payload = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._payload
 
 
 class FakeOPAResponse:
@@ -2732,6 +2789,32 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
 
         self.assertEqual(settings.timeout_seconds, 30.0)
 
+    def test_openai_planner_retries_retryable_provider_failures(self) -> None:
+        from layer2_runtime_governance.planning import _PlanningPayload, _PlanStepPayload
+
+        planner_service = OpenAIPlanner(
+            settings=OpenAIPlannerSettings(api_key="test-key", model="test-model")
+        )
+        planner_service._client = _FlakyPlannerClient(
+            _PlanningPayload(
+                rationale_summary="Transient provider errors recovered cleanly.",
+                plan_steps=[
+                    _PlanStepPayload(
+                        objective="Collect authoritative DMA sources.",
+                        rationale="The task is research-oriented.",
+                        expected_outcome="A compact source set.",
+                    )
+                ],
+            ),
+            failures=[429, 503],
+        )
+
+        with patch("llm_retry.time.sleep", return_value=None):
+            decision = planner_service.plan(task_state=_build_policy_input_task_state())
+
+        self.assertEqual(decision.rationale, "Transient provider errors recovered cleanly.")
+        self.assertEqual(planner_service._client.responses.call_count, 3)
+
     def test_openrouter_actor_converts_json_action_to_actor_result_without_network(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
@@ -2751,6 +2834,82 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertEqual(result.output_text, "OpenRouter actor completed the step.")
         self.assertIsNotNone(result.step_validation)
         self.assertEqual(result.step_validation.confidence, 0.82)
+
+    def test_openrouter_client_retries_retryable_http_failures(self) -> None:
+        client = openrouter_client_module.OpenRouterChatClient(
+            openrouter_client_module.OpenRouterRuntimeSettings(
+                model="openai/gpt-oss-120b:free",
+                api_key="test-key",
+                base_url="https://openrouter.ai/api/v1",
+                timeout_seconds=1.0,
+            )
+        )
+        response_payload = {
+            "model": "openai/gpt-oss-120b:free",
+            "choices": [
+                {
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "tool_calls": [
+                            {
+                                "type": "function",
+                                "function": {
+                                    "name": "emit_final_output",
+                                    "arguments": json.dumps(
+                                        {
+                                            "summary": "Recovered after transient provider failures.",
+                                            "output_text": "Recovered output.",
+                                            "completion_rationale": "The provider call succeeded.",
+                                            "objective_satisfied": True,
+                                            "evidence_sufficient": True,
+                                            "confidence": 0.8,
+                                        }
+                                    ),
+                                },
+                            }
+                        ]
+                    },
+                }
+            ],
+        }
+        side_effects = [
+            HTTPError(
+                url="https://openrouter.ai/api/v1/chat/completions",
+                code=429,
+                msg="Too Many Requests",
+                hdrs=None,
+                fp=io.BytesIO(b'{"error":"rate_limited"}'),
+            ),
+            HTTPError(
+                url="https://openrouter.ai/api/v1/chat/completions",
+                code=503,
+                msg="Service Unavailable",
+                hdrs=None,
+                fp=io.BytesIO(b'{"error":"unavailable"}'),
+            ),
+            _FakeOpenRouterHTTPResponse(response_payload),
+        ]
+
+        with patch("llm_retry.time.sleep", return_value=None), patch.object(
+            openrouter_client_module,
+            "urlopen",
+            side_effect=side_effects,
+        ) as mocked_urlopen:
+            payload = client.complete_tool_call(
+                system_prompt="system",
+                user_prompt="user",
+                tools=[
+                    {
+                        "type": "function",
+                        "name": "emit_final_output",
+                        "description": "Return the final output envelope.",
+                        "parameters": {"type": "object", "properties": {}, "additionalProperties": True},
+                    }
+                ],
+            )
+
+        self.assertEqual(payload["tool_name"], "emit_final_output")
+        self.assertEqual(mocked_urlopen.call_count, 3)
 
     def test_openrouter_actor_web_search_without_query_uses_step_fallback(self) -> None:
         actor = OpenRouterActor(

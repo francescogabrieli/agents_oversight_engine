@@ -8,6 +8,8 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from llm_retry import llm_retry
+
 from .state import PlanStep, PlanStepKind, PlanStepStatus, TaskState
 from .tool_contract import EvidenceSupportLevel
 
@@ -256,20 +258,7 @@ class OpenAIReplanner(ReplannerPort):
     # Ask OpenAI for a typed replacement trajectory and convert it into domain models.
     def replan(self, *, task_state: TaskState) -> ReplanDecision:
         try:
-            response = self._client.responses.parse(
-                model=self._settings.model,
-                input=[
-                    {
-                        "role": "system",
-                        "content": build_replanner_system_prompt(),
-                    },
-                    {
-                        "role": "user",
-                        "content": build_replanner_user_prompt(task_state=task_state),
-                    },
-                ],
-                text_format=_ReplanningPayload,
-            )
+            response = self._request_replan_response(task_state=task_state)
         except Exception as exc:  # pragma: no cover - network/client errors
             raise ReplannerExecutionError(f"Replanner request failed: {exc}") from exc
 
@@ -294,6 +283,24 @@ class OpenAIReplanner(ReplannerPort):
             rationale=payload.rationale_summary,
             replanner_name=self.replanner_name,
             prompt_version=self.prompt_version,
+        )
+
+    # Retry only transient provider failures so one rate-limit does not abort recovery.
+    @llm_retry
+    def _request_replan_response(self, *, task_state: TaskState) -> object:
+        return self._client.responses.parse(
+            model=self._settings.model,
+            input=[
+                {
+                    "role": "system",
+                    "content": build_replanner_system_prompt(),
+                },
+                {
+                    "role": "user",
+                    "content": build_replanner_user_prompt(task_state=task_state),
+                },
+            ],
+            text_format=_ReplanningPayload,
         )
 
 

@@ -700,30 +700,59 @@ def combine_governance_directives(
         raise ValueError("combine_governance_directives requires static policy information.")
 
     resolved_dynamic_policy = dynamic_policy_assessment or oversight_assessment
+
+    # OPA hard decisions are absolute vetoes — no weighting can override them.
     if resolved_static_policy.policy_decision == PolicyDecision.DENY:
         return GovernanceDirective.STOP
     if resolved_static_policy.policy_decision == PolicyDecision.REQUIRE_HUMAN_REVIEW:
         return GovernanceDirective.WAIT_HUMAN_REVIEW
     if resolved_static_policy.policy_decision == PolicyDecision.ASK_CLARIFICATION:
         return GovernanceDirective.ASK_USER_CLARIFICATION
-    candidate_directives = [resolved_static_policy.policy_directive]
+
+    # Each adaptive layer has an explicit authority weight.
+    # A single low-confidence layer can no longer force WAIT_HUMAN_REVIEW unilaterally.
+    # The weighted escalation score must reach or exceed 0.5 to override the static directive.
+    ESCALATION_THRESHOLD = 0.5
+    _LAYER_WEIGHTS = {
+        "dynamic": 0.8,
+        "behavioral": 0.4,
+        "judge": 0.6,
+    }
+
+    weighted_score: float = 0.0
+    total_weight: float = 0.0
+    best_escalation: GovernanceDirective = resolved_static_policy.policy_directive
+
     if resolved_dynamic_policy is not None:
-        candidate_directives.append(
-            _map_dynamic_directive(resolved_dynamic_policy.recommended_directive)
-        )
+        w = _LAYER_WEIGHTS["dynamic"]
+        d = _map_dynamic_directive(resolved_dynamic_policy.recommended_directive)
+        total_weight += w
+        if _conservativeness_rank(d) > _conservativeness_rank(resolved_static_policy.policy_directive):
+            weighted_score += w
+            if _conservativeness_rank(d) > _conservativeness_rank(best_escalation):
+                best_escalation = d
+
     if behavioral_assessment is not None:
-        candidate_directives.append(
-            _map_behavioral_directive(behavioral_assessment.behavioral_recommended_directive)
-        )
+        w = _LAYER_WEIGHTS["behavioral"]
+        d = _map_behavioral_directive(behavioral_assessment.behavioral_recommended_directive)
+        total_weight += w
+        if _conservativeness_rank(d) > _conservativeness_rank(resolved_static_policy.policy_directive):
+            weighted_score += w
+            if _conservativeness_rank(d) > _conservativeness_rank(best_escalation):
+                best_escalation = d
+
     if judge_assessment is not None:
-        candidate_directives.append(_map_judge_directive(judge_assessment.recommendation))
-    most_conservative = max(candidate_directives, key=_conservativeness_rank)
-    if most_conservative in {
-        GovernanceDirective.WAIT_HUMAN_REVIEW,
-        GovernanceDirective.REPLAN,
-        GovernanceDirective.REQUEST_MORE_EVIDENCE,
-    }:
-        return most_conservative
+        w = _LAYER_WEIGHTS["judge"]
+        d = _map_judge_directive(judge_assessment.recommendation)
+        total_weight += w
+        if _conservativeness_rank(d) > _conservativeness_rank(resolved_static_policy.policy_directive):
+            weighted_score += w
+            if _conservativeness_rank(d) > _conservativeness_rank(best_escalation):
+                best_escalation = d
+
+    if total_weight > 0 and (weighted_score / total_weight) >= ESCALATION_THRESHOLD:
+        return best_escalation
+
     return resolved_static_policy.policy_directive
 
 

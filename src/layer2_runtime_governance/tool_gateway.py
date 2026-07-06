@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+from llm_retry import llm_retry
+
 from .tool_contract import (
     ToolExecutionResult,
     ToolGatewayPort,
@@ -209,11 +211,7 @@ class OpenAIToolGateway(ToolGatewayPort):
             )
 
         try:
-            response = self._client.responses.create(
-                model=self._settings.model,
-                input=tool_request.query,
-                tools=[{"type": "web_search_preview"}],
-            )
+            response = self._request_web_search_response(tool_request=tool_request)
         except Exception as exc:  # pragma: no cover - network/client errors
             return _failure(tool_request, f"Web search failed: {exc}")
 
@@ -226,6 +224,15 @@ class OpenAIToolGateway(ToolGatewayPort):
             summary="Web search executed successfully.",
             content=_truncate_text(content, definition.max_content_chars) if content else None,
             sources=sources,
+        )
+
+    # Retry only transient provider failures so web_search remains stable during demos.
+    @llm_retry
+    def _request_web_search_response(self, *, tool_request: ToolRequest) -> object:
+        return self._client.responses.create(
+            model=self._settings.model,
+            input=tool_request.query,
+            tools=[{"type": "web_search_preview"}],
         )
 
     # Fetch one URL and extract readable text using only the standard library.

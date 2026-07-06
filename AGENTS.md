@@ -43,6 +43,7 @@ It already includes:
 - local SQLite behavioural memory as a non-authoritative read model for historical run features
 - behavioural similarity, deviation, and novelty scoring with conservative escalation recommendations
 - selective `LLM-as-a-judge` assessments for fragile outputs and risky draft states
+- weighted adaptive escalation combining dynamic policy, behavioural, and judge signals without overriding OPA hard decisions
 - typed human-review requests and decisions with LangGraph `interrupt / resume`
 - durable local LangGraph checkpoint persistence and per-thread runtime artifacts on disk
 - typed `external_communication` phase tracking for evidence, draft, review/edit, approval, and blocked states
@@ -91,7 +92,7 @@ Important implementation principles:
 
 - `Layer 1` is external to the LangGraph runtime.
 - `Layer 2` is the live orchestration layer and is implemented with LangGraph.
-- for the `planner + actor` branch, follow `docs/plan-and-execute.ipynb` as the primary implementation pattern reference:
+- for the `planner + actor` branch, follow `docs/guidelines/plan-and-execute.ipynb` as the primary implementation pattern reference:
   - multi-step semantic planner
   - step-bounded executor
   - structured tool binding at the runtime level
@@ -181,14 +182,15 @@ Current design:
 - `tool_gateway.py` contains the read-only operational tool surface currently available to the runtime, including `web_search`, `fetch_url_text`, and configured read-only MCP test tools behind the gateway registry
 - `configs/layer2_tool_gateway.json` is the active Tool Gateway registry for configured native, HTTP, OpenAI, and MCP-backed tools
 - MCP is usable as a governed backend behind the Tool Gateway; the actor must never call MCP servers directly
-- `governance.py` defines the typed static-policy contracts, OPA HTTP policy engine, decision combiner, and final governance decision trace used after actor execution
+- `governance.py` defines the typed static-policy contracts, OPA HTTP policy engine, weighted decision combiner, and final governance decision trace used after actor execution
 - `behavioral.py` defines the behavioural foundation contract, SQLite-backed historical read model, similarity/deviation/novelty scoring, and conservative behavioural recommendations
 - `judge.py` defines the selective semantic judge port, invocation policy, and typed judge assessments
 - `oversight.py` defines deterministic dynamic policy assessment for `evidence_quality`, `operational_risk`, and `trajectory_health`, plus the recommendation consumed by governance
 - `oversight.py` now resolves operational risk from an explicit runtime posture (`none`, `read_only`, `write`) and resolves evidence requirements from typed plan-step metadata before falling back to legacy heuristics
 - `configs/layer2_oversight_policy.json` now includes a `tool_risk.none` level so no-tool executions are not treated as the old medium-risk default
 - `openrouter_client.py` defines the OpenRouter HTTP adapter used by the temporary Layer 2 actor test backend
-- `persistence.py` defines the durable disk-backed LangGraph saver plus the per-thread runtime artifact store used for trace, dashboard, and HITL persistence
+- `nodes.py` now evaluates static policy and deterministic dynamic policy in parallel inside `governance`, before behavioral and judge assessment are applied
+- `persistence.py` defines the durable disk-backed LangGraph saver plus the per-thread runtime artifact store used for trace, dashboard, and HITL persistence; checkpoints are persisted as JSON-safe serializer-backed snapshots under `artifacts/runtime/checkpoints/layer2_checkpoints.json`
 - `trace.py` defines the typed, JSON-exportable Layer 2 runtime trace contract used for debugging, thesis evidence, HITL payloads, and evaluation, including resolved evidence-requirement provenance for each plan step
 - `evaluation.py` defines the offline trace evaluation pipeline that reads exported trace JSON and produces JSON and Markdown reports, including typed-vs-heuristic evidence mismatch accounting
 - `hitl_dashboard.py` defines the dashboard-facing snapshot model derived from `TaskState`, governance, oversight, and HITL review payloads
@@ -208,7 +210,7 @@ Current design:
 
 Reference implementation note:
 
-- `docs/plan-and-execute.ipynb` is the main local reference for the internal planner/executor split
+- `docs/guidelines/plan-and-execute.ipynb` is the main local reference for the internal planner/executor split
 - when tools are introduced, prefer the LangGraph/LangChain pattern of binding real tools to the executor instead of describing the available tools only in natural language inside the prompt
 - the executor prompt may still be richer and more architecture-specific than the minimal prompt shown in the tutorial
 
@@ -230,12 +232,14 @@ Contains diagrams and visual aids.
 
 Current relevant files:
 
-- `docs/plan-and-execute.ipynb`
-- `docs/plan-and-execute.jpg`
-- `docs/planner_use_cases.html`
-- `docs/confidence_risk_trajectory_deck.html`
+- `docs/guidelines/plan-and-execute.ipynb`
+- `docs/guidelines/plan-and-execute.jpg`
+- `docs/deck/planner_use_cases.html`
+- `docs/deck/confidence_risk_trajectory_deck.html`
 - `docs/governance_hitl_contract.md`
 - `docs/tool_gateway_strategy.md`
+- `docs/flow_details.md`
+- `architecture/e2e_real_task.md`
 
 
 ### `tests`
@@ -247,6 +251,10 @@ Current relevant files:
 - `tests/test_layer1_intake.py`
 - `tests/test_layer2_runtime_governance.py`
 - `tests/test_layer1_layer2_integration.py`
+- `tests/test_layer2_evaluation.py`
+- `tests/test_layer2_hitl_dashboard.py`
+- `tests/test_hitl_control_plane.py`
+- `tests/test_main_layer2_dashboard.py`
 - `tests/test_layer2_oversight.py`
 - `tests/test_layer2_trace.py`
 - `tests/test_tool_gateway_mcp.py`
@@ -308,9 +316,10 @@ Current relevant files:
 - the active baseline also includes the real `replanner` branch triggered by `NEEDS_REPLAN`
 - the active baseline also includes a typed governance branch after `actor` that can continue, replan, escalate, or abort
 - governance now combines five explicit internal layers: static policy, deterministic dynamic policy, behavioural intelligence, selective judge review, and a deterministic decision combiner; OPA denials, required review, and clarification decisions remain non-negotiable
+- adaptive governance escalation is now weighted: dynamic policy, behavioural, and judge signals each contribute explicit authority, and no single advisory layer should force `WAIT_HUMAN_REVIEW` on its own unless the weighted threshold is met
 - governance still evaluates every actor turn, but intermediate local outputs that explicitly remain in recovery (`continue_acting` / `request_more_evidence`) should prefer local continuation over premature human-review escalation unless a hard policy or explicit blocking condition requires review
 - external communication drafts are explicit runtime state; the operator-facing payload is a single markdown body, while policy distinguishes between partial draft assembly and review-ready governed drafts before opening HITL
-- the planner/executor split should remain aligned with `docs/plan-and-execute.ipynb` unless there is a clear thesis-driven reason to diverge
+- the planner/executor split should remain aligned with `docs/guidelines/plan-and-execute.ipynb` unless there is a clear thesis-driven reason to diverge
 - planner output must remain semantic and typed
 - planner output may now include typed `step_kind`, `evidence_requirement`, and `claim_precision_ceiling` metadata on each semantic step; older outputs without those fields remain valid
 - planner output must not contain concrete tool calls, executable payloads, or framework-specific actions
@@ -360,6 +369,7 @@ Current relevant files:
 - governance is active as an explicit runtime node and uses OPA over HTTP as the deterministic static policy engine target
 - deterministic dynamic policy may only preserve or make the static policy decision more conservative; it must never make an OPA decision more permissive
 - the default LangGraph checkpointer is now a durable local disk-backed saver rather than a process-local in-memory saver
+- the default checkpoint file is `artifacts/runtime/checkpoints/layer2_checkpoints.json`, written through `JsonPlusSerializer` envelopes instead of Python pickle blobs
 - the runtime persists per-thread artifacts under `artifacts/runtime/<thread_id>/`, including trace, compact trace, dashboard snapshot, runtime summary, and pending HITL payload when present
 - the behavioural SQLite store lives under `artifacts/runtime/behavioral/behavioral.sqlite3` by default and must remain a read model rather than the primary runtime source of truth
 - dynamic policy scoring must remain deterministic, explainable, and configured through `configs/layer2_oversight_policy.json`
@@ -571,6 +581,6 @@ The current most relevant near-term evolution path is:
 2. keep the Layer 1 -> Layer 2 bootstrap-planner-actor-tool-replanner contract stable
 3. harden the governance contract and policy bundle boundaries before adding more policy dimensions
 4. evolve confidence, risk, and trajectory signals into explicit inputs for governance instead of ad hoc heuristics
-5. extend HITL with the future dashboard and richer operator workflows on top of the existing `interrupt / resume` path
-6. introduce LLM-as-a-judge only after the deterministic governance slice remains stable and testable
+5. harden the standalone HITL dashboard and richer operator workflows on top of the existing `interrupt / resume` path
+6. calibrate weighted governance escalation and selective judge invocation against real traces before widening the tool surface
 7. strengthen observability and evidence quality assessment before widening the tool surface

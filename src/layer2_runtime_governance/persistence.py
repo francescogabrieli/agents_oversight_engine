@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import pickle
 import threading
 from collections import defaultdict
 from dataclasses import dataclass
@@ -36,7 +35,7 @@ def get_default_runtime_artifacts_root() -> Path:
 
 # Keep the default checkpoint file under the runtime artifacts root.
 def get_default_checkpointer_path() -> Path:
-    return get_default_runtime_artifacts_root() / "checkpoints" / "layer2_checkpoints.pkl"
+    return get_default_runtime_artifacts_root() / "checkpoints" / "layer2_checkpoints.json"
 
 
 @dataclass(frozen=True)
@@ -59,6 +58,7 @@ class DiskBackedMemorySaver(InMemorySaver):
         storage_path: Path | None = None,
     ) -> None:
         super().__init__(serde=serde)
+        self._serde = serde or JsonPlusSerializer()
         self.storage_path = storage_path or get_default_checkpointer_path()
         self._lock = threading.RLock()
         self._ensure_parent_dir()
@@ -96,29 +96,35 @@ class DiskBackedMemorySaver(InMemorySaver):
         if not self.storage_path.exists():
             return
 
-        raw_payload = pickle.loads(self.storage_path.read_bytes())
-        self.storage = self._restore_storage(raw_payload.get("storage", {}))
-        self.writes = self._restore_writes(raw_payload.get("writes", {}))
-        self.blobs = raw_payload.get("blobs", {})
+        raw_payload = json.loads(self.storage_path.read_text(encoding="utf-8"))
+        self.storage = self._restore_storage(
+            self._deserialize_storage(raw_payload.get("storage", {}))
+        )
+        self.writes = self._restore_writes(
+            self._deserialize_writes(raw_payload.get("writes", []))
+        )
+        self.blobs = self._deserialize_blobs(raw_payload.get("blobs", {}))
 
-    # Write a plain-Python snapshot to disk using an atomic temp file replacement.
+    # Write a JSON snapshot to disk using an atomic temp file replacement.
     def _sync_to_disk(self) -> None:
         payload = {
-            "storage": self._snapshot_storage(),
-            "writes": self._snapshot_writes(),
-            "blobs": dict(self.blobs),
+            "storage": self._serialize_storage(self._snapshot_storage()),
+            "writes": self._serialize_writes(self._snapshot_writes()),
+            "blobs": self._serialize_blobs(dict(self.blobs)),
         }
         temp_path = self.storage_path.with_name(
             f"{self.storage_path.name}.{uuid4().hex}.tmp"
         )
-        temp_path.write_bytes(pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL))
+        temp_path.write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
         temp_path.replace(self.storage_path)
 
     # Ensure the checkpoint parent directory exists before reads or writes.
     def _ensure_parent_dir(self) -> None:
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Convert nested defaultdict storage into plain dicts for stable pickling.
+    # Convert nested defaultdict storage into plain dicts for stable JSON serialization.
     def _snapshot_storage(self) -> dict[str, dict[str, dict[str, Any]]]:
         return {
             thread_id: {
@@ -128,7 +134,7 @@ class DiskBackedMemorySaver(InMemorySaver):
             for thread_id, namespaces in self.storage.items()
         }
 
-    # Convert nested defaultdict writes into plain dicts for stable pickling.
+    # Convert nested defaultdict writes into plain dicts for stable JSON serialization.
     def _snapshot_writes(self) -> dict[tuple[str, str, str], dict[tuple[str, int], Any]]:
         return {
             outer_key: dict(entries)
@@ -149,6 +155,113 @@ class DiskBackedMemorySaver(InMemorySaver):
         for outer_key, entries in raw_writes.items():
             restored[outer_key] = dict(entries)
         return restored
+
+    # Serialize storage checkpoint values to JSON-safe form via serde.
+    def _serialize_storage(
+        self,
+        storage: dict[str, dict[str, dict[str, Any]]],
+    ) -> dict[str, dict[str, dict[str, Any]]]:
+        result: dict[str, dict[str, dict[str, Any]]] = {}
+        for thread_id, namespaces in storage.items():
+            result[thread_id] = {}
+            for ns, checkpoints in namespaces.items():
+                result[thread_id][ns] = {}
+                for ckpt_id, ckpt_value in checkpoints.items():
+                    result[thread_id][ns][ckpt_id] = self._serialize_value(ckpt_value)
+        return result
+
+    # Deserialize storage checkpoint values back from JSON-safe form.
+    def _deserialize_storage(
+        self,
+        raw: dict[str, dict[str, dict[str, Any]]],
+    ) -> dict[str, dict[str, dict[str, Any]]]:
+        result: dict[str, dict[str, dict[str, Any]]] = {}
+        for thread_id, namespaces in raw.items():
+            result[thread_id] = {}
+            for ns, checkpoints in namespaces.items():
+                result[thread_id][ns] = {}
+                for ckpt_id, ckpt_value in checkpoints.items():
+                    result[thread_id][ns][ckpt_id] = self._deserialize_value(ckpt_value)
+        return result
+
+    # Serialize writes values to JSON-safe form. Keys are tuples stored as JSON arrays.
+    def _serialize_writes(
+        self,
+        writes: dict[tuple[str, str, str], dict[tuple[str, int], Any]],
+    ) -> list[Any]:
+        result = []
+        for outer_key, entries in writes.items():
+            serialized_entries = []
+            for inner_key, value in entries.items():
+                serialized_entries.append({
+                    "k": list(inner_key),
+                    "v": self._serialize_value(value),
+                })
+            result.append({"k": list(outer_key), "entries": serialized_entries})
+        return result
+
+    # Deserialize writes values back from JSON-safe form. Keys are restored from JSON arrays.
+    def _deserialize_writes(
+        self,
+        raw: list[Any],
+    ) -> dict[tuple[str, str, str], dict[tuple[str, int], Any]]:
+        result: dict[Any, dict[Any, Any]] = {}
+        for item in raw:
+            outer_key = tuple(item["k"])
+            entries: dict[Any, Any] = {}
+            for entry in item.get("entries", []):
+                inner_key = tuple(entry["k"])
+                entries[inner_key] = self._deserialize_value(entry["v"])
+            result[outer_key] = entries
+        return result
+
+    # Serialize blob values to JSON-safe form. Keys are tuples stored as JSON arrays.
+    def _serialize_blobs(self, blobs: dict[Any, Any]) -> list[Any]:
+        result = []
+        for key, value in blobs.items():
+            serialized_key = list(key) if isinstance(key, tuple) else key
+            result.append({"k": serialized_key, "v": self._serialize_value(value)})
+        return result
+
+    # Deserialize blob values back from JSON-safe form.
+    def _deserialize_blobs(self, raw: list[Any]) -> dict[Any, Any]:
+        result: dict[Any, Any] = {}
+        for item in raw:
+            raw_key = item["k"]
+            key = tuple(raw_key) if isinstance(raw_key, list) else raw_key
+            result[key] = self._deserialize_value(item["v"])
+        return result
+
+    # Serialize one arbitrary checkpoint value to a JSON-safe envelope using serde.
+    def _serialize_value(self, value: Any) -> Any:
+        if value is None:
+            return None
+        try:
+            type_name, serialized = self._serde.dumps_typed(value)
+            if isinstance(serialized, bytes):
+                import base64
+                return {"__serde_type__": type_name, "__serde_bytes__": base64.b64encode(serialized).decode("ascii")}
+            return {"__serde_type__": type_name, "__serde_str__": serialized}
+        except Exception:
+            return value
+
+    # Deserialize one checkpoint value from its JSON-safe envelope using serde.
+    def _deserialize_value(self, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        if "__serde_type__" not in value:
+            return value
+        type_name = value["__serde_type__"]
+        try:
+            if "__serde_bytes__" in value:
+                import base64
+                raw = base64.b64decode(value["__serde_bytes__"])
+                return self._serde.loads_typed((type_name, raw))
+            if "__serde_str__" in value:
+                return self._serde.loads_typed((type_name, value["__serde_str__"]))
+        except Exception:
+            pass
+        return value
 
 
 class RuntimeArtifactStore:

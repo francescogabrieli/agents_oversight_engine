@@ -49,7 +49,7 @@ L'architettura viene compressa in cinque macro-blocchi:
 - `Task Intake`: codice esterno al grafo. Prepara il payload iniziale prima dell'avvio del runtime.
 - `Runtime & Governance`: implementato principalmente come nodi e subgraph LangGraph.
 - `Policy Engine`: nodo del grafo che invoca un componente esterno OPA (Open Policy Agent).
-- `HITL Gateway`: nodo LangGraph con `interrupt()` più interfaccia di review. Viene usato `LangGraph Studio / LangSmith Studio` per visualizzare thread, stato e history del workflow e per gestire operativamente le pause del grafo.
+- `HITL Gateway`: nodo LangGraph con `interrupt()` più control plane di review standalone servito da `src/main_layer2_dashboard.py`, che legge checkpoint e artifact runtime persistiti su disco.
 - `Tool Bus / External Capabilities`: componente esterno al grafo, invocato dal nodo `tool_gateway`.
 - `State, Evidence & Observability`: componente ibrido che fonde gli artefatti nativi prodotti da LangGraph, come stato runtime, checkpoint, thread history, task metadata e interrupt, con il tracciamento custom dell'architettura, come evidenze semantiche, output di governance, rationale, score e audit trail.
 - `Evaluation & Continuous Improvement`: codice esterno, eseguito fuori dal ciclo live del task.
@@ -390,11 +390,12 @@ Componenti principali nella baseline corrente:
 - `static_policy`, backed by OPA HTTP
 - `dynamic_policy`, deterministico e configurato da `configs/layer2_oversight_policy.json`
 - `behavioral_foundation`, backed by SQLite locale e feature storiche tipizzate
+- `judge`, sensore semantico selettivo gia integrato nel nodo `governance`
 - `decision_combiner`, tipizzato in `governance.py`
 
 Componenti futuri:
-- `judge_node`, come sensore semantico separato
-- `hitl_gateway`, come interrupt/resume reale invece di solo stato terminale tipizzato
+- `judge_node`, come sensore semantico separato quando il subgraph di governance verra esplicitato
+- `hitl_gateway`, come nodo dedicato separato dal control plane esterno se il flusso HITL diventera piu articolato
 
 Ruolo:
 - osservare in continuo lo stream operativo emesso dall'`Agent Core`
@@ -496,15 +497,14 @@ Responsabilità della baseline attuale:
 - esporre un `BehavioralAssessment` tipizzato e leggibile
 - persistere feature e snapshot della run corrente come read model storico
 
-Limiti espliciti della baseline attuale:
-- il layer `behavioral` non produce ancora `novelty_score` o `behavior_deviation_score`
-- il layer `behavioral` non seleziona ancora task simili con ranking forte
-- il layer `behavioral` non modifica ancora la direttiva finale del runtime
+Capacita gia implementate:
+- il layer `behavioral` produce `historical_similarity_score`, `behavior_deviation_score` e `novelty_score`
+- il layer `behavioral` seleziona run candidate comparabili e ne deriva una raccomandazione conservativa
 - la memoria SQLite non sostituisce la trace completa: è un read model indicizzato, non la source of truth primaria
 
 Direzione evolutiva:
 - aggiungere similarity e deviation rispetto a run storiche comparabili
-- trasformare l'assessment storico in segnale advisory ad alta priorità
+- calibrare meglio soglie, pesi e review-rate prima di attribuire piu autorita al segnale storico
 - mantenere comunque il vincolo che `behavioral` non possa rendere il sistema più permissivo della `static_policy`
 
 #### Guardrail Proporzionati
@@ -526,7 +526,7 @@ Questa scelta non indebolisce la governance: separa il controllo utile dall'attr
 
 #### Judge
 
-Implementazione futura: **nodo del subgraph di governance**.
+Implementazione corrente: **componente selettivo interno al nodo `governance`**, con backend disattivabile e porta OpenAI opzionale.
 
 Ruolo:
 - operare come sensore semantico live del runtime
@@ -539,30 +539,35 @@ Il `judge` non sostituisce né il `Policy Engine` né il motore di confidence/ri
 Non decide da solo i vincoli hard del sistema.
 Produce invece una valutazione semantica che può contribuire a `continue`, `replan`, `request_more_evidence`, `wait_human_review` o `stop` attraverso il `decision_combiner`.
 
+Nella baseline attuale il judge:
+- viene invocato solo in modo selettivo, non su ogni turn
+- puo rimanere `disabled` senza rompere il contratto typed
+- persiste comunque uno `JudgeAssessment` tipizzato, distinguendo chiaramente tra judge non invocato e judge invocato
+
 #### Decision Combiner
 
 Implementazione corrente: **funzione tipizzata in `governance.py`**.
 
 Ruolo:
-- ricevere gli esiti di `static_policy`, `dynamic_policy` e `behavioral`
+- ricevere gli esiti di `static_policy`, `dynamic_policy`, `behavioral` e `judge`
 - produrre una sola direttiva di controllo per il runtime
 - applicare una gerarchia esplicita di decisione
 
 Gerarchia di combinazione:
 1. la `static_policy` ha priorità sui vincoli non negoziabili
-2. la `dynamic_policy` può rendere più prudente la decisione entro i confini ammessi dalla policy
-3. il layer `behavioral` nella baseline corrente contribuisce solo come contesto tracciato e non cambia ancora la direttiva finale
-4. il `judge` contribuira in futuro come segnale semantico ad alta priorita, ma non potra ampliare cio che la policy ha vietato
+2. `deny`, `require_human_review` e `ask_clarification` di OPA restano veto hard e non possono essere annullati
+3. negli altri casi, `dynamic_policy`, `behavioral` e `judge` contribuiscono come layer advisory con pesi espliciti
+4. l'escalation advisory scatta solo se il punteggio pesato supera la soglia del combiner
+5. nessun layer advisory puo ampliare cio che la policy ha vietato
 
 Regole correnti:
 - `OPA deny` diventa sempre `stop`
 - `OPA require_human_review` diventa sempre `wait_human_review`
 - `OPA ask_clarification` diventa sempre `ask_user_clarification`
-- `OPA allow` con rischio operativo alto diventa `wait_human_review`
-- `OPA allow` con completion fragile diventa `request_more_evidence`
-- `OPA allow` con traiettoria degradata diventa `replan`
-- l'assessment `behavioral` corrente viene tracciato e persistito ma non altera ancora l'output del combiner
-- `OPA allow` con segnali sani conserva la direttiva policy-derived
+- `dynamic_policy`, `behavioral` e `judge` possono solo spingere verso direttive piu conservative della direttiva policy-derived
+- un singolo layer advisory non deve forzare da solo `wait_human_review` se il punteggio pesato complessivo resta sotto soglia
+- la direttiva di escalation scelta e la piu conservativa tra quelle che hanno contribuito al superamento della soglia
+- `OPA allow` con segnali advisory deboli o isolati conserva la direttiva policy-derived
 
 Output possibili:
 - `continue`
@@ -577,10 +582,11 @@ Output possibili:
 
 Implementazione: **nodo LangGraph + interfaccia esterna**.
 
-L'interfaccia adottata è `LangGraph Studio / LangSmith Studio`, usata per:
-- visualizzare thread e stato corrente del workflow
-- ispezionare la history della run
-- gestire la pausa del grafo e la successiva ripresa operativa
+L'interfaccia adottata oggi e una **dashboard standalone multi-thread** servita da `src/main_layer2_dashboard.py`, usata per:
+- visualizzare inbox e dettaglio dei thread in `WAITING_HUMAN_REVIEW`
+- leggere snapshot dashboard, trace e payload di review persistiti su disco
+- approvare, bloccare, chiedere chiarimenti o modificare draft `external_communication`
+- riprendere il grafo da checkpoint persistiti dopo la decisione umana
 
 Il meccanismo HITL rimane comunque basato su `interrupt / resume` del runtime LangGraph.
 
@@ -605,6 +611,12 @@ Azioni umane possibili:
 - `edit`
 - `request_more_evidence`
 - `stop`
+
+Persistenza operativa rilevante:
+- checkpoint LangGraph su `artifacts/runtime/checkpoints/layer2_checkpoints.json`
+- artifact per thread sotto `artifacts/runtime/<thread_id>/`
+- payload di review pending in `pending_human_review.json`
+- snapshot inbox-oriented in `runtime_summary.json`
 
 ### 2.3 Output
 

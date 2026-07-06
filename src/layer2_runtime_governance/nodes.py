@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from typing import Callable
 
@@ -171,14 +172,20 @@ def governance(
         return state
 
     policy_input = build_policy_evaluation_input(task_state=state)
-    static_policy_assessment = evaluate_static_policy(
-        policy_engine_service=policy_engine_service,
-        policy_input=policy_input,
-    )
-    dynamic_policy_assessment = evaluate_dynamic_policy(
-        task_state=state,
-        policy_input=policy_input,
-    )
+    # Static (OPA HTTP) and dynamic (deterministic) assessments are independent — run in parallel.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        static_future = pool.submit(
+            evaluate_static_policy,
+            policy_engine_service=policy_engine_service,
+            policy_input=policy_input,
+        )
+        dynamic_future = pool.submit(
+            evaluate_dynamic_policy,
+            task_state=state,
+            policy_input=policy_input,
+        )
+        static_policy_assessment = static_future.result()
+        dynamic_policy_assessment = dynamic_future.result()
     resolved_thread_id = thread_id or state.runtime_thread_id or state.intake_metadata.request_id
     behavioral_assessment = build_behavioral_assessment(
         thread_id=resolved_thread_id,

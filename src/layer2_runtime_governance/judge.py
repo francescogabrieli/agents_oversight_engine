@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from llm_retry import llm_retry
+
 from .actor_contract import ActorResultType
 from .behavioral import BehavioralAssessment, BehavioralRecommendedDirective
 from .oversight import (
@@ -180,27 +182,14 @@ class OpenAIJudge(JudgePort):
         invocation_flags: tuple[str, ...],
     ) -> JudgeAssessment:
         try:
-            response = self._client.responses.parse(
-                model=self._settings.model,
-                input=[
-                    {
-                        "role": "system",
-                        "content": build_judge_system_prompt(),
-                    },
-                    {
-                        "role": "user",
-                        "content": build_judge_user_prompt(
-                            task_state=task_state,
-                            policy_input=policy_input,
-                            static_policy_assessment=static_policy_assessment,
-                            dynamic_policy_assessment=dynamic_policy_assessment,
-                            behavioral_assessment=behavioral_assessment,
-                            evaluated_target=evaluated_target,
-                            invocation_flags=invocation_flags,
-                        ),
-                    },
-                ],
-                text_format=_JudgePayload,
+            response = self._request_judge_response(
+                task_state=task_state,
+                policy_input=policy_input,
+                static_policy_assessment=static_policy_assessment,
+                dynamic_policy_assessment=dynamic_policy_assessment,
+                behavioral_assessment=behavioral_assessment,
+                evaluated_target=evaluated_target,
+                invocation_flags=invocation_flags,
             )
         except Exception as exc:  # pragma: no cover - network/client errors
             raise JudgeExecutionError(f"Judge request failed: {exc}") from exc
@@ -218,6 +207,42 @@ class OpenAIJudge(JudgePort):
             rationale=" ".join(payload.rationale.split()),
             flags=tuple(_normalize_flag(flag) for flag in payload.flags if _normalize_flag(flag)),
             evaluated_target=evaluated_target,
+        )
+
+    # Retry only transient provider failures so selective judge checks stay non-fragile.
+    @llm_retry
+    def _request_judge_response(
+        self,
+        *,
+        task_state: TaskState,
+        policy_input: "PolicyEvaluationInput",
+        static_policy_assessment: "StaticPolicyAssessment",
+        dynamic_policy_assessment: DynamicPolicyAssessment,
+        behavioral_assessment: BehavioralAssessment,
+        evaluated_target: str,
+        invocation_flags: tuple[str, ...],
+    ) -> object:
+        return self._client.responses.parse(
+            model=self._settings.model,
+            input=[
+                {
+                    "role": "system",
+                    "content": build_judge_system_prompt(),
+                },
+                {
+                    "role": "user",
+                    "content": build_judge_user_prompt(
+                        task_state=task_state,
+                        policy_input=policy_input,
+                        static_policy_assessment=static_policy_assessment,
+                        dynamic_policy_assessment=dynamic_policy_assessment,
+                        behavioral_assessment=behavioral_assessment,
+                        evaluated_target=evaluated_target,
+                        invocation_flags=invocation_flags,
+                    ),
+                },
+            ],
+            text_format=_JudgePayload,
         )
 
 

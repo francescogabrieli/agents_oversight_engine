@@ -8,6 +8,8 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from llm_retry import llm_retry
+
 
 _REQUIRED_OPENROUTER_MODEL = "openai/gpt-oss-120b:free"
 
@@ -75,6 +77,7 @@ class OpenRouterChatClient:
         _validate_required_model(model=self._settings.model)
 
     # Ask OpenRouter for a JSON object and return it as a plain dictionary.
+    @llm_retry
     def complete_json(
         self,
         *,
@@ -130,6 +133,7 @@ class OpenRouterChatClient:
         return _parse_json_object(content)
 
     # Ask OpenRouter for a standard OpenAI-compatible tool call.
+    @llm_retry
     def complete_tool_call(
         self,
         *,

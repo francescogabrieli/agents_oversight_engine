@@ -8,6 +8,8 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from llm_retry import llm_retry
+
 from .state import PlanStep, PlanStepKind, PlannerDecision, TaskState
 from .tool_contract import EvidenceSupportLevel
 
@@ -182,20 +184,7 @@ class OpenAIPlanner(PlannerPort):
     def plan(self, *, task_state: TaskState) -> PlannerDecision:
         # Ask OpenAI for a typed semantic planning payload and convert it into domain models.
         try:
-            response = self._client.responses.parse(
-                model=self._settings.model,
-                input=[
-                    {
-                        "role": "system",
-                        "content": build_planner_system_prompt(),
-                    },
-                    {
-                        "role": "user",
-                        "content": build_planner_user_prompt(task_state=task_state),
-                    },
-                ],
-                text_format=_PlanningPayload,
-            )
+            response = self._request_plan_response(task_state=task_state)
         except Exception as exc:  # pragma: no cover - network/client errors
             raise PlannerExecutionError(f"Planner request failed: {exc}") from exc
 
@@ -221,6 +210,24 @@ class OpenAIPlanner(PlannerPort):
             rationale=payload.rationale_summary,
             planner_name=self.planner_name,
             prompt_version=self.prompt_version,
+        )
+
+    # Retry only transient provider failures so one rate-limit does not abort the run.
+    @llm_retry
+    def _request_plan_response(self, *, task_state: TaskState) -> object:
+        return self._client.responses.parse(
+            model=self._settings.model,
+            input=[
+                {
+                    "role": "system",
+                    "content": build_planner_system_prompt(),
+                },
+                {
+                    "role": "user",
+                    "content": build_planner_user_prompt(task_state=task_state),
+                },
+            ],
+            text_format=_PlanningPayload,
         )
 
 
