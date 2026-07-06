@@ -63,6 +63,12 @@ class DashboardGovernancePanel:
     behavioral_deviation_score: float | None
     behavioral_novelty_score: float | None
     oversight_summary: str | None
+    combiner_dominant_dimension: str | None
+    combiner_support_by_directive: dict[str, float] | None
+    combiner_selected_reason: str | None
+    combiner_rejected_alternatives: dict[str, str] | None
+    combiner_safety_invariants_checked: tuple[str, ...]
+    combiner_signals: tuple[dict[str, Any], ...]
 
 
 # DashboardOversightPanel exposes the deterministic adaptive oversight result.
@@ -241,6 +247,12 @@ def _build_governance_panel(
         behavioral_deviation_score=governance_decision.behavioral_deviation_score,
         behavioral_novelty_score=governance_decision.behavioral_novelty_score,
         oversight_summary=governance_decision.oversight_summary,
+        combiner_dominant_dimension=governance_decision.combiner_dominant_dimension,
+        combiner_support_by_directive=governance_decision.combiner_support_by_directive,
+        combiner_selected_reason=governance_decision.combiner_selected_reason,
+        combiner_rejected_alternatives=governance_decision.combiner_rejected_alternatives,
+        combiner_safety_invariants_checked=governance_decision.combiner_safety_invariants_checked,
+        combiner_signals=governance_decision.combiner_signals,
     )
 
 

@@ -141,6 +141,12 @@ class GovernanceDecisionTrace:
     behavioral_deviation_score: float | None = None
     behavioral_novelty_score: float | None = None
     oversight_summary: str | None = None
+    combiner_dominant_dimension: str | None = None
+    combiner_support_by_directive: dict[str, float] | None = None
+    combiner_selected_reason: str | None = None
+    combiner_rejected_alternatives: dict[str, str] | None = None
+    combiner_safety_invariants_checked: tuple[str, ...] = ()
+    combiner_signals: tuple[dict[str, Any], ...] = ()
 
 
 # Keep the legacy public name stable while the internal model becomes more explicit.
@@ -368,22 +374,22 @@ def combine_governance_assessments(
     behavioral_assessment: BehavioralAssessment | None = None,
     judge_assessment: JudgeAssessment | None = None,
 ) -> GovernanceDecisionTrace:
-    final_directive = combine_governance_directives(
+    from .decision_combiner import combine_decision_signals
+
+    repeated_recovery = _repeated_recovery_attempt_detected(task_state=task_state)
+    repeated_provider_failure = _repeated_provider_runtime_failure_detected(task_state=task_state)
+    combiner_result = combine_decision_signals(
         static_policy_assessment=static_policy_assessment,
         dynamic_policy_assessment=dynamic_policy_assessment,
         behavioral_assessment=behavioral_assessment,
         judge_assessment=judge_assessment,
+        external_impact=policy_input.external_impact,
+        validation_allows_completion=_validation_allows_completion(task_state=task_state),
+        repeated_recovery=repeated_recovery,
+        repeated_provider_failure=repeated_provider_failure,
+        provider_runtime_action_missing=_provider_runtime_action_missing(policy_input=policy_input),
     )
-    repeated_recovery = _repeated_recovery_attempt_detected(task_state=task_state)
-    repeated_provider_failure = _repeated_provider_runtime_failure_detected(task_state=task_state)
-    if repeated_recovery and final_directive == GovernanceDirective.REQUEST_MORE_EVIDENCE:
-        final_directive = GovernanceDirective.REPLAN
-    if _provider_runtime_action_missing(policy_input=policy_input):
-        final_directive = (
-            GovernanceDirective.WAIT_HUMAN_REVIEW
-            if repeated_provider_failure
-            else GovernanceDirective.REPLAN
-        )
+    final_directive = combiner_result.final_directive
     final_directive = _normalize_intermediate_output_directive(
         task_state=task_state,
         policy_input=policy_input,
@@ -411,6 +417,7 @@ def combine_governance_assessments(
         dynamic_policy_assessment=dynamic_policy_assessment,
         behavioral_assessment=behavioral_assessment,
         judge_assessment=judge_assessment,
+        combiner_selected_reason=combiner_result.selected_reason,
     )
     summary_suffixes: list[str] = []
     if repeated_recovery and final_directive == GovernanceDirective.REPLAN:
@@ -468,6 +475,29 @@ def combine_governance_assessments(
         oversight_summary=(
             dynamic_policy_assessment.summary if dynamic_policy_assessment is not None else None
         ),
+        combiner_dominant_dimension=combiner_result.dominant_dimension,
+        combiner_support_by_directive={
+            directive.value: round(score, 4)
+            for directive, score in combiner_result.support_by_directive.items()
+        },
+        combiner_selected_reason=combiner_result.selected_reason,
+        combiner_rejected_alternatives={
+            directive.value: reason
+            for directive, reason in combiner_result.rejected_alternatives.items()
+        },
+        combiner_safety_invariants_checked=combiner_result.safety_invariants_checked,
+        combiner_signals=tuple(
+            {
+                "source": signal.source,
+                "dimension": signal.dimension,
+                "recommended_directive": signal.recommended_directive.value,
+                "severity": round(signal.severity, 4),
+                "confidence": round(signal.confidence, 4),
+                "recoverable_by": tuple(directive.value for directive in signal.recoverable_by),
+                "rationale": signal.rationale,
+            }
+            for signal in combiner_result.signals
+        ),
     )
 
 
@@ -486,10 +516,7 @@ def _normalize_intermediate_output_directive(
     }:
         return final_directive
 
-    if policy_input.actor_result_type not in {
-        ActorResultType.INTERMEDIATE_OUTPUT,
-        ActorResultType.FINAL_OUTPUT,
-    }:
+    if policy_input.actor_result_type != ActorResultType.INTERMEDIATE_OUTPUT:
         return final_directive
 
     if policy_input.external_impact or policy_input.capability_mode == CapabilityAccessMode.WRITE:
@@ -528,6 +555,19 @@ def _resolve_validation_action_for_directive_normalization(
     if actor_result.step_validation is None:
         return None
     return actor_result.step_validation.next_action
+
+
+# Treat positive typed completion validation as explicit evidence that recovery can stop.
+def _validation_allows_completion(*, task_state: TaskState) -> bool:
+    actor_result = task_state.actor_result
+    if actor_result is None or actor_result.step_validation is None:
+        return False
+    validation = actor_result.step_validation
+    return (
+        validation.next_action == StepValidationDecision.COMPLETE_STEP
+        and validation.objective_satisfied
+        and validation.evidence_sufficient
+    )
 
 
 # Treat provider protocol failures as runtime recovery, not operator review.
@@ -589,6 +629,8 @@ def build_governance_decision(
     behavioral_assessment: BehavioralAssessment | None = None,
     judge_assessment: JudgeAssessment | None = None,
 ) -> GovernanceDecisionTrace:
+    from .decision_combiner import combine_decision_signals
+
     static_policy_assessment = StaticPolicyAssessment(
         policy_decision=policy_result.policy_decision,
         reason_codes=policy_result.reason_codes,
@@ -610,12 +652,14 @@ def build_governance_decision(
             judge_assessment=judge_assessment,
         )
 
-    final_directive = combine_governance_directives(
+    combiner_result = combine_decision_signals(
         static_policy_assessment=static_policy_assessment,
         dynamic_policy_assessment=oversight_assessment,
         behavioral_assessment=behavioral_assessment,
         judge_assessment=judge_assessment,
+        validation_allows_completion=False,
     )
+    final_directive = combiner_result.final_directive
     return GovernanceDecisionTrace(
         directive=final_directive,
         policy_decision=static_policy_assessment.policy_decision,
@@ -626,6 +670,7 @@ def build_governance_decision(
             dynamic_policy_assessment=oversight_assessment,
             behavioral_assessment=behavioral_assessment,
             judge_assessment=judge_assessment,
+            combiner_selected_reason=combiner_result.selected_reason,
         ),
         constrains_capability_use=constrains_capability_use(
             policy_input=policy_input,
@@ -671,6 +716,29 @@ def build_governance_decision(
             behavioral_assessment.novelty_score if behavioral_assessment is not None else None
         ),
         oversight_summary=oversight_assessment.summary if oversight_assessment is not None else None,
+        combiner_dominant_dimension=combiner_result.dominant_dimension,
+        combiner_support_by_directive={
+            directive.value: round(score, 4)
+            for directive, score in combiner_result.support_by_directive.items()
+        },
+        combiner_selected_reason=combiner_result.selected_reason,
+        combiner_rejected_alternatives={
+            directive.value: reason
+            for directive, reason in combiner_result.rejected_alternatives.items()
+        },
+        combiner_safety_invariants_checked=combiner_result.safety_invariants_checked,
+        combiner_signals=tuple(
+            {
+                "source": signal.source,
+                "dimension": signal.dimension,
+                "recommended_directive": signal.recommended_directive.value,
+                "severity": round(signal.severity, 4),
+                "confidence": round(signal.confidence, 4),
+                "recoverable_by": tuple(directive.value for directive in signal.recoverable_by),
+                "rationale": signal.rationale,
+            }
+            for signal in combiner_result.signals
+        ),
     )
 
 
@@ -685,6 +753,8 @@ def combine_governance_directives(
     policy_directive: GovernanceDirective | None = None,
     oversight_assessment: DynamicPolicyAssessment | None = None,
 ) -> GovernanceDirective:
+    from .decision_combiner import combine_decision_signals
+
     # Keep backward compatibility for older callers while routing through the new model.
     resolved_static_policy = static_policy_assessment
     if resolved_static_policy is None and policy_result is not None and policy_directive is not None:
@@ -700,60 +770,12 @@ def combine_governance_directives(
         raise ValueError("combine_governance_directives requires static policy information.")
 
     resolved_dynamic_policy = dynamic_policy_assessment or oversight_assessment
-
-    # OPA hard decisions are absolute vetoes — no weighting can override them.
-    if resolved_static_policy.policy_decision == PolicyDecision.DENY:
-        return GovernanceDirective.STOP
-    if resolved_static_policy.policy_decision == PolicyDecision.REQUIRE_HUMAN_REVIEW:
-        return GovernanceDirective.WAIT_HUMAN_REVIEW
-    if resolved_static_policy.policy_decision == PolicyDecision.ASK_CLARIFICATION:
-        return GovernanceDirective.ASK_USER_CLARIFICATION
-
-    # Each adaptive layer has an explicit authority weight.
-    # A single low-confidence layer can no longer force WAIT_HUMAN_REVIEW unilaterally.
-    # The weighted escalation score must reach or exceed 0.5 to override the static directive.
-    ESCALATION_THRESHOLD = 0.5
-    _LAYER_WEIGHTS = {
-        "dynamic": 0.8,
-        "behavioral": 0.4,
-        "judge": 0.6,
-    }
-
-    weighted_score: float = 0.0
-    total_weight: float = 0.0
-    best_escalation: GovernanceDirective = resolved_static_policy.policy_directive
-
-    if resolved_dynamic_policy is not None:
-        w = _LAYER_WEIGHTS["dynamic"]
-        d = _map_dynamic_directive(resolved_dynamic_policy.recommended_directive)
-        total_weight += w
-        if _conservativeness_rank(d) > _conservativeness_rank(resolved_static_policy.policy_directive):
-            weighted_score += w
-            if _conservativeness_rank(d) > _conservativeness_rank(best_escalation):
-                best_escalation = d
-
-    if behavioral_assessment is not None:
-        w = _LAYER_WEIGHTS["behavioral"]
-        d = _map_behavioral_directive(behavioral_assessment.behavioral_recommended_directive)
-        total_weight += w
-        if _conservativeness_rank(d) > _conservativeness_rank(resolved_static_policy.policy_directive):
-            weighted_score += w
-            if _conservativeness_rank(d) > _conservativeness_rank(best_escalation):
-                best_escalation = d
-
-    if judge_assessment is not None:
-        w = _LAYER_WEIGHTS["judge"]
-        d = _map_judge_directive(judge_assessment.recommendation)
-        total_weight += w
-        if _conservativeness_rank(d) > _conservativeness_rank(resolved_static_policy.policy_directive):
-            weighted_score += w
-            if _conservativeness_rank(d) > _conservativeness_rank(best_escalation):
-                best_escalation = d
-
-    if total_weight > 0 and (weighted_score / total_weight) >= ESCALATION_THRESHOLD:
-        return best_escalation
-
-    return resolved_static_policy.policy_directive
+    return combine_decision_signals(
+        static_policy_assessment=resolved_static_policy,
+        dynamic_policy_assessment=resolved_dynamic_policy,
+        behavioral_assessment=behavioral_assessment,
+        judge_assessment=judge_assessment,
+    ).final_directive
 
 
 # Convert the dynamic recommendation into the governance directive enum.
@@ -819,6 +841,7 @@ def _build_combined_summary(
     dynamic_policy_assessment: DynamicPolicyAssessment | None,
     behavioral_assessment: BehavioralAssessment | None,
     judge_assessment: JudgeAssessment | None = None,
+    combiner_selected_reason: str | None = None,
 ) -> str:
     summary_parts = [static_policy_assessment.summary]
     if dynamic_policy_assessment is not None:
@@ -837,6 +860,8 @@ def _build_combined_summary(
         summary_parts.append(behavioral_assessment.summary)
     if judge_assessment is not None and judge_assessment.summary:
         summary_parts.append(judge_assessment.summary)
+    if combiner_selected_reason:
+        summary_parts.append(f"Combiner rationale: {combiner_selected_reason}")
     return " ".join(summary_parts)
 
 

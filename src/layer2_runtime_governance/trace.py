@@ -168,6 +168,12 @@ class TraceGovernanceDecision:
     behavioral_deviation_score: float | None
     behavioral_novelty_score: float | None
     oversight_summary: str | None
+    combiner_dominant_dimension: str | None
+    combiner_support_by_directive: dict[str, float] | None
+    combiner_selected_reason: str | None
+    combiner_rejected_alternatives: dict[str, str] | None
+    combiner_safety_invariants_checked: tuple[str, ...]
+    combiner_signals: tuple[dict[str, Any], ...]
 
 
 @dataclass(frozen=True)
@@ -686,6 +692,12 @@ def _build_governance_decision(decision: GovernanceDecision) -> TraceGovernanceD
         behavioral_deviation_score=decision.behavioral_deviation_score,
         behavioral_novelty_score=decision.behavioral_novelty_score,
         oversight_summary=decision.oversight_summary,
+        combiner_dominant_dimension=decision.combiner_dominant_dimension,
+        combiner_support_by_directive=decision.combiner_support_by_directive,
+        combiner_selected_reason=decision.combiner_selected_reason,
+        combiner_rejected_alternatives=decision.combiner_rejected_alternatives,
+        combiner_safety_invariants_checked=decision.combiner_safety_invariants_checked,
+        combiner_signals=decision.combiner_signals,
     )
 
 
