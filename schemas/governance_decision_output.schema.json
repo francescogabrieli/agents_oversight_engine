@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local/layer2/governance_decision_output.schema.json",
+  "title": "GovernanceDecisionOutput",
+  "type": "object",
+  "required": [
+    "directive",
+    "policy_decision",
+    "reason_codes",
+    "pillar_results",
+    "selected_reason",
+    "rejected_alternatives",
+    "safety_invariants_checked",
+    "requires_human_review",
+    "policy_bundle_version"
+  ],
+  "properties": {
+    "directive": {
+      "enum": [
+        "continue",
+        "continue_read_only",
+        "request_more_evidence",
+        "replan",
+        "ask_user_clarification",
+        "wait_human_review",
+        "stop",
+        "deny"
+      ]
+    },
+    "policy_decision": {
+      "enum": ["allow", "allow_read_only", "ask_clarification", "require_human_review", "deny"]
+    },
+    "reason_codes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1
+    },
+    "pillar_results": { "type": "object" },
+    "selected_reason": { "type": "string", "minLength": 1 },
+    "rejected_alternatives": { "type": "object" },
+    "safety_invariants_checked": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "requires_human_review": { "type": "boolean" },
+    "policy_bundle_version": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": true
+}

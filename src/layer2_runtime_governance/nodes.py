@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from typing import Callable
 
@@ -18,13 +17,10 @@ from .governance import (
     GovernanceDirective,
     PolicyEnginePort,
     PolicyEvaluationInput,
-    combine_governance_assessments,
-    build_governance_decision,
     build_policy_evaluation_input,
-    evaluate_static_policy,
+    evaluate_opa_first_governance,
 )
-from .judge import JudgePort, evaluate_judge
-from .oversight import evaluate_dynamic_policy
+from .judge import JudgePort
 from .planning import PlannerPort
 from .hitl import build_human_review_request
 from .hitl import human_review
@@ -171,44 +167,20 @@ def governance(
         )
         return state
 
-    policy_input = build_policy_evaluation_input(task_state=state)
-    # Static (OPA HTTP) and dynamic (deterministic) assessments are independent — run in parallel.
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        static_future = pool.submit(
-            evaluate_static_policy,
-            policy_engine_service=policy_engine_service,
-            policy_input=policy_input,
-        )
-        dynamic_future = pool.submit(
-            evaluate_dynamic_policy,
-            task_state=state,
-            policy_input=policy_input,
-        )
-        static_policy_assessment = static_future.result()
-        dynamic_policy_assessment = dynamic_future.result()
     resolved_thread_id = thread_id or state.runtime_thread_id or state.intake_metadata.request_id
-    behavioral_assessment = build_behavioral_assessment(
-        thread_id=resolved_thread_id,
+    governance_evaluation = evaluate_opa_first_governance(
         task_state=state,
-        dynamic_policy_assessment=dynamic_policy_assessment,
-        behavioral_store=behavioral_store_service,
-    )
-    judge_assessment = evaluate_judge(
-        task_state=state,
-        policy_input=policy_input,
-        static_policy_assessment=static_policy_assessment,
-        dynamic_policy_assessment=dynamic_policy_assessment,
-        behavioral_assessment=behavioral_assessment,
+        policy_engine_service=policy_engine_service,
         judge_service=judge_service,
+        behavioral_store_service=behavioral_store_service,
+        thread_id=resolved_thread_id,
     )
-    governance_decision = combine_governance_assessments(
-        task_state=state,
-        policy_input=policy_input,
-        static_policy_assessment=static_policy_assessment,
-        dynamic_policy_assessment=dynamic_policy_assessment,
-        behavioral_assessment=behavioral_assessment,
-        judge_assessment=judge_assessment,
-    )
+    policy_input = governance_evaluation.policy_input
+    static_policy_assessment = governance_evaluation.static_policy_assessment
+    dynamic_policy_assessment = governance_evaluation.dynamic_policy_assessment
+    behavioral_assessment = governance_evaluation.behavioral_assessment
+    judge_assessment = governance_evaluation.judge_assessment
+    governance_decision = governance_evaluation.governance_decision
 
     state.last_static_policy_assessment = static_policy_assessment
     state.static_policy_history.append(static_policy_assessment)

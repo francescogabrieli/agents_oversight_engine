@@ -176,6 +176,10 @@ class TraceGovernanceDecision:
     combiner_signals: tuple[dict[str, Any], ...]
     combiner_normalized_directive: str | None
     combiner_normalization_reason: str | None
+    governance_input_schema_version: str | None
+    pillar_requirements: dict[str, bool] | None
+    pillar_results: dict[str, Any] | None
+    pillar_errors: dict[str, str] | None
 
 
 @dataclass(frozen=True)
@@ -702,6 +706,10 @@ def _build_governance_decision(decision: GovernanceDecision) -> TraceGovernanceD
         combiner_signals=decision.combiner_signals,
         combiner_normalized_directive=decision.combiner_normalized_directive,
         combiner_normalization_reason=decision.combiner_normalization_reason,
+        governance_input_schema_version=decision.governance_input_schema_version,
+        pillar_requirements=decision.pillar_requirements,
+        pillar_results=decision.pillar_results,
+        pillar_errors=decision.pillar_errors,
     )
 
 

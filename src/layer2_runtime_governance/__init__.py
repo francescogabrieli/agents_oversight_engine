@@ -46,6 +46,7 @@ from .decision_combiner import (
 from .governance import (
     GovernanceDecision,
     GovernanceDecisionTrace,
+    GovernanceEvaluationResult,
     GovernanceDirective,
     GovernanceReasonCode,
     OPAHttpPolicyEngine,
@@ -64,6 +65,7 @@ from .governance import (
     combine_governance_directives,
     constrains_capability_use,
     derive_governance_directive,
+    evaluate_opa_first_governance,
     evaluate_static_policy,
 )
 from .graph import (
@@ -275,6 +277,7 @@ __all__ = [
     "ExternalCommunicationState",
     "GovernanceDecision",
     "GovernanceDecisionTrace",
+    "GovernanceEvaluationResult",
     "GovernanceDirective",
     "GovernanceHitlDashboardSnapshot",
     "GovernanceReasonCode",
@@ -406,6 +409,7 @@ __all__ = [
     "derive_governance_directive",
     "evaluate_confidence_risk_trajectory",
     "evaluate_behavioral_policy",
+    "evaluate_opa_first_governance",
     "evaluate_judge",
     "evaluate_dynamic_policy",
     "evaluate_evidence_quality",

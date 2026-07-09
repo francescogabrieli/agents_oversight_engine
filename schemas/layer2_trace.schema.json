@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local/layer2/layer2_trace.schema.json",
+  "title": "Layer2RuntimeTrace",
+  "type": "object",
+  "required": ["runtime", "intake", "governance_decisions"],
+  "properties": {
+    "runtime": { "type": "object" },
+    "intake": { "type": "object" },
+    "plan_steps": { "type": "array" },
+    "observed_evidence": { "type": "array" },
+    "governance_decisions": { "type": "array" }
+  },
+  "additionalProperties": true
+}

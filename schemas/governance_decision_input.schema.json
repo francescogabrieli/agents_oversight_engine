@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local/layer2/governance_decision_input.schema.json",
+  "title": "GovernanceDecisionInput",
+  "type": "object",
+  "required": ["schema_version", "policy_config", "base_facts", "pillars"],
+  "properties": {
+    "schema_version": { "const": "governance_decision_input.v1" },
+    "policy_config": { "type": "object" },
+    "base_facts": { "type": "object" },
+    "pillar_requirements": { "type": "object" },
+    "pillars": {
+      "type": "object",
+      "required": ["evidence", "risk", "trajectory"],
+      "properties": {
+        "evidence": { "type": "object" },
+        "risk": { "type": "object" },
+        "trajectory": { "type": "object" },
+        "behavioral": { "type": "object" },
+        "judge": { "type": "object" }
+      },
+      "additionalProperties": true
+    },
+    "pillar_errors": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    }
+  },
+  "additionalProperties": false
+}
