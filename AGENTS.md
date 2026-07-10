@@ -164,7 +164,7 @@ Main files:
 - `judge.py`
 - `oversight.py`
 - `evaluation.py`
-- `openrouter_client.py`
+- `bedrock_client.py`
 - `persistence.py`
 - `trace.py`
 - `runtime_warnings.py`
@@ -175,7 +175,7 @@ Current design:
 - `state.py` now also carries typed semantic step metadata on `PlanStep` itself: `step_kind`, `evidence_requirement`, and `claim_precision_ceiling`, with legacy-compatible defaults for older planners/replanners
 - `nodes.py` contains `bootstrap_from_intake`, `planner`, `actor`, `governance`, `human_review`, `tool_gateway`, `observe_tool_result`, `replanner`, and bootstrap closure helpers
 - `planning.py` defines the planner port, prompt builders, and the default OpenAI-backed planner
-- `acting.py` defines the actor port, prompt builders, the temporary OpenRouter-backed actor, and the optional OpenAI-backed actor using runtime-bound tools instead of a prompt-only tool inventory
+- `acting.py` defines the actor port, prompt builders, the Amazon Bedrock Nova 2 Lite-backed actor, and the optional OpenAI-backed actor using runtime-bound tools instead of a prompt-only tool inventory
 - `actor_contract.py` now passes explicit evidence-support metadata to the actor, including `required_evidence_support_level`, `max_supported_claim_precision`, and the current `step_kind`
 - `replanning.py` defines the replanner port, prompt builders, the default OpenAI-backed replanner, and a local conservative fallback replanner for tests/offline use
 - `actor_contract.py` defines the typed handoff from planner state into actor-facing execution context for the current plan step, including observed evidence, scratchpad entries, and prior step validations
@@ -190,7 +190,7 @@ Current design:
 - `oversight.py` defines deterministic dynamic policy assessment for `evidence_quality`, `operational_risk`, and `trajectory_health`, plus the recommendation consumed by governance
 - `oversight.py` now resolves operational risk from an explicit runtime posture (`none`, `read_only`, `write`) and resolves evidence requirements from typed plan-step metadata before falling back to legacy heuristics
 - `configs/layer2_oversight_policy.json` now includes a `tool_risk.none` level so no-tool executions are not treated as the old medium-risk default
-- `openrouter_client.py` defines the OpenRouter HTTP adapter used by the temporary Layer 2 actor test backend
+- `bedrock_client.py` defines the Amazon Bedrock Converse adapter used by the Layer 2 actor with the approved Nova 2 Lite EU inference profile
 - `nodes.py` now evaluates static policy and deterministic dynamic policy in parallel inside `governance`, before behavioral and judge assessment are applied
 - `persistence.py` defines the durable disk-backed LangGraph saver plus the per-thread runtime artifact store used for trace, dashboard, and HITL persistence; checkpoints are persisted as JSON-safe serializer-backed snapshots under `artifacts/runtime/checkpoints/layer2_checkpoints.json`
 - `trace.py` defines the typed, JSON-exportable Layer 2 runtime trace contract used for debugging, thesis evidence, HITL payloads, and evaluation, including resolved evidence-requirement provenance for each plan step
@@ -330,9 +330,9 @@ Current relevant files:
 - actor execution must operate on the current plan step, not on the full task as a second planner
 - actor output must remain typed and compact even when backed by an LLM
 - actor prompts and runtime hints should receive explicit evidence-support ceilings from the runtime contract instead of inferring them only from free-form wording
-- the current Layer 2 actor backend is OpenRouter with `openai/gpt-oss-120b:free` for first cloud-based tests; this remains a temporary test choice before moving to a stable large cloud model
+- the current Layer 2 actor backend is Amazon Bedrock with Nova 2 Lite through the fixed `eu.amazon.nova-2-lite-v1:0` inference profile in `eu-central-1`
 - planner and replanner remain OpenAI-backed for now
-- actor provider selection is controlled by `LAYER2_ACTOR_PROVIDER`, with supported values `openrouter` and `openai`
+- actor provider selection is controlled by `LAYER2_ACTOR_PROVIDER`, with supported values `bedrock` and `openai`; Bedrock is the default
 - malformed provider JSON that omits the runtime action envelope should be recovered only when it is clearly completion-shaped; otherwise it should stop conservatively instead of being treated as normal progress
 - provider failures that return no usable runtime action and no actor output are runtime recovery events; they should route to replanning/retry rather than opening a human-review gate with an empty draft
 - actor execution may produce local outputs, request later capability use, ask clarification, or signal replan
@@ -508,7 +508,7 @@ The project currently uses:
 - Python in local virtual environment `.venv`
 - OpenAI API for the real Layer 1 parser
 - OpenAI API for the default Layer 2 planner
-- OpenRouter API for the current Layer 2 actor test backend, currently `openai/gpt-oss-120b:free`
+- Amazon Bedrock for the current Layer 2 actor backend through `eu.amazon.nova-2-lite-v1:0` in `eu-central-1`
 - OpenAI API for the default Layer 2 replanner
 - OpenAI API for the `web_search` path in the default Layer 2 tool gateway
 - Python standard library HTTP/HTML extraction for the `fetch_url_text` path in the default Layer 2 tool gateway
@@ -523,19 +523,16 @@ Environment variables may be loaded from:
 Expected secret:
 
 - `OPENAI_API_KEY`
-- `OPENROUTER_API_KEY`
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
 
-Expected temporary actor runtime for first tests:
+Expected Bedrock actor runtime:
 
 - optional overrides:
-  - `LAYER2_ACTOR_PROVIDER=openrouter`
-  - `LAYER2_ACTOR_OPENROUTER_MODEL=openai/gpt-oss-120b:free`
-  - `LAYER2_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1`
-  - `LAYER2_OPENROUTER_TIMEOUT_SECONDS=120`
-
-Future actor runtime target:
-
-- replace the temporary OpenRouter free actor backend with a stable large cloud model once the runtime contracts, governance, tool gateway, oversight, and trace surfaces are stable
+  - `LAYER2_ACTOR_PROVIDER=bedrock`
+  - `LAYER2_ACTOR_BEDROCK_MODEL_ID=eu.amazon.nova-2-lite-v1:0`
+  - `AWS_REGION=eu-central-1`
+  - `AWS_SESSION_TOKEN=` when temporary AWS credentials are used
 
 
 ## Change Policy

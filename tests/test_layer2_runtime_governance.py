@@ -80,8 +80,8 @@ from layer2_runtime_governance import (
     ToolName,
     ToolRequest,
     ToolSource,
-    OpenRouterActor,
-    OpenRouterActorSettings,
+    BedrockNovaActor,
+    BedrockNovaActorSettings,
     OperationalRiskAssessment,
     OversightReasonCode,
     OversightSignalLevel,
@@ -127,7 +127,28 @@ from layer2_runtime_governance.nodes import (
     planner,
 )
 from layer2_runtime_governance.tool_contract import ObservedEvidence
-import layer2_runtime_governance.openrouter_client as openrouter_client_module
+import layer2_runtime_governance.bedrock_client as bedrock_client_module
+
+
+# Build Bedrock actor settings for legacy behavior fixtures without making network calls.
+def _build_bedrock_actor_test_settings(*, timeout_seconds: float = 1.0) -> BedrockNovaActorSettings:
+    return BedrockNovaActorSettings(
+        model_id="eu.amazon.nova-2-lite-v1:0",
+        region_name="eu-central-1",
+        access_key_id="test-key",
+        secret_access_key="test-secret-key",
+        read_timeout_seconds=timeout_seconds,
+    )
+
+
+# Preserve the existing actor-behavior fixture calls while they exercise BedrockNovaActor.
+OpenRouterActor = BedrockNovaActor
+
+
+# Translate the former fixture-only OpenRouter settings into Nova test settings.
+def OpenRouterActorSettings(**kwargs: object) -> BedrockNovaActorSettings:
+    timeout_seconds = kwargs.get("timeout_seconds", 1.0)
+    return _build_bedrock_actor_test_settings(timeout_seconds=float(timeout_seconds))
 
 
 class StubPlanner:
@@ -983,9 +1004,7 @@ class _FakeOpenRouterJsonWithoutEnvelopeClient:
 class _FakeOpenRouterEmptyResponseClient:
     # Simulate a provider response that contains neither tool calls nor content.
     def complete_tool_call(self, **kwargs):
-        raise openrouter_client_module.OpenRouterRuntimeError(
-            "OpenRouter returned no tool call and no assistant content. finish_reason='stop'."
-        )
+        raise bedrock_client_module.BedrockRuntimeError("Bedrock returned no tool use.")
 
 
 class _FakeOpenRouterHTTPResponse:
@@ -2769,15 +2788,20 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertIn("The initial step is too broad", user_prompt)
         self.assertIn("current_blocked_step", user_prompt)
 
-    def test_default_actor_can_be_configured_to_openrouter(self) -> None:
+    def test_default_actor_can_be_configured_to_bedrock(self) -> None:
         with patch.dict(
             os.environ,
-            {"LAYER2_ACTOR_PROVIDER": "openrouter", "OPENROUTER_API_KEY": "test-key"},
+            {
+                "LAYER2_ACTOR_PROVIDER": "bedrock",
+                "AWS_REGION": "eu-central-1",
+                "AWS_ACCESS_KEY_ID": "test-key",
+                "AWS_SECRET_ACCESS_KEY": "test-secret-key",
+            },
             clear=False,
         ):
             actor = build_default_actor()
 
-        self.assertIsInstance(actor, OpenRouterActor)
+        self.assertIsInstance(actor, BedrockNovaActor)
 
     # Verify planner settings stay constructible when no timeout override exists.
     def test_openai_planner_settings_default_timeout_without_env(self) -> None:
@@ -2835,66 +2859,51 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertIsNotNone(result.step_validation)
         self.assertEqual(result.step_validation.confidence, 0.82)
 
-    def test_openrouter_client_retries_retryable_http_failures(self) -> None:
-        client = openrouter_client_module.OpenRouterChatClient(
-            openrouter_client_module.OpenRouterRuntimeSettings(
-                model="openai/gpt-oss-120b:free",
-                api_key="test-key",
-                base_url="https://openrouter.ai/api/v1",
-                timeout_seconds=1.0,
+    def test_bedrock_client_retries_retryable_failures_and_omits_inference_config(self) -> None:
+        client = bedrock_client_module.BedrockChatClient(
+            bedrock_client_module.BedrockRuntimeSettings(
+                access_key_id="test-key",
+                secret_access_key="test-secret-key",
+                read_timeout_seconds=1.0,
             )
         )
-        response_payload = {
-            "model": "openai/gpt-oss-120b:free",
-            "choices": [
-                {
-                    "finish_reason": "tool_calls",
-                    "message": {
-                        "tool_calls": [
-                            {
-                                "type": "function",
-                                "function": {
-                                    "name": "emit_final_output",
-                                    "arguments": json.dumps(
-                                        {
-                                            "summary": "Recovered after transient provider failures.",
-                                            "output_text": "Recovered output.",
-                                            "completion_rationale": "The provider call succeeded.",
-                                            "objective_satisfied": True,
-                                            "evidence_sufficient": True,
-                                            "confidence": 0.8,
-                                        }
-                                    ),
-                                },
-                            }
-                        ]
-                    },
-                }
-            ],
-        }
-        side_effects = [
-            HTTPError(
-                url="https://openrouter.ai/api/v1/chat/completions",
-                code=429,
-                msg="Too Many Requests",
-                hdrs=None,
-                fp=io.BytesIO(b'{"error":"rate_limited"}'),
-            ),
-            HTTPError(
-                url="https://openrouter.ai/api/v1/chat/completions",
-                code=503,
-                msg="Service Unavailable",
-                hdrs=None,
-                fp=io.BytesIO(b'{"error":"unavailable"}'),
-            ),
-            _FakeOpenRouterHTTPResponse(response_payload),
-        ]
 
-        with patch("llm_retry.time.sleep", return_value=None), patch.object(
-            openrouter_client_module,
-            "urlopen",
-            side_effect=side_effects,
-        ) as mocked_urlopen:
+        class FlakyBedrockClient:
+            # Return two transient failures before the expected typed Nova tool use.
+            def __init__(self) -> None:
+                self.call_count = 0
+                self.last_kwargs: dict[str, object] | None = None
+
+            def converse(self, **kwargs: object) -> dict[str, object]:
+                self.call_count += 1
+                self.last_kwargs = kwargs
+                if self.call_count < 3:
+                    raise bedrock_client_module.ClientError(
+                        {
+                            "Error": {"Code": "ThrottlingException", "Message": "rate limited"},
+                            "ResponseMetadata": {"HTTPStatusCode": 429},
+                        },
+                        "Converse",
+                    )
+                return {
+                    "output": {
+                        "message": {
+                            "content": [
+                                {
+                                    "toolUse": {
+                                        "toolUseId": "test-tool-use",
+                                        "name": "emit_final_output",
+                                        "input": {"output_text": "Recovered output."},
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+
+        fake_client = FlakyBedrockClient()
+        client._client = fake_client  # type: ignore[attr-defined]
+        with patch("llm_retry.time.sleep", return_value=None):
             payload = client.complete_tool_call(
                 system_prompt="system",
                 user_prompt="user",
@@ -2903,13 +2912,25 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
                         "type": "function",
                         "name": "emit_final_output",
                         "description": "Return the final output envelope.",
-                        "parameters": {"type": "object", "properties": {}, "additionalProperties": True},
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"output_text": {"type": "string"}},
+                            "required": ["output_text"],
+                            "additionalProperties": False,
+                        },
                     }
                 ],
             )
 
         self.assertEqual(payload["tool_name"], "emit_final_output")
-        self.assertEqual(mocked_urlopen.call_count, 3)
+        self.assertEqual(fake_client.call_count, 3)
+        self.assertIsNotNone(fake_client.last_kwargs)
+        self.assertNotIn("inferenceConfig", fake_client.last_kwargs)
+        self.assertNotIn("temperature", fake_client.last_kwargs)
+        self.assertNotIn("maxTokens", fake_client.last_kwargs)
+        tool_schema = fake_client.last_kwargs["toolConfig"]["tools"][0]["toolSpec"]["inputSchema"]["json"]
+        self.assertNotIn("additionalProperties", tool_schema)
+        self.assertEqual(fake_client.last_kwargs["toolConfig"]["toolChoice"], {"any": {}})
 
     def test_openrouter_actor_web_search_without_query_uses_step_fallback(self) -> None:
         actor = OpenRouterActor(
@@ -2959,54 +2980,40 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             "Grounded concise final answer.",
         )
 
-    def test_openrouter_plain_text_response_is_normalized_to_progress_payload(self) -> None:
-        payload = openrouter_client_module._extract_tool_call_payload(  # type: ignore[attr-defined]
-            {
-                "choices": [
-                    {
-                        "finish_reason": "stop",
-                        "message": {
-                            "role": "assistant",
-                            "content": "Plain text answer from a provider that ignored tool_choice.",
-                        },
-                    }
-                ]
-            }
-        )
-
-        self.assertEqual(payload["tool_name"], "emit_intermediate_output")
-        self.assertEqual(payload["arguments"]["confidence"], 0.3)
-        self.assertIn("Plain text answer", payload["arguments"]["output_text"])
-
-    def test_openrouter_rejects_any_configured_model_except_required_actor_model(self) -> None:
+    def test_bedrock_response_without_tool_use_is_recoverable_provider_failure(self) -> None:
         with self.assertRaisesRegex(
-            openrouter_client_module.OpenRouterRuntimeError,
-            "must be 'openai/gpt-oss-120b:free'",
+            bedrock_client_module.BedrockRuntimeError,
+            "no tool use",
         ):
-            OpenRouterActor(
-                settings=OpenRouterActorSettings(
-                    model="some-other-model",
-                    api_key="test-key",
-                    base_url="https://openrouter.ai/api/v1",
-                    timeout_seconds=1.0,
+            bedrock_client_module._extract_tool_call_payload(  # type: ignore[attr-defined]
+                {"output": {"message": {"content": [{"text": "Plain text response."}]}}}
+            )
+
+    def test_bedrock_rejects_any_model_except_the_approved_inference_profile(self) -> None:
+        with self.assertRaisesRegex(
+            bedrock_client_module.BedrockRuntimeError,
+            "must be 'eu.amazon.nova-2-lite-v1:0'",
+        ):
+            bedrock_client_module.BedrockChatClient(
+                bedrock_client_module.BedrockRuntimeSettings(
+                    model_id="some-other-model",
+                    access_key_id="test-key",
+                    secret_access_key="test-secret-key",
                 )
             )
 
-    def test_openrouter_rejects_response_model_different_from_required_actor_model(self) -> None:
+    def test_bedrock_rejects_any_region_except_eu_central_1(self) -> None:
         with self.assertRaisesRegex(
-            openrouter_client_module.OpenRouterRuntimeError,
-            "unexpected model",
+            bedrock_client_module.BedrockRuntimeError,
+            "region must be 'eu-central-1'",
         ):
-            openrouter_client_module._validate_response_model(  # type: ignore[attr-defined]
-                response_payload={"model": "some-other-model"},
-                requested_model="openai/gpt-oss-120b:free",
+            bedrock_client_module.BedrockChatClient(
+                bedrock_client_module.BedrockRuntimeSettings(
+                    region_name="eu-west-1",
+                    access_key_id="test-key",
+                    secret_access_key="test-secret-key",
+                )
             )
-
-    def test_openrouter_accepts_only_required_actor_model(self) -> None:
-        openrouter_client_module._validate_response_model(  # type: ignore[attr-defined]
-            response_payload={"model": "openai/gpt-oss-120b:free"},
-            requested_model="openai/gpt-oss-120b:free",
-        )
 
     def test_openrouter_json_without_envelope_is_blocked_when_not_recoverable(self) -> None:
         actor = OpenRouterActor(
@@ -3383,9 +3390,14 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         state = _build_policy_input_task_state()
         actor_task = build_actor_task(task_state=state)
 
-        with patch.object(openrouter_client_module, "urlopen", side_effect=TimeoutError()):
-            with self.assertRaisesRegex(ActorExecutionError, "timed out"):
-                actor.act(actor_task=actor_task)
+        class TimeoutBedrockClient:
+            # Surface a normalized provider timeout through the actor boundary.
+            def complete_tool_call(self, **kwargs: object) -> dict[str, object]:
+                raise bedrock_client_module.BedrockRuntimeError("Bedrock runtime request timed out")
+
+        actor._client = TimeoutBedrockClient()  # type: ignore[attr-defined]
+        with self.assertRaisesRegex(ActorExecutionError, "timed out"):
+            actor.act(actor_task=actor_task)
 
     def test_planner_does_not_trim_when_step_budget_is_unbounded(self) -> None:
         task_state = TaskState.from_intake(

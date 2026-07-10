@@ -17,10 +17,10 @@ from .actor_contract import (
     ActorTask,
     CapabilityAccessMode,
 )
-from .openrouter_client import (
-    OpenRouterChatClient,
-    OpenRouterRuntimeError,
-    OpenRouterRuntimeSettings,
+from .bedrock_client import (
+    BedrockChatClient,
+    BedrockRuntimeError,
+    BedrockRuntimeSettings,
 )
 from .state import ScratchpadEntry, ScratchpadEntryType, StepValidation, StepValidationDecision
 from .tool_contract import (
@@ -64,26 +64,29 @@ class OpenAIActorSettings:
 
 
 @dataclass(frozen=True)
-class OpenRouterActorSettings:
-    # OpenRouterActorSettings selects the temporary cloud actor test model.
-    model: str = "openai/gpt-oss-120b:free"
-    api_key: str | None = None
-    base_url: str = "https://openrouter.ai/api/v1"
-    timeout_seconds: float = 120.0
-    temperature: float = 0.0
+class BedrockNovaActorSettings:
+    # BedrockNovaActorSettings keeps the actor-specific Bedrock configuration typed.
+    model_id: str = "eu.amazon.nova-2-lite-v1:0"
+    region_name: str = "eu-central-1"
+    access_key_id: str | None = None
+    secret_access_key: str | None = None
+    session_token: str | None = None
+    read_timeout_seconds: float = 3600.0
+    connect_timeout_seconds: float = 10.0
 
     @classmethod
-    def from_env(cls) -> "OpenRouterActorSettings":
-        # Reuse the shared OpenRouter settings while allowing actor-specific model override.
-        settings = OpenRouterRuntimeSettings.from_env(
-            model_env_key="LAYER2_ACTOR_OPENROUTER_MODEL"
-        )
+    # Load the actor-facing Bedrock settings without exposing credential fields to prompts.
+    def from_env(cls) -> "BedrockNovaActorSettings":
+        # Reuse shared Bedrock settings while keeping the actor constructor testable.
+        settings = BedrockRuntimeSettings.from_env()
         return cls(
-            model=settings.model,
-            api_key=settings.api_key,
-            base_url=settings.base_url,
-            timeout_seconds=settings.timeout_seconds,
-            temperature=settings.temperature,
+            model_id=settings.model_id,
+            region_name=settings.region_name,
+            access_key_id=settings.access_key_id,
+            secret_access_key=settings.secret_access_key,
+            session_token=settings.session_token,
+            read_timeout_seconds=settings.read_timeout_seconds,
+            connect_timeout_seconds=settings.connect_timeout_seconds,
         )
 
 
@@ -1077,25 +1080,27 @@ class OpenAIActor(ActorPort):
         )
 
 
-class OpenRouterActor(ActorPort):
-    # OpenRouterActor runs only the actor role on the temporary cloud test backend.
-    actor_name = "openrouter_gpt_oss_120b_free_actor"
-    prompt_version = "actor_v5_openrouter_standard_tool_calling"
+class BedrockNovaActor(ActorPort):
+    # BedrockNovaActor runs the actor role through the approved Nova 2 Lite inference profile.
+    actor_name = "bedrock_nova_2_lite_actor"
+    prompt_version = "actor_v6_bedrock_converse_tool_calling"
 
-    def __init__(self, settings: OpenRouterActorSettings | None = None) -> None:
-        # Validate OpenRouter actor settings without affecting planner/replanner providers.
-        self._settings = settings or OpenRouterActorSettings.from_env()
-        self._client = OpenRouterChatClient(
-            OpenRouterRuntimeSettings(
-                model=self._settings.model,
-                api_key=self._settings.api_key,
-                base_url=self._settings.base_url,
-                timeout_seconds=self._settings.timeout_seconds,
-                temperature=self._settings.temperature,
+    def __init__(self, settings: BedrockNovaActorSettings | None = None) -> None:
+        # Keep actor construction independent from planner and replanner providers.
+        self._settings = settings or BedrockNovaActorSettings.from_env()
+        self._client = BedrockChatClient(
+            BedrockRuntimeSettings(
+                model_id=self._settings.model_id,
+                region_name=self._settings.region_name,
+                access_key_id=self._settings.access_key_id,
+                secret_access_key=self._settings.secret_access_key,
+                session_token=self._settings.session_token,
+                read_timeout_seconds=self._settings.read_timeout_seconds,
+                connect_timeout_seconds=self._settings.connect_timeout_seconds,
             )
         )
 
-    # Ask OpenRouter for one standard tool call and convert it into ActorResult.
+    # Ask Bedrock for one typed tool use and convert it into the stable ActorResult contract.
     def act(self, *, actor_task: ActorTask) -> ActorResult:
         try:
             payload = self._client.complete_tool_call(
@@ -1103,10 +1108,10 @@ class OpenRouterActor(ActorPort):
                 user_prompt=build_actor_user_prompt(actor_task=actor_task),
                 tools=_build_actor_runtime_tools(),
             )
-        except OpenRouterRuntimeError as exc:
-            if "no tool call and no assistant content" in str(exc):
+        except BedrockRuntimeError as exc:
+            if "no tool use" in str(exc):
                 return _build_provider_blocked_result(actor_task=actor_task, detail=str(exc))
-            raise ActorExecutionError(f"OpenRouter actor request failed: {exc}") from exc
+            raise ActorExecutionError(f"Bedrock actor request failed: {exc}") from exc
 
         tool_call = _convert_json_payload_to_tool_call(payload)
         return _convert_tool_call_to_actor_result(actor_task=actor_task, tool_call=tool_call)
@@ -2050,10 +2055,10 @@ def build_default_actor() -> ActorPort:
     provider = _resolve_actor_provider()
     if provider == "openai":
         return OpenAIActor()
-    if provider == "openrouter":
-        return OpenRouterActor()
+    if provider == "bedrock":
+        return BedrockNovaActor()
     raise RuntimeError(
-        "Unsupported LAYER2_ACTOR_PROVIDER. Use 'openrouter' for temporary actor tests or 'openai'."
+        "Unsupported LAYER2_ACTOR_PROVIDER. Use 'bedrock' or 'openai'."
     )
 
 
@@ -2062,7 +2067,7 @@ def _resolve_actor_provider() -> str:
     env_file_values = _load_env_file_values()
     return os.getenv(
         "LAYER2_ACTOR_PROVIDER",
-        env_file_values.get("LAYER2_ACTOR_PROVIDER", "openrouter"),
+        env_file_values.get("LAYER2_ACTOR_PROVIDER", "bedrock"),
     ).strip().lower()
 
 
@@ -2103,10 +2108,10 @@ def _candidate_env_paths() -> list[Path]:
 
 __all__ = [
     "ActorExecutionError",
+    "BedrockNovaActor",
+    "BedrockNovaActorSettings",
     "OpenAIActor",
     "OpenAIActorSettings",
-    "OpenRouterActor",
-    "OpenRouterActorSettings",
     "build_actor_system_prompt",
     "build_actor_user_prompt",
     "build_default_actor",

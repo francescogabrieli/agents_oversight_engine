@@ -1,9 +1,9 @@
 from .acting import (
     ActorExecutionError,
+    BedrockNovaActor,
+    BedrockNovaActorSettings,
     OpenAIActor,
     OpenAIActorSettings,
-    OpenRouterActor,
-    OpenRouterActorSettings,
     build_default_actor,
 )
 from .actor_contract import (
@@ -240,6 +240,8 @@ from .trace import (
 
 __all__ = [
     "ActorExecutionError",
+    "BedrockNovaActor",
+    "BedrockNovaActorSettings",
     "ActorPastStep",
     "ActorPlanStep",
     "ActorPort",
@@ -310,8 +312,6 @@ __all__ = [
     "OpenAIReplannerSettings",
     "OpenAIToolGateway",
     "OpenAIToolGatewaySettings",
-    "OpenRouterActor",
-    "OpenRouterActorSettings",
     "OperationalRiskAssessment",
     "OversightAssessment",
     "OversightPolicyConfig",

@@ -514,7 +514,7 @@ Ad oggi il progetto copre già in modo consistente:
 - Runtime Layer 2
 - Planner semantico
 - Actor sul passo corrente
-- Backend OpenRouter `gpt-oss-120b` per i primi test cloud dell'actor
+- Backend Amazon Bedrock con inference profile europeo Nova 2 Lite per l'actor
 - Tool loop read-only
 - Observability
 - Replanning
@@ -537,9 +537,8 @@ Ad oggi il progetto copre già in modo consistente:
 
 ### Cosa non è ancora attivo
 
-Nota sui modelli: nei primi test cloud l'actor usa `gpt-oss-120b` via OpenRouter.
-Questa resta una scelta temporanea per test gratuiti/intermedi.
-Quando il runtime sara stabile, l'actor verra migrato verso un grande modello cloud stabile.
+Nota sui modelli: l'actor usa Amazon Bedrock con l'inference profile `eu.amazon.nova-2-lite-v1:0` nella regione `eu-central-1`.
+L'integrazione usa l'API Converse con tool calling tipizzato e mantiene invariati i contratti runtime.
 Planner e replanner restano separati dall'actor e possono mantenere backend diversi.
 
 Non sono ancora parte del runtime attivo:
