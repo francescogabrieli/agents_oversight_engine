@@ -4,6 +4,7 @@
   "title": "GovernanceDecisionOutput",
   "type": "object",
   "required": [
+    "schema_version",
     "directive",
     "policy_decision",
     "reason_codes",
@@ -12,9 +13,11 @@
     "rejected_alternatives",
     "safety_invariants_checked",
     "requires_human_review",
-    "policy_bundle_version"
+    "policy_bundle_version",
+    "policy_config_version"
   ],
   "properties": {
+    "schema_version": { "const": "governance_decision_output.v1" },
     "directive": {
       "enum": [
         "continue",
@@ -43,7 +46,8 @@
       "items": { "type": "string", "minLength": 1 }
     },
     "requires_human_review": { "type": "boolean" },
-    "policy_bundle_version": { "type": "string", "minLength": 1 }
+    "policy_bundle_version": { "type": "string", "minLength": 1 },
+    "policy_config_version": { "type": "string", "minLength": 1 }
   },
   "additionalProperties": true
 }

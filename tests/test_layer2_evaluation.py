@@ -27,7 +27,7 @@ from layer2_runtime_governance.evaluation import (
 
 class Layer2EvaluationTests(unittest.TestCase):
     def test_real_trace_export_is_evaluated_successfully(self) -> None:
-        report = evaluate_layer2_trace_inputs([REPO_ROOT / "full-trace.json"])
+        report = evaluate_layer2_trace_inputs([REPO_ROOT / "full-trace-1.json"])
 
         self.assertEqual(report.aggregate.parsed_runs, 1)
         self.assertEqual(report.runs[0].status, "ok")
@@ -106,7 +106,7 @@ class Layer2EvaluationTests(unittest.TestCase):
         self.assertIn("parse_failed", {run.status for run in report.runs})
 
     def test_report_serialization_is_stable_for_the_same_report(self) -> None:
-        report = evaluate_layer2_trace_inputs([REPO_ROOT / "full-trace.json"])
+        report = evaluate_layer2_trace_inputs([REPO_ROOT / "full-trace-1.json"])
 
         payload_one = layer2_evaluation_report_to_dict(report)
         payload_two = layer2_evaluation_report_to_dict(report)
@@ -132,7 +132,7 @@ class Layer2EvaluationTests(unittest.TestCase):
 
     def test_evaluation_report_can_be_written_to_disk(self) -> None:
         with _workspace_temp_dir() as temp_path:
-            report = evaluate_layer2_trace_inputs([REPO_ROOT / "full-trace.json"])
+            report = evaluate_layer2_trace_inputs([REPO_ROOT / "full-trace-1.json"])
             json_path = temp_path / "report.json"
             md_path = temp_path / "report.md"
 

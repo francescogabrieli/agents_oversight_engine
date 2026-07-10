@@ -180,6 +180,7 @@ class TraceGovernanceDecision:
     pillar_requirements: dict[str, bool] | None
     pillar_results: dict[str, Any] | None
     pillar_errors: dict[str, str] | None
+    policy_config_version: str | None = None
 
 
 @dataclass(frozen=True)
@@ -685,6 +686,7 @@ def _build_governance_decision(decision: GovernanceDecision) -> TraceGovernanceD
         ),
         policy_engine_name=decision.policy_engine_name,
         policy_bundle_version=decision.policy_bundle_version,
+        policy_config_version=decision.policy_config_version,
         policy_directive=decision.policy_directive.value,
         oversight_recommended_directive=decision.oversight_recommended_directive.value,
         behavioral_recommended_directive=decision.behavioral_recommended_directive.value,

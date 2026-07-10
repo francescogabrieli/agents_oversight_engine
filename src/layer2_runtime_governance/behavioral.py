@@ -163,6 +163,7 @@ class SQLiteBehavioralStore(BehavioralStorePort):
             baseline_candidates=top_baseline,
         )
         review_rate = _compute_review_rate(top_baseline)
+        failure_rate = _compute_failure_rate(top_baseline)
         behavioral_directive, behavioral_flags = _recommend_behavioral_directive(
             task_state=task_state,
             dynamic_policy_assessment=dynamic_policy_assessment,
@@ -177,6 +178,7 @@ class SQLiteBehavioralStore(BehavioralStorePort):
         notes = (
             f"matched_run_count={len(top_summary)}",
             f"review_rate={review_rate:.2f}",
+            f"failure_rate={failure_rate:.2f}",
             f"deviation_driver={deviation_driver or 'none'}",
             *behavioral_flags,
         )
@@ -1008,6 +1010,14 @@ def _compute_review_rate(scored_candidates: list[dict[str, Any]]) -> float:
         return 0.0
     review_runs = sum(1 for item in scored_candidates if int(item.get("review_count", 0)) > 0)
     return review_runs / len(scored_candidates)
+
+
+# Compute historical terminal-failure frequency as a non-authoritative behavioural fact.
+def _compute_failure_rate(scored_candidates: list[dict[str, Any]]) -> float:
+    if not scored_candidates:
+        return 0.0
+    failed_runs = sum(1 for item in scored_candidates if int(item.get("abort_count", 0)) > 0)
+    return failed_runs / len(scored_candidates)
 
 
 # Recommend a conservative behavioural directive from the computed scores.

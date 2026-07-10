@@ -1,17 +1,10 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 from .governance import PolicyEvaluationInput
 from .state import TaskState
-
-
-# Load the OPA-governed policy configuration bundled with the repository.
-def load_governance_policy_config(*, config_path: Path | None = None) -> dict[str, Any]:
-    resolved_path = config_path or _default_policy_config_path()
-    return json.loads(resolved_path.read_text(encoding="utf-8"))
 
 
 # Build the base facts document sent to OPA before optional pillar selection.
@@ -106,28 +99,33 @@ def build_governance_base_facts(
 def build_governance_decision_input(
     *,
     base_facts: dict[str, Any],
-    policy_config: dict[str, Any],
+    policy_bundle_version: str,
+    policy_config_version: str,
     pillar_requirements: dict[str, bool],
     pillars: dict[str, Any],
     pillar_errors: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     return {
         "schema_version": "governance_decision_input.v1",
-        "policy_config": policy_config,
+        "policy_bundle_version": policy_bundle_version,
+        "policy_config_version": policy_config_version,
         "base_facts": base_facts,
         "pillar_requirements": pillar_requirements,
         "pillars": pillars,
+        "pillar_unavailable": {
+            name: bool(payload.get("raw_facts", {}).get("pillar_unavailable", False))
+            for name, payload in pillars.items()
+            if isinstance(payload, dict)
+        },
         "pillar_errors": pillar_errors or {},
     }
 
 
-# Validate the minimal GovernanceDecisionInput contract before the PEP calls OPA.
+# Validate the versioned GovernanceDecisionInput JSON Schema before the PEP calls OPA.
 def validate_governance_decision_input(payload: dict[str, Any]) -> None:
-    if payload.get("schema_version") != "governance_decision_input.v1":
-        raise ValueError("GovernanceDecisionInput has an unsupported schema_version.")
-    for required_key in ("policy_config", "base_facts", "pillars"):
-        if not isinstance(payload.get(required_key), dict):
-            raise ValueError(f"GovernanceDecisionInput.{required_key} must be an object.")
+    from .schema_validation import validate_json_schema
+
+    validate_json_schema(schema_name="governance_decision_input", payload=payload)
     for pillar_name in ("evidence", "risk", "trajectory"):
         pillar = payload["pillars"].get(pillar_name)
         if not isinstance(pillar, dict):
@@ -135,8 +133,3 @@ def validate_governance_decision_input(payload: dict[str, Any]) -> None:
         for field_name in ("raw_facts", "score_components", "score_formula_version", "thresholds_version"):
             if field_name not in pillar:
                 raise ValueError(f"GovernanceDecisionInput pillar '{pillar_name}' missing '{field_name}'.")
-
-
-# Resolve the repository-local OPA policy configuration path.
-def _default_policy_config_path() -> Path:
-    return Path(__file__).resolve().parents[2] / "configs" / "opa" / "layer2_governance" / "policy_config.json"

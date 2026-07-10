@@ -1,7 +1,12 @@
 package layer2.governance.pillars.judge
 
 facts := object.get(input.pillars.judge, "raw_facts", {})
-thresholds := input.policy_config.thresholds
+config := data.policy_config
+thresholds := config.thresholds
+
+default reject_strong := false
+default external_flag_strong := false
+default strong_signal := false
 
 reject_strong if {
   object.get(facts, "verdict", "approve") == "reject_output"
@@ -24,7 +29,7 @@ result := {
   "raw_facts": facts,
   "score_components": object.get(input.pillars.judge, "score_components", {}),
   "score_formula_version": object.get(input.pillars.judge, "score_formula_version", "judge_v1"),
-  "thresholds_version": object.get(input.pillars.judge, "thresholds_version", input.policy_config.thresholds_version)
+  "thresholds_version": object.get(input.pillars.judge, "thresholds_version", config.thresholds_version)
 }
 
 strong_signal if {

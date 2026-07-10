@@ -1,7 +1,13 @@
 package layer2.governance.pillars.behavioral
 
 facts := object.get(input.pillars.behavioral, "raw_facts", {})
-thresholds := input.policy_config.thresholds
+config := data.policy_config
+thresholds := config.thresholds
+
+default high_novelty := false
+default high_deviation := false
+default history_sparse := false
+default strong := false
 
 high_novelty if {
   object.get(facts, "novelty_score", 0) >= thresholds.behavioral_high_novelty
@@ -23,7 +29,7 @@ result := {
   "raw_facts": facts,
   "score_components": object.get(input.pillars.behavioral, "score_components", {}),
   "score_formula_version": object.get(input.pillars.behavioral, "score_formula_version", "behavioral_features_v2"),
-  "thresholds_version": object.get(input.pillars.behavioral, "thresholds_version", input.policy_config.thresholds_version)
+  "thresholds_version": object.get(input.pillars.behavioral, "thresholds_version", config.thresholds_version)
 }
 
 strong if {

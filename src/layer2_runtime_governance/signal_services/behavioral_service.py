@@ -19,8 +19,8 @@ def build_behavioral_signal(
         "similarity_score": assessment.historical_similarity_score if assessment else None,
         "deviation_score": assessment.behavior_deviation_score if assessment else None,
         "novelty_score": assessment.novelty_score if assessment else None,
-        "historical_failure_rate": None,
-        "historical_review_rate": None,
+        "historical_failure_rate": _note_rate(assessment, "failure_rate"),
+        "historical_review_rate": _note_rate(assessment, "review_rate"),
         "deviation_driver": _deviation_driver(assessment),
         "flags": list(assessment.behavioral_flags if assessment else ()),
     }
@@ -50,4 +50,17 @@ def _deviation_driver(assessment: BehavioralAssessment | None) -> str | None:
     for note in assessment.notes:
         if note.startswith("deviation_driver="):
             return note.split("=", 1)[1]
+    return None
+
+
+# Extract non-normative historical rates persisted by the behavioural read model.
+def _note_rate(assessment: BehavioralAssessment | None, prefix: str) -> float | None:
+    if assessment is None:
+        return None
+    for note in assessment.notes:
+        if note.startswith(f"{prefix}="):
+            try:
+                return float(note.split("=", 1)[1])
+            except ValueError:
+                return None
     return None

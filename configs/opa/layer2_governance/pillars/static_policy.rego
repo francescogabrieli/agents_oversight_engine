@@ -1,5 +1,10 @@
 package layer2.governance.pillars.static_policy
 
+default write_blocked := false
+default read_only_required := false
+default hitl_mandatory := false
+default clarification_signaled := false
+
 default result := {
   "write_blocked": false,
   "read_only_required": false,

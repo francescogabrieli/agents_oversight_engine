@@ -1,8 +1,11 @@
 package layer2.governance.pillars.trajectory
 
 facts := input.pillars.trajectory.raw_facts
-weights := input.policy_config.trajectory_weights
-thresholds := input.policy_config.thresholds
+config := data.policy_config
+weights := config.trajectory_weights
+thresholds := config.thresholds
+
+default degraded_or_replan := false
 
 turn_overage := max([0, facts.actor_turn_count_for_step - weights.max_actor_turns_per_step])
 

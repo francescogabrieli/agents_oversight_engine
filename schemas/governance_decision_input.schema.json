@@ -3,10 +3,11 @@
   "$id": "https://local/layer2/governance_decision_input.schema.json",
   "title": "GovernanceDecisionInput",
   "type": "object",
-  "required": ["schema_version", "policy_config", "base_facts", "pillars"],
+  "required": ["schema_version", "policy_bundle_version", "policy_config_version", "base_facts", "pillar_requirements", "pillars", "pillar_unavailable", "pillar_errors"],
   "properties": {
     "schema_version": { "const": "governance_decision_input.v1" },
-    "policy_config": { "type": "object" },
+    "policy_bundle_version": { "type": "string", "minLength": 1 },
+    "policy_config_version": { "type": "string", "minLength": 1 },
     "base_facts": { "type": "object" },
     "pillar_requirements": { "type": "object" },
     "pillars": {
@@ -24,6 +25,10 @@
     "pillar_errors": {
       "type": "object",
       "additionalProperties": { "type": "string" }
+    },
+    "pillar_unavailable": {
+      "type": "object",
+      "additionalProperties": { "type": "boolean" }
     }
   },
   "additionalProperties": false

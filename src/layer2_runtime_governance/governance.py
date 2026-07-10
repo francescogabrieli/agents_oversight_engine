@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import warnings
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -81,6 +82,8 @@ class GovernanceReasonCode(str, Enum):
     JUDGE_REJECT_OUTPUT = "judge_reject_output"
     JUDGE_REJECT_EXTERNAL_OR_HIGH_RISK = "judge_reject_external_or_high_risk"
     JUDGE_FLAG_EXTERNAL_DRAFT = "judge_flag_external_draft"
+    POLICY_VERSION_MISMATCH = "policy_version_mismatch"
+    REQUIRED_PILLAR_UNAVAILABLE = "required_pillar_unavailable"
     OPA_FAILURE_FAIL_CLOSED = "opa_failure_fail_closed"
 
 
@@ -172,6 +175,7 @@ class GovernanceDecisionTrace:
     pillar_requirements: dict[str, bool] | None = None
     pillar_results: dict[str, Any] | None = None
     pillar_errors: dict[str, str] | None = None
+    policy_config_version: str | None = None
 
 
 @dataclass(frozen=True)
@@ -195,8 +199,7 @@ GovernanceDecision = GovernanceDecisionTrace
 class PolicyEnginePort(Protocol):
     policy_engine_name: str
     policy_bundle_version: str
-
-    def evaluate(self, *, policy_input: PolicyEvaluationInput) -> PolicyEvaluationResult: ...
+    policy_config_version: str
 
     def evaluate_required_pillars(self, *, base_facts: dict[str, Any]) -> dict[str, bool]: ...
 
@@ -340,6 +343,7 @@ def evaluate_static_policy(
     policy_engine_service: PolicyEnginePort,
     policy_input: PolicyEvaluationInput,
 ) -> StaticPolicyAssessment:
+    warnings.warn("evaluate_static_policy is deprecated; OPA owns policy interpretation.", DeprecationWarning, stacklevel=2)
     policy_result = policy_engine_service.evaluate(policy_input=policy_input)
     return StaticPolicyAssessment(
         policy_decision=policy_result.policy_decision,
@@ -417,6 +421,7 @@ def combine_governance_assessments(
     behavioral_assessment: BehavioralAssessment | None = None,
     judge_assessment: JudgeAssessment | None = None,
 ) -> GovernanceDecisionTrace:
+    warnings.warn("combine_governance_assessments is deprecated; OPA owns final governance decisions.", DeprecationWarning, stacklevel=2)
     from .decision_combiner import combine_decision_signals
 
     repeated_recovery = _repeated_recovery_attempt_detected(task_state=task_state)
@@ -959,43 +964,22 @@ def _build_combined_summary(
 # Execute the policy evaluation against OPA over HTTP.
 class OPAHttpPolicyEngine(PolicyEnginePort):
     policy_engine_name = "opa_http_policy_engine"
-    policy_bundle_version = "layer2_governance_v1"
+    policy_bundle_version = "layer2_governance_v2"
+    policy_config_version = "layer2_governance_thresholds_v1"
 
     def __init__(self, settings: OPAHttpPolicyEngineSettings | None = None) -> None:
         # Resolve settings once so the runtime stays deterministic.
         self._settings = settings or OPAHttpPolicyEngineSettings.from_env()
 
+    # Preserve the v1 API for callers during this release; the runtime never invokes it.
     def evaluate(self, *, policy_input: PolicyEvaluationInput) -> PolicyEvaluationResult:
-        payload = json.dumps(
-            {"input": build_opa_input_document(policy_input=policy_input)},
-            ensure_ascii=False,
-        ).encode("utf-8")
-        request = Request(
-            self._resolve_url(),
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
+        warnings.warn("OPAHttpPolicyEngine.evaluate is deprecated; use evaluate_decision.", DeprecationWarning, stacklevel=2)
+        result = self._post_json(
+            path=self._settings.decision_path,
+            payload={"input": build_opa_input_document(policy_input=policy_input)},
         )
-        try:
-            with urlopen(request, timeout=self._settings.timeout_seconds) as response:
-                raw_body = response.read().decode("utf-8")
-        except HTTPError as exc:  # pragma: no cover
-            raise PolicyEngineExecutionError(
-                f"OPA policy request failed with HTTP {exc.code}: {exc.reason}"
-            ) from exc
-        except URLError as exc:  # pragma: no cover
-            raise PolicyEngineExecutionError(f"OPA policy request failed: {exc.reason}") from exc
-        except Exception as exc:  # pragma: no cover
-            raise PolicyEngineExecutionError(f"OPA policy request failed: {exc}") from exc
-
-        try:
-            parsed_body = json.loads(raw_body)
-        except json.JSONDecodeError as exc:  # pragma: no cover
-            raise PolicyEngineExecutionError(f"OPA returned invalid JSON: {exc}") from exc
-
-        result = parsed_body.get("result")
         if not isinstance(result, dict):
-            raise PolicyEngineExecutionError("OPA response did not contain a structured result.")
+            raise PolicyEngineExecutionError("OPA response must be an object.")
         return PolicyEvaluationResult(
             policy_decision=_parse_policy_decision(result.get("policy_decision")),
             reason_codes=_parse_reason_codes(result.get("reason_codes")),
@@ -1008,7 +992,11 @@ class OPAHttpPolicyEngine(PolicyEnginePort):
     def evaluate_required_pillars(self, *, base_facts: dict[str, Any]) -> dict[str, bool]:
         result = self._post_json(
             path="/v1/data/layer2/governance/required_pillars",
-            payload={"input": base_facts},
+            payload={"input": {
+                "policy_bundle_version": self.policy_bundle_version,
+                "policy_config_version": self.policy_config_version,
+                "base_facts": base_facts,
+            }},
         )
         if not isinstance(result, dict):
             raise PolicyEngineExecutionError("OPA required_pillars response must be an object.")
@@ -1081,7 +1069,6 @@ def evaluate_opa_first_governance(
     from .governance_input_builder import (
         build_governance_base_facts,
         build_governance_decision_input,
-        load_governance_policy_config,
         validate_governance_decision_input,
     )
     from .judge import build_default_judge
@@ -1094,8 +1081,10 @@ def evaluate_opa_first_governance(
     )
 
     policy_input = build_policy_evaluation_input(task_state=task_state)
-    policy_config = load_governance_policy_config()
-    thresholds_version = str(policy_config.get("thresholds_version", "layer2_governance_thresholds_v1"))
+    # OPA owns configuration; the PEP only declares the compatible bundle versions.
+    policy_bundle_version = str(policy_engine_service.policy_bundle_version)
+    policy_config_version = str(getattr(policy_engine_service, "policy_config_version", "layer2_governance_thresholds_v1"))
+    thresholds_version = policy_config_version
     base_facts = build_governance_base_facts(
         task_state=task_state,
         policy_input=policy_input,
@@ -1113,7 +1102,8 @@ def evaluate_opa_first_governance(
             policy_engine_service=policy_engine_service,
             reason=f"OPA required_pillars failed: {exc}",
             base_facts=base_facts,
-            policy_config=policy_config,
+            policy_bundle_version=policy_bundle_version,
+            policy_config_version=policy_config_version,
         )
 
     pillar_errors: dict[str, str] = {}
@@ -1170,9 +1160,8 @@ def evaluate_opa_first_governance(
             thresholds_version=thresholds_version,
         )
 
-    static_for_judge = _build_static_assessment_from_base(
-        policy_input=policy_input,
-        base_facts=base_facts,
+    # The judge receives opaque static context; only OPA interprets policy semantics.
+    static_for_judge = _build_judge_static_context(
         policy_engine_service=policy_engine_service,
     )
     if pillar_requirements.get("require_judge", False):
@@ -1200,7 +1189,8 @@ def evaluate_opa_first_governance(
 
     decision_input = build_governance_decision_input(
         base_facts=base_facts,
-        policy_config=policy_config,
+        policy_bundle_version=policy_bundle_version,
+        policy_config_version=policy_config_version,
         pillar_requirements=pillar_requirements,
         pillars=pillars,
         pillar_errors=pillar_errors,
@@ -1214,7 +1204,8 @@ def evaluate_opa_first_governance(
             policy_engine_service=policy_engine_service,
             reason=f"GovernanceDecisionInput validation failed: {exc}",
             base_facts=base_facts,
-            policy_config=policy_config,
+            policy_bundle_version=policy_bundle_version,
+            policy_config_version=policy_config_version,
             pillar_requirements=pillar_requirements,
             pillars=pillars,
             pillar_errors=pillar_errors,
@@ -1227,7 +1218,6 @@ def evaluate_opa_first_governance(
         raw_output = _evaluate_governance_decision_output(
             policy_engine_service=policy_engine_service,
             decision_input=decision_input,
-            policy_input=policy_input,
         )
         governance_decision = _build_governance_trace_from_opa_output(
         raw_output=raw_output,
@@ -1245,7 +1235,8 @@ def evaluate_opa_first_governance(
             policy_engine_service=policy_engine_service,
             reason=f"OPA decision failed: {exc}",
             base_facts=base_facts,
-            policy_config=policy_config,
+            policy_bundle_version=policy_bundle_version,
+            policy_config_version=policy_config_version,
             pillar_requirements=pillar_requirements,
             pillars=pillars,
             pillar_errors=pillar_errors,
@@ -1260,7 +1251,7 @@ def evaluate_opa_first_governance(
         policy_engine_service=policy_engine_service,
     )
     dynamic_assessment = _build_dynamic_assessment_from_signals(
-        pillars=pillars,
+        pillars=raw_output.get("pillar_results", pillars),
         directive=governance_decision.oversight_recommended_directive,
     )
     return GovernanceEvaluationResult(
@@ -1275,60 +1266,34 @@ def evaluate_opa_first_governance(
     )
 
 
-# Use OPA's required-pillar endpoint when available, with a compatibility shim for legacy test engines.
+# Use OPA's required-pillar endpoint. Missing support is a fail-closed engine failure.
 def _evaluate_required_pillars(
     *,
     policy_engine_service: PolicyEnginePort,
     base_facts: dict[str, Any],
 ) -> dict[str, bool]:
-    evaluator = getattr(policy_engine_service, "evaluate_required_pillars", None)
-    if callable(evaluator):
-        result = evaluator(base_facts=base_facts)
-        if isinstance(result, dict):
-            return {
-                "require_evidence": bool(result.get("require_evidence", True)),
-                "require_risk": bool(result.get("require_risk", True)),
-                "require_trajectory": bool(result.get("require_trajectory", True)),
-                "require_behavioral": bool(result.get("require_behavioral", True)),
-                "require_judge": bool(result.get("require_judge", False)),
-            }
-    actor = base_facts.get("actor", {})
-    runtime = base_facts.get("runtime", {})
-    external = base_facts.get("external_communication", {})
+    result = policy_engine_service.evaluate_required_pillars(base_facts=base_facts)
+    if not isinstance(result, dict):
+        raise PolicyEngineExecutionError("OPA required_pillars response must be an object.")
     return {
-        "require_evidence": True,
-        "require_risk": True,
-        "require_trajectory": True,
-        "require_behavioral": True,
-        "require_judge": bool(
-            external.get("review_ready")
-            or (
-                actor.get("has_output_text")
-                and actor.get("result_type") in {"intermediate_output", "final_output"}
-                and int(runtime.get("observed_evidence_count") or 0) <= 1
-            )
-        ),
+        "require_evidence": bool(result.get("require_evidence", True)),
+        "require_risk": bool(result.get("require_risk", True)),
+        "require_trajectory": bool(result.get("require_trajectory", True)),
+        "require_behavioral": bool(result.get("require_behavioral", True)),
+        "require_judge": bool(result.get("require_judge", False)),
     }
 
 
-# Use OPA's final decision endpoint when available, otherwise adapt legacy static-policy test engines.
+# Request the final decision only from the OPA PDP; no Python policy adapter is reachable here.
 def _evaluate_governance_decision_output(
     *,
     policy_engine_service: PolicyEnginePort,
     decision_input: dict[str, Any],
-    policy_input: PolicyEvaluationInput,
 ) -> dict[str, Any]:
-    evaluator = getattr(policy_engine_service, "evaluate_decision", None)
-    if callable(evaluator):
-        result = evaluator(decision_input=decision_input)
-        if isinstance(result, dict):
-            return result
-    policy_result = policy_engine_service.evaluate(policy_input=policy_input)
-    return _legacy_policy_result_to_decision_output(
-        policy_result=policy_result,
-        policy_input=policy_input,
-        decision_input=decision_input,
-    )
+    result = policy_engine_service.evaluate_decision(decision_input=decision_input)
+    if not isinstance(result, dict):
+        raise PolicyEngineExecutionError("OPA decision response must be an object.")
+    return result
 
 
 # Validate the OPA output shape and convert it into the canonical trace dataclass.
@@ -1350,11 +1315,44 @@ def _build_governance_trace_from_opa_output(
         raw_output.get("selected_reason"),
         field_name="selected_reason",
     )
+    pillar_results = raw_output["pillar_results"]
+    policy_directive = _static_policy_directive_from_pillar(
+        pillar_results.get("static_policy", {}), fallback_directive=directive
+    )
+    return GovernanceDecisionTrace(
+        directive=directive, policy_decision=policy_decision, reason_codes=reason_codes,
+        summary=selected_reason, constrains_capability_use=directive != GovernanceDirective.CONTINUE,
+        evaluated_actor_result_type=policy_input.actor_result_type, evaluated_tool_name=policy_input.tool_name,
+        policy_engine_name=policy_engine_service.policy_engine_name,
+        policy_bundle_version=str(raw_output.get("policy_bundle_version") or policy_engine_service.policy_bundle_version),
+        policy_directive=policy_directive, oversight_recommended_directive=_map_opa_directive_for_trace(directive),
+        behavioral_recommended_directive=_map_behavioral_directive(behavioral_assessment.behavioral_recommended_directive),
+        judge_recommended_directive=_map_judge_directive(judge_assessment.recommendation), judge_invoked=judge_assessment.invoked,
+        static_policy_summary=_static_policy_summary_from_pillar(pillar_results.get("static_policy", {})),
+        dynamic_policy_summary=dynamic_policy_assessment.summary, behavioral_summary=behavioral_assessment.summary,
+        judge_summary=judge_assessment.summary, behavioral_similarity_score=behavioral_assessment.historical_similarity_score,
+        behavioral_deviation_score=behavioral_assessment.behavior_deviation_score, behavioral_novelty_score=behavioral_assessment.novelty_score,
+        oversight_summary=dynamic_policy_assessment.summary, combiner_dominant_dimension=None, combiner_support_by_directive=None,
+        combiner_selected_reason=selected_reason,
+        combiner_rejected_alternatives={str(key): str(value) for key, value in raw_output["rejected_alternatives"].items()},
+        combiner_safety_invariants_checked=tuple(str(item) for item in raw_output["safety_invariants_checked"]),
+        combiner_signals=tuple(_pillar_result_signals(pillar_results=pillar_results)),
+        combiner_normalized_directive=None, combiner_normalization_reason=None,
+        governance_input_schema_version=(str(decision_input.get("schema_version")) if isinstance(decision_input, dict) else None),
+        pillar_requirements=({str(key): bool(value) for key, value in decision_input.get("pillar_requirements", {}).items()} if isinstance(decision_input, dict) else None),
+        pillar_results=pillar_results,
+        pillar_errors=({str(key): str(value) for key, value in decision_input.get("pillar_errors", {}).items()} if isinstance(decision_input, dict) else None),
+        policy_config_version=str(raw_output.get("policy_config_version")),
+    )
 
 
 # Validate the minimal GovernanceDecisionOutput contract before applying a directive.
 def _validate_governance_decision_output(raw_output: dict[str, Any]) -> None:
+    from .schema_validation import validate_json_schema
+
+    validate_json_schema(schema_name="governance_decision_output", payload=raw_output)
     required_fields = (
+        "schema_version",
         "directive",
         "policy_decision",
         "reason_codes",
@@ -1364,6 +1362,7 @@ def _validate_governance_decision_output(raw_output: dict[str, Any]) -> None:
         "safety_invariants_checked",
         "requires_human_review",
         "policy_bundle_version",
+        "policy_config_version",
     )
     for field_name in required_fields:
         if field_name not in raw_output:
@@ -1378,75 +1377,6 @@ def _validate_governance_decision_output(raw_output: dict[str, Any]) -> None:
         raise PolicyEngineExecutionError("OPA decision output safety_invariants_checked must be a list.")
     if not isinstance(raw_output["requires_human_review"], bool):
         raise PolicyEngineExecutionError("OPA decision output requires_human_review must be a boolean.")
-    rejected_alternatives = raw_output.get("rejected_alternatives", {})
-    if not isinstance(rejected_alternatives, dict):
-        raise PolicyEngineExecutionError("OPA rejected_alternatives must be an object.")
-    safety_invariants = raw_output.get("safety_invariants_checked", [])
-    if not isinstance(safety_invariants, list):
-        raise PolicyEngineExecutionError("OPA safety_invariants_checked must be a list.")
-    pillar_results = raw_output.get("pillar_results", {})
-    if not isinstance(pillar_results, dict):
-        raise PolicyEngineExecutionError("OPA pillar_results must be an object.")
-    policy_directive = _static_policy_directive_from_pillar(
-        pillar_results.get("static_policy", {}),
-        fallback_directive=directive,
-    )
-    return GovernanceDecisionTrace(
-        directive=directive,
-        policy_decision=policy_decision,
-        reason_codes=reason_codes,
-        summary=selected_reason,
-        constrains_capability_use=directive != GovernanceDirective.CONTINUE,
-        evaluated_actor_result_type=policy_input.actor_result_type,
-        evaluated_tool_name=policy_input.tool_name,
-        policy_engine_name=policy_engine_service.policy_engine_name,
-        policy_bundle_version=str(raw_output.get("policy_bundle_version") or policy_engine_service.policy_bundle_version),
-        policy_directive=policy_directive,
-        oversight_recommended_directive=_map_opa_directive_for_trace(directive),
-        behavioral_recommended_directive=_map_behavioral_directive(
-            behavioral_assessment.behavioral_recommended_directive
-        ),
-        judge_recommended_directive=_map_judge_directive(judge_assessment.recommendation),
-        judge_invoked=judge_assessment.invoked,
-        static_policy_summary=_static_policy_summary_from_pillar(pillar_results.get("static_policy", {})),
-        dynamic_policy_summary=dynamic_policy_assessment.summary,
-        behavioral_summary=behavioral_assessment.summary,
-        judge_summary=judge_assessment.summary,
-        behavioral_similarity_score=behavioral_assessment.historical_similarity_score,
-        behavioral_deviation_score=behavioral_assessment.behavior_deviation_score,
-        behavioral_novelty_score=behavioral_assessment.novelty_score,
-        oversight_summary=dynamic_policy_assessment.summary,
-        combiner_dominant_dimension=None,
-        combiner_support_by_directive=None,
-        combiner_selected_reason=selected_reason,
-        combiner_rejected_alternatives={str(key): str(value) for key, value in rejected_alternatives.items()},
-        combiner_safety_invariants_checked=tuple(str(item) for item in safety_invariants),
-        combiner_signals=tuple(_pillar_result_signals(pillar_results=pillar_results)),
-        combiner_normalized_directive=None,
-        combiner_normalization_reason=None,
-        governance_input_schema_version=(
-            str(decision_input.get("schema_version"))
-            if isinstance(decision_input, dict)
-            else None
-        ),
-        pillar_requirements=(
-            {
-                str(key): bool(value)
-                for key, value in decision_input.get("pillar_requirements", {}).items()
-            }
-            if isinstance(decision_input, dict)
-            else None
-        ),
-        pillar_results=pillar_results,
-        pillar_errors=(
-            {
-                str(key): str(value)
-                for key, value in decision_input.get("pillar_errors", {}).items()
-            }
-            if isinstance(decision_input, dict)
-            else None
-        ),
-    )
 
 
 # Convert OPA/static-pillar output into the legacy static assessment stored in TaskState.
@@ -1535,6 +1465,18 @@ def _build_static_assessment_from_base(
     )
 
 
+# Supply a compatibility-shaped judge context without evaluating static policy in Python.
+def _build_judge_static_context(*, policy_engine_service: PolicyEnginePort) -> StaticPolicyAssessment:
+    return StaticPolicyAssessment(
+        policy_decision=PolicyDecision.ALLOW,
+        reason_codes=(GovernanceReasonCode.ALLOWED_BY_POLICY,),
+        summary="Static-policy facts are supplied to OPA; Python does not interpret them before judging.",
+        policy_engine_name=policy_engine_service.policy_engine_name,
+        policy_bundle_version=policy_engine_service.policy_bundle_version,
+        policy_directive=GovernanceDirective.CONTINUE,
+    )
+
+
 # Build legacy dynamic assessment records from pillar facts for trace/dashboard compatibility.
 def _build_dynamic_assessment_from_signals(
     *,
@@ -1545,17 +1487,17 @@ def _build_dynamic_assessment_from_signals(
     risk = pillars.get("risk", {})
     trajectory = pillars.get("trajectory", {})
     evidence_assessment = EvidenceQualityAssessment(
-        score=float(evidence.get("diagnostic_score", 0.0)),
+        score=float(evidence.get("score", evidence.get("diagnostic_score")) or 0.0),
         level=_parse_oversight_level(evidence.get("diagnostic_level"), OversightSignalLevel.WEAK),
         reason_codes=_parse_oversight_reason_codes(evidence.get("reason_facts", [])),
     )
     risk_assessment = OperationalRiskAssessment(
-        score=float(risk.get("diagnostic_score", 0.0)),
+        score=float(risk.get("score", risk.get("diagnostic_score")) or 0.0),
         level=_parse_oversight_level(risk.get("diagnostic_level"), OversightSignalLevel.LOW),
         reason_codes=_parse_oversight_reason_codes(risk.get("reason_facts", [])),
     )
     trajectory_assessment = TrajectoryHealthAssessment(
-        score=float(trajectory.get("diagnostic_score", 0.0)),
+        score=float(trajectory.get("score", trajectory.get("diagnostic_score")) or 0.0),
         level=_parse_oversight_level(trajectory.get("diagnostic_level"), OversightSignalLevel.HEALTHY),
         reason_codes=_parse_oversight_reason_codes(trajectory.get("reason_facts", [])),
     )
@@ -1587,7 +1529,8 @@ def _build_fail_closed_governance_result(
     policy_engine_service: PolicyEnginePort,
     reason: str,
     base_facts: dict[str, Any],
-    policy_config: dict[str, Any],
+    policy_bundle_version: str,
+    policy_config_version: str,
     pillar_requirements: dict[str, bool] | None = None,
     pillars: dict[str, Any] | None = None,
     pillar_errors: dict[str, str] | None = None,
@@ -1605,12 +1548,13 @@ def _build_fail_closed_governance_result(
         "require_judge": False,
     }
     resolved_pillars = pillars or {}
-    thresholds_version = str(policy_config.get("thresholds_version", "layer2_governance_thresholds_v1"))
+    thresholds_version = policy_config_version
     for name in ("evidence", "risk", "trajectory", "behavioral", "judge"):
         resolved_pillars.setdefault(name, _unavailable_pillar(name, thresholds_version))
     decision_input = build_governance_decision_input(
         base_facts=base_facts,
-        policy_config=policy_config,
+        policy_bundle_version=policy_bundle_version,
+        policy_config_version=policy_config_version,
         pillar_requirements=resolved_requirements,
         pillars=resolved_pillars,
         pillar_errors={**(pillar_errors or {}), "opa": reason},
@@ -1656,6 +1600,7 @@ def _build_fail_closed_governance_result(
         pillar_requirements=resolved_requirements,
         pillar_results=resolved_pillars,
         pillar_errors={**(pillar_errors or {}), "opa": reason},
+        policy_config_version=policy_config_version,
     )
     return GovernanceEvaluationResult(
         policy_input=policy_input,

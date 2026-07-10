@@ -1241,7 +1241,7 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertEqual(result.reason_codes, (GovernanceReasonCode.READ_ONLY_ALLOWED,))
         self.assertEqual(result.summary, "Read-only capability use is allowed.")
         self.assertEqual(result.policy_engine_name, "opa_http_policy_engine")
-        self.assertEqual(result.policy_bundle_version, "layer2_governance_v1")
+        self.assertEqual(result.policy_bundle_version, "layer2_governance_v2")
 
     def test_read_only_tool_request_routes_through_governance(self) -> None:
         graph = _build_test_graph(policy_engine_service=StubPolicyEngine())

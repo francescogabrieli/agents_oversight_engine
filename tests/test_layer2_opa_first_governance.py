@@ -97,6 +97,7 @@ class EvaluationServiceDecouplingTests(unittest.TestCase):
 class _AllowPolicyEngine(PolicyEnginePort):
     policy_engine_name = "test_opa_v2_engine"
     policy_bundle_version = "layer2_governance_v2"
+    policy_config_version = "layer2_governance_thresholds_v1"
 
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -105,6 +106,7 @@ class _AllowPolicyEngine(PolicyEnginePort):
     def evaluate_required_pillars(self, *, base_facts):
         self.calls.append("required_pillars")
         return {
+            "schema_version": "governance_decision_output.v1",
             "require_evidence": True,
             "require_risk": True,
             "require_trajectory": True,
@@ -132,6 +134,7 @@ class _AllowPolicyEngine(PolicyEnginePort):
             "safety_invariants_checked": ["deny_is_absorbing"],
             "requires_human_review": False,
             "policy_bundle_version": self.policy_bundle_version,
+            "policy_config_version": self.policy_config_version,
         }
 
     # Keep compatibility with the legacy protocol method.

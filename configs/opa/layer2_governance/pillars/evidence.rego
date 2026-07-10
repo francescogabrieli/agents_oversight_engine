@@ -1,8 +1,9 @@
 package layer2.governance.pillars.evidence
 
 facts := input.pillars.evidence.raw_facts
-weights := input.policy_config.evidence_weights
-thresholds := input.policy_config.thresholds
+config := data.policy_config
+weights := config.evidence_weights
+thresholds := config.thresholds
 
 raw_evidence_score := score if {
   score := bool_score(facts.actor_evidence_sufficient) * weights.evidence_sufficient

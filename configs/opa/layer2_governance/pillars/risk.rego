@@ -1,7 +1,8 @@
 package layer2.governance.pillars.risk
 
 facts := input.pillars.risk.raw_facts
-weights := input.policy_config.risk_weights
+config := data.policy_config
+weights := config.risk_weights
 
 base := weights.tool_risk[facts.tool_risk_level]
 multiplier := weights.sensitivity_multiplier[facts.sensitivity_level]
@@ -12,11 +13,11 @@ score := min([1, max([0, base * multiplier
   + additive(facts.tool_requires_human_review, weights.requires_human_review_additive)])])
 
 level := "high" if {
-  score > input.policy_config.thresholds.max_operational_risk
+  score > config.thresholds.max_operational_risk
 }
 
 level := "medium" if {
-  score <= input.policy_config.thresholds.max_operational_risk
+  score <= config.thresholds.max_operational_risk
   score >= 0.3
 }
 
