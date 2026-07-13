@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ast
+import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -36,6 +38,26 @@ from layer2_runtime_governance.state import PlanStep, PlanStepStatus, RuntimeSta
 
 
 class OPAFirstGovernanceContractTests(unittest.TestCase):
+    # Importing the runtime package must not load the retired Python decision combiner.
+    def test_runtime_package_does_not_load_legacy_combiner(self) -> None:
+        environment = dict(os.environ)
+        environment["PYTHONPATH"] = str(SRC_ROOT)
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import sys; import layer2_runtime_governance; "
+                    "raise SystemExit('layer2_runtime_governance.decision_combiner' in sys.modules)"
+                ),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
     # GovernanceDecisionInput should be versioned and include score components for deterministic pillars.
     def test_governance_decision_input_contains_required_pillar_components(self) -> None:
         state = _actor_ready_state()

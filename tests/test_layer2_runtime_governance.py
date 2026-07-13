@@ -362,7 +362,25 @@ class OverDecomposedSourceSummaryPlanner:
 
 class StubPolicyEngine(PolicyEnginePort):
     policy_engine_name = "stub_policy_engine"
-    policy_bundle_version = "stub_policy_bundle_v1"
+    policy_bundle_version = "layer2_governance_v2"
+    policy_config_version = "layer2_governance_thresholds_v1"
+
+    # Model OPA's inexpensive first pass so graph tests never contact a live policy engine.
+    def evaluate_required_pillars(self, *, base_facts: dict[str, Any]) -> dict[str, bool]:
+        return {
+            "require_evidence": True,
+            "require_risk": True,
+            "require_trajectory": True,
+            "require_behavioral": True,
+            "require_judge": False,
+        }
+
+    # Return a schema-valid OPA decision derived from the deterministic graph fixture.
+    def evaluate_decision(self, *, decision_input: dict[str, Any]) -> dict[str, Any]:
+        return _build_stub_opa_decision(
+            decision_input=decision_input,
+            policy_engine=self,
+        )
 
     # Apply deterministic governance decisions so the runtime stays testable without OPA.
     def evaluate(self, *, policy_input: PolicyEvaluationInput) -> PolicyEvaluationResult:
@@ -425,7 +443,35 @@ class StubPolicyEngine(PolicyEnginePort):
 
 class ReviewPolicyEngine(PolicyEnginePort):
     policy_engine_name = "review_policy_engine"
-    policy_bundle_version = "review_policy_bundle_v1"
+    policy_bundle_version = "layer2_governance_v2"
+    policy_config_version = "layer2_governance_thresholds_v1"
+
+    # Keep required-pillar selection deterministic for HITL graph tests.
+    def evaluate_required_pillars(self, *, base_facts: dict[str, Any]) -> dict[str, bool]:
+        return {
+            "require_evidence": True,
+            "require_risk": True,
+            "require_trajectory": True,
+            "require_behavioral": True,
+            "require_judge": False,
+        }
+
+    # Force review only for the fixture's proposed action while preserving valid OPA output.
+    def evaluate_decision(self, *, decision_input: dict[str, Any]) -> dict[str, Any]:
+        actor = decision_input["base_facts"]["actor"]
+        if actor["result_type"] == ActorResultType.PROPOSE_ACTION.value:
+            return _build_stub_opa_decision(
+                decision_input=decision_input,
+                policy_engine=self,
+                directive="wait_human_review",
+                policy_decision="require_human_review",
+                reason_code="human_review_required",
+                summary="The proposed action requires human review before execution.",
+            )
+        return _build_stub_opa_decision(
+            decision_input=decision_input,
+            policy_engine=self,
+        )
 
     # Force a human review pause when the actor proposes an external action.
     def evaluate(self, *, policy_input: PolicyEvaluationInput) -> PolicyEvaluationResult:
@@ -445,6 +491,71 @@ class ReviewPolicyEngine(PolicyEnginePort):
             policy_engine_name=self.policy_engine_name,
             policy_bundle_version=self.policy_bundle_version,
         )
+
+
+# Build one valid OPA decision envelope from the graph fixture's facts and signals.
+def _build_stub_opa_decision(
+    *,
+    decision_input: dict[str, Any],
+    policy_engine: PolicyEnginePort,
+    directive: str | None = None,
+    policy_decision: str | None = None,
+    reason_code: str | None = None,
+    summary: str | None = None,
+) -> dict[str, Any]:
+    base_facts = decision_input["base_facts"]
+    actor = base_facts["actor"]
+    policy = base_facts["policy"]
+    pillars = decision_input["pillars"]
+    resolved_directive = directive or "continue"
+    resolved_policy_decision = policy_decision or "allow"
+    resolved_reason_code = reason_code or "allowed_by_policy"
+    resolved_summary = summary or "The fixture permits this runtime turn."
+
+    if actor["capability_mode"] == CapabilityAccessMode.WRITE.value or actor["external_impact"]:
+        resolved_directive = "stop"
+        resolved_policy_decision = "deny"
+        resolved_reason_code = "write_capability_blocked"
+        resolved_summary = "Write-like capability is blocked by the policy stub."
+    elif actor["result_type"] == ActorResultType.ASK_CLARIFICATION.value:
+        resolved_directive = "ask_user_clarification"
+        resolved_policy_decision = "ask_clarification"
+        resolved_reason_code = "ask_clarification_required"
+        resolved_summary = "Clarification is required by the policy stub."
+    elif actor["result_type"] == ActorResultType.NEEDS_REPLAN.value:
+        resolved_directive = "replan"
+        resolved_reason_code = "replan_allowed"
+        resolved_summary = "Replanning is allowed by the policy stub."
+    elif (
+        actor["result_type"] in {
+            ActorResultType.INTERMEDIATE_OUTPUT.value,
+            ActorResultType.FINAL_OUTPUT.value,
+        }
+        and pillars["evidence"]["raw_facts"].get("support_rank_available", 0)
+        < pillars["evidence"]["raw_facts"].get("support_rank_required", 0)
+    ):
+        resolved_directive = "request_more_evidence"
+        resolved_reason_code = "evidence_support_below_step_need"
+        resolved_summary = "The step requires stronger evidence support."
+    elif base_facts["tool"]["name"] is not None and policy["read_only_mode"]:
+        resolved_directive = "continue_read_only"
+        resolved_policy_decision = "allow_read_only"
+        resolved_reason_code = "read_only_allowed"
+        resolved_summary = "Read-only tool use is allowed by the policy stub."
+
+    return {
+        "schema_version": "governance_decision_output.v1",
+        "directive": resolved_directive,
+        "policy_decision": resolved_policy_decision,
+        "reason_codes": [resolved_reason_code],
+        "pillar_results": pillars,
+        "selected_reason": resolved_summary,
+        "rejected_alternatives": {},
+        "safety_invariants_checked": ["fixture_opa_decision"],
+        "requires_human_review": resolved_directive == "wait_human_review",
+        "policy_bundle_version": policy_engine.policy_bundle_version,
+        "policy_config_version": policy_engine.policy_config_version,
+    }
 
 
 class StaticJudge(JudgePort):
