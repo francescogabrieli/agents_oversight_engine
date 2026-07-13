@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 from collections import defaultdict
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ from uuid import uuid4
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+from langgraph.checkpoint.sqlite import SqliteSaver
 
 from layer1_intake import IntakeResult
 
@@ -35,7 +37,27 @@ def get_default_runtime_artifacts_root() -> Path:
 
 # Keep the default checkpoint file under the runtime artifacts root.
 def get_default_checkpointer_path() -> Path:
-    return get_default_runtime_artifacts_root() / "checkpoints" / "layer2_checkpoints.json"
+    return get_default_runtime_artifacts_root() / "checkpoints" / "layer2_checkpoints.sqlite3"
+
+
+# Create the official LangGraph SQLite saver used by every durable runtime process.
+def build_sqlite_checkpointer(
+    *,
+    serde: JsonPlusSerializer,
+    storage_path: Path | None = None,
+) -> SqliteSaver:
+    checkpoint_path = Path(storage_path) if storage_path is not None else get_default_checkpointer_path()
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(
+        checkpoint_path,
+        check_same_thread=False,
+        timeout=30,
+    )
+    # Let independent CLI and dashboard processes wait briefly for SQLite write locks.
+    connection.execute("PRAGMA busy_timeout = 30000")
+    saver = SqliteSaver(connection, serde=serde)
+    saver.setup()
+    return saver
 
 
 @dataclass(frozen=True)
@@ -416,6 +438,7 @@ def persist_runtime_artifacts(
 
 
 __all__ = [
+    "build_sqlite_checkpointer",
     "DiskBackedMemorySaver",
     "RuntimeArtifactPaths",
     "RuntimeArtifactStore",

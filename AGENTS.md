@@ -192,13 +192,13 @@ Current design:
 - `configs/layer2_oversight_policy.json` now includes a `tool_risk.none` level so no-tool executions are not treated as the old medium-risk default
 - `bedrock_client.py` defines the Amazon Bedrock Converse adapter used by the Layer 2 actor with the approved Nova 2 Lite EU inference profile
 - `nodes.py` now evaluates static policy and deterministic dynamic policy in parallel inside `governance`, before behavioral and judge assessment are applied
-- `persistence.py` defines the durable disk-backed LangGraph saver plus the per-thread runtime artifact store used for trace, dashboard, and HITL persistence; checkpoints are persisted as JSON-safe serializer-backed snapshots under `artifacts/runtime/checkpoints/layer2_checkpoints.json`
+- `persistence.py` configures the official durable LangGraph SQLite saver plus the per-thread runtime artifact store used for trace and dashboard observability; checkpoints are persisted under `artifacts/runtime/checkpoints/layer2_checkpoints.sqlite3`
 - `trace.py` defines the typed, JSON-exportable Layer 2 runtime trace contract used for debugging, thesis evidence, HITL payloads, and evaluation, including resolved evidence-requirement provenance for each plan step
 - `evaluation.py` defines the offline trace evaluation pipeline that reads exported trace JSON and produces JSON and Markdown reports, including typed-vs-heuristic evidence mismatch accounting
 - `hitl_dashboard.py` defines the dashboard-facing snapshot model derived from `TaskState`, governance, oversight, and HITL review payloads
 - `main_layer2_dashboard.py` now acts as a standalone multi-thread HITL control plane backend that serves the React dashboard build, exposes the review inbox/detail/resume API, and resolves resume actions from persisted checkpoints on demand
 - `main_layer2_dashboard.py` now also persists post-resume artifacts through the same runtime artifact store used by the dashboard inbox/detail API, so HITL decisions immediately refresh the observed thread state after agent continuation
-- `main_layer2_dashboard.py` now refreshes the disk-backed checkpoint view before rebuilding a persisted thread, so the standalone dashboard can resume runs created by a separate `main_layer2.py` process without stale in-memory checkpoint state
+- `main_layer2_dashboard.py` rebuilds a persisted thread directly from the official SQLite LangGraph checkpointer, so the standalone dashboard can resume runs created by a separate `main_layer2.py` process without relying on stale in-memory state or trace artifacts
 - the dashboard review inbox is intentionally action-oriented and now hides pending-review threads whose persisted `updated_at` is older than 2 minutes; old artifacts remain on disk and detail views can still be resolved directly by thread id
 - `frontend/dashboard` contains the standalone React + TypeScript + Tailwind + daisyUI dashboard frontend that is built into static assets and served by `main_layer2_dashboard.py`
 - `configs/layer2_oversight_policy.json` defines the explicit weights, thresholds, risk scores, sensitivity multipliers, and trajectory penalties used by the dynamic policy layer
@@ -371,8 +371,8 @@ Current relevant files:
 - `WAITING_HUMAN_REVIEW` is now the typed pause state that feeds the LangGraph `interrupt / resume` HITL path
 - governance is active as an explicit runtime node and uses OPA over HTTP as the deterministic static policy engine target
 - deterministic dynamic policy may only preserve or make the static policy decision more conservative; it must never make an OPA decision more permissive
-- the default LangGraph checkpointer is now a durable local disk-backed saver rather than a process-local in-memory saver
-- the default checkpoint file is `artifacts/runtime/checkpoints/layer2_checkpoints.json`, written through `JsonPlusSerializer` envelopes instead of Python pickle blobs
+- the default LangGraph checkpointer is the official durable local SQLite saver rather than a process-local in-memory saver
+- the default checkpoint file is `artifacts/runtime/checkpoints/layer2_checkpoints.sqlite3`; LangGraph owns its checkpoint schema and serialization
 - the runtime persists per-thread artifacts under `artifacts/runtime/<thread_id>/`, including trace, compact trace, dashboard snapshot, runtime summary, and pending HITL payload when present
 - the behavioural SQLite store lives under `artifacts/runtime/behavioral/behavioral.sqlite3` by default and must remain a read model rather than the primary runtime source of truth
 - dynamic policy scoring must remain deterministic, explainable, and configured through `configs/layer2_oversight_policy.json`
@@ -513,7 +513,7 @@ The project currently uses:
 - OpenAI API for the `web_search` path in the default Layer 2 tool gateway
 - Python standard library HTTP/HTML extraction for the `fetch_url_text` path in the default Layer 2 tool gateway
 - LangGraph for Layer 2 runtime orchestration
-- durable local disk-backed LangGraph checkpoint persistence for the current local runtime graph
+- durable local SQLite LangGraph checkpoint persistence for the current local runtime graph
 
 Environment variables may be loaded from:
 

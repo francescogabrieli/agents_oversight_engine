@@ -126,6 +126,7 @@ from .oversight import (
     resolve_required_evidence_support_context,
 )
 from .persistence import (
+    build_sqlite_checkpointer,
     DiskBackedMemorySaver,
     RuntimeArtifactPaths,
     RuntimeArtifactStore,
@@ -367,6 +368,7 @@ __all__ = [
     "build_default_actor",
     "build_default_behavioral_store",
     "build_default_checkpointer",
+    "build_sqlite_checkpointer",
     "build_default_oversight_policy_config",
     "build_judge_system_prompt",
     "build_judge_user_prompt",

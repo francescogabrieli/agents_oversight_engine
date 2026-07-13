@@ -75,13 +75,6 @@ class DashboardServerContext:
     static_root: Path
 
 
-# Refresh long-lived checkpoint views so the dashboard sees threads written by the runtime process.
-def _refresh_checkpointer_view(checkpointer: Any) -> None:
-    refresh = getattr(checkpointer, "refresh_from_disk", None)
-    if callable(refresh):
-        refresh()
-
-
 # Rebuild a checkpoint-backed dashboard session from an in-memory trace payload.
 def build_dashboard_session_from_trace(
     trace: dict[str, Any],
@@ -110,7 +103,6 @@ def build_dashboard_session_from_thread_id(
 ) -> DashboardSession:
     resolved_checkpointer = checkpointer or build_default_checkpointer()
     resolved_artifact_store = artifact_store or RuntimeArtifactStore()
-    _refresh_checkpointer_view(resolved_checkpointer)
     runtime_graph = build_runtime_graph(checkpointer=resolved_checkpointer)
     snapshot = runtime_graph.get_state({"configurable": {"thread_id": thread_id}})
     snapshot_values = snapshot.values if snapshot is not None else {}
@@ -128,18 +120,8 @@ def build_dashboard_session_from_thread_id(
             resume_flow=resume_flow,
         )
 
-    # Fall back to the persisted HITL artifact when the checkpoint snapshot only exposes wrapper fields.
-    pending_review_payload = resolved_artifact_store.read_pending_human_review(thread_id)
-    if pending_review_payload is None:
-        raise ValueError(f"Persisted thread '{thread_id}' does not contain a canonical task_state.")
-    return DashboardSession(
-        thread_id=thread_id,
-        intake_result=None,
-        final_result={"pending_human_review_request": _coerce_human_review_request(pending_review_payload)},
-        checkpointer=resolved_checkpointer,
-        artifact_store=resolved_artifact_store,
-        resume_flow=resume_flow,
-    )
+    # A trace artifact is read-only observability data, never a source for LangGraph resume.
+    raise ValueError(f"Persisted thread '{thread_id}' does not contain a canonical LangGraph checkpoint.")
 
 
 # Resume one checkpoint-backed session with a typed human review decision.
@@ -756,6 +738,12 @@ def _build_request_handler(*, context: DashboardServerContext):
                 self._write_json(detail)
             except ValueError as exc:
                 self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
+            except Exception as exc:  # pragma: no cover - protects the HTTP boundary.
+                # Keep backend failures visible to the operator instead of dropping the connection.
+                self._write_json(
+                    {"error": f"Unable to resume the LangGraph runtime: {exc}"},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
 
         # Serve the built React application and fall back to index.html for client routes.
         def _serve_static(self, request_path: str) -> None:

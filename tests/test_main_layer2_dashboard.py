@@ -222,28 +222,20 @@ class MainLayer2DashboardTests(unittest.TestCase):
         self.assertEqual(payload["runtime_summary"]["task_goal"], "Prepare a cautious external communication draft.")
         self.assertEqual(payload["dashboard_snapshot"]["runtime_state"], "waiting_human_review")
 
-    # Verify dashboard resume/session loading refreshes a stale cross-process checkpointer view.
-    def test_build_dashboard_session_refreshes_stale_checkpointer_view(self) -> None:
+    # Verify session loading uses the canonical state supplied by the LangGraph checkpointer.
+    def test_build_dashboard_session_uses_canonical_checkpoint_state(self) -> None:
         task_state = _build_paused_session(thread_id="thread-refresh").final_result["task_state"]
 
         class _RefreshableCheckpointer:
             def __init__(self) -> None:
                 self.refreshed = False
 
-            def refresh_from_disk(self) -> None:
-                self.refreshed = True
-
         class _FakeGraph:
             def __init__(self, checkpointer) -> None:
                 self.checkpointer = checkpointer
 
             def get_state(self, _config):
-                values = (
-                    {"task_state": task_state}
-                    if self.checkpointer.refreshed
-                    else {"intake_result": task_state.intake_payload, "thread_id": "thread-refresh"}
-                )
-                return mock.Mock(values=values)
+                return mock.Mock(values={"task_state": task_state})
 
         checkpointer = _RefreshableCheckpointer()
 
@@ -257,12 +249,11 @@ class MainLayer2DashboardTests(unittest.TestCase):
                 artifact_store=self.artifact_store,
             )
 
-        self.assertTrue(checkpointer.refreshed)
         self.assertEqual(session.thread_id, "thread-refresh")
         self.assertEqual(session.final_result["task_state"].current_state, RuntimeState.WAITING_HUMAN_REVIEW)
 
-    # Verify session loading can fall back to the persisted HITL payload when the checkpoint lacks task_state.
-    def test_build_dashboard_session_falls_back_to_persisted_pending_review(self) -> None:
+    # Verify artifacts cannot be used as a substitute for a canonical LangGraph checkpoint.
+    def test_build_dashboard_session_rejects_artifact_only_state(self) -> None:
         _persist_review_artifacts(
             self.artifact_store,
             thread_id="thread-artifact-fallback",
@@ -280,26 +271,12 @@ class MainLayer2DashboardTests(unittest.TestCase):
         with mock.patch(
             "main_layer2_dashboard.build_runtime_graph",
             side_effect=lambda checkpointer: _FakeGraph(),
-        ):
-            session = build_dashboard_session_from_thread_id(
+        ), self.assertRaisesRegex(ValueError, "canonical LangGraph checkpoint"):
+            build_dashboard_session_from_thread_id(
                 "thread-artifact-fallback",
                 checkpointer=_RefreshableCheckpointer(),
                 artifact_store=self.artifact_store,
             )
-
-        decision = _parse_human_review_decision(
-            {
-                "thread_id": "thread-artifact-fallback",
-                "request_id": "thread-artifact-fallback:hitl",
-                "decision_type": "approve_continue",
-            },
-            session=session,
-        )
-        pending_request = session.final_result["pending_human_review_request"]
-
-        self.assertIsNone(session.intake_result)
-        self.assertEqual(pending_request.thread_id, "thread-artifact-fallback")
-        self.assertEqual(decision.decision_type, HumanReviewDecisionType.APPROVE_CONTINUE)
 
     # Verify resume applies a typed decision and returns the refreshed persisted thread state.
     def test_api_resume_returns_refreshed_thread(self) -> None:

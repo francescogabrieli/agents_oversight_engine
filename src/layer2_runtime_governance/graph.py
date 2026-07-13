@@ -79,7 +79,7 @@ from .nodes import (
     human_review,
     tool_gateway,
 )
-from .persistence import DiskBackedMemorySaver
+from .persistence import build_sqlite_checkpointer
 from .planning import PlannerPort, build_default_planner
 from .replanning import ReplanDecision, ReplannerPort, build_default_replanner
 from .state import (
@@ -445,7 +445,7 @@ def _extract_bootstrap_thread_id(
     return state["intake_result"].metadata.request_id
 
 
-def _build_default_checkpointer(*, storage_path: Any | None = None) -> DiskBackedMemorySaver:
+def _build_default_checkpointer(*, storage_path: Any | None = None) -> Any:
     # Register the custom runtime models so checkpoint persistence can serialize them safely.
     allowed_runtime_types = [
         ActorResult,
@@ -522,11 +522,11 @@ def _build_default_checkpointer(*, storage_path: Any | None = None) -> DiskBacke
             for runtime_type in allowed_runtime_types
         ]
     )
-    return DiskBackedMemorySaver(serde=serializer, storage_path=storage_path)
+    return build_sqlite_checkpointer(serde=serializer, storage_path=storage_path)
 
 
 # Expose the default checkpointer so local tools can share the same resume-safe serializer.
-def build_default_checkpointer(*, storage_path: Any | None = None) -> DiskBackedMemorySaver:
+def build_default_checkpointer(*, storage_path: Any | None = None) -> Any:
     return _build_default_checkpointer(storage_path=storage_path)
 
 
