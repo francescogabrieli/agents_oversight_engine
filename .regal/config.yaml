@@ -1,0 +1,27 @@
+# Regal configuration for the Layer 2 OPA bundle.
+# The bundle keeps an application-oriented directory name while Rego packages
+# retain the stable layer2.* namespace.
+project:
+  rego-version: 1
+  roots:
+    - configs/opa/layer2_governance
+
+rules:
+  idiomatic:
+    directory-package-mismatch:
+      # The current bundle layout is intentional and is not package-mirroring.
+      level: ignore
+
+  imports:
+    unresolved-reference:
+      # Regal scans Rego modules, but policy_config is supplied by JSON data.
+      level: error
+      except-paths:
+        - data.policy_config
+        - data.policy_config.*
+
+  style:
+    line-length:
+      level: warning
+      max-line-length: 120
+      non-breakable-word-threshold: 100
