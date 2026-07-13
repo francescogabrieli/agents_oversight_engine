@@ -48,8 +48,8 @@ L'architettura viene compressa in cinque macro-blocchi:
 
 - `Task Intake`: codice esterno al grafo. Prepara il payload iniziale prima dell'avvio del runtime.
 - `Runtime & Governance`: implementato principalmente come nodi e subgraph LangGraph.
-- `Policy Engine`: nodo del grafo che invoca un componente esterno OPA (Open Policy Agent).
-- `HITL Gateway`: nodo LangGraph con `interrupt()` più control plane di review standalone servito da `src/main_layer2_dashboard.py`, che legge checkpoint e artifact runtime persistiti su disco.
+- `Governance PDP`: OPA (Open Policy Agent) è il policy decision point esterno; il nodo LangGraph `governance` è il policy enforcement point che costruisce fatti, invoca OPA e applica la direttiva restituita.
+- `HITL Gateway`: nodo LangGraph con `interrupt()` più control plane di review standalone servito da `src/main_layer2_dashboard.py`, che riprende esclusivamente checkpoint LangGraph SQLite con `Command(resume=...)`; gli artifact runtime sono osservabilità, non stato ripristinabile.
 - `Tool Bus / External Capabilities`: componente esterno al grafo, invocato dal nodo `tool_gateway`.
 - `State, Evidence & Observability`: componente ibrido che fonde gli artefatti nativi prodotti da LangGraph, come stato runtime, checkpoint, thread history, task metadata e interrupt, con il tracciamento custom dell'architettura, come evidenze semantiche, output di governance, rationale, score e audit trail.
 - `Evaluation & Continuous Improvement`: codice esterno, eseguito fuori dal ciclo live del task.
@@ -150,21 +150,23 @@ Nodi principali:
 - `bootstrap_from_intake`
 - `planner`
 - `actor`
+- `governance`
 - `tool_gateway`
 - `observe_tool_result`
 - `replanner`
-- `finalize`
-- `abort`
+- `human_review`
+- `finalize_bootstrap`
 
 Ruolo dei nodi principali:
 - `bootstrap_from_intake`: inizializza il `TaskState` a partire dall'`IntakeResult`
 - `planner`: componente deliberativa che produce il piano semantico completo del task a partire dallo stato corrente
 - `actor`: componente esecutiva principale dell'agente, che trasforma il passo pianificato corrente in un'azione concreta o in una proposta operativa
+- `governance`: policy enforcement point che chiede a OPA la direttiva finale per il turno corrente
 - `tool_gateway`: punto di accesso controllato verso il `Tool Bus` e le capacità esterne
 - `observe_tool_result`: osserva gli effetti dell'azione eseguita e li converte in evidenze
 - `replanner`: aggiorna il piano quando servono correzioni, nuove evidenze o adattamento della traiettoria
-- `finalize`: chiude il task in stato `completed`
-- `abort`: chiude il task in stato `aborted`
+- `human_review`: sospende con `interrupt()` e applica la decisione tipizzata ricevuta da `Command(resume=...)`
+- `finalize_bootstrap`: chiude la slice in stato `completed`; una direttiva `stop` porta invece a `aborted`
 
 #### Ruolo di `planner` e `actor`
 
@@ -335,288 +337,44 @@ Nota operativa:
 - uno stesso `current_plan_step` può richiedere più iterazioni locali `actor -> tool_gateway -> observe_tool_result`
 - il `replanner` viene coinvolto quando il passo è completato, quando le evidenze raccolte invalidano il piano corrente, oppure quando la governance richiede correzione, chiarimento o escalation
 
-#### Stream Contract: `Agent Core` -> `Governance Core`
+#### Governance Core: OPA-first e cinque pilastri
 
-Durante l'esecuzione del `current_plan_step`, l'`Agent Core` emette uno stream strutturato di eventi operativi verso il `Governance Core`.
+Il nodo LangGraph `governance` è il **Policy Enforcement Point (PEP)**. OPA è il solo **Policy Decision Point (PDP)**: possiede policy statica, soglie, pesi, precedenze, cap, invarianti e direttiva finale. Python non combina più direttive con un decision combiner nel percorso live.
 
-In questo contesto, "stream continuo" non significa accesso continuo al ragionamento interno grezzo del modello, né monitoraggio onnisciente del runtime.
-Significa invece una sequenza ad alta frequenza di eventi operativi osservabili emessi dopo ogni transizione rilevante del passo corrente.
+Flusso di un turno governato:
 
-Lo stream non è:
-- una chain-of-thought grezza
-- una sequenza di checkpoint statici business-specific
-- un unico esito finale emesso solo a step concluso
+1. il PEP costruisce `base_facts` versionati da `TaskState` e `ActorResult`;
+2. interroga OPA `data.layer2.governance.required_pillars` per sapere quali segnali sono obbligatori;
+3. invoca i servizi locali che producono fatti per i cinque pilastri;
+4. valida `GovernanceDecisionInput` e lo invia a OPA `data.layer2.governance.decision`;
+5. valida `GovernanceDecisionOutput`, registra `GovernanceDecisionTrace` e applica la direttiva al grafo;
+6. se OPA o il contratto non sono disponibili, applica fail-closed tracciato verso `wait_human_review`.
 
-Lo stream è invece:
-- un canale event-driven di osservabilità operativa
-- una sequenza di aggiornamenti compatti, tipizzati e leggibili
-- il principale input live del `Governance Core`
+I servizi di segnale sono moduli locali tipizzati, non PDP separati: possono produrre componenti diagnostiche per trace, ma non scelgono direttive runtime.
 
-Eventi minimi attesi nello stream:
-- inizio del `current_plan_step`
-- proposta di azione operativa
-- richiesta di uso di un tool o capacità esterna
-- esito osservato del tool o della micro-azione eseguita
-- aggiornamento delle evidenze rilevanti
-- segnali di incertezza, rischio o degrado della traiettoria
-- produzione di draft, chiarimenti o output intermedi
-- completamento del passo oppure richiesta di `replan` / escalation
+I **cinque pilastri** sono:
 
-Proprietà del contract:
-- lo stream deve restare compatto, tipizzato e leggibile anche per review umana
-- deve descrivere il comportamento osservabile del runtime, non il ragionamento interno grezzo
-- il `Governance Core` valuta lo stream in modalità event-driven durante l'operatività del runtime
-- l'agente non si ferma per checkpoint hardcoded: l'interruzione avviene solo quando il blocco di governance produce una direttiva di controllo o escalation
+| Pilastro | Producer | Decisione OPA |
+| --- | --- | --- |
+| `evidence` | evidenza osservata, validazione step e precisione del claim | sufficienza, gap e mismatch di precisione |
+| `risk` | posture capability, registry tool, sensibilità e impatto esterno | envelope read-only, rischio elevato e HITL |
+| `trajectory` | turni, errori tool/provider, replan e recovery | continuazione, raccolta evidenza, replan o stop |
+| `behavioral` | read model SQLite di similarità, deviazione e novelty | anomalia solo corroborata; mai escalation autonoma a HITL |
+| `judge` | valutazione semantica selettiva | requisito condizionale e escalation per output fragili o draft esterni |
 
-Valutazioni attese all'interno del `Governance Core`:
-- il layer di `static_policy` legge lo stream e produce una decisione hard come `allow`, `allow_read_only`, `ask_clarification`, `require_human_review` o `deny`
-- il layer di `dynamic_policy` usa lo stream per calcolare segnali continui su qualità delle evidenze, rischio operativo e salute della traiettoria
-- il layer `behavioral` legge memoria storica e feature delle run precedenti per produrre un assessment storico non bloccante
-- il `judge` opera su eventi o snapshot periodici dello stream, senza dipendere da checkpoint statici, e produce una valutazione semantica del comportamento del runtime
-- il `decision_combiner` riceve questi esiti e produce la direttiva finale del blocco governance
+`static_policy` è il sesto modulo Rego di base: non è un pilastro di segnale, ma l'envelope hard che blocca write, impone review e preserva read-only.
 
-Ruolo architetturale del contract:
-- dare al `Governance Core` visibilità continua sul lavoro dell'agente tramite eventi operativi osservabili
-- permettere valutazioni dinamiche di policy, rischio, incertezza e coerenza semantica
-- rendere possibile l'attivazione selettiva di `interrupt / resume` e HITL
+La configurazione OPA decide quando `judge` è obbligatorio; evidence, risk, trajectory e behavioral sono richiesti in ogni valutazione. Un pilastro obbligatorio indisponibile produce un fail-closed. I risultati dei pilastri, gli errori, le versioni e le invarianti vengono inclusi nella trace.
 
-#### Governance Core
-
-Implementazione corrente: **nodo LangGraph `governance` con componenti interni tipizzati**.
-
-Direzione architetturale futura: **subgraph LangGraph esplicito**, quando HITL `interrupt / resume`, judge semantico e osservabilita avanzata richiederanno nodi separati.
-
-Componenti principali nella baseline corrente:
-- `static_policy`, backed by OPA HTTP
-- `dynamic_policy`, deterministico e configurato da `configs/layer2_oversight_policy.json`
-- `behavioral_foundation`, backed by SQLite locale e feature storiche tipizzate
-- `judge`, sensore semantico selettivo gia integrato nel nodo `governance`
-- `decision_combiner`, tipizzato in `governance.py`
-
-Componenti futuri:
-- `judge_node`, come sensore semantico separato quando il subgraph di governance verra esplicitato
-- `hitl_gateway`, come nodo dedicato separato dal control plane esterno se il flusso HITL diventera piu articolato
-
-Ruolo:
-- osservare in continuo lo stream operativo emesso dall'`Agent Core`
-- valutare policy, rischio, incertezza, contesto storico e coerenza semantica durante l'esecuzione
-- trasformare gli esiti dei sottosistemi in una decisione di controllo spiegabile e tracciabile
-
-#### Static Policy
-
-Implementazione: **nodo del grafo + componente esterno OPA (Open Policy Agent)**.
-
-Ruolo:
-- applicare il **deterministic policy envelope** del sistema
-- valutare vincoli non negoziabili prima dell'esecuzione di azioni operative o richieste di tool
-- stabilire ciò che è ammissibile, ciò che è consentito solo in `read_only` e ciò che richiede obbligatoriamente revisione umana
-
-Decisioni possibili:
-- `allow`
-- `allow_read_only`
-- `ask_clarification`
-- `require_human_review`
-- `deny`
-
-Segnali usati dalle policy:
-- tipo di tool
-- dominio del task
-- sensibilità dei dati
-- irreversibilità dell'azione
-- rischio del tool
-- evidenze minime disponibili
-- vincoli organizzativi
-- eventuali precedenti approvazioni umane
-
-Il layer di `static_policy` definisce i confini hard del runtime.
-I livelli successivi non possono mai allargare ciò che la `static_policy` ha negato o ristretto.
-
-#### Dynamic Policy
-
-Implementazione corrente: **componente deterministico interno al nodo `governance`**.
-
-File principali:
-- `src/layer2_runtime_governance/oversight.py`
-- `configs/layer2_oversight_policy.json`
-
-Persistenza runtime:
-- `TaskState.last_oversight_assessment`
-- `TaskState.oversight_history`
-- `TaskState.last_dynamic_policy_assessment`
-- `TaskState.dynamic_policy_history`
-
-Score distinti:
-- `evidence_quality_score`
-- `operational_risk_score`
-- `trajectory_health_score`
-
-Ruolo:
-- operare come **deterministic adaptive policy layer**
-- intervenire quando nessuna policy hard ha bloccato l'azione, ma il runtime non è sufficientemente robusto per proseguire in autonomia
-- evitare un unico `confidence_score` aggregato
-- separare qualità delle evidenze, rischio operativo e salute della traiettoria
-- supportare decisioni come `continue`, `replan`, `request_more_evidence` o escalation
-
-Questo blocco non stabilisce se un'azione è ammissibile in assoluto; valuta se un'azione già ammissibile è sufficientemente supportata, prudente e robusta da eseguire nel contesto corrente.
-
-La baseline implementata evita intenzionalmente un unico `confidence_score`.
-Le formule sono configurabili e auditabili:
-- `evidence_quality` combina validazione del passo, confidence dell'actor, evidenze osservate, locator di provenienza e successo dell'ultimo tool
-- `operational_risk` combina rischio del tool nel registry, sensibilita del task, impatto esterno, capability write-like e richiesta di human review
-- `trajectory_health` penalizza troppi turni actor, tool falliti, segnali `needs_replan` e incertezza residua con confidence bassa
-
-Granularita dell'evidenza:
-- le affermazioni cronologiche ufficiali come `entered into force`, `applies from`, `applies on` e `timeline` devono normalmente essere trattate come `detailed_extracted`
-- `primary_legal` resta riservato a threshold, articoli, numeri di utenti, turnover e altri dettagli giuridici strettamente normativi
-- i summary brevi e ad alto livello devono restare eseguibili con evidenza `high_level_summary`: parole generali come gatekeeper, obblighi, divieti, enforcement o core platform services non devono trasformare automaticamente il task in un'estrazione clause-by-clause
-- esempi granulari di obblighi, divieti o requisiti specifici devono essere richiesti solo quando il task li domanda o quando sono direttamente presenti nelle evidenze osservate
-
-Il layer produce una raccomandazione, non un permesso assoluto.
-OPA resta il confine hard: la `dynamic_policy` puo solo confermare o rendere piu prudente la decisione di policy.
-
-#### Behavioral Foundation
-
-Implementazione corrente: **componente interno al nodo `governance` con persistenza SQLite locale**.
-
-File principali:
-- `src/layer2_runtime_governance/behavioral.py`
-- `artifacts/runtime/behavioral/behavioral.sqlite3`
-
-Persistenza runtime:
-- `TaskState.last_behavioral_assessment`
-- `TaskState.behavioral_history`
-
-Ruolo:
-- materializzare un assessment storico della run corrente a partire da memoria locale persistita
-- salvare snapshot strutturati di run, step, tool call, decisioni di governance, segnali dinamici e feature aggregate
-- preparare il terreno per similarity search, deviation analysis e novelty scoring futuri
-- rendere disponibile al `decision_combiner` un contesto storico tipizzato senza introdurre ancora nuova autorità decisionale
-
-Responsabilità della baseline attuale:
-- leggere la memoria SQLite locale
-- esporre un `BehavioralAssessment` tipizzato e leggibile
-- persistere feature e snapshot della run corrente come read model storico
-
-Capacita gia implementate:
-- il layer `behavioral` produce `historical_similarity_score`, `behavior_deviation_score` e `novelty_score`
-- il layer `behavioral` seleziona run candidate comparabili e ne deriva una raccomandazione conservativa
-- la memoria SQLite non sostituisce la trace completa: è un read model indicizzato, non la source of truth primaria
-
-Direzione evolutiva:
-- aggiungere similarity e deviation rispetto a run storiche comparabili
-- calibrare meglio soglie, pesi e review-rate prima di attribuire piu autorita al segnale storico
-- mantenere comunque il vincolo che `behavioral` non possa rendere il sistema più permissivo della `static_policy`
-
-#### Guardrail Proporzionati
-
-Un obiettivo architetturale esplicito e che i vincoli di governance migliorino l'affidabilita senza degradare inutilmente il loop agentico.
-I guardrail devono quindi essere:
-- proporzionati alla richiesta utente e al livello di precisione atteso
-- cumulativi solo quando misurano rischi diversi, non quando duplicano lo stesso blocco
-- capaci di ridurre la precisione del draft prima di aumentare l'escalation
-- verificabili nel trace, in modo che ogni `request_more_evidence`, `replan` o `wait_human_review` mostri quale vincolo ha inciso
-
-Per task piccoli come "fonti ufficiali + riassunto breve", il runtime deve preferire:
-- piano compatto
-- una o due raccolte di evidenza ufficiale
-- sintesi al livello di precisione supportato
-- nessun replan se il problema si risolve abbassando granularita o usando evidenza gia raccolta
-
-Questa scelta non indebolisce la governance: separa il controllo utile dall'attrito operativo. Un claim preciso non supportato resta bloccato, ma un summary alto livello non deve fallire solo perche contiene termini normali del dominio.
-
-#### Judge
-
-Implementazione corrente: **componente selettivo interno al nodo `governance`**, con backend disattivabile e porta OpenAI opzionale.
-
-Ruolo:
-- operare come sensore semantico live del runtime
-- intercettare problemi di coerenza non catturati dalle sole policy o dagli score quantitativi
-- misurare drift rispetto al goal
-- rilevare incoerenza tra evidenze raccolte e azione proposta
-- rilevare incoerenza tra traiettoria pianificata e comportamento operativo effettivo
-
-Il `judge` non sostituisce né il `Policy Engine` né il motore di confidence/risk.
-Non decide da solo i vincoli hard del sistema.
-Produce invece una valutazione semantica che può contribuire a `continue`, `replan`, `request_more_evidence`, `wait_human_review` o `stop` attraverso il `decision_combiner`.
-
-Nella baseline attuale il judge:
-- viene invocato solo in modo selettivo, non su ogni turn
-- puo rimanere `disabled` senza rompere il contratto typed
-- persiste comunque uno `JudgeAssessment` tipizzato, distinguendo chiaramente tra judge non invocato e judge invocato
-
-#### Decision Combiner
-
-Implementazione corrente: **funzione tipizzata in `governance.py`**.
-
-Ruolo:
-- ricevere gli esiti di `static_policy`, `dynamic_policy`, `behavioral` e `judge`
-- produrre una sola direttiva di controllo per il runtime
-- applicare una gerarchia esplicita di decisione
-
-Gerarchia di combinazione:
-1. la `static_policy` ha priorità sui vincoli non negoziabili
-2. `deny`, `require_human_review` e `ask_clarification` di OPA restano veto hard e non possono essere annullati
-3. negli altri casi, `dynamic_policy`, `behavioral` e `judge` contribuiscono come layer advisory con pesi espliciti
-4. l'escalation advisory scatta solo se il punteggio pesato supera la soglia del combiner
-5. nessun layer advisory puo ampliare cio che la policy ha vietato
-
-Regole correnti:
-- `OPA deny` diventa sempre `stop`
-- `OPA require_human_review` diventa sempre `wait_human_review`
-- `OPA ask_clarification` diventa sempre `ask_user_clarification`
-- `dynamic_policy`, `behavioral` e `judge` possono solo spingere verso direttive piu conservative della direttiva policy-derived
-- un singolo layer advisory non deve forzare da solo `wait_human_review` se il punteggio pesato complessivo resta sotto soglia
-- la direttiva di escalation scelta e la piu conservativa tra quelle che hanno contribuito al superamento della soglia
-- `OPA allow` con segnali advisory deboli o isolati conserva la direttiva policy-derived
-
-Output possibili:
-- `continue`
-- `continue_read_only`
-- `request_more_evidence`
-- `replan`
-- `wait_human_review`
-- `ask_user_clarification`
-- `stop`
+Le direttive possibili sono `continue`, `continue_read_only`, `request_more_evidence`, `replan`, `wait_human_review`, `ask_user_clarification` e `stop`. In particolare, `deny` statico resta assorbente, una review obbligatoria non viene declassata e behavioral/judge non possono produrre un hard deny.
 
 #### HITL Gateway
 
-Implementazione: **nodo LangGraph + interfaccia esterna**.
+Il nodo `human_review` chiama `interrupt()` con un payload tipizzato e JSON-safe. La dashboard riceve la decisione umana e riprende lo stesso `thread_id` tramite `Command(resume=...)` sul checkpointer SQLite LangGraph. Non ricostruisce mai il runtime da trace o artifact.
 
-L'interfaccia adottata oggi e una **dashboard standalone multi-thread** servita da `src/main_layer2_dashboard.py`, usata per:
-- visualizzare inbox e dettaglio dei thread in `WAITING_HUMAN_REVIEW`
-- leggere snapshot dashboard, trace e payload di review persistiti su disco
-- approvare, bloccare, chiedere chiarimenti o modificare draft `external_communication`
-- riprendere il grafo da checkpoint persistiti dopo la decisione umana
+Azioni umane canoniche: `approve_continue`, `approve_continue_read_only`, `modify_and_continue` (solo draft di comunicazione esterna), `request_more_evidence`, `replan`, `ask_clarification` e `abort`.
 
-Il meccanismo HITL rimane comunque basato su `interrupt / resume` del runtime LangGraph.
-
-HITL non è un passaggio obbligatorio tra `planner` e `actor`.
-Il runtime opera normalmente in autonomia e l'intervento umano entra solo quando viene attivato da un trigger di oversight significativo.
-
-Il `HITL Gateway` non viene attivato direttamente da un singolo segnale isolato, ma dalla direttiva finale prodotta dal `decision_combiner`.
-
-In particolare:
-- una decisione di policy `require_human_review` può attivare direttamente HITL
-- segnali di confidence/risk o del `judge` possono portare a HITL solo quando il `decision_combiner` li valuta come non risolvibili con semplice `replan`, `request_more_evidence` o chiarimento
-
-Trigger tipici di ingresso in HITL:
-- decisione `require_human_review` dal `policy_engine`
-- rischio operativo troppo alto o traiettoria degradata non risolvibile con semplice `replan`
-- incoerenza semantica forte rilevata dal `judge`
-- azione write-like o esternamente impattante che richiede revisione prima dell'esecuzione
-
-Azioni umane possibili:
-- `approve`
-- `reject`
-- `edit`
-- `request_more_evidence`
-- `stop`
-
-Persistenza operativa rilevante:
-- checkpoint LangGraph su `artifacts/runtime/checkpoints/layer2_checkpoints.json`
-- artifact per thread sotto `artifacts/runtime/<thread_id>/`
-- payload di review pending in `pending_human_review.json`
-- snapshot inbox-oriented in `runtime_summary.json`
+Gli artifact per thread (`full-trace-2.json`, snapshot dashboard e payload pending) sono materiale di osservabilità. Il checkpoint autoritativo è `artifacts/runtime/checkpoints/layer2_checkpoints.sqlite3`.
 
 ### 2.3 Output
 
@@ -637,7 +395,7 @@ Output operativi del blocco:
 
 ### 2.4 Framework / Librerie
 
-LangGraph Graph API, OPA, Pydantic, LLM per il judge.
+LangGraph Graph API, OPA HTTP con bundle Rego versionato, Pydantic, SQLite e LLM opzionale per il judge.
 
 ---
 
@@ -744,9 +502,11 @@ Aree logiche principali:
 
 Responsabilità:
 - working state del task
-- checkpoint della run
+- checkpoint SQLite della run
 - supporto a pause e resume
 - stato minimo necessario al workflow live
+
+Il checkpointer LangGraph è l'unica fonte autorevole per `interrupt / resume`. Le trace JSON e gli snapshot dashboard non devono essere usati per ricostruire o continuare una run.
 
 #### Custom Evidence Layer
 
@@ -787,7 +547,7 @@ Output disponibili:
 
 ### 4.4 Framework / Librerie
 
-Checkpointer LangGraph, eventuale store LangGraph, SQLite, JSON locali, Pydantic.
+`SqliteSaver` LangGraph, SQLite behavioural read model, JSON di trace/artifact, Pydantic.
 
 ---
 
@@ -808,12 +568,16 @@ Input principali:
 
 Questo macro-block è implementato come **codice esterno al ciclo live del grafo**.
 
-Responsabilità principali:
+Responsabilità principali già implementate:
 - valutare come si è comportato il sistema
-- misurare qualità della traiettoria e gestione dell'incertezza
-- verificare il rispetto delle policy
+- normalizzare trace esportate senza importare `TaskState` o modelli del runtime live
+- invocare OPA `data.layer2.evaluation.compliance`
+- produrre report JSON e Markdown su compliance e completezza della trace
+
+Direzione di continuous improvement non ancora automatizzata:
+- misurare qualità della traiettoria e gestione dell'incertezza su dataset e run aggregate
 - usare memoria storica e feature aggregate per identificare pattern ripetuti, casi anomali e deviazioni
-- trasformare i risultati della evaluation in aggiornamenti del sistema
+- trasformare risultati approvati in aggiornamenti versionati di prompt, soglie, policy e dataset
 
 Metriche minime consigliate:
 - task success
@@ -842,12 +606,10 @@ Output possibili:
 
 ### 5.4 Framework / Librerie
 
-Da definire.
+CLI Python standalone, normalizzatore di trace, client OPA HTTP e report JSON/Markdown.
 
 ---
 
-# USE CASE
+# Use case e protocollo di valutazione
 
-Si definiscono tre tasks diverse che serviranno per testare e verificare la buona riuscita dell'architettura.
-
-TODO!
+I casi sperimentali devono coprire almeno: (1) ricerca read-only con evidenza insufficiente recuperabile, (2) degrado di traiettoria o failure provider che richiede replan, (3) draft di comunicazione esterna che richiede judge e HITL. Ogni caso deve esportare trace e outcome atteso dei cinque pilastri.

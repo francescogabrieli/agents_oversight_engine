@@ -12,9 +12,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from html import unescape
 from html.parser import HTMLParser
+from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 from urllib.request import Request, urlopen
 
 from llm_retry import llm_retry
@@ -36,6 +37,11 @@ try:
     from openai import OpenAI
 except ImportError:  # pragma: no cover - handled at runtime if dependency is missing
     OpenAI = None
+
+try:
+    from pypdf import PdfReader
+except ImportError:  # pragma: no cover - the fallback stays unavailable until installed
+    PdfReader = None
 
 
 # ToolBackend names the concrete execution mechanism hidden behind ToolRequest.
@@ -242,20 +248,16 @@ class OpenAIToolGateway(ToolGatewayPort):
         tool_request: ToolRequest,
         definition: ToolDefinition,
     ) -> ToolExecutionResult:
-        try:
-            request = Request(
-                tool_request.url,
-                headers={
-                    "User-Agent": "Layer2ToolGateway/1.0",
-                    "Accept": "text/html, text/plain;q=0.9, */*;q=0.1",
-                },
-            )
-            with urlopen(request, timeout=definition.timeout_seconds) as response:
-                raw_body = response.read(definition.max_bytes + 1)
-                charset = response.headers.get_content_charset() or "utf-8"
-                content_type = response.headers.get_content_type()
-        except Exception as exc:  # pragma: no cover - network/io errors
-            return _failure(tool_request, f"URL fetch failed: {exc}")
+        fetch_result = _fetch_http_document(
+            url=tool_request.url or "",
+            timeout_seconds=definition.timeout_seconds,
+            max_bytes=definition.max_bytes,
+            accept="text/html, text/plain;q=0.9, */*;q=0.1",
+        )
+        if isinstance(fetch_result, str):
+            return _failure(tool_request, f"URL fetch failed: {fetch_result}")
+
+        raw_body, charset, content_type = fetch_result
 
         if len(raw_body) > definition.max_bytes:
             return _failure(tool_request, "URL fetch exceeded the configured byte limit.")
@@ -271,7 +273,48 @@ class OpenAIToolGateway(ToolGatewayPort):
 
         content = _truncate_text(extracted_text, definition.max_content_chars)
         snippet = _truncate_text(content, 500)
-        if not _is_meaningful_extracted_text(content):
+        requires_eur_lex_fallback = _is_eur_lex_bot_challenge(
+            url=tool_request.url,
+            extracted_text=extracted_text,
+        )
+        if not _is_meaningful_extracted_text(content) or requires_eur_lex_fallback:
+            fallback_url = _build_eur_lex_cellar_fallback_url(tool_request.url)
+            if fallback_url is not None:
+                fallback_result = _fetch_http_document(
+                    url=fallback_url,
+                    timeout_seconds=definition.timeout_seconds,
+                    # Official legal PDFs can exceed the compact HTML fetch limit but remain bounded.
+                    max_bytes=max(definition.max_bytes, 2_000_000),
+                    accept="application/pdf",
+                    accept_language="eng",
+                )
+                if not isinstance(fallback_result, str):
+                    fallback_body, fallback_charset, fallback_content_type = fallback_result
+                    fallback_text = (
+                        _extract_pdf_text(fallback_body)
+                        if fallback_content_type == "application/pdf"
+                        else _extract_visible_text(
+                            fallback_body.decode(fallback_charset, errors="replace")
+                        )
+                    )
+                    fallback_content = _truncate_text(
+                        fallback_text,
+                        definition.max_content_chars,
+                    )
+                    if _is_meaningful_extracted_text(fallback_content):
+                        return ToolExecutionResult(
+                            request=tool_request,
+                            success=True,
+                            summary="EUR-Lex text fetched through the official CELLAR fallback.",
+                            content=fallback_content,
+                            sources=(
+                                ToolSource(
+                                    title=f"EUR-Lex CELEX content ({_celex_identifier(tool_request.url)})",
+                                    locator=fallback_url,
+                                    snippet=_truncate_text(fallback_content, 500),
+                                ),
+                            ),
+                        )
             return _failure(
                 tool_request,
                 "URL fetch succeeded but extracted readable text was empty.",
@@ -290,6 +333,38 @@ class OpenAIToolGateway(ToolGatewayPort):
                 ),
             ),
         )
+
+
+# Read one bounded public HTTP document while keeping request headers explicit and auditable.
+def _fetch_http_document(
+    *,
+    url: str,
+    timeout_seconds: float,
+    max_bytes: int,
+    accept: str,
+    accept_language: str | None = None,
+) -> tuple[bytes, str, str] | str:
+    try:
+        headers = {
+            "User-Agent": "Layer2ToolGateway/1.0",
+            "Accept": accept,
+        }
+        if accept_language:
+            headers["Accept-Language"] = accept_language
+        request = Request(
+            url,
+            headers=headers,
+        )
+        with urlopen(request, timeout=timeout_seconds) as response:
+            raw_body = response.read(max_bytes + 1)
+            charset = response.headers.get_content_charset() or "utf-8"
+            content_type = response.headers.get_content_type()
+    except Exception as exc:  # pragma: no cover - network/io errors
+        return str(exc)
+
+    if len(raw_body) > max_bytes:
+        return "URL fetch exceeded the configured byte limit."
+    return raw_body, charset, content_type
 
 
 class _VisibleTextExtractor(HTMLParser):
@@ -743,6 +818,66 @@ def _annotation_value(annotation, key: str) -> str | None:
         return annotation.get(key)
 
     return None
+
+
+# Convert an official EUR-Lex CELEX URL into the documented CELLAR content endpoint.
+def _build_eur_lex_cellar_fallback_url(url: str | None) -> str | None:
+    celex = _celex_identifier(url)
+    if celex is None:
+        return None
+
+    # Consolidated CELEX identifiers start with 0; CELLAR content uses the base sector-3 act.
+    base_celex = celex
+    consolidated_match = re.fullmatch(r"0(\d{4}[A-Z]\d+)(?:-\d+)?", celex)
+    if consolidated_match is not None:
+        base_celex = f"3{consolidated_match.group(1)}"
+
+    # CELLAR resolves the CELEX content endpoint to its HTTPS PDF resource.
+    return f"http://publications.europa.eu/resource/celex/{base_celex}"
+
+
+# Extract a CELEX identifier only from an EUR-Lex URL already validated by the gateway.
+def _celex_identifier(url: str | None) -> str | None:
+    if not url:
+        return None
+
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if host != "eur-lex.europa.eu":
+        return None
+
+    uri_values = parse_qs(parsed.query).get("uri", ())
+    if not uri_values:
+        return None
+
+    candidate = unquote(uri_values[0]).upper()
+    match = re.search(r"(?:^|:)CELEX:([0-9A-Z-]+)", candidate)
+    return match.group(1) if match is not None else None
+
+
+# Detect EUR-Lex anti-bot interstitials so they never become evidence merely because they are long.
+def _is_eur_lex_bot_challenge(*, url: str | None, extracted_text: str) -> bool:
+    if _celex_identifier(url) is None:
+        return False
+
+    normalized = " ".join(extracted_text.lower().split())
+    return (
+        "javascript is disabled" in normalized
+        or "verify that you're not a robot" in normalized
+        or "verify that you are not a robot" in normalized
+    )
+
+
+# Extract visible text from an official PDF without preserving layout-specific metadata.
+def _extract_pdf_text(pdf_bytes: bytes) -> str:
+    if PdfReader is None:
+        return ""
+
+    try:
+        reader = PdfReader(BytesIO(pdf_bytes))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception:  # pragma: no cover - malformed external PDF content
+        return ""
 
 
 # Extract a readable title from an HTML page when one exists.

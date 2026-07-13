@@ -1086,6 +1086,13 @@ def _apply_governance_decision(
         )
         state.pending_human_review_request = None
         state.human_review_resume_state = None
+        # A governed read-only request is the recovery mechanism for an evidence gap.
+        if (
+            policy_input.actor_result_type == ActorResultType.PROPOSE_ACTION
+            and state.current_tool_request is not None
+        ):
+            state.current_state = RuntimeState.READY_TOOL_EXECUTION
+            return
         _restore_actor_step_for_more_evidence(state)
         state.current_state = RuntimeState.ACTING
         state.current_tool_request = None

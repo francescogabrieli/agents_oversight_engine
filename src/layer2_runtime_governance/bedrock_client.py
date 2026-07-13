@@ -33,6 +33,7 @@ class BedrockRuntimeSettings:
     # Keep the approved regional inference profile explicit and protected from silent fallback.
     model_id: str = _REQUIRED_BEDROCK_MODEL_ID
     region_name: str = "eu-central-1"
+    profile_name: str | None = None
     access_key_id: str | None = None
     secret_access_key: str | None = None
     session_token: str | None = None
@@ -55,6 +56,7 @@ class BedrockRuntimeSettings:
                 "AWS_REGION",
                 env_file_values.get("AWS_REGION", "eu-central-1"),
             ),
+            profile_name=os.getenv("AWS_PROFILE", env_file_values.get("AWS_PROFILE")),
             access_key_id=os.getenv(
                 "AWS_ACCESS_KEY_ID", env_file_values.get("AWS_ACCESS_KEY_ID")
             ),
@@ -91,12 +93,19 @@ class BedrockChatClient:
                 "The 'boto3' package is not installed. Install it before using the Bedrock actor."
             )
 
-        self._client = boto3.client(
+        # An explicit profile must win over stale static values in local env files.
+        session = (
+            boto3.Session(profile_name=self._settings.profile_name)
+            if self._settings.profile_name
+            else boto3.Session(
+                aws_access_key_id=self._settings.access_key_id,
+                aws_secret_access_key=self._settings.secret_access_key,
+                aws_session_token=self._settings.session_token,
+            )
+        )
+        self._client = session.client(
             "bedrock-runtime",
             region_name=self._settings.region_name,
-            aws_access_key_id=self._settings.access_key_id,
-            aws_secret_access_key=self._settings.secret_access_key,
-            aws_session_token=self._settings.session_token,
             config=Config(
                 connect_timeout=self._settings.connect_timeout_seconds,
                 read_timeout=self._settings.read_timeout_seconds,
@@ -148,10 +157,13 @@ def _validate_settings(*, settings: BedrockRuntimeSettings) -> None:
             "Bedrock actor region must be 'eu-central-1', "
             f"got '{settings.region_name}'."
         )
-    if not settings.access_key_id or not settings.secret_access_key:
+    if (
+        not settings.profile_name
+        and (not settings.access_key_id or not settings.secret_access_key)
+    ):
         raise BedrockRuntimeError(
-            "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required for the Bedrock actor. "
-            "Set them in the process environment or src/.env."
+            "Configure AWS_PROFILE or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY "
+            "for the Bedrock actor."
         )
 
 

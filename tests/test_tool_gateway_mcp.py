@@ -255,6 +255,50 @@ class GatewayMCPTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertIn("extracted readable text was empty", result.error_message or "")
 
+    # Verify a JS-gated EUR-Lex page falls back to official machine-readable CELLAR content.
+    def test_fetch_url_uses_cellar_fallback_for_empty_eur_lex_extraction(self) -> None:
+        gateway = OpenAIToolGateway()
+        eur_lex_response = FakeHTTPResponse(
+            body=(
+                b"<html><title>JavaScript is disabled</title><body>"
+                b"In order to continue, we need to verify that you're not a robot."
+                b"</body></html>"
+            ),
+            content_type="text/html",
+        )
+        cellar_response = FakeHTTPResponse(body=b"%PDF-1.7 mock", content_type="application/pdf")
+
+        with patch("layer2_runtime_governance.tool_gateway._is_blocked_host", return_value=False):
+            with patch(
+                "layer2_runtime_governance.tool_gateway.urlopen",
+                side_effect=[eur_lex_response, cellar_response],
+            ), patch(
+                "layer2_runtime_governance.tool_gateway._extract_pdf_text",
+                return_value=(
+                    "The purpose of this Regulation is to contribute to the proper "
+                    "functioning of the internal market by laying down harmonised rules."
+                ),
+            ):
+                result = gateway.execute(
+                    tool_request=ToolRequest(
+                        plan_step_id="step_1",
+                        tool_name=ToolName.FETCH_URL_TEXT,
+                        reason="Retrieve the official DMA legal text.",
+                        url=(
+                            "https://eur-lex.europa.eu/legal-content/EN/TXT/?"
+                            "uri=CELEX%3A02022R1925-20221012"
+                        ),
+                    )
+                )
+
+        self.assertTrue(result.success)
+        self.assertIn("CELLAR fallback", result.summary)
+        self.assertIn("proper functioning of the internal market", result.content or "")
+        self.assertEqual(
+            result.sources[0].locator,
+            "http://publications.europa.eu/resource/celex/32022R1925",
+        )
+
     def test_disabled_tool_returns_structured_failure(self) -> None:
         disabled_config = ToolGatewayConfig(
             tools={

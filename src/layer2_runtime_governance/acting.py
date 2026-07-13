@@ -68,6 +68,7 @@ class BedrockNovaActorSettings:
     # BedrockNovaActorSettings keeps the actor-specific Bedrock configuration typed.
     model_id: str = "eu.amazon.nova-2-lite-v1:0"
     region_name: str = "eu-central-1"
+    profile_name: str | None = None
     access_key_id: str | None = None
     secret_access_key: str | None = None
     session_token: str | None = None
@@ -82,6 +83,7 @@ class BedrockNovaActorSettings:
         return cls(
             model_id=settings.model_id,
             region_name=settings.region_name,
+            profile_name=settings.profile_name,
             access_key_id=settings.access_key_id,
             secret_access_key=settings.secret_access_key,
             session_token=settings.session_token,
@@ -1052,11 +1054,14 @@ class OpenAIActor(ActorPort):
         except Exception as exc:  # pragma: no cover - network/client errors
             raise ActorExecutionError(f"Actor request failed: {exc}") from exc
 
-        tool_call = _extract_single_function_call(response)
-        return _convert_tool_call_to_actor_result(
-            actor_task=actor_task,
-            tool_call=tool_call,
-        )
+        try:
+            tool_call = _extract_single_function_call(response)
+            return _convert_tool_call_to_actor_result(
+                actor_task=actor_task,
+                tool_call=tool_call,
+            )
+        except ActorExecutionError as exc:
+            return _build_provider_replan_result(actor_task=actor_task, detail=str(exc))
 
     # Retry only transient provider failures so one 429/503 does not abort the actor turn.
     @llm_retry
@@ -1092,6 +1097,7 @@ class BedrockNovaActor(ActorPort):
             BedrockRuntimeSettings(
                 model_id=self._settings.model_id,
                 region_name=self._settings.region_name,
+                profile_name=self._settings.profile_name,
                 access_key_id=self._settings.access_key_id,
                 secret_access_key=self._settings.secret_access_key,
                 session_token=self._settings.session_token,
@@ -1113,8 +1119,11 @@ class BedrockNovaActor(ActorPort):
                 return _build_provider_blocked_result(actor_task=actor_task, detail=str(exc))
             raise ActorExecutionError(f"Bedrock actor request failed: {exc}") from exc
 
-        tool_call = _convert_json_payload_to_tool_call(payload)
-        return _convert_tool_call_to_actor_result(actor_task=actor_task, tool_call=tool_call)
+        try:
+            tool_call = _convert_json_payload_to_tool_call(payload)
+            return _convert_tool_call_to_actor_result(actor_task=actor_task, tool_call=tool_call)
+        except ActorExecutionError as exc:
+            return _build_provider_replan_result(actor_task=actor_task, detail=str(exc))
 
 
 # Build the bound runtime tools exposed to the actor model.
@@ -1362,6 +1371,23 @@ def _build_provider_blocked_result(*, actor_task: ActorTask, detail: str) -> Act
         plan_step_id=actor_task.current_plan_step.step_id,
         result_type=ActorResultType.BLOCKED,
         summary="Actor provider returned no usable runtime action.",
+        capability_mode=CapabilityAccessMode.NONE,
+        blocking_reason=blocking_reason,
+        scratchpad_entry=_build_scratchpad_entry(
+            actor_task=actor_task,
+            entry_type=ScratchpadEntryType.UNCERTAINTY,
+            summary=blocking_reason,
+        ),
+    )
+
+
+# Route malformed provider action envelopes into the existing recovery branch, not a graph crash.
+def _build_provider_replan_result(*, actor_task: ActorTask, detail: str) -> ActorResult:
+    blocking_reason = f"Actor provider emitted an unusable runtime action: {detail}"
+    return ActorResult(
+        plan_step_id=actor_task.current_plan_step.step_id,
+        result_type=ActorResultType.NEEDS_REPLAN,
+        summary="Actor provider emitted an incomplete runtime action.",
         capability_mode=CapabilityAccessMode.NONE,
         blocking_reason=blocking_reason,
         scratchpad_entry=_build_scratchpad_entry(

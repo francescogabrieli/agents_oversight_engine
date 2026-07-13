@@ -121,6 +121,7 @@ from layer2_runtime_governance.governance import (
     build_opa_input_document,
 )
 from layer2_runtime_governance.nodes import (
+    _apply_governance_decision,
     _record_actor_execution,
     governance,
     observe_tool_result,
@@ -1672,6 +1673,34 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
         self.assertIn("Recipient: Acme Cloud Operations Team", task_state.external_communication.draft.body)
         self.assertIn("Subject: Urgent incident verification required", task_state.external_communication.draft.body)
 
+    # Verify recoverable evidence gaps execute the actor's governed read-only request.
+    def test_request_more_evidence_preserves_pending_read_only_tool_request(self) -> None:
+        task_state = _build_policy_input_task_state()
+        policy_input = build_policy_evaluation_input(task_state=task_state)
+        decision = GovernanceDecision(
+            directive=GovernanceDirective.REQUEST_MORE_EVIDENCE,
+            policy_decision=PolicyDecision.ALLOW,
+            reason_codes=(GovernanceReasonCode.ALLOWED_BY_POLICY,),
+            summary="Evidence support is below the current step requirement.",
+            constrains_capability_use=True,
+            evaluated_actor_result_type=ActorResultType.PROPOSE_ACTION,
+            evaluated_tool_name=ToolName.WEB_SEARCH,
+            policy_engine_name="test_policy",
+            policy_bundle_version="test_v1",
+            policy_directive=GovernanceDirective.CONTINUE_READ_ONLY,
+            oversight_recommended_directive=GovernanceDirective.REQUEST_MORE_EVIDENCE,
+        )
+
+        _apply_governance_decision(
+            task_state,
+            governance_decision=decision,
+            policy_input=policy_input,
+        )
+
+        self.assertEqual(task_state.current_state, RuntimeState.READY_TOOL_EXECUTION)
+        self.assertIsNotNone(task_state.current_tool_request)
+        self.assertEqual(task_state.current_tool_request.tool_name, ToolName.WEB_SEARCH)
+
     def test_external_markdown_outline_partial_draft_stays_in_single_body(self) -> None:
         task_state = TaskState.from_intake(_build_external_communication_intake_result())
         task_state.plan_steps = [
@@ -2914,6 +2943,17 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
 
         self.assertIsInstance(actor, BedrockNovaActor)
 
+    # Verify an AWS SSO profile is retained so Bedrock can avoid stale static credentials.
+    def test_bedrock_settings_load_aws_profile_from_environment(self) -> None:
+        with patch.dict(os.environ, {"AWS_PROFILE": "datareply-pua"}, clear=True), patch(
+            "layer2_runtime_governance.bedrock_client._load_env_file_values",
+            return_value={},
+        ):
+            settings = bedrock_client_module.BedrockRuntimeSettings.from_env()
+
+        self.assertEqual(settings.profile_name, "datareply-pua")
+        self.assertIsNone(settings.access_key_id)
+
     # Verify planner settings stay constructible when no timeout override exists.
     def test_openai_planner_settings_default_timeout_without_env(self) -> None:
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), patch(
@@ -3099,6 +3139,27 @@ class Layer2RuntimeGraphTests(unittest.TestCase):
             bedrock_client_module._extract_tool_call_payload(  # type: ignore[attr-defined]
                 {"output": {"message": {"content": [{"text": "Plain text response."}]}}}
             )
+
+    # Verify incomplete Bedrock action arguments enter the typed replan recovery branch.
+    def test_bedrock_actor_incomplete_tool_call_requests_replan(self) -> None:
+        actor = BedrockNovaActor(settings=_build_bedrock_actor_test_settings())
+
+        class IncompleteToolCallClient:
+            # Return a valid action name with an incomplete contract, as some providers can do.
+            def complete_tool_call(self, **_: object) -> dict[str, object]:
+                return {
+                    "tool_name": "request_web_search",
+                    "arguments": {"reason": "Find official DMA sources."},
+                }
+
+        actor._client = IncompleteToolCallClient()  # type: ignore[attr-defined]
+        actor_task = build_actor_task(task_state=_build_policy_input_task_state())
+
+        result = actor.act(actor_task=actor_task)
+
+        self.assertEqual(result.result_type, ActorResultType.NEEDS_REPLAN)
+        self.assertIn("incomplete runtime action", result.summary)
+        self.assertIn("missing required string argument 'summary'", result.blocking_reason)
 
     def test_bedrock_rejects_any_model_except_the_approved_inference_profile(self) -> None:
         with self.assertRaisesRegex(
