@@ -11,9 +11,8 @@ from ..oversight import (
     EvidenceQualityAssessment,
     OperationalRiskAssessment,
     OversightAssessment,
-    _evidence_support_level_rank,
     _output_claim_support_level,
-    _output_stays_within_intake_support,
+    _precision_mismatch_detected,
     resolve_required_evidence_support_context,
     TrajectoryHealthAssessment,
 )
@@ -150,11 +149,6 @@ def _build_plan_step(*, step: Any, task_state: TaskState) -> TracePlanStep:
 
 # Read-only observability component extracted from the trace facade.
 def _build_actor_turn(*, actor_result: ActorResult | None, task_state: TaskState) -> TraceActorTurn:
-    resolved_requirement = (
-        resolve_required_evidence_support_context(task_state=task_state)
-        if actor_result is not None
-        else None
-    )
     output_claim_level = (
         _output_claim_support_level(task_state=task_state) if actor_result is not None else None
     )
@@ -177,11 +171,7 @@ def _build_actor_turn(*, actor_result: ActorResult | None, task_state: TaskState
         precision_mismatch_detected=bool(
             actor_result is not None
             and actor_result.output_text
-            and resolved_requirement is not None
-            and output_claim_level is not None
-            and not _output_stays_within_intake_support(task_state=task_state)
-            and _evidence_support_level_rank(output_claim_level)
-            > _evidence_support_level_rank(resolved_requirement.required_level)
+            and _precision_mismatch_detected(task_state=task_state)
         ),
     )
 

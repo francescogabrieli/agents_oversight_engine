@@ -84,3 +84,48 @@ findings contains "judge_used_as_hard_deny" if {
 	decision.static_policy_summary != null
 	not contains(lower(decision.static_policy_summary), "write")
 }
+
+# Aggregated search fallback text cannot represent extracted source-level content.
+findings contains "web_search_evidence_support_overstated" if {
+	some evidence in input.trace.observed_evidence
+	evidence.source_tool == "web_search"
+	endswith(evidence.evidence_id, ":fallback")
+	evidence.support_level in {"detailed_extracted", "primary_legal"}
+}
+
+# A fallback tied only to the search query does not preserve source-level provenance.
+findings contains "web_search_fallback_missing_source_locator" if {
+	some evidence in input.trace.observed_evidence
+	evidence.source_tool == "web_search"
+	endswith(evidence.evidence_id, ":fallback")
+	not startswith(lower(evidence.locator), "http://")
+	not startswith(lower(evidence.locator), "https://")
+}
+
+# The final actor and governance views must expose the same deterministic mismatch fact.
+findings contains "actor_governance_precision_mismatch_disagrees" if {
+	count(input.trace.governance_decisions) > 0
+	final_index := count(input.trace.governance_decisions) - 1
+	final_decision := input.trace.governance_decisions[final_index]
+	input.trace.actor.precision_mismatch_detected != final_decision.pillar_results.evidence.precision_mismatch
+}
+
+# Scored OPA evidence must not be serialized with a stale default diagnostic level.
+findings contains "evidence_score_level_inconsistent" if {
+	some assessment in input.trace.dynamic_policy_assessments
+	assessment.evidence_quality.score >= data.policy_config.thresholds.min_evidence_quality
+	assessment.evidence_quality.level != "strong"
+}
+
+findings contains "evidence_score_level_inconsistent" if {
+	some assessment in input.trace.dynamic_policy_assessments
+	assessment.evidence_quality.score < 0.35
+	assessment.evidence_quality.level != "weak"
+}
+
+# Governance summaries must use the final scored pillars rather than the pre-OPA unscored snapshot.
+findings contains "governance_dynamic_summary_stale" if {
+	some decision in input.trace.governance_decisions
+	decision.pillar_results.evidence.score > 0
+	contains(decision.dynamic_policy_summary, "evidence weak (0.00)")
+}

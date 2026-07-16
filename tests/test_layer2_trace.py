@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 
@@ -32,6 +33,7 @@ from layer2_runtime_governance import (
     CapabilityAccessMode,
     ExternalCommunicationDraft,
     ExternalCommunicationPhase,
+    EvidenceSupportLevel,
     EvidenceQualityAssessment,
     GovernanceDecision,
     GovernanceDirective,
@@ -71,6 +73,7 @@ from layer2_runtime_governance import (
     layer2_trace_to_json,
 )
 from layer2_runtime_governance.tool_contract import ObservedEvidence
+from layer2_runtime_governance.signal_services.evidence_service import build_evidence_signal
 
 
 class Layer2TraceTests(unittest.TestCase):
@@ -123,6 +126,40 @@ class Layer2TraceTests(unittest.TestCase):
         self.assertEqual(trace.plan_steps[0].step_kind, "source_discovery")
         self.assertEqual(trace.plan_steps[0].evidence_requirement, "source_discovery")
         self.assertEqual(trace.plan_steps[0].claim_precision_ceiling, "high_level_summary")
+
+    # Actor observability and governance facts must call the same mismatch resolver.
+    def test_actor_trace_and_governance_signal_share_precision_mismatch_resolution(self) -> None:
+        state = _complete_task_state()
+        state.plan_steps[1].evidence_requirement = EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
+        state.plan_steps[1].claim_precision_ceiling = EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
+        state.observed_evidence = [
+            ObservedEvidence(
+                evidence_id="step_1:tool:1:source:1",
+                plan_step_id="step_1",
+                title="Discovered source",
+                locator="https://example.org/source",
+                excerpt="Discovered source metadata. Content has not been extracted.",
+                source_tool=ToolName.WEB_SEARCH,
+                support_level=EvidenceSupportLevel.SOURCE_DISCOVERY,
+            )
+        ]
+        state.actor_result = replace(
+            state.actor_result,
+            output_text="Regulation (EU) 2022/1925 was adopted on 14 September 2022.",
+        )
+
+        trace = build_layer2_runtime_trace(
+            thread_id="precision-mismatch-consistency",
+            intake_result=state.intake_payload,
+            task_state=state,
+        )
+        evidence_signal = build_evidence_signal(
+            task_state=state,
+            thresholds_version="test_thresholds",
+        )
+
+        self.assertTrue(trace.actor.precision_mismatch_detected)
+        self.assertTrue(evidence_signal["raw_facts"]["precision_mismatch"])
 
     def test_trace_dict_and_json_are_json_safe(self) -> None:
         state = _complete_task_state()

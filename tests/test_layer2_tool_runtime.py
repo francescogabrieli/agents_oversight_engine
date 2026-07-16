@@ -57,7 +57,8 @@ class Layer2ToolRuntimeTests(unittest.TestCase):
         )
 
 
-    def test_observe_tool_result_uses_single_fallback_evidence_for_multi_source_results(self) -> None:
+    # Snippetless sources remain individually traceable discovery evidence.
+    def test_observe_tool_result_preserves_multi_source_metadata_without_snippets(self) -> None:
         task_state = TaskState.from_intake(_build_research_intake_result())
         task_state.observed_evidence = []
         task_state.plan_steps = [
@@ -97,10 +98,16 @@ class Layer2ToolRuntimeTests(unittest.TestCase):
 
         observed_state = observe_tool_result(task_state)
 
-        self.assertEqual(len(observed_state.observed_evidence), 1)
+        self.assertEqual(len(observed_state.observed_evidence), 2)
         self.assertEqual(
-            observed_state.observed_evidence[0].evidence_id,
-            "step_1:tool:1:fallback",
+            [item.locator for item in observed_state.observed_evidence],
+            ["https://example.org/a", "https://example.org/b"],
+        )
+        self.assertTrue(
+            all(
+                item.support_level == EvidenceSupportLevel.SOURCE_DISCOVERY
+                for item in observed_state.observed_evidence
+            )
         )
 
 
@@ -138,7 +145,8 @@ class Layer2ToolRuntimeTests(unittest.TestCase):
         self.assertEqual(observed_state.observed_evidence, [])
 
 
-    def test_observe_tool_result_classifies_substantive_web_search_as_high_level_summary(self) -> None:
+    # Aggregated search content must not upgrade a snippetless source.
+    def test_observe_tool_result_keeps_snippetless_web_source_at_source_discovery(self) -> None:
         task_state = TaskState.from_intake(_build_research_intake_result())
         task_state.observed_evidence = []
         task_state.plan_steps = [
@@ -179,10 +187,50 @@ class Layer2ToolRuntimeTests(unittest.TestCase):
 
         self.assertEqual(
             observed_state.observed_evidence[0].support_level,
-            EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
+            EvidenceSupportLevel.SOURCE_DISCOVERY,
+        )
+
+
+    # A direct source-level timeline snippet can retain detailed support.
+    def test_observe_tool_result_allows_detailed_support_for_source_level_timeline_snippet(self) -> None:
+        task_state = TaskState.from_intake(_build_research_intake_result())
+        task_state.observed_evidence = []
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Collect official timeline evidence.",
+                rationale="The step needs an official source.",
+                expected_outcome="A source shortlist.",
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        task_state.current_plan_step_index = 0
+        task_state.tool_call_count = 1
+        task_state.last_tool_result = ToolExecutionResult(
+            request=ToolRequest(
+                plan_step_id="step_1",
+                tool_name=ToolName.WEB_SEARCH,
+                reason="Find the official timeline.",
+                query="official DMA timeline",
+            ),
+            success=True,
+            summary="Web search executed successfully.",
+            sources=(
+                ToolSource(
+                    title="Official DMA overview",
+                    locator="https://example.org/dma",
+                    snippet="The regulation was adopted on 14 September 2022 and entered into force later.",
+                ),
+            ),
+        )
+
+        observed_state = observe_tool_result(task_state)
+
+        self.assertEqual(
+            observed_state.observed_evidence[0].support_level,
+            EvidenceSupportLevel.DETAILED_EXTRACTED,
         )
 
 
 if __name__ == "__main__":
     unittest.main()
-

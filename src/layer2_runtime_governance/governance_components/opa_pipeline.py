@@ -17,6 +17,7 @@ from .decision_parser import (
     _build_governance_trace_from_opa_output,
     _build_judge_static_context,
     _build_static_assessment_from_decision,
+    _parse_governance_directive,
 )
 from .fail_closed import (
     _build_fail_closed_governance_result,
@@ -196,6 +197,11 @@ def evaluate_opa_first_governance(
             policy_engine_service=policy_engine_service,
             decision_input=decision_input,
         )
+        # Build every exported diagnostic from the scored final OPA pillars.
+        dynamic_assessment = _build_dynamic_assessment_from_signals(
+            pillars=raw_output.get("pillar_results", pillars),
+            directive=_parse_governance_directive(raw_output.get("directive")),
+        )
         governance_decision = _build_governance_trace_from_opa_output(
             raw_output=raw_output,
             policy_input=policy_input,
@@ -226,10 +232,6 @@ def evaluate_opa_first_governance(
         raw_output=raw_output,
         policy_input=policy_input,
         policy_engine_service=policy_engine_service,
-    )
-    dynamic_assessment = _build_dynamic_assessment_from_signals(
-        pillars=raw_output.get("pillar_results", pillars),
-        directive=governance_decision.oversight_recommended_directive,
     )
     return GovernanceEvaluationResult(
         policy_input=policy_input,

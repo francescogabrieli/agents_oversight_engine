@@ -265,17 +265,26 @@ def _build_dynamic_assessment_from_signals(
     trajectory = pillars.get("trajectory", {})
     evidence_assessment = EvidenceQualityAssessment(
         score=float(evidence.get("score", evidence.get("diagnostic_score")) or 0.0),
-        level=_parse_oversight_level(evidence.get("diagnostic_level"), OversightSignalLevel.WEAK),
+        level=_parse_oversight_level(
+            evidence.get("level", evidence.get("diagnostic_level")),
+            OversightSignalLevel.WEAK,
+        ),
         reason_codes=_parse_oversight_reason_codes(evidence.get("reason_facts", [])),
     )
     risk_assessment = OperationalRiskAssessment(
         score=float(risk.get("score", risk.get("diagnostic_score")) or 0.0),
-        level=_parse_oversight_level(risk.get("diagnostic_level"), OversightSignalLevel.LOW),
+        level=_parse_oversight_level(
+            risk.get("level", risk.get("diagnostic_level")),
+            OversightSignalLevel.LOW,
+        ),
         reason_codes=_parse_oversight_reason_codes(risk.get("reason_facts", [])),
     )
     trajectory_assessment = TrajectoryHealthAssessment(
         score=float(trajectory.get("score", trajectory.get("diagnostic_score")) or 0.0),
-        level=_parse_oversight_level(trajectory.get("diagnostic_level"), OversightSignalLevel.HEALTHY),
+        level=_parse_oversight_level(
+            trajectory.get("level", trajectory.get("diagnostic_level")),
+            OversightSignalLevel.HEALTHY,
+        ),
         reason_codes=_parse_oversight_reason_codes(trajectory.get("reason_facts", [])),
     )
     recommended = _map_governance_to_dynamic_directive(directive)

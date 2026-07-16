@@ -169,14 +169,23 @@ def _build_observed_evidence_from_tool_result(
         )
         return evidence_items
 
-    # Preserve source-level provenance whenever the tool returned it.
+    # Preserve source-level provenance even when search backends return URL metadata without snippets.
     for index, source in enumerate(tool_result.sources, start=1):
-        # Avoid cloning one global tool transcript onto every returned source.
         excerpt = source.snippet
-        if excerpt is None and len(tool_result.sources) == 1:
-            excerpt = tool_result.content or tool_result.summary
-        if not _is_meaningful_evidence_excerpt(excerpt):
+        if not _is_meaningful_evidence_excerpt(excerpt) and source.locator.strip():
+            excerpt = f"Discovered source metadata: {source.title}. Content has not been extracted."
+        if not _is_meaningful_evidence_excerpt(excerpt) or not source.locator.strip():
             continue
+        support_level = (
+            EvidenceSupportLevel.SOURCE_DISCOVERY
+            if not _is_meaningful_evidence_excerpt(source.snippet)
+            else _classify_observed_evidence_support_level(
+                tool_name=tool_result.request.tool_name,
+                locator=source.locator,
+                title=source.title,
+                excerpt=source.snippet or "",
+            )
+        )
         evidence_items.append(
             ObservedEvidence(
                 evidence_id=f"{current_step.step_id}:tool:{state.tool_call_count}:source:{index}",
@@ -186,16 +195,11 @@ def _build_observed_evidence_from_tool_result(
                 excerpt=(excerpt or "")[:1000],
                 source_kind=EvidenceSourceKind.TOOL_OBSERVATION,
                 source_tool=tool_result.request.tool_name,
-                support_level=_classify_observed_evidence_support_level(
-                    tool_name=tool_result.request.tool_name,
-                    locator=source.locator,
-                    title=source.title,
-                    excerpt=excerpt or "",
-                ),
+                support_level=support_level,
             )
         )
 
-    # Keep at least one fallback evidence item even when the tool returned no structured sources.
+    # Keep a bounded fallback only when the backend returned no usable source metadata.
     if not evidence_items:
         locator = tool_result.request.url or tool_result.request.query or tool_result.request.tool_name.value
         excerpt = tool_result.content or tool_result.error_message or tool_result.summary
@@ -217,11 +221,15 @@ def _build_observed_evidence_from_tool_result(
                 excerpt=(excerpt or "")[:1000],
                 source_kind=EvidenceSourceKind.TOOL_OBSERVATION,
                 source_tool=tool_result.request.tool_name,
-                support_level=_classify_observed_evidence_support_level(
-                    tool_name=tool_result.request.tool_name,
-                    locator=locator,
-                    title=tool_result.request.tool_name.value,
-                    excerpt=excerpt or "",
+                support_level=(
+                    EvidenceSupportLevel.SOURCE_DISCOVERY
+                    if tool_result.request.tool_name == ToolName.WEB_SEARCH
+                    else _classify_observed_evidence_support_level(
+                        tool_name=tool_result.request.tool_name,
+                        locator=locator,
+                        title=tool_result.request.tool_name.value,
+                        excerpt=excerpt or "",
+                    )
                 ),
             )
         )
@@ -331,9 +339,8 @@ def _classify_observed_evidence_support_level(
     )
 
     if any(marker in lowered_excerpt for marker in timeline_markers):
-        if tool_name == ToolName.WEB_SEARCH:
-            return EvidenceSupportLevel.DETAILED_EXTRACTED
-        if tool_name == ToolName.FETCH_URL_TEXT:
+        # This branch is reached only for a source-level snippet or fetched content.
+        if tool_name in {ToolName.WEB_SEARCH, ToolName.FETCH_URL_TEXT}:
             return EvidenceSupportLevel.DETAILED_EXTRACTED
 
     if tool_name == ToolName.WEB_SEARCH:

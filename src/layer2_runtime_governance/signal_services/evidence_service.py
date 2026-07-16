@@ -10,7 +10,7 @@ from layer2_runtime_governance.oversight import (
     _latest_tool_result_for_evaluated_step,
     _meaningful_observed_evidence,
     _output_claim_support_level,
-    _output_stays_within_intake_support,
+    _precision_mismatch_detected,
     _required_evidence_support_level,
 )
 from layer2_runtime_governance.domain import TaskState
@@ -28,11 +28,7 @@ def build_evidence_signal(*, task_state: TaskState, thresholds_version: str) -> 
         required_level=required_level,
         output_claim_level=output_claim_level,
     )
-    precision_mismatch = (
-        not _output_stays_within_intake_support(task_state=task_state)
-        and _evidence_support_level_rank(available_level)
-        < _evidence_support_level_rank(effective_required_level)
-    )
+    precision_mismatch = _precision_mismatch_detected(task_state=task_state)
     raw_facts = {
         "actor_evidence_sufficient": bool(validation and validation.evidence_sufficient),
         "actor_objective_satisfied": bool(validation and validation.objective_satisfied),

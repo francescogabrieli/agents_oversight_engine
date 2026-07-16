@@ -35,6 +35,7 @@ from layer2_runtime_governance.governance_components import (
     evaluate_opa_first_governance,
 )
 from layer2_runtime_governance.domain import PlanStep, PlanStepStatus, RuntimeState, TaskState
+from layer2_runtime_governance.oversight import OversightSignalLevel
 
 
 class OPAFirstGovernanceContractTests(unittest.TestCase):
@@ -100,6 +101,22 @@ class OPAFirstGovernanceContractTests(unittest.TestCase):
 
         self.assertEqual(result.governance_decision.directive, GovernanceDirective.WAIT_HUMAN_REVIEW)
         self.assertIn(GovernanceReasonCode.OPA_FAILURE_FAIL_CLOSED, result.governance_decision.reason_codes)
+
+    # Final diagnostics and the governance trace must use the scored OPA pillar output.
+    def test_scored_opa_levels_drive_dynamic_and_governance_summaries(self) -> None:
+        result = evaluate_opa_first_governance(
+            task_state=_actor_ready_state(),
+            policy_engine_service=_ScoredAllowPolicyEngine(),
+            thread_id="opa-first-scored-diagnostics",
+        )
+
+        self.assertEqual(result.dynamic_policy_assessment.evidence_quality.score, 0.93)
+        self.assertEqual(
+            result.dynamic_policy_assessment.evidence_quality.level,
+            OversightSignalLevel.STRONG,
+        )
+        self.assertIn("evidence strong (0.93)", result.governance_decision.dynamic_policy_summary)
+        self.assertNotIn("evidence weak (0.00)", result.governance_decision.dynamic_policy_summary)
 
 
 class EvaluationServiceDecouplingTests(unittest.TestCase):
@@ -175,6 +192,16 @@ class _InvalidDecisionPolicyEngine(_AllowPolicyEngine):
     def evaluate_decision(self, *, decision_input):
         self.calls.append("decision")
         return {"directive": "continue"}
+
+
+class _ScoredAllowPolicyEngine(_AllowPolicyEngine):
+    # Return the same scored pillar shape produced by the real OPA bundle.
+    def evaluate_decision(self, *, decision_input):
+        output = super().evaluate_decision(decision_input=decision_input)
+        output["pillar_results"]["evidence"].update({"score": 0.93, "level": "strong"})
+        output["pillar_results"]["risk"].update({"score": 0.0, "level": "low"})
+        output["pillar_results"]["trajectory"].update({"score": 1.0, "level": "healthy"})
+        return output
 
 
 # Build a compact actor-ready TaskState for OPA-first contract tests.

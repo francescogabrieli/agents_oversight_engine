@@ -819,6 +819,22 @@ def _effective_support_check_level(
     return required_level
 
 
+# Resolve precision mismatch once so actor diagnostics, governance facts, and traces cannot diverge.
+def _precision_mismatch_detected(*, task_state: TaskState) -> bool:
+    if _output_stays_within_intake_support(task_state=task_state):
+        return False
+    available_level = _available_evidence_support_level(task_state=task_state)
+    required_level = _required_evidence_support_level(task_state=task_state)
+    output_claim_level = _output_claim_support_level(task_state=task_state)
+    effective_level = _effective_support_check_level(
+        required_level=required_level,
+        output_claim_level=output_claim_level,
+    )
+    return _evidence_support_level_rank(available_level) < _evidence_support_level_rank(
+        effective_level
+    )
+
+
 # Resolve the evidence support level and record whether the value came from typed metadata or fallback heuristics.
 def resolve_required_evidence_support_context(
     *,
@@ -1484,4 +1500,5 @@ __all__ = [
     "resolve_required_evidence_support_context",
     "_effective_support_check_level",
     "_output_claim_support_level",
+    "_precision_mismatch_detected",
 ]
