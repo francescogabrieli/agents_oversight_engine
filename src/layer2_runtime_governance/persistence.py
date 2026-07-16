@@ -4,7 +4,6 @@ import json
 import sqlite3
 import threading
 from collections import defaultdict
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -21,8 +20,9 @@ from .hitl_dashboard import (
     governance_hitl_dashboard_snapshot_to_dict,
     governance_hitl_dashboard_snapshot_to_json,
 )
-from .state import TaskState
-from .trace import (
+from .infrastructure.ports import RuntimeArtifactPaths, RuntimeArtifactStorePort
+from .domain import TaskState
+from .observability import (
     build_compact_trace_from_runtime_trace,
     build_layer2_runtime_trace,
     layer2_trace_to_json,
@@ -58,17 +58,6 @@ def build_sqlite_checkpointer(
     saver = SqliteSaver(connection, serde=serde)
     saver.setup()
     return saver
-
-
-@dataclass(frozen=True)
-class RuntimeArtifactPaths:
-    # Expose the main persisted files so tests and operator tooling can inspect them directly.
-    thread_dir: Path
-    runtime_summary_path: Path
-    full_trace_path: Path
-    compact_trace_path: Path
-    dashboard_snapshot_path: Path
-    pending_human_review_path: Path
 
 
 class DiskBackedMemorySaver(InMemorySaver):
@@ -427,7 +416,7 @@ def persist_runtime_artifacts(
     thread_id: str,
     intake_result: IntakeResult,
     task_state: TaskState,
-    artifact_store: RuntimeArtifactStore | None = None,
+    artifact_store: RuntimeArtifactStorePort | None = None,
 ) -> RuntimeArtifactPaths:
     resolved_store = artifact_store or RuntimeArtifactStore()
     return resolved_store.persist(

@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from layer2_runtime_governance.actor_contract import CapabilityAccessMode
-from layer2_runtime_governance.governance import PolicyEvaluationInput
-from layer2_runtime_governance.tool_gateway import (
+from layer2_runtime_governance.governance_components import PolicyEvaluationInput
+from layer2_runtime_governance.tools import (
     build_default_tool_gateway_config,
     get_default_tool_gateway_config_path,
     load_tool_gateway_config,

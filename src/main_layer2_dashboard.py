@@ -29,7 +29,7 @@ from layer2_runtime_governance import (
     build_runtime_graph,
 )
 from layer2_runtime_governance.persistence import RuntimeArtifactStore
-from layer2_runtime_governance.state import TaskState
+from layer2_runtime_governance.domain import TaskState
 
 from main_layer2 import resume_layer2_flow
 

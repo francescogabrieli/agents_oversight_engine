@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from llm_retry import llm_retry
 
-from .state import PlanStep, PlanStepKind, PlanStepStatus, TaskState
+from .domain import PlanStep, PlanStepKind, PlanStepStatus, TaskState
 from .tool_contract import EvidenceSupportLevel
 
 try:

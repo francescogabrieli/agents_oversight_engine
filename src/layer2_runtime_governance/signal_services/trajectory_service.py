@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from layer2_runtime_governance.actor_contract import ActorResultType
-from layer2_runtime_governance.governance import PolicyEvaluationInput
-from layer2_runtime_governance.state import ScratchpadEntryType, TaskState
+from layer2_runtime_governance.governance_components import PolicyEvaluationInput
+from layer2_runtime_governance.domain import ScratchpadEntryType, TaskState
 
 
 # Build trajectory counters and diagnostic components for OPA interpretation.

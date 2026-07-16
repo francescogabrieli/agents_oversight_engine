@@ -24,7 +24,7 @@ from .oversight import (
     _output_stays_within_intake_support,
     _required_evidence_support_level,
 )
-from .state import ExternalCommunicationPhase, TaskState
+from .domain import ExternalCommunicationPhase, TaskState
 from .tool_contract import EvidenceSupportLevel
 
 try:
@@ -33,7 +33,7 @@ except ImportError:  # pragma: no cover - handled at runtime if dependency is mi
     OpenAI = None
 
 if TYPE_CHECKING:
-    from .governance import PolicyEvaluationInput, StaticPolicyAssessment
+    from .governance_components import PolicyEvaluationInput, StaticPolicyAssessment
 
 
 class JudgeRecommendedDirective(str, Enum):

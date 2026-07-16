@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import sys
 import unittest
+from uuid import uuid4
 from pathlib import Path
 
+from langgraph.checkpoint.memory import InMemorySaver
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
@@ -51,7 +53,6 @@ from layer2_runtime_governance import (
     ToolName,
     ToolRequest,
     ToolSource,
-    build_governance_decision,
     build_policy_evaluation_input,
     build_runtime_graph,
 )
@@ -64,6 +65,9 @@ from layer2_runtime_governance.oversight import (
     evaluate_trajectory_health,
     get_default_oversight_policy_config_path,
     load_oversight_policy_config,
+)
+from layer2_runtime_governance.infrastructure.checkpointing import (
+    build_runtime_serializer,
 )
 from layer2_runtime_governance.tool_contract import ObservedEvidence
 from layer2_runtime_governance.tool_gateway import (
@@ -392,194 +396,11 @@ class Layer2OversightTests(unittest.TestCase):
         self.assertNotIn(OversightReasonCode.ACTOR_TURNS_EXCEEDED, assessment.reason_codes)
         self.assertNotIn(OversightReasonCode.FAILED_TOOL_RESULT_PRESENT, assessment.reason_codes)
 
-    def test_replan_limit_escalates_to_human_review(self) -> None:
-        task_state = _build_task_state_with_actor_result(
-            actor_result_type=ActorResultType.NEEDS_REPLAN,
-            validation=None,
-        )
-        task_state.step_history.append(
-            _step_record(node_name="replanner", summary="First replan.")
-        )
-        task_state.step_history.append(
-            _step_record(node_name="replanner", summary="Second replan.")
-        )
-        policy_input = build_policy_evaluation_input(task_state=task_state)
 
-        oversight = evaluate_confidence_risk_trajectory(
-            task_state=task_state,
-            policy_input=policy_input,
-            tool_gateway_config=_tool_config(),
-        )
-        decision = build_governance_decision(
-            policy_input=policy_input,
-            policy_result=_policy_result(PolicyDecision.ALLOW),
-            oversight_assessment=oversight,
-        )
 
-        self.assertEqual(decision.directive, GovernanceDirective.WAIT_HUMAN_REVIEW)
-        self.assertIn(
-            OversightReasonCode.REPLAN_LIMIT_EXCEEDED,
-            oversight.trajectory_health.reason_codes,
-        )
 
-    def test_opa_deny_remains_stop_even_when_oversight_is_healthy(self) -> None:
-        task_state = _healthy_completion_state()
-        policy_input = build_policy_evaluation_input(task_state=task_state)
-        oversight = evaluate_confidence_risk_trajectory(
-            task_state=task_state,
-            policy_input=policy_input,
-            tool_gateway_config=_tool_config(),
-        )
 
-        decision = build_governance_decision(
-            policy_input=policy_input,
-            policy_result=_policy_result(PolicyDecision.DENY),
-            oversight_assessment=oversight,
-        )
 
-        self.assertEqual(decision.directive, GovernanceDirective.STOP)
-        self.assertEqual(decision.policy_directive, GovernanceDirective.STOP)
-
-    def test_opa_allow_with_high_risk_waits_for_human_review(self) -> None:
-        task_state = _build_task_state_with_actor_result(
-            actor_result_type=ActorResultType.PROPOSE_ACTION,
-            tool_request=ToolRequest(
-                plan_step_id="step_1",
-                tool_name=ToolName.MCP_LOCAL_TEST_TEXT_STATS,
-                reason="Use high-risk tool.",
-                text="agent",
-            ),
-        )
-        policy_input = build_policy_evaluation_input(task_state=task_state)
-        oversight = evaluate_confidence_risk_trajectory(
-            task_state=task_state,
-            policy_input=policy_input,
-            tool_gateway_config=_tool_config(
-                risk_level=ToolRiskLevel.HIGH,
-                requires_human_review=True,
-            ),
-        )
-
-        decision = build_governance_decision(
-            policy_input=policy_input,
-            policy_result=_policy_result(PolicyDecision.ALLOW),
-            oversight_assessment=oversight,
-        )
-
-        self.assertEqual(decision.directive, GovernanceDirective.WAIT_HUMAN_REVIEW)
-        self.assertEqual(
-            decision.oversight_recommended_directive,
-            GovernanceDirective.WAIT_HUMAN_REVIEW,
-        )
-
-    def test_opa_allow_with_weak_completion_requests_more_evidence(self) -> None:
-        task_state = _build_task_state_with_actor_result(
-            actor_result_type=ActorResultType.FINAL_OUTPUT,
-            validation=StepValidation(
-                plan_step_id="step_1",
-                objective_satisfied=False,
-                evidence_sufficient=False,
-                confidence=0.3,
-                next_action=StepValidationDecision.COMPLETE_STEP,
-                rationale_summary="Completion is weak.",
-                residual_uncertainty="Evidence is missing.",
-            ),
-        )
-        policy_input = build_policy_evaluation_input(task_state=task_state)
-        oversight = evaluate_confidence_risk_trajectory(
-            task_state=task_state,
-            policy_input=policy_input,
-            tool_gateway_config=_tool_config(),
-        )
-
-        decision = build_governance_decision(
-            policy_input=policy_input,
-            policy_result=_policy_result(PolicyDecision.ALLOW),
-            oversight_assessment=oversight,
-        )
-
-        self.assertEqual(decision.directive, GovernanceDirective.REQUEST_MORE_EVIDENCE)
-        self.assertEqual(
-            decision.oversight_recommended_directive,
-            GovernanceDirective.REQUEST_MORE_EVIDENCE,
-        )
-
-    def test_opa_allow_with_support_level_mismatch_requests_more_evidence(self) -> None:
-        task_state = _build_task_state_with_actor_result(
-            actor_result_type=ActorResultType.FINAL_OUTPUT,
-            validation=StepValidation(
-                plan_step_id="step_1",
-                objective_satisfied=True,
-                evidence_sufficient=True,
-                confidence=0.9,
-                next_action=StepValidationDecision.COMPLETE_STEP,
-                rationale_summary="The draft appears complete.",
-            ),
-        )
-        task_state.plan_steps[0].objective = "Capture the DMA's main obligations and designation criteria."
-        task_state.plan_steps[0].expected_outcome = "A concise set of obligations and criteria."
-        task_state.actor_result = ActorResult(
-            plan_step_id="step_1",
-            result_type=ActorResultType.FINAL_OUTPUT,
-            summary="Complete the step.",
-            capability_mode=CapabilityAccessMode.NONE,
-            output_text=(
-                "Gatekeeper status depends on specific size thresholds, and the regulation "
-                "requires interoperability and restrictions on self-preferencing."
-            ),
-            step_validation=task_state.step_validations[-1],
-        )
-        task_state.observed_evidence.append(
-            ObservedEvidence(
-                evidence_id="step_1:tool:1:source:1",
-                plan_step_id="step_1",
-                title="DMA legislation page",
-                locator="https://digital-markets-act.ec.europa.eu/legislation_en",
-                excerpt=(
-                    "The DMA contains the main rules for the designation of gatekeepers and "
-                    "the implementation of the obligations and prohibitions imposed on them."
-                ),
-                source_tool=ToolName.FETCH_URL_TEXT,
-                support_level=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
-            )
-        )
-        task_state.last_tool_result = _successful_tool_result()
-        policy_input = build_policy_evaluation_input(task_state=task_state)
-        oversight = evaluate_confidence_risk_trajectory(
-            task_state=task_state,
-            policy_input=policy_input,
-            tool_gateway_config=_tool_config(),
-        )
-
-        decision = build_governance_decision(
-            policy_input=policy_input,
-            policy_result=_policy_result(PolicyDecision.ALLOW),
-            oversight_assessment=oversight,
-        )
-
-        self.assertEqual(decision.directive, GovernanceDirective.REQUEST_MORE_EVIDENCE)
-        self.assertIn(
-            OversightReasonCode.EVIDENCE_SUPPORT_BELOW_STEP_NEED,
-            oversight.evidence_quality.reason_codes,
-        )
-
-    def test_opa_allow_with_healthy_signals_preserves_continue(self) -> None:
-        task_state = _healthy_completion_state()
-        policy_input = build_policy_evaluation_input(task_state=task_state)
-        oversight = evaluate_confidence_risk_trajectory(
-            task_state=task_state,
-            policy_input=policy_input,
-            tool_gateway_config=_tool_config(),
-        )
-
-        decision = build_governance_decision(
-            policy_input=policy_input,
-            policy_result=_policy_result(PolicyDecision.ALLOW),
-            oversight_assessment=oversight,
-        )
-
-        self.assertEqual(decision.directive, GovernanceDirective.CONTINUE)
-        self.assertEqual(decision.policy_directive, GovernanceDirective.CONTINUE)
 
     def test_runtime_weak_completion_returns_to_actor_for_more_evidence(self) -> None:
         graph = build_runtime_graph(
@@ -588,11 +409,13 @@ class Layer2OversightTests(unittest.TestCase):
             tool_gateway_service=NoopToolGateway(),
             replanner_service=NoopReplanner(),
             policy_engine_service=AllowPolicyEngine(),
+            checkpointer=InMemorySaver(serde=build_runtime_serializer()),
         )
 
         result = graph.invoke(
             {"intake_result": _intake_result()},
-            config={"configurable": {"thread_id": "oversight-more-evidence-loop"}},
+            # Durable checkpoints require isolated ids across repeated test runs.
+            config={"configurable": {"thread_id": f"oversight-more-evidence-loop-{uuid4()}"}},
         )
 
         task_state = result["task_state"]
@@ -862,7 +685,38 @@ class WeakThenStrongCompletionActor(ActorPort):
 
 class AllowPolicyEngine(PolicyEnginePort):
     policy_engine_name = "allow_policy_engine"
-    policy_bundle_version = "allow_policy_v1"
+    policy_bundle_version = "layer2_governance_v2"
+    policy_config_version = "layer2_governance_thresholds_v1"
+
+    # Request deterministic pillars without a judge for this focused recovery test.
+    def evaluate_required_pillars(self, *, base_facts):
+        return {
+            "require_evidence": True,
+            "require_risk": True,
+            "require_trajectory": True,
+            "require_behavioral": False,
+            "require_judge": False,
+        }
+
+    # Reproduce the evidence recovery decision while leaving all other signals permissive.
+    def evaluate_decision(self, *, decision_input):
+        validation = decision_input["base_facts"].get("step_validation") or {}
+        weak_completion = float(validation.get("confidence", 0.0)) < 0.65
+        return {
+            "schema_version": "governance_decision_output.v1",
+            "directive": "request_more_evidence" if weak_completion else "continue",
+            "policy_decision": "allow",
+            "reason_codes": [
+                "evidence_support_below_step_need" if weak_completion else "allowed_by_policy"
+            ],
+            "pillar_results": decision_input["pillars"],
+            "selected_reason": "Evidence recovery test decision.",
+            "rejected_alternatives": {},
+            "safety_invariants_checked": ["deny_is_absorbing"],
+            "requires_human_review": False,
+            "policy_bundle_version": self.policy_bundle_version,
+            "policy_config_version": self.policy_config_version,
+        }
 
     # Always allow so the test isolates adaptive oversight behavior.
     def evaluate(self, *, policy_input) -> PolicyEvaluationResult:

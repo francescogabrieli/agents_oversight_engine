@@ -17,7 +17,7 @@ from .oversight import (
     OversightSignalLevel,
     _available_evidence_support_level,
 )
-from .state import TaskState
+from .domain import TaskState
 from .tool_contract import EvidenceSupportLevel
 
 if TYPE_CHECKING:

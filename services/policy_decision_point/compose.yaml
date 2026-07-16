@@ -1,0 +1,23 @@
+services:
+  policy-decision-point:
+    image: openpolicyagent/opa:1.15.2-static
+    command:
+      - run
+      - --server
+      - --addr=0.0.0.0:8181
+      - --log-format=json
+      - /policy
+    ports:
+      - "8181:8181"
+    volumes:
+      - ../../configs/opa/layer2_governance:/policy:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/opa", "eval", "--fail-defined", "--data", "/policy", "data.layer2.governance.required_pillars"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s

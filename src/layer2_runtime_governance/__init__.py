@@ -29,7 +29,7 @@ from .behavioral import (
     persist_behavioral_snapshot,
     persist_judge_snapshot,
 )
-from .governance import (
+from .governance_components import (
     GovernanceDecision,
     GovernanceDecisionTrace,
     GovernanceEvaluationResult,
@@ -44,15 +44,9 @@ from .governance import (
     PolicyEvaluationResult,
     StaticPolicyAssessment,
     build_default_policy_engine,
-    build_governance_decision,
     build_opa_input_document,
     build_policy_evaluation_input,
-    combine_governance_assessments,
-    combine_governance_directives,
-    constrains_capability_use,
-    derive_governance_directive,
     evaluate_opa_first_governance,
-    evaluate_static_policy,
 )
 from .graph import (
     Layer2GraphInput,
@@ -61,6 +55,7 @@ from .graph import (
     build_default_checkpointer,
     build_runtime_graph,
 )
+from .composition import Layer2RuntimeDependencies, compose_layer2_runtime
 from .judge import (
     DisabledJudge,
     JudgeAssessment,
@@ -88,7 +83,7 @@ from .hitl_dashboard import (
     governance_hitl_dashboard_snapshot_to_dict,
     governance_hitl_dashboard_snapshot_to_json,
 )
-from .nodes import (
+from .runtime import (
     actor,
     bootstrap_from_intake,
     finalize_bootstrap,
@@ -152,7 +147,7 @@ from .replanning import (
     build_replanner_system_prompt,
     build_replanner_user_prompt,
 )
-from .state import (
+from .domain import (
     ExecutedPlanStep,
     ExternalCommunicationPhase,
     ExternalCommunicationDraft,
@@ -199,7 +194,7 @@ from .tool_gateway import (
     get_default_tool_gateway_config_path,
     load_tool_gateway_config,
 )
-from .trace import (
+from .observability import (
     Layer2RuntimeTrace,
     TraceActorTurn,
     TraceBehavioralAssessment,
@@ -280,6 +275,7 @@ __all__ = [
     "Layer2GraphInput",
     "Layer2GraphOutput",
     "Layer2GraphState",
+    "Layer2RuntimeDependencies",
     "Layer2RuntimeTrace",
     "LocalConservativeReplanner",
     "McpServerDefinition",
@@ -377,7 +373,6 @@ __all__ = [
     "build_default_replanner",
     "build_default_tool_gateway",
     "build_default_tool_gateway_config",
-    "build_governance_decision",
     "build_governance_hitl_dashboard_snapshot",
     "build_layer2_runtime_trace",
     "build_opa_input_document",
@@ -385,10 +380,7 @@ __all__ = [
     "build_replanner_system_prompt",
     "build_replanner_user_prompt",
     "build_runtime_graph",
-    "combine_governance_assessments",
-    "combine_governance_directives",
-    "constrains_capability_use",
-    "derive_governance_directive",
+    "compose_layer2_runtime",
     "evaluate_confidence_risk_trajectory",
     "evaluate_behavioral_policy",
     "evaluate_opa_first_governance",
@@ -396,7 +388,6 @@ __all__ = [
     "evaluate_dynamic_policy",
     "evaluate_evidence_quality",
     "evaluate_operational_risk",
-    "evaluate_static_policy",
     "evaluate_trajectory_health",
     "finalize_bootstrap",
     "get_default_behavioral_store_path",

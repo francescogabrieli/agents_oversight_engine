@@ -6,9 +6,9 @@ from enum import Enum
 from typing import Any
 
 from .behavioral import BehavioralAssessment
-from .governance import GovernanceDecision
+from .governance_components import GovernanceDecision
 from .oversight import DynamicPolicyAssessment, OversightAssessment
-from .state import (
+from .domain import (
     HumanReviewDecision,
     HumanReviewDecisionType,
     HumanReviewExternalEdit,

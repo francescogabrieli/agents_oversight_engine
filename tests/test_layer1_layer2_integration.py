@@ -5,6 +5,8 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
+from langgraph.checkpoint.memory import InMemorySaver
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
@@ -33,10 +35,15 @@ from layer2_runtime_governance import (
     ActorResult,
     ActorResultType,
     ActorTask,
+    BehavioralAssessment,
+    BehavioralRecommendedDirective,
     CapabilityAccessMode,
     GovernanceDirective,
     GovernanceReasonCode,
+    EvidenceSourceKind,
+    EvidenceSupportLevel,
     PlanStep,
+    PlanStepKind,
     PlannerDecision,
     PolicyDecision,
     PolicyEnginePort,
@@ -55,6 +62,9 @@ from layer2_runtime_governance import (
     ToolName,
     ToolRequest,
     ToolSource,
+)
+from layer2_runtime_governance.infrastructure.checkpointing import (
+    build_runtime_serializer,
 )
 from main_layer2 import run_layer2_flow
 
@@ -92,12 +102,18 @@ class StubPlanner:
                     objective="Collect reliable evidence aligned with the intake goal.",
                     rationale="The first step should ground the task before synthesis.",
                     expected_outcome="A compact reliable evidence base.",
+                    step_kind=PlanStepKind.SOURCE_DISCOVERY,
+                    evidence_requirement=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
+                    claim_precision_ceiling=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
                 ),
                 PlanStep(
                     step_id="step_2",
                     objective="Synthesize a grounded answer.",
                     rationale="A synthesis step should follow evidence gathering.",
                     expected_outcome="A concise grounded answer aligned with the goal.",
+                    step_kind=PlanStepKind.FINAL_SYNTHESIS,
+                    evidence_requirement=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
+                    claim_precision_ceiling=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
                 ),
             ],
             rationale="The stub planner selected an evidence-first semantic mini-plan.",
@@ -110,8 +126,12 @@ class StubActor(ActorPort):
     actor_name = "stub_actor"
     prompt_version = "stub_actor_v1"
 
+    # Drive one deterministic actor/tool/observation loop across two semantic steps.
     def act(self, *, actor_task: ActorTask) -> ActorResult:
-        if actor_task.current_plan_step.step_id == "step_1" and not actor_task.observed_evidence:
+        if actor_task.current_plan_step.step_id == "step_1" and not any(
+            item.source_kind == EvidenceSourceKind.TOOL_OBSERVATION
+            for item in actor_task.observed_evidence
+        ):
             return ActorResult(
                 plan_step_id=actor_task.current_plan_step.step_id,
                 result_type=ActorResultType.PROPOSE_ACTION,
@@ -196,7 +216,10 @@ class StubToolGateway(ToolGatewayPort):
                 ToolSource(
                     title="European Commission - Digital Markets Act",
                     locator="https://commission.europa.eu/dma",
-                    snippet="The DMA sets rules for gatekeeper platforms.",
+                    snippet=(
+                        "Official EU material describes DMA rules and obligations for "
+                        "gatekeepers and core platform services."
+                    ),
                 ),
             ),
         )
@@ -204,8 +227,70 @@ class StubToolGateway(ToolGatewayPort):
 
 class StubPolicyEngine(PolicyEnginePort):
     policy_engine_name = "stub_policy_engine"
-    policy_bundle_version = "stub_policy_bundle_v1"
+    policy_bundle_version = "layer2_governance_v2"
+    policy_config_version = "layer2_governance_thresholds_v1"
 
+    # Select deterministic OPA-first pillars without contacting a policy service.
+    def evaluate_required_pillars(self, *, base_facts):
+        return {
+            "require_evidence": True,
+            "require_risk": True,
+            "require_trajectory": True,
+            "require_behavioral": True,
+            "require_judge": False,
+        }
+
+    # Return the minimal schema-valid decision needed by the integration trajectory.
+    def evaluate_decision(self, *, decision_input):
+        base_facts = decision_input["base_facts"]
+        actor = base_facts["actor"]
+        tool = base_facts["tool"]
+        evidence = decision_input["pillars"]["evidence"]["raw_facts"]
+        trajectory = decision_input["pillars"]["trajectory"]["raw_facts"]
+        directive = "continue"
+        policy_decision = "allow"
+        reason_code = "allowed_by_policy"
+        summary = "The integration policy permits this runtime turn."
+
+        if actor["capability_mode"] == "write" or actor["external_impact"]:
+            directive = "stop"
+            policy_decision = "deny"
+            reason_code = "write_capability_blocked"
+            summary = "Write-like capability is blocked by the integration policy."
+        elif actor["result_type"] == ActorResultType.ASK_CLARIFICATION.value:
+            directive = "ask_user_clarification"
+            policy_decision = "ask_clarification"
+            reason_code = "ask_clarification_required"
+            summary = "Clarification is required by the integration policy."
+        elif trajectory.get("provider_runtime_action_missing"):
+            directive = "replan"
+            reason_code = "repeated_recovery"
+            summary = "Missing provider action requires replanning."
+        elif evidence.get("support_rank_available", 0) < evidence.get("support_rank_required", 0):
+            directive = "request_more_evidence"
+            reason_code = "evidence_support_below_step_need"
+            summary = "The step requires stronger evidence support."
+        elif tool["name"] is not None and base_facts["policy"]["read_only_mode"]:
+            directive = "continue_read_only"
+            policy_decision = "allow_read_only"
+            reason_code = "read_only_allowed"
+            summary = "Read-only capability use is allowed."
+
+        return {
+            "schema_version": "governance_decision_output.v1",
+            "directive": directive,
+            "policy_decision": policy_decision,
+            "reason_codes": [reason_code],
+            "pillar_results": decision_input["pillars"],
+            "selected_reason": summary,
+            "rejected_alternatives": {},
+            "safety_invariants_checked": ["integration_fixture_policy"],
+            "requires_human_review": directive == "wait_human_review",
+            "policy_bundle_version": self.policy_bundle_version,
+            "policy_config_version": self.policy_config_version,
+        }
+
+    # Preserve the legacy policy port for compatibility-focused callers.
     def evaluate(self, *, policy_input: PolicyEvaluationInput) -> PolicyEvaluationResult:
         if (
             policy_input.external_impact
@@ -284,6 +369,27 @@ class StubReplanner(ReplannerPort):
         )
 
 
+class EmptyBehavioralStore:
+    # Keep integration tests independent from history accumulated by other test modules.
+    def build_behavioral_assessment(self, *, thread_id, task_state, dynamic_policy_assessment=None):
+        return BehavioralAssessment(
+            history_available=False,
+            historical_run_count=0,
+            feature_snapshot_version="integration_empty_v1",
+            summary="No behavioral history is used by this integration fixture.",
+            notes=(),
+            behavioral_recommended_directive=BehavioralRecommendedDirective.CONTINUE,
+        )
+
+    # The integration fixture intentionally keeps no behavioral read model.
+    def persist_behavioral_snapshot(self, *, thread_id, intake_result, task_state) -> None:
+        return None
+
+    # The integration fixture intentionally keeps no judge history.
+    def persist_judge_snapshot(self, *, thread_id, task_state) -> None:
+        return None
+
+
 class Layer1Layer2IntegrationTests(unittest.TestCase):
     def test_research_task_bootstraps_end_to_end(self) -> None:
         trace = run_layer2_flow(
@@ -306,6 +412,8 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
             tool_gateway_service=StubToolGateway(),
             replanner_service=StubReplanner(),
             policy_engine_service=StubPolicyEngine(),
+            behavioral_store_service=EmptyBehavioralStore(),
+            checkpointer=InMemorySaver(serde=build_runtime_serializer()),
         )
 
         intake_result = trace["intake_result"]
@@ -344,12 +452,22 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
         self.assertEqual(task_state.actor_result.capability_mode, CapabilityAccessMode.NONE)
         self.assertEqual(len(task_state.executed_steps), 2)
         self.assertEqual(task_state.tool_call_count, 1)
-        self.assertEqual(len(task_state.observed_evidence), 1)
+        self.assertEqual(len(task_state.observed_evidence), 3)
+        self.assertEqual(
+            sum(
+                item.source_kind == EvidenceSourceKind.TOOL_OBSERVATION
+                for item in task_state.observed_evidence
+            ),
+            1,
+        )
         self.assertEqual(len(task_state.scratchpad), 4)
         self.assertEqual(len(task_state.step_validations), 2)
         self.assertEqual(len(task_state.governance_history), 3)
         self.assertEqual(task_state.governance_history[0].policy_decision, PolicyDecision.ALLOW)
-        self.assertEqual(task_state.governance_history[0].directive, GovernanceDirective.CONTINUE)
+        self.assertEqual(
+            task_state.governance_history[0].directive,
+            GovernanceDirective.REQUEST_MORE_EVIDENCE,
+        )
 
     def test_clarification_task_bootstraps_end_to_end(self) -> None:
         trace = run_layer2_flow(
@@ -372,6 +490,8 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
             tool_gateway_service=StubToolGateway(),
             replanner_service=StubReplanner(),
             policy_engine_service=StubPolicyEngine(),
+            behavioral_store_service=EmptyBehavioralStore(),
+            checkpointer=InMemorySaver(serde=build_runtime_serializer()),
         )
 
         intake_result = trace["intake_result"]

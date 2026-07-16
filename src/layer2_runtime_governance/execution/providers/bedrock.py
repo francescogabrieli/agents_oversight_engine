@@ -1,0 +1,58 @@
+from __future__ import annotations
+
+from ...actor_contract import ActorPort, ActorResult, ActorTask
+from ...bedrock_client import BedrockChatClient, BedrockRuntimeError, BedrockRuntimeSettings
+from ..action_schemas import build_actor_runtime_tools
+from ..errors import ActorExecutionError
+from ..prompts import build_actor_system_prompt, build_actor_user_prompt
+from ..response_parser import convert_json_payload_to_tool_call
+from ..result_builder import (
+    build_provider_blocked_result,
+    build_provider_replan_result,
+    convert_tool_call_to_actor_result,
+)
+from ..settings import BedrockNovaActorSettings
+
+
+class BedrockNovaActor(ActorPort):
+    # Execute the actor role through the approved Nova 2 Lite inference profile.
+    actor_name = "bedrock_nova_2_lite_actor"
+    prompt_version = "actor_v6_bedrock_converse_tool_calling"
+
+    def __init__(self, settings: BedrockNovaActorSettings | None = None) -> None:
+        self._settings = settings or BedrockNovaActorSettings.from_env()
+        self._client = BedrockChatClient(
+            BedrockRuntimeSettings(
+                model_id=self._settings.model_id,
+                region_name=self._settings.region_name,
+                profile_name=self._settings.profile_name,
+                access_key_id=self._settings.access_key_id,
+                secret_access_key=self._settings.secret_access_key,
+                session_token=self._settings.session_token,
+                read_timeout_seconds=self._settings.read_timeout_seconds,
+                connect_timeout_seconds=self._settings.connect_timeout_seconds,
+            )
+        )
+
+    # Ask Bedrock for one action and normalize it into ActorResult.
+    def act(self, *, actor_task: ActorTask) -> ActorResult:
+        try:
+            payload = self._client.complete_tool_call(
+                system_prompt=build_actor_system_prompt(),
+                user_prompt=build_actor_user_prompt(actor_task=actor_task),
+                tools=build_actor_runtime_tools(),
+            )
+        except BedrockRuntimeError as exc:
+            if "no tool use" in str(exc):
+                return build_provider_blocked_result(actor_task=actor_task, detail=str(exc))
+            raise ActorExecutionError(f"Bedrock actor request failed: {exc}") from exc
+        try:
+            return convert_tool_call_to_actor_result(
+                actor_task=actor_task,
+                tool_call=convert_json_payload_to_tool_call(payload),
+            )
+        except ActorExecutionError as exc:
+            return build_provider_replan_result(actor_task=actor_task, detail=str(exc))
+
+
+__all__ = ["BedrockNovaActor"]

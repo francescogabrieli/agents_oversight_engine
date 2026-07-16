@@ -13,7 +13,7 @@ from layer2_runtime_governance.oversight import (
     _output_stays_within_intake_support,
     _required_evidence_support_level,
 )
-from layer2_runtime_governance.state import TaskState
+from layer2_runtime_governance.domain import TaskState
 
 
 # Build raw evidence facts and diagnostic score components without selecting a directive.

@@ -1,24 +1,14 @@
-from __future__ import annotations
 
-import json
-from dataclasses import asdict, dataclass, is_dataclass
-from datetime import datetime
-from enum import Enum
-from pathlib import Path
 from typing import Any
-
-from pydantic import BaseModel
 
 from layer1_intake import IntakeResult
 
-from .actor_contract import ActorResult
-from .behavioral import BehavioralAssessment
-from .governance import GovernanceDecision, StaticPolicyAssessment
-from .judge import JudgeAssessment
-from .oversight import (
-    DynamicPolicyAssessment,
+from ..actor_contract import ActorResult
+from ..behavioral import BehavioralAssessment
+from ..governance_components import GovernanceDecision, StaticPolicyAssessment
+from ..judge import JudgeAssessment
+from ..oversight import (
     EvidenceQualityAssessment,
-    EvidenceRequirementSource,
     OperationalRiskAssessment,
     OversightAssessment,
     _evidence_support_level_rank,
@@ -27,7 +17,8 @@ from .oversight import (
     resolve_required_evidence_support_context,
     TrajectoryHealthAssessment,
 )
-from .state import (
+from .serialization import enum_value, to_jsonable
+from ..domain import (
     ExecutedPlanStep,
     ExternalCommunicationDraft,
     ExternalCommunicationState,
@@ -37,319 +28,15 @@ from .state import (
     StepRecord,
     StepValidation,
     TaskState,
-    PlanStepKind,
 )
-from .state import HumanReviewDecision, HumanReviewRequest
-from .tool_contract import ObservedEvidence, ToolExecutionResult, ToolRequest, ToolSource
+from ..domain import HumanReviewDecision, HumanReviewRequest
+from ..tool_contract import ObservedEvidence, ToolExecutionResult, ToolRequest, ToolSource
 
 
-@dataclass(frozen=True)
-class TraceRuntimeSummary:
-    # TraceRuntimeSummary identifies the run and its terminal runtime state.
-    thread_id: str
-    current_state: str
-    bootstrap_completed: bool
-    runtime_flags: tuple[str, ...]
-    step_history: tuple[dict[str, Any], ...]
-    actor_turn_count: int
-    tool_call_count: int
+from .models import *
 
 
-@dataclass(frozen=True)
-class TraceIntakeSummary:
-    # TraceIntakeSummary preserves the Layer 1 handoff in compact audit form.
-    goal: str
-    context: str
-    domain_type: str
-    domain_label: str
-    sensitivity: str
-    success_criteria: tuple[str, ...]
-    constraints: tuple[str, ...]
-    parse_status: str
-    parser_name: str
-    prompt_version: str
-    schema_version: str
-    policy_profile_name: str
-    confidence_threshold: float
-    max_steps: int | None
-    max_tool_calls: int | None
-    read_only_mode: bool
-
-
-@dataclass(frozen=True)
-class TracePlanStep:
-    # TracePlanStep is one semantic planner step as seen by runtime governance.
-    step_id: str
-    objective: str
-    rationale: str
-    expected_outcome: str
-    step_kind: str | None
-    evidence_requirement: str | None
-    claim_precision_ceiling: str | None
-    resolved_required_evidence_support_level: str | None
-    resolved_required_evidence_support_source: str | None
-    status: str
-
-
-@dataclass(frozen=True)
-class TraceActorTurn:
-    # TraceActorTurn captures actor-facing execution without hidden reasoning.
-    actor_name: str | None
-    actor_prompt_version: str | None
-    result_type: str | None
-    plan_step_id: str | None
-    summary: str | None
-    capability_mode: str | None
-    external_impact: bool | None
-    output_text: str | None
-    blocking_reason: str | None
-    proposed_tool_name: str | None
-    output_claim_support_level: str | None
-    precision_mismatch_detected: bool
-
-
-@dataclass(frozen=True)
-class TraceToolCall:
-    # TraceToolCall records the tool request/result material retained by TaskState.
-    plan_step_id: str
-    tool_name: str
-    reason: str
-    query: str | None
-    url: str | None
-    text: str | None
-    path: str | None
-    expression: str | None
-    timezone: str | None
-    limit: int | None
-    max_results: int
-    extractive_goal: str | None
-    success: bool | None
-    summary: str | None
-    content: str | None
-    error_message: str | None
-    sources: tuple[dict[str, Any], ...]
-
-
-@dataclass(frozen=True)
-class TraceObservedEvidence:
-    # TraceObservedEvidence is the grounded evidence surface visible to later actor turns.
-    evidence_id: str
-    plan_step_id: str
-    title: str
-    locator: str
-    excerpt: str
-    source_kind: str
-    source_tool: str | None
-    support_level: str
-
-
-@dataclass(frozen=True)
-class TraceGovernanceDecision:
-    # TraceGovernanceDecision makes each policy/combiner decision readable.
-    directive: str
-    policy_decision: str
-    reason_codes: tuple[str, ...]
-    summary: str
-    constrains_capability_use: bool
-    evaluated_actor_result_type: str
-    evaluated_tool_name: str | None
-    policy_engine_name: str
-    policy_bundle_version: str
-    policy_directive: str
-    oversight_recommended_directive: str
-    behavioral_recommended_directive: str
-    judge_recommended_directive: str
-    judge_invoked: bool
-    static_policy_summary: str | None
-    dynamic_policy_summary: str | None
-    behavioral_summary: str | None
-    judge_summary: str | None
-    behavioral_similarity_score: float | None
-    behavioral_deviation_score: float | None
-    behavioral_novelty_score: float | None
-    oversight_summary: str | None
-    combiner_dominant_dimension: str | None
-    combiner_support_by_directive: dict[str, float] | None
-    combiner_selected_reason: str | None
-    combiner_rejected_alternatives: dict[str, str] | None
-    combiner_safety_invariants_checked: tuple[str, ...]
-    combiner_signals: tuple[dict[str, Any], ...]
-    combiner_normalized_directive: str | None
-    combiner_normalization_reason: str | None
-    governance_input_schema_version: str | None
-    pillar_requirements: dict[str, bool] | None
-    pillar_results: dict[str, Any] | None
-    pillar_errors: dict[str, str] | None
-    policy_config_version: str | None = None
-
-
-@dataclass(frozen=True)
-class TraceOversightSignal:
-    # TraceOversightSignal keeps each adaptive score separate and explainable.
-    score: float
-    level: str
-    reason_codes: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class TraceOversightAssessment:
-    # TraceOversightAssessment records the confidence/risk/trajectory recommendation.
-    evidence_quality: TraceOversightSignal
-    operational_risk: TraceOversightSignal
-    trajectory_health: TraceOversightSignal
-    recommended_directive: str
-    summary: str
-    reason_codes: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class TraceStaticPolicyAssessment:
-    # TraceStaticPolicyAssessment keeps the OPA hard decision separate from later layers.
-    policy_decision: str
-    reason_codes: tuple[str, ...]
-    summary: str
-    policy_engine_name: str
-    policy_bundle_version: str
-    policy_directive: str
-
-
-@dataclass(frozen=True)
-class TraceBehavioralAssessment:
-    # TraceBehavioralAssessment exposes the behavioural history summary, scores, and advisory directive.
-    history_available: bool
-    historical_run_count: int
-    feature_snapshot_version: str
-    summary: str
-    notes: tuple[str, ...]
-    matched_run_count: int
-    historical_similarity_score: float | None
-    behavior_deviation_score: float | None
-    novelty_score: float | None
-    behavioral_recommended_directive: str
-    behavioral_flags: tuple[str, ...]
-    matched_run_ids: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class TraceJudgeAssessment:
-    # TraceJudgeAssessment keeps the selective semantic judge auditable across governance passes.
-    invoked: bool
-    recommendation: str
-    confidence: float
-    summary: str
-    rationale: str
-    flags: tuple[str, ...]
-    evaluated_target: str
-
-
-@dataclass(frozen=True)
-class TraceExternalCommunicationDraft:
-    # TraceExternalCommunicationDraft captures the typed outbound content in JSON-safe form.
-    channel: str
-    recipient: str | None
-    subject: str | None
-    body: str | None
-    metadata: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class TraceHumanReviewExternalEdit:
-    # TraceHumanReviewExternalEdit captures a human-applied draft edit for audit.
-    draft: TraceExternalCommunicationDraft
-    note: str | None
-
-
-@dataclass(frozen=True)
-class TraceHumanReviewRequest:
-    # TraceHumanReviewRequest captures the pending HITL payload in JSON-safe form.
-    request_id: str
-    thread_id: str
-    current_state: str
-    resume_state: str
-    current_plan_step_id: str | None
-    current_plan_step_objective: str | None
-    actor_result_type: str | None
-    current_tool_request: dict[str, Any] | None
-    governance_directive: str | None
-    governance_summary: str | None
-    static_policy_summary: str | None
-    dynamic_policy_summary: str | None
-    behavioral_summary: str | None
-    judge_summary: str | None
-    oversight_summary: str | None
-    external_communication_target_type: str | None
-    external_communication_draft: TraceExternalCommunicationDraft | None
-    reason_codes: tuple[str, ...]
-    allowed_decisions: tuple[str, ...]
-    review_summary: str | None
-
-
-@dataclass(frozen=True)
-class TraceHumanReviewDecision:
-    # TraceHumanReviewDecision captures the human resume payload and history.
-    request_id: str
-    decision_type: str
-    note: str | None
-    clarification_text: str | None
-    external_communication_edit: TraceHumanReviewExternalEdit | None
-    reviewer_id: str | None
-
-
-@dataclass(frozen=True)
-class TraceHumanReviewSummary:
-    # TraceHumanReviewSummary keeps the pending review and history easy to inspect.
-    pending_request: TraceHumanReviewRequest | None
-    last_request: TraceHumanReviewRequest | None
-    last_decision: TraceHumanReviewDecision | None
-    decision_history: tuple[TraceHumanReviewDecision, ...]
-
-
-@dataclass(frozen=True)
-class TraceExecutionSummary:
-    # TraceExecutionSummary gathers final output and audit-safe execution history.
-    final_output_text: str | None
-    executed_steps: tuple[dict[str, Any], ...]
-    scratchpad: tuple[dict[str, Any], ...]
-    step_validations: tuple[dict[str, Any], ...]
-
-
-@dataclass(frozen=True)
-class TraceExternalCommunicationSummary:
-    # Keep the current external communication phase visible in runtime artifacts and evaluation.
-    phase: str
-    draft: TraceExternalCommunicationDraft | None
-    last_applied_edit: TraceHumanReviewExternalEdit | None
-    edit_history: tuple[TraceHumanReviewExternalEdit, ...]
-    last_transition_summary: str | None
-
-
-@dataclass(frozen=True)
-class Layer2RuntimeTrace:
-    # Layer2RuntimeTrace is the stable JSON-exportable audit artifact for Layer 2.
-    runtime: TraceRuntimeSummary
-    intake: TraceIntakeSummary
-    planner_name: str | None
-    planner_prompt_version: str | None
-    planner_rationale: str | None
-    planning_source: str | None
-    plan_steps: tuple[TracePlanStep, ...]
-    current_plan_step_index: int | None
-    current_plan_step_id: str | None
-    actor: TraceActorTurn
-    execution: TraceExecutionSummary
-    tool_calls: tuple[TraceToolCall, ...]
-    observed_evidence: tuple[TraceObservedEvidence, ...]
-    static_policy_assessments: tuple[TraceStaticPolicyAssessment, ...]
-    dynamic_policy_assessments: tuple[TraceOversightAssessment, ...]
-    behavioral_assessments: tuple[TraceBehavioralAssessment, ...]
-    judge_assessments: tuple[TraceJudgeAssessment, ...]
-    governance_decisions: tuple[TraceGovernanceDecision, ...]
-    oversight_assessments: tuple[TraceOversightAssessment, ...]
-    human_review: TraceHumanReviewSummary
-    external_communication: TraceExternalCommunicationSummary | None
-
-
-# Build the stable Layer 2 trace from the canonical runtime state.
+# Read-only observability component extracted from the trace facade.
 def build_layer2_runtime_trace(
     thread_id: str,
     intake_result: IntakeResult,
@@ -402,90 +89,7 @@ def build_layer2_runtime_trace(
     )
 
 
-# Convert a Layer 2 trace into plain JSON-safe Python structures.
-def layer2_trace_to_dict(trace: Layer2RuntimeTrace) -> dict[str, Any]:
-    return _to_jsonable(trace)
-
-
-# Convert a Layer 2 trace into stable formatted JSON.
-def layer2_trace_to_json(trace: Layer2RuntimeTrace) -> str:
-    return json.dumps(layer2_trace_to_dict(trace), indent=2, ensure_ascii=False)
-
-
-# Build the old compact trace shape from the new typed runtime trace.
-def build_compact_trace_from_runtime_trace(trace: Layer2RuntimeTrace) -> dict[str, Any]:
-    return {
-        "runtime": {
-            "thread_id": trace.runtime.thread_id,
-            "demo_intake_used": trace.intake.parser_name == "demo_intake_builder",
-        },
-        "intake_summary": {
-            "goal": trace.intake.goal,
-            "domain_type": trace.intake.domain_type,
-            "sensitivity": trace.intake.sensitivity,
-            "parse_status": trace.intake.parse_status,
-            "read_only_mode": trace.intake.read_only_mode,
-        },
-        "planning_snapshot": {
-            "plan_step_count": len(trace.plan_steps),
-            "current_plan_step_index": trace.current_plan_step_index,
-            "current_plan_step": _current_step_objective(trace),
-            "planner_name": trace.planner_name,
-            "planning_source": trace.planning_source,
-            "planner_prompt_version": trace.planner_prompt_version,
-            "plan_steps": [asdict(step) for step in trace.plan_steps],
-        },
-        "actor_snapshot": asdict(trace.actor),
-        "execution_snapshot": asdict(trace.execution),
-        "governance_snapshot": {
-            "static_policy_pass_count": len(trace.static_policy_assessments),
-            "last_static_policy_assessment": (
-                asdict(trace.static_policy_assessments[-1]) if trace.static_policy_assessments else None
-            ),
-            "dynamic_policy_pass_count": len(trace.dynamic_policy_assessments),
-            "last_dynamic_policy_assessment": (
-                asdict(trace.dynamic_policy_assessments[-1]) if trace.dynamic_policy_assessments else None
-            ),
-            "behavioral_pass_count": len(trace.behavioral_assessments),
-            "last_behavioral_assessment": (
-                asdict(trace.behavioral_assessments[-1]) if trace.behavioral_assessments else None
-            ),
-            "judge_pass_count": len(trace.judge_assessments),
-            "last_judge_assessment": (
-                asdict(trace.judge_assessments[-1]) if trace.judge_assessments else None
-            ),
-            "governance_pass_count": len(trace.governance_decisions),
-            "last_governance_decision": (
-                asdict(trace.governance_decisions[-1]) if trace.governance_decisions else None
-            ),
-            "oversight_pass_count": len(trace.oversight_assessments),
-            "last_oversight_assessment": (
-                asdict(trace.oversight_assessments[-1]) if trace.oversight_assessments else None
-            ),
-        },
-        "human_review_snapshot": asdict(trace.human_review),
-        "external_communication_snapshot": (
-            asdict(trace.external_communication)
-            if trace.external_communication is not None
-            else None
-        ),
-        "bootstrap_state": {
-            "current_state": trace.runtime.current_state,
-            "step_count": len(trace.runtime.step_history),
-            "bootstrap_completed": trace.runtime.bootstrap_completed,
-            "runtime_flags": list(trace.runtime.runtime_flags),
-        },
-        "tool_snapshot": {
-            "actor_turn_count": trace.runtime.actor_turn_count,
-            "tool_call_count": trace.runtime.tool_call_count,
-            "current_tool_request": _compact_current_tool_request(trace.tool_calls),
-            "last_tool_result": _compact_last_tool_result(trace.tool_calls),
-            "observed_evidence_count": len(trace.observed_evidence),
-        },
-    }
-
-
-# Build the run identity and terminal runtime snapshot.
+# Read-only observability component extracted from the trace facade.
 def _build_runtime_summary(*, thread_id: str, task_state: TaskState) -> TraceRuntimeSummary:
     return TraceRuntimeSummary(
         thread_id=thread_id,
@@ -498,7 +102,7 @@ def _build_runtime_summary(*, thread_id: str, task_state: TaskState) -> TraceRun
     )
 
 
-# Build the compact Layer 1 handoff summary.
+# Read-only observability component extracted from the trace facade.
 def _build_intake_summary(*, intake_result: IntakeResult) -> TraceIntakeSummary:
     task_spec = intake_result.structured_task.task_spec
     execution_policy = intake_result.structured_task.execution_policy
@@ -522,7 +126,7 @@ def _build_intake_summary(*, intake_result: IntakeResult) -> TraceIntakeSummary:
     )
 
 
-# Convert one plan step into the trace representation.
+# Read-only observability component extracted from the trace facade.
 def _build_plan_step(*, step: Any, task_state: TaskState) -> TracePlanStep:
     resolved_requirement = resolve_required_evidence_support_context(
         task_state=task_state,
@@ -533,18 +137,18 @@ def _build_plan_step(*, step: Any, task_state: TaskState) -> TracePlanStep:
         objective=step.objective,
         rationale=step.rationale,
         expected_outcome=step.expected_outcome,
-        step_kind=_enum_value(step.step_kind),
-        evidence_requirement=_enum_value(step.evidence_requirement),
-        claim_precision_ceiling=_enum_value(step.claim_precision_ceiling),
-        resolved_required_evidence_support_level=_enum_value(
+        step_kind=enum_value(step.step_kind),
+        evidence_requirement=enum_value(step.evidence_requirement),
+        claim_precision_ceiling=enum_value(step.claim_precision_ceiling),
+        resolved_required_evidence_support_level=enum_value(
             resolved_requirement.required_level
         ),
-        resolved_required_evidence_support_source=_enum_value(resolved_requirement.source),
-        status=_enum_value(step.status),
+        resolved_required_evidence_support_source=enum_value(resolved_requirement.source),
+        status=enum_value(step.status),
     )
 
 
-# Convert the latest actor result into the trace representation.
+# Read-only observability component extracted from the trace facade.
 def _build_actor_turn(*, actor_result: ActorResult | None, task_state: TaskState) -> TraceActorTurn:
     resolved_requirement = (
         resolve_required_evidence_support_context(task_state=task_state)
@@ -582,7 +186,7 @@ def _build_actor_turn(*, actor_result: ActorResult | None, task_state: TaskState
     )
 
 
-# Build final output and audit-safe execution history.
+# Read-only observability component extracted from the trace facade.
 def _build_execution_summary(*, task_state: TaskState) -> TraceExecutionSummary:
     return TraceExecutionSummary(
         final_output_text=task_state.final_output_text,
@@ -594,7 +198,7 @@ def _build_execution_summary(*, task_state: TaskState) -> TraceExecutionSummary:
     )
 
 
-# Build the retained tool request/result trace from TaskState.
+# Read-only observability component extracted from the trace facade.
 def _build_tool_calls(*, task_state: TaskState) -> tuple[TraceToolCall, ...]:
     calls: list[TraceToolCall] = []
     for result in task_state.tool_results_history:
@@ -606,7 +210,7 @@ def _build_tool_calls(*, task_state: TaskState) -> tuple[TraceToolCall, ...]:
     return tuple(calls)
 
 
-# Convert a retained tool result into trace form.
+# Read-only observability component extracted from the trace facade.
 def _build_tool_call_from_result(result: ToolExecutionResult) -> TraceToolCall:
     request = result.request
     return TraceToolCall(
@@ -619,7 +223,7 @@ def _build_tool_call_from_result(result: ToolExecutionResult) -> TraceToolCall:
     )
 
 
-# Convert a pending/current tool request into trace form.
+# Read-only observability component extracted from the trace facade.
 def _build_tool_call_from_request(request: ToolRequest) -> TraceToolCall:
     return TraceToolCall(
         **_tool_request_fields(request),
@@ -631,7 +235,7 @@ def _build_tool_call_from_request(request: ToolRequest) -> TraceToolCall:
     )
 
 
-# Convert tool request fields shared by pending and completed tool calls.
+# Read-only observability component extracted from the trace facade.
 def _tool_request_fields(request: ToolRequest) -> dict[str, Any]:
     return {
         "plan_step_id": request.plan_step_id,
@@ -649,7 +253,7 @@ def _tool_request_fields(request: ToolRequest) -> dict[str, Any]:
     }
 
 
-# Convert a tool source into plain provenance fields.
+# Read-only observability component extracted from the trace facade.
 def _build_tool_source(source: ToolSource) -> dict[str, Any]:
     return {
         "title": source.title,
@@ -658,7 +262,7 @@ def _build_tool_source(source: ToolSource) -> dict[str, Any]:
     }
 
 
-# Convert one observed evidence item into the trace representation.
+# Read-only observability component extracted from the trace facade.
 def _build_observed_evidence(evidence: ObservedEvidence) -> TraceObservedEvidence:
     return TraceObservedEvidence(
         evidence_id=evidence.evidence_id,
@@ -672,7 +276,7 @@ def _build_observed_evidence(evidence: ObservedEvidence) -> TraceObservedEvidenc
     )
 
 
-# Convert one governance decision into the trace representation.
+# Read-only observability component extracted from the trace facade.
 def _build_governance_decision(decision: GovernanceDecision) -> TraceGovernanceDecision:
     return TraceGovernanceDecision(
         directive=decision.directive.value,
@@ -715,7 +319,7 @@ def _build_governance_decision(decision: GovernanceDecision) -> TraceGovernanceD
     )
 
 
-# Convert one static policy assessment into the trace representation.
+# Read-only observability component extracted from the trace facade.
 def _build_static_policy_assessment(
     assessment: StaticPolicyAssessment,
 ) -> TraceStaticPolicyAssessment:
@@ -729,7 +333,7 @@ def _build_static_policy_assessment(
     )
 
 
-# Convert one oversight assessment into the trace representation.
+# Read-only observability component extracted from the trace facade.
 def _build_oversight_assessment(assessment: OversightAssessment) -> TraceOversightAssessment:
     return TraceOversightAssessment(
         evidence_quality=_build_oversight_signal(assessment.evidence_quality),
@@ -741,7 +345,7 @@ def _build_oversight_assessment(assessment: OversightAssessment) -> TraceOversig
     )
 
 
-# Convert one behavioural assessment into the trace representation.
+# Read-only observability component extracted from the trace facade.
 def _build_behavioral_assessment(
     assessment: BehavioralAssessment,
 ) -> TraceBehavioralAssessment:
@@ -761,7 +365,7 @@ def _build_behavioral_assessment(
     )
 
 
-# Convert one judge assessment into the trace representation.
+# Read-only observability component extracted from the trace facade.
 def _build_judge_assessment(
     assessment: JudgeAssessment,
 ) -> TraceJudgeAssessment:
@@ -776,7 +380,7 @@ def _build_judge_assessment(
     )
 
 
-# Convert the HITL request/decision history into trace form.
+# Read-only observability component extracted from the trace facade.
 def _build_human_review_summary(*, task_state: TaskState) -> TraceHumanReviewSummary:
     return TraceHumanReviewSummary(
         pending_request=(
@@ -800,7 +404,7 @@ def _build_human_review_summary(*, task_state: TaskState) -> TraceHumanReviewSum
     )
 
 
-# Convert one human review request into the trace representation.
+# Read-only observability component extracted from the trace facade.
 def _build_human_review_request(
     request: HumanReviewRequest,
 ) -> TraceHumanReviewRequest:
@@ -815,7 +419,7 @@ def _build_human_review_request(
             request.actor_result_type.value if request.actor_result_type is not None else None
         ),
         current_tool_request=(
-            _to_jsonable(request.current_tool_request)
+            to_jsonable(request.current_tool_request)
             if request.current_tool_request is not None
             else None
         ),
@@ -840,7 +444,7 @@ def _build_human_review_request(
     )
 
 
-# Convert one human review decision into the trace representation.
+# Read-only observability component extracted from the trace facade.
 def _build_human_review_decision(
     decision: HumanReviewDecision,
 ) -> TraceHumanReviewDecision:
@@ -858,7 +462,7 @@ def _build_human_review_decision(
     )
 
 
-# Convert the typed external communication subflow into trace form.
+# Read-only observability component extracted from the trace facade.
 def _build_external_communication_summary(
     external_communication: ExternalCommunicationState | None,
 ) -> TraceExternalCommunicationSummary | None:
@@ -883,7 +487,7 @@ def _build_external_communication_summary(
     )
 
 
-# Convert one external communication draft into trace form.
+# Read-only observability component extracted from the trace facade.
 def _build_external_communication_draft(
     draft: ExternalCommunicationDraft,
 ) -> TraceExternalCommunicationDraft:
@@ -896,7 +500,7 @@ def _build_external_communication_draft(
     )
 
 
-# Convert one human edit wrapper into trace form.
+# Read-only observability component extracted from the trace facade.
 def _build_human_review_external_edit(
     edit: HumanReviewExternalEdit,
 ) -> TraceHumanReviewExternalEdit:
@@ -906,7 +510,7 @@ def _build_human_review_external_edit(
     )
 
 
-# Convert any oversight signal score into trace form.
+# Read-only observability component extracted from the trace facade.
 def _build_oversight_signal(
     signal: EvidenceQualityAssessment | OperationalRiskAssessment | TrajectoryHealthAssessment,
 ) -> TraceOversightSignal:
@@ -917,7 +521,7 @@ def _build_oversight_signal(
     )
 
 
-# Convert one runtime step record into plain fields.
+# Read-only observability component extracted from the trace facade.
 def _build_step_record(record: StepRecord) -> dict[str, Any]:
     return {
         "step_index": record.step_index,
@@ -927,7 +531,7 @@ def _build_step_record(record: StepRecord) -> dict[str, Any]:
     }
 
 
-# Convert one executed plan step into plain fields.
+# Read-only observability component extracted from the trace facade.
 def _build_executed_step(step: ExecutedPlanStep) -> dict[str, Any]:
     return {
         "step_id": step.step_id,
@@ -938,7 +542,7 @@ def _build_executed_step(step: ExecutedPlanStep) -> dict[str, Any]:
     }
 
 
-# Convert one audit-safe scratchpad entry into plain fields.
+# Read-only observability component extracted from the trace facade.
 def _build_scratchpad_entry(entry: ScratchpadEntry) -> dict[str, Any]:
     return {
         "turn_index": entry.turn_index,
@@ -949,7 +553,7 @@ def _build_scratchpad_entry(entry: ScratchpadEntry) -> dict[str, Any]:
     }
 
 
-# Convert one step validation into plain fields.
+# Read-only observability component extracted from the trace facade.
 def _build_step_validation(validation: StepValidation) -> dict[str, Any]:
     return {
         "plan_step_id": validation.plan_step_id,
@@ -962,7 +566,7 @@ def _build_step_validation(validation: StepValidation) -> dict[str, Any]:
     }
 
 
-# Resolve whether the current plan came from the initial planner or replanner.
+# Read-only observability component extracted from the trace facade.
 def _resolve_planning_source(planner_name: str | None) -> str | None:
     if planner_name is None:
         return None
@@ -971,108 +575,34 @@ def _resolve_planning_source(planner_name: str | None) -> str | None:
     return "planner"
 
 
-# Return the objective for the current plan step in compact trace output.
-def _current_step_objective(trace: Layer2RuntimeTrace) -> str | None:
-    if trace.current_plan_step_id is None:
-        return None
-    for step in trace.plan_steps:
-        if step.step_id == trace.current_plan_step_id:
-            return step.objective
-    return None
-
-
-# Return the compact pending/current tool request shape used by legacy CLI output.
-def _compact_current_tool_request(tool_calls: tuple[TraceToolCall, ...]) -> dict[str, Any] | None:
-    if not tool_calls:
-        return None
-
-    # Only a trace entry with success=None represents a still-pending request.
-    if tool_calls[-1].success is not None:
-        return None
-
-    call = tool_calls[-1]
-    return {
-        "tool_name": call.tool_name,
-        "reason": call.reason,
-        "query": call.query,
-        "url": call.url,
-        "text": call.text,
-        "path": call.path,
-        "expression": call.expression,
-        "timezone": call.timezone,
-        "limit": call.limit,
-        "max_results": call.max_results,
-        "extractive_goal": call.extractive_goal,
-    }
-
-
-# Return the compact last tool result shape used by legacy CLI output.
-def _compact_last_tool_result(tool_calls: tuple[TraceToolCall, ...]) -> dict[str, Any] | None:
-    completed_calls = [call for call in tool_calls if call.success is not None]
-    if not completed_calls:
-        return None
-    call = completed_calls[-1]
-    return {
-        "tool_name": call.tool_name,
-        "success": call.success,
-        "summary": call.summary,
-        "error_message": call.error_message,
-        "source_count": len(call.sources),
-    }
-
-
-# Convert runtime objects recursively into JSON-safe values.
-def _to_jsonable(value: Any) -> Any:
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, Path):
-        return str(value)
-    if is_dataclass(value):
-        return _to_jsonable(asdict(value))
-    if isinstance(value, dict):
-        return {key: _to_jsonable(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_to_jsonable(item) for item in value]
-    return value
-
-
-# Convert enum-like values to plain strings while tolerating already materialized strings.
-def _enum_value(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, str):
-        return value
-    return str(value)
-
-
 __all__ = [
-    "Layer2RuntimeTrace",
-    "TraceActorTurn",
-    "TraceExecutionSummary",
-    "TraceExternalCommunicationSummary",
-    "TraceExternalCommunicationDraft",
-    "TraceBehavioralAssessment",
-    "TraceHumanReviewDecision",
-    "TraceHumanReviewExternalEdit",
-    "TraceHumanReviewRequest",
-    "TraceHumanReviewSummary",
-    "TraceGovernanceDecision",
-    "TraceIntakeSummary",
-    "TraceJudgeAssessment",
-    "TraceObservedEvidence",
-    "TraceStaticPolicyAssessment",
-    "TraceOversightAssessment",
-    "TracePlanStep",
-    "TraceRuntimeSummary",
-    "TraceToolCall",
-    "build_compact_trace_from_runtime_trace",
     "build_layer2_runtime_trace",
-    "layer2_trace_to_dict",
-    "layer2_trace_to_json",
+    "_build_runtime_summary",
+    "_build_intake_summary",
+    "_build_plan_step",
+    "_build_actor_turn",
+    "_build_execution_summary",
+    "_build_tool_calls",
+    "_build_tool_call_from_result",
+    "_build_tool_call_from_request",
+    "_tool_request_fields",
+    "_build_tool_source",
+    "_build_observed_evidence",
+    "_build_governance_decision",
+    "_build_static_policy_assessment",
+    "_build_oversight_assessment",
+    "_build_behavioral_assessment",
+    "_build_judge_assessment",
+    "_build_human_review_summary",
+    "_build_human_review_request",
+    "_build_human_review_decision",
+    "_build_external_communication_summary",
+    "_build_external_communication_draft",
+    "_build_human_review_external_edit",
+    "_build_oversight_signal",
+    "_build_step_record",
+    "_build_executed_step",
+    "_build_scratchpad_entry",
+    "_build_step_validation",
+    "_resolve_planning_source"
 ]

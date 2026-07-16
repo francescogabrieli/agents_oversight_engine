@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import sys
 import unittest
+from uuid import uuid4
 from pathlib import Path
 from unittest.mock import patch
 
+from langgraph.checkpoint.memory import InMemorySaver
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
@@ -58,6 +60,9 @@ from layer2_runtime_governance.tool_gateway import (
     ToolRiskLevel,
     get_default_tool_gateway_config_path,
     load_tool_gateway_config,
+)
+from layer2_runtime_governance.infrastructure.checkpointing import (
+    build_runtime_serializer,
 )
 
 
@@ -133,7 +138,7 @@ class GatewayMCPTests(unittest.TestCase):
                 plan_step_id="step_1",
                 tool_name=ToolName.MCP_LOCAL_TEST_READ_FIXTURE,
                 reason="Traversal should be rejected by the fixture server.",
-                path="..\\test_layer2_runtime_governance.py",
+                path="..\\layer2_runtime_fixtures.py",
             )
         )
 
@@ -219,8 +224,8 @@ class GatewayMCPTests(unittest.TestCase):
             content_type="text/html",
         )
 
-        with patch("layer2_runtime_governance.tool_gateway._is_blocked_host", return_value=False):
-            with patch("layer2_runtime_governance.tool_gateway.urlopen", return_value=response):
+        with patch("layer2_runtime_governance.tools.security.is_blocked_host", return_value=False):
+            with patch("layer2_runtime_governance.tools.adapters.http_fetch.urlopen", return_value=response):
                 result = gateway.execute(
                     tool_request=ToolRequest(
                         plan_step_id="step_1",
@@ -241,8 +246,8 @@ class GatewayMCPTests(unittest.TestCase):
             content_type="text/html",
         )
 
-        with patch("layer2_runtime_governance.tool_gateway._is_blocked_host", return_value=False):
-            with patch("layer2_runtime_governance.tool_gateway.urlopen", return_value=response):
+        with patch("layer2_runtime_governance.tools.security.is_blocked_host", return_value=False):
+            with patch("layer2_runtime_governance.tools.adapters.http_fetch.urlopen", return_value=response):
                 result = gateway.execute(
                     tool_request=ToolRequest(
                         plan_step_id="step_1",
@@ -268,12 +273,12 @@ class GatewayMCPTests(unittest.TestCase):
         )
         cellar_response = FakeHTTPResponse(body=b"%PDF-1.7 mock", content_type="application/pdf")
 
-        with patch("layer2_runtime_governance.tool_gateway._is_blocked_host", return_value=False):
+        with patch("layer2_runtime_governance.tools.security.is_blocked_host", return_value=False):
             with patch(
-                "layer2_runtime_governance.tool_gateway.urlopen",
+                "layer2_runtime_governance.tools.adapters.http_fetch.urlopen",
                 side_effect=[eur_lex_response, cellar_response],
             ), patch(
-                "layer2_runtime_governance.tool_gateway._extract_pdf_text",
+                "layer2_runtime_governance.tools.adapters.http_fetch.extract_pdf_text",
                 return_value=(
                     "The purpose of this Regulation is to contribute to the proper "
                     "functioning of the internal market by laying down harmonised rules."
@@ -337,19 +342,26 @@ class GatewayMCPTests(unittest.TestCase):
             tool_gateway_service=OpenAIToolGateway(),
             replanner_service=NoopReplanner(),
             policy_engine_service=AllowPolicyEngine(),
+            checkpointer=InMemorySaver(serde=build_runtime_serializer()),
         )
 
         result = graph.invoke(
             {"intake_result": build_research_intake_result()},
-            config={"configurable": {"thread_id": "mcp-runtime-tool-loop"}},
+            # Durable checkpoints require a unique id so repeated test runs remain isolated.
+            config={"configurable": {"thread_id": f"mcp-runtime-tool-loop-{uuid4()}"}},
         )
 
         task_state = result["task_state"]
         self.assertEqual(task_state.current_state, RuntimeState.COMPLETED)
         self.assertEqual(task_state.tool_call_count, 1)
-        self.assertEqual(len(task_state.observed_evidence), 1)
+        tool_observations = [
+            evidence
+            for evidence in task_state.observed_evidence
+            if evidence.source_tool is not None
+        ]
+        self.assertEqual(len(tool_observations), 1)
         self.assertEqual(
-            task_state.observed_evidence[0].source_tool,
+            tool_observations[0].source_tool,
             ToolName.MCP_LOCAL_TEST_TEXT_STATS,
         )
 
@@ -412,7 +424,11 @@ class MCPThenCompleteActor(ActorPort):
 
     # Request an MCP tool once, then complete after observing evidence.
     def act(self, *, actor_task: ActorTask) -> ActorResult:
-        if not actor_task.observed_evidence:
+        has_mcp_observation = any(
+            evidence.source_tool == ToolName.MCP_LOCAL_TEST_TEXT_STATS
+            for evidence in actor_task.observed_evidence
+        )
+        if not has_mcp_observation:
             return ActorResult(
                 plan_step_id=actor_task.current_plan_step.step_id,
                 result_type=ActorResultType.PROPOSE_ACTION,
@@ -454,7 +470,35 @@ class MCPThenCompleteActor(ActorPort):
 
 class AllowPolicyEngine(PolicyEnginePort):
     policy_engine_name = "allow_policy_engine"
-    policy_bundle_version = "allow_policy_v1"
+    policy_bundle_version = "layer2_governance_v2"
+    policy_config_version = "layer2_governance_thresholds_v1"
+
+    # Request deterministic pillars without invoking a semantic judge in this tool test.
+    def evaluate_required_pillars(self, *, base_facts):
+        return {
+            "require_evidence": True,
+            "require_risk": True,
+            "require_trajectory": True,
+            "require_behavioral": False,
+            "require_judge": False,
+        }
+
+    # Return a schema-valid decision so this test remains focused on the tool loop.
+    def evaluate_decision(self, *, decision_input):
+        has_tool = decision_input["base_facts"]["tool"]["name"] is not None
+        return {
+            "schema_version": "governance_decision_output.v1",
+            "directive": "continue_read_only" if has_tool else "continue",
+            "policy_decision": "allow_read_only" if has_tool else "allow",
+            "reason_codes": ["read_only_allowed" if has_tool else "allowed_by_policy"],
+            "pillar_results": decision_input["pillars"],
+            "selected_reason": "Read-only runtime test action is allowed.",
+            "rejected_alternatives": {},
+            "safety_invariants_checked": ["read_only_envelope_preserved"],
+            "requires_human_review": False,
+            "policy_bundle_version": self.policy_bundle_version,
+            "policy_config_version": self.policy_config_version,
+        }
 
     # Allow all read-only actions in this focused runtime test.
     def evaluate(self, *, policy_input: PolicyEvaluationInput) -> PolicyEvaluationResult:

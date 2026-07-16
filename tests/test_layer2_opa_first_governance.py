@@ -25,7 +25,7 @@ from layer1_intake import (
     TaskSpec,
 )
 from layer2_runtime_governance.actor_contract import ActorResult, ActorResultType
-from layer2_runtime_governance.governance import (
+from layer2_runtime_governance.governance_components import (
     GovernanceDirective,
     GovernanceReasonCode,
     PolicyDecision,
@@ -34,7 +34,7 @@ from layer2_runtime_governance.governance import (
     PolicyEvaluationResult,
     evaluate_opa_first_governance,
 )
-from layer2_runtime_governance.state import PlanStep, PlanStepStatus, RuntimeState, TaskState
+from layer2_runtime_governance.domain import PlanStep, PlanStepStatus, RuntimeState, TaskState
 
 
 class OPAFirstGovernanceContractTests(unittest.TestCase):

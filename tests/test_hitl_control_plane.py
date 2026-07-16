@@ -42,9 +42,9 @@ from layer2_runtime_governance import (
     ToolRequest,
     TaskState,
 )
-from layer2_runtime_governance.governance import PolicyEnginePort
+from layer2_runtime_governance.governance_components import PolicyEnginePort
 from layer2_runtime_governance.hitl import build_human_review_request
-from layer2_runtime_governance.nodes import governance
+from layer2_runtime_governance.runtime.governance_service import governance
 from main_layer2 import main as main_layer2_cli
 from main_layer2 import resume_layer2_flow
 from main_layer2_dashboard import build_dashboard_session_from_trace

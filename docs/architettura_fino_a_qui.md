@@ -102,16 +102,17 @@ Il layer deve prendere un task già canonico e portarlo avanti in modo controlla
 
 ### File principali
 
-- `state.py`
+- `domain/`
 - `graph.py`
-- `nodes.py`
+- `runtime/`
 - `planning.py`
 - `acting.py`
 - `replanning.py`
 - `tool_contract.py`
 - `actor_contract.py`
-- `tool_gateway.py`
-- `governance.py`
+- `tools/`
+- `governance_components/`
+- `observability/`
 
 ---
 
@@ -470,11 +471,11 @@ Deve soltanto orchestrare e instradare.
 
 ---
 
-## 13. `trace.py` e `main_layer2.py`: export osservabile
+## 13. `observability/` e `main_layer2.py`: export osservabile
 
 `src/main_layer2.py` è il punto migliore da cui debuggare l'intero sistema.
 
-`src/layer2_runtime_governance/trace.py` ora contiene il contratto di trace riusabile.
+`src/layer2_runtime_governance/observability/` contiene il contratto di trace riusabile.
 Il modulo legge `TaskState` in modo read-only e produce un artefatto tipizzato, JSON-safe e auditabile.
 `src/main_layer2.py` resta l'entrypoint operativo e stampa viste compatte o complete derivate dallo stesso exporter.
 

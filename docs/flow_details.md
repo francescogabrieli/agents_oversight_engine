@@ -78,11 +78,11 @@ Se vuoi capire la run al 100%, devi sapere anche dove vive ogni responsabilità.
   - costruisce il grafo LangGraph
   - decide i nodi e il routing
 
-- `src/layer2_runtime_governance/nodes.py`
-  - contiene la logica eseguibile dei nodi
-  - qui avvengono le mutazioni reali di `TaskState`
+- `src/layer2_runtime_governance/runtime/`
+  - contiene i servizi applicativi che aggiornano `TaskState`
+  - `node_adapters.py` traduce soltanto tra LangGraph e questi servizi
 
-- `src/layer2_runtime_governance/state.py`
+- `src/layer2_runtime_governance/domain/`
   - definisce il contratto centrale `TaskState`
   - definisce enum, step, validation, HITL ed external communication
 
@@ -93,10 +93,10 @@ Se vuoi capire la run al 100%, devi sapere anche dove vive ogni responsabilità.
 - `src/layer2_runtime_governance/tool_contract.py`
   - definisce request, result ed evidence tipizzate
 
-- `src/layer2_runtime_governance/governance.py`
+- `src/layer2_runtime_governance/governance_components/`
   - costruisce il policy input
-  - applica static policy
-  - combina tutti i layer di controllo
+  - chiama e valida la decisione OPA
+  - applica il fail-closed senza duplicare la policy finale in Python
 
 - `src/layer2_runtime_governance/oversight.py`
   - implementa la dynamic policy numerica
@@ -109,18 +109,18 @@ Se vuoi capire la run al 100%, devi sapere anche dove vive ogni responsabilità.
   - decide se il judge deve partire
   - costruisce il payload di valutazione semantica
 
-- `src/layer2_runtime_governance/tool_gateway.py`
+- `src/layer2_runtime_governance/tools/`
   - esegue davvero i tool ammessi
   - normalizza i risultati backend
 
-- `src/layer2_runtime_governance/trace.py`
+- `src/layer2_runtime_governance/observability/`
   - esporta la vista osservabile della run
 
 La separazione corretta da tenere a mente è questa:
 
-- `state.py` dice che cosa può esistere
+- `domain/` dice che cosa può esistere
 - `graph.py` dice dove si può andare
-- `nodes.py` dice che cosa cambia davvero
+- `runtime/` dice che cosa cambia davvero
 - i moduli governance decidono se si può proseguire o no
 
 ## 2.2. Le Quattro Strutture Da Tenere Sempre In Testa
@@ -1974,16 +1974,16 @@ Se salti questo ordine, rischi di guardare solo l’output finale e perdere il p
 
 Se invece vuoi capire la struttura, l’ordine di lettura migliore del codice è:
 
-1. `state.py`
+1. `domain/task_state.py`
 2. `graph.py`
-3. `nodes.py`
+3. `runtime/node_adapters.py`
 4. `actor_contract.py`
 5. `tool_contract.py`
-6. `governance.py`
+6. `governance_components/`
 7. `oversight.py`
 8. `behavioral.py`
 9. `judge.py`
-10. `trace.py`
+10. `observability/`
 
 Questo ordine è il più vicino possibile alla logica reale della run.
 

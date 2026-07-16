@@ -10,7 +10,7 @@ from langgraph.types import interrupt
 from .actor_contract import ActorResultType
 from .behavioral import BehavioralAssessment
 from .oversight import DynamicPolicyAssessment, OversightAssessment
-from .state import (
+from .domain import (
     ExternalCommunicationPhase,
     ExternalCommunicationDraft,
     HumanReviewDecision,

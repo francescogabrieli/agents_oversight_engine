@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .governance import PolicyEvaluationInput
-from .state import TaskState
+from .governance_components import PolicyEvaluationInput
+from .domain import TaskState
 
 
 # Build the base facts document sent to OPA before optional pillar selection.

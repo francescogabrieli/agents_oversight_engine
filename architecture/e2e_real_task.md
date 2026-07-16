@@ -82,15 +82,15 @@ Lavora in strati espliciti:
 2. `dynamic_policy`
 3. `behavioral`
 4. `judge`
-5. `decision_combiner`
+5. decisione finale OPA/Rego
 
 Dettagli rilevanti:
 - `static_policy` e `dynamic_policy` vengono valutati in parallelo nel nodo `governance`
 - `deny`, `require_human_review` e `ask_clarification` di OPA restano veto hard
 - `behavioral` produce similarity, deviation e novelty score su memoria SQLite locale
 - il `judge` e selettivo e puo restare `disabled` mantenendo il contratto typed
-- il `decision_combiner` usa escalation pesata: i layer advisory non possono scavalcare da soli la static policy
-- se il combiner propone `wait_human_review` ma la governance normalizza il turn intermedio verso `continue` o `request_more_evidence`, la trace conserva sia la direttiva originale del combiner sia la normalizzazione post-combiner
+- OPA/Rego usa escalation pesata: i layer advisory non possono scavalcare da soli la static policy
+- il runtime valida e applica la direttiva OPA senza eseguire un secondo algoritmo decisionale in Python
 - il caso `allow_read_only` mantiene visibile il vincolo read-only anche quando la direttiva finale diventa piu conservativa di `continue_read_only`
 
 Effetto pratico sul task reale:
@@ -121,8 +121,8 @@ Dipende da:
 - dashboard standalone `src/main_layer2_dashboard.py`
 
 Artifact chiave:
-- `artifacts/runtime/checkpoints/layer2_checkpoints.json`
-- `artifacts/runtime/<thread_id>/trace.json`
+- `artifacts/runtime/checkpoints/layer2_checkpoints.sqlite3`
+- `artifacts/runtime/<thread_id>/full-trace-2.json`
 - `artifacts/runtime/<thread_id>/runtime_summary.json`
 - `artifacts/runtime/<thread_id>/pending_human_review.json`
 
@@ -130,8 +130,8 @@ Artifact chiave:
 
 A fine run:
 
-1. `trace.py` esporta la trace tipizzata dal solo `TaskState`
-2. la governance trace espone anche il motivo della normalizzazione post-combiner quando la direttiva finale differisce da quella scelta dal combiner
+1. `observability/` esporta la trace tipizzata dal solo `TaskState`
+2. la governance trace espone la direttiva OPA, i pillar, i reason code e le invarianti verificate
 3. `persistence.py` aggiorna artifact per dashboard e replay
 4. `behavioral.py` persiste il read model storico locale
 5. `src/main_layer2_evaluation.py` puo leggere la trace offline senza dipendere dal runtime live

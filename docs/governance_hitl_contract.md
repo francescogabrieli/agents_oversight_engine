@@ -23,10 +23,10 @@ The table below separates what the code already implements from what is only a d
 
 | Contract item | Status | Where it lives |
 | --- | --- | --- |
-| `governance` is the hard control point after actor execution | Implemented | `src/layer2_runtime_governance/governance.py`, `src/layer2_runtime_governance/nodes.py` |
-| `oversight` can only make the runtime more conservative | Implemented | `src/layer2_runtime_governance/governance.py`, `src/layer2_runtime_governance/oversight.py` |
+| `governance` is the hard control point after actor execution | Implemented | `src/layer2_runtime_governance/runtime/governance_service.py`, `src/layer2_runtime_governance/governance_components/` |
+| `oversight` can only make the runtime more conservative | Implemented | `src/layer2_runtime_governance/governance_components/`, `src/layer2_runtime_governance/oversight.py` |
 | `human_review` is the only pause/resume path for typed operator intervention | Implemented | `src/layer2_runtime_governance/hitl.py`, `src/layer2_runtime_governance/graph.py` |
-| `external_communication` stays gated behind evidence, draft, edit, and human review | Partially implemented typed phase model | `src/layer2_runtime_governance/state.py`, `src/layer2_runtime_governance/nodes.py`, `src/layer2_runtime_governance/governance.py`, `src/layer2_runtime_governance/hitl.py` |
+| `external_communication` stays gated behind evidence, draft, edit, and human review | Partially implemented typed phase model | `src/layer2_runtime_governance/domain/review.py`, `src/layer2_runtime_governance/runtime/actor_service.py`, `src/layer2_runtime_governance/runtime/governance_service.py`, `src/layer2_runtime_governance/hitl.py` |
 | The dashboard is a view and decision surface over this contract | Implemented local HTML control plane | `src/main_layer2_dashboard.py`, `src/layer2_runtime_governance/hitl_dashboard.py` |
 
 ## Dashboard Data Model
@@ -149,13 +149,14 @@ That branch should reuse the same boundary logic as the rest of Layer 2:
 
 ## Code Pointers
 
-- `src/layer2_runtime_governance/governance.py`
+- `src/layer2_runtime_governance/governance_components/`
+- `src/layer2_runtime_governance/runtime/governance_service.py`
 - `src/layer2_runtime_governance/oversight.py`
 - `src/layer2_runtime_governance/hitl.py`
 - `src/layer2_runtime_governance/hitl_dashboard.py`
 - `src/main_layer2_dashboard.py`
-- `src/layer2_runtime_governance/state.py`
-- `src/layer2_runtime_governance/nodes.py`
+- `src/layer2_runtime_governance/domain/task_state.py`
+- `src/layer2_runtime_governance/runtime/node_adapters.py`
 - `src/layer2_runtime_governance/graph.py`
 
 ## Practical Reading
