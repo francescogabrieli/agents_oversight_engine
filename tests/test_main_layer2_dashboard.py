@@ -240,8 +240,8 @@ class MainLayer2DashboardTests(unittest.TestCase):
         checkpointer = _RefreshableCheckpointer()
 
         with mock.patch(
-            "main_layer2_dashboard.build_runtime_graph",
-            side_effect=lambda checkpointer: _FakeGraph(checkpointer),
+            "main_layer2_dashboard.compose_layer2_runtime",
+            side_effect=lambda dependencies: _FakeGraph(dependencies.checkpointer),
         ):
             session = build_dashboard_session_from_thread_id(
                 "thread-refresh",
@@ -269,7 +269,7 @@ class MainLayer2DashboardTests(unittest.TestCase):
                 return mock.Mock(values={"thread_id": "thread-artifact-fallback"})
 
         with mock.patch(
-            "main_layer2_dashboard.build_runtime_graph",
+            "main_layer2_dashboard.compose_layer2_runtime",
             side_effect=lambda checkpointer: _FakeGraph(),
         ), self.assertRaisesRegex(ValueError, "canonical LangGraph checkpoint"):
             build_dashboard_session_from_thread_id(

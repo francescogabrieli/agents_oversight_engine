@@ -51,7 +51,7 @@ It already includes:
 - the external communication draft body is taken from the latest governed draft output for the branch, while the trace retains the canonical final body and diagnostics for claim precision vs typed evidence requirements
 - over-decomposed external communication plans may be compacted to a shorter governed draft flow when the planner adds a redundant refinement step after the review-ready draft
 - typed runtime trace export through `observability/`, surfaced by `src/main_layer2.py`
-- offline trace evaluation and reporting through `evaluation.py`, surfaced by `src/main_layer2_evaluation.py`
+- offline trace evaluation and reporting through `evaluation/`, surfaced by `src/main_layer2_evaluation.py`
 
 These are the folders to treat as the active implementation baseline:
 
@@ -154,20 +154,20 @@ Main files:
 
 - `state.py`
 - `graph.py`
-- `planning.py`
-- `acting.py`
-- `replanning.py`
+- `planning/`
+- `acting.py` (compatibility facade)
+- `replanning.py` (compatibility facade)
 - `actor_contract.py`
 - `tool_contract.py`
 - `tool_gateway.py`
 - `governance.py`
-- `behavioral.py`
-- `judge.py`
-- `oversight.py`
-- `evaluation.py`
-- `bedrock_client.py`
-- `persistence.py`
-- `runtime_warnings.py`
+- `behavioral/`
+- `judge/`
+- `oversight/`
+- `evaluation/`
+- `execution/providers/bedrock_runtime.py` (`bedrock_client.py` is a compatibility facade)
+- `infrastructure/runtime_artifacts.py` (`persistence.py` is a compatibility facade)
+- `infrastructure/runtime_warnings.py`
 
 Modular capability packages introduced for the active Layer 2 baseline:
 
@@ -185,10 +185,10 @@ Current design:
 - `domain/` owns the canonical bootstrap state, runtime flags, plan models, actor execution records, review contracts, `TaskState`, and serialization recovery; `state.py` is an import-compatible facade
 - `domain/plan.py` carries typed semantic step metadata on `PlanStep`: `step_kind`, `evidence_requirement`, and `claim_precision_ceiling`, with legacy-compatible defaults
 - `runtime/` owns lifecycle, planner, actor, governance, tool observation, replanning services, and thin LangGraph node adapters; the retired `nodes.py` facade must not be restored
-- `planning.py` defines the planner port, prompt builders, and the default OpenAI-backed planner
+- `planning/` defines the planner port, prompt builders, the default OpenAI-backed planner, and replanning adapters
 - `acting.py` preserves the public actor imports and builds the configured actor; concrete Bedrock/OpenAI adapters, prompts, action schemas, response parsing, result construction, and evidence guards live under `execution/`
 - `actor_contract.py` now passes explicit evidence-support metadata to the actor, including `required_evidence_support_level`, `max_supported_claim_precision`, and the current `step_kind`
-- `replanning.py` defines the replanner port, prompt builders, the default OpenAI-backed replanner, and a local conservative fallback replanner for tests/offline use
+- `planning/replanning.py` defines the replanner port, prompt builders, the default OpenAI-backed replanner, and a local conservative fallback replanner for tests/offline use; `replanning.py` preserves the legacy import path
 - `actor_contract.py` defines the typed handoff from planner state into actor-facing execution context for the current plan step, including observed evidence, scratchpad entries, and prior step validations
 - `tool_contract.py` defines typed tool requests, tool results, and observed evidence contracts
 - `tool_gateway.py` contains the read-only operational tool surface currently available to the runtime, including `web_search`, `fetch_url_text`, and configured read-only MCP test tools behind the gateway registry
@@ -198,24 +198,24 @@ Current design:
 - `governance_policy_service` owns the runtime-independent HTTP transport contract for the external OPA Policy Decision Point; it must not import Layer 2 runtime state
 - `services/policy_decision_point` is the deployable, stateless OPA service boundary; LangGraph remains the Policy Enforcement Point and applies only validated typed directives
 - OPA/Rego is the sole final directive authority; Python may normalize and validate transport data but must not recreate a competing final decision combiner
-- `behavioral.py` defines the behavioural foundation contract, SQLite-backed historical read model, similarity/deviation/novelty scoring, and conservative behavioural recommendations
-- `judge.py` defines the selective semantic judge port, invocation policy, and typed judge assessments
-- `oversight.py` defines deterministic dynamic policy assessment for `evidence_quality`, `operational_risk`, and `trajectory_health`, plus the recommendation consumed by governance
-- `oversight.py` now resolves operational risk from an explicit runtime posture (`none`, `read_only`, `write`) and resolves evidence requirements from typed plan-step metadata before falling back to legacy heuristics
-- `configs/layer2_oversight_policy.json` now includes a `tool_risk.none` level so no-tool executions are not treated as the old medium-risk default
-- `bedrock_client.py` defines the Amazon Bedrock Converse adapter used by the Layer 2 actor with the approved Nova 2 Lite EU inference profile
+- `behavioral/` defines the behavioural foundation contract, SQLite-backed historical read model, similarity/deviation/novelty scoring, and conservative behavioural recommendations
+- `judge/` defines the selective semantic judge port, invocation policy, and typed judge assessments
+- `oversight/` defines deterministic dynamic policy assessment for `evidence_quality`, `operational_risk`, and `trajectory_health`, plus the recommendation consumed by governance
+- `oversight/` resolves operational risk from an explicit runtime posture (`none`, `read_only`, `write`) and resolves evidence requirements from typed plan-step metadata before falling back to legacy heuristics
+- `configs/opa/layer2_governance/data.json` includes a `tool_risk.none` level so no-tool executions are not treated as the old medium-risk default
+- `execution/providers/bedrock_runtime.py` defines the Amazon Bedrock Converse adapter used by the Layer 2 actor with the approved Nova 2 Lite EU inference profile; `bedrock_client.py` is import-compatible
 - `runtime/governance_service.py` applies the OPA-first governance result and persists static, dynamic, behavioral, and judge records before routing
-- `persistence.py` configures the official durable LangGraph SQLite saver plus the per-thread runtime artifact store used for trace and dashboard observability; checkpoints are persisted under `artifacts/runtime/checkpoints/layer2_checkpoints.sqlite3`
+- `infrastructure/runtime_artifacts.py` configures the local official LangGraph SQLite saver plus the per-thread runtime artifact store; `persistence.py` is import-compatible and `infrastructure/checkpointing.py` can select the official PostgreSQL saver for deployed environments
 - `observability/` defines the typed, JSON-exportable Layer 2 trace models, builders, and compact views used for debugging, thesis evidence, HITL payloads, and evaluation; the retired `trace.py` facade must not be restored
-- `evaluation.py` defines the offline trace evaluation pipeline that reads exported trace JSON and produces JSON and Markdown reports, including typed-vs-heuristic evidence mismatch accounting
+- `evaluation/` defines the offline trace evaluation pipeline that reads exported trace JSON and produces JSON and Markdown reports, including typed-vs-heuristic evidence mismatch accounting
 - `hitl_dashboard.py` defines the dashboard-facing snapshot model derived from `TaskState`, governance, oversight, and HITL review payloads
 - `main_layer2_dashboard.py` now acts as a standalone multi-thread HITL control plane backend that serves the React dashboard build, exposes the review inbox/detail/resume API, and resolves resume actions from persisted checkpoints on demand
 - `main_layer2_dashboard.py` now also persists post-resume artifacts through the same runtime artifact store used by the dashboard inbox/detail API, so HITL decisions immediately refresh the observed thread state after agent continuation
-- `main_layer2_dashboard.py` rebuilds a persisted thread directly from the official SQLite LangGraph checkpointer, so the standalone dashboard can resume runs created by a separate `main_layer2.py` process without relying on stale in-memory state or trace artifacts
+- `main_layer2_dashboard.py` rebuilds a persisted thread directly from the configured official LangGraph checkpointer, so the standalone dashboard can resume runs created by a separate `main_layer2.py` process without relying on stale in-memory state or trace artifacts
 - the dashboard review inbox is intentionally action-oriented and now hides pending-review threads whose persisted `updated_at` is older than 2 minutes; old artifacts remain on disk and detail views can still be resolved directly by thread id
 - `frontend/dashboard` contains the standalone React + TypeScript + Tailwind + daisyUI dashboard frontend that is built into static assets and served by `main_layer2_dashboard.py`
-- `configs/layer2_oversight_policy.json` defines the explicit weights, thresholds, risk scores, sensitivity multipliers, and trajectory penalties used by the dynamic policy layer
-- `runtime_warnings.py` centralizes warning suppression needed before importing selected LangGraph/LangChain dependencies
+- `configs/opa/layer2_governance/data.json` is the canonical source for weights, thresholds, risk scores, sensitivity multipliers, and trajectory penalties consumed by OPA and the compatibility evaluator
+- `infrastructure/runtime_warnings.py` centralizes warning suppression needed before importing selected LangGraph/LangChain dependencies
 - `graph.py` contains the current LangGraph wiring for the planner/actor/governance/tool/replanner/human-review loop:
   `START -> bootstrap_from_intake -> planner -> actor -> governance -> { tool_gateway | replanner | human_review | finalize_bootstrap }`
   `human_review -> { planner | actor | tool_gateway | replanner | finalize_bootstrap }`
@@ -238,7 +238,7 @@ Current relevant file:
 
 - `configs/layer1_execution_policies.json`
 - `configs/layer2_tool_gateway.json`
-- `configs/layer2_oversight_policy.json`
+- `configs/opa/layer2_governance/data.json`
 
 
 ### `docs`
@@ -414,11 +414,11 @@ Current relevant files:
 - `WAITING_HUMAN_REVIEW` is now the typed pause state that feeds the LangGraph `interrupt / resume` HITL path
 - governance is active as an explicit runtime node and uses OPA over HTTP as the deterministic static policy engine target
 - deterministic dynamic policy may only preserve or make the static policy decision more conservative; it must never make an OPA decision more permissive
-- the default LangGraph checkpointer is the official durable local SQLite saver rather than a process-local in-memory saver
-- the default checkpoint file is `artifacts/runtime/checkpoints/layer2_checkpoints.sqlite3`; LangGraph owns its checkpoint schema and serialization
-- the runtime persists per-thread artifacts under `artifacts/runtime/<thread_id>/`, including trace, compact trace, dashboard snapshot, runtime summary, and pending HITL payload when present
+- the default LangGraph checkpointer is the official durable local SQLite saver rather than a process-local in-memory saver; production deployments may select the official PostgreSQL saver
+- the default checkpoint file is `artifacts/runtime/checkpoints/layer2_checkpoints.sqlite3`; LangGraph owns its checkpoint schema and serialization, and pending interrupts must never be reconstructed from artifact JSON
+- the runtime persists per-thread artifacts under `artifacts/runtime/<thread_id>/`, including the canonical trace, dashboard snapshot, runtime summary, and pending HITL payload when present
 - the behavioural SQLite store lives under `artifacts/runtime/behavioral/behavioral.sqlite3` by default and must remain a read model rather than the primary runtime source of truth
-- dynamic policy scoring must remain deterministic, explainable, and configured through `configs/layer2_oversight_policy.json`
+- dynamic policy scoring must remain deterministic, explainable, and configured through `configs/opa/layer2_governance/data.json`
 - trajectory-health turn pressure should stay forgiving enough that short source-plus-summary tasks can make a few recovery turns without being forced into replanning
 - runtime trace export must be read-only over `TaskState`; it must not mutate runtime state or become a parallel source of truth
 - `main_layer2.py` may print trace views, but reusable trace construction belongs in `observability/`
@@ -453,11 +453,11 @@ Useful breakpoint locations:
 - `src/layer2_runtime_governance/runtime/actor_service.py`
 - `src/layer2_runtime_governance/runtime/governance_service.py`
 - `src/layer2_runtime_governance/domain/task_state.py`
-- `src/layer2_runtime_governance/planning.py`
+- `src/layer2_runtime_governance/planning/__init__.py`
 - `src/layer2_runtime_governance/acting.py`
-- `src/layer2_runtime_governance/replanning.py`
+- `src/layer2_runtime_governance/planning/replanning.py`
 - `src/layer2_runtime_governance/tool_gateway.py`
-- `src/layer2_runtime_governance/oversight.py`
+- `src/layer2_runtime_governance/oversight/__init__.py`
 - `src/layer2_runtime_governance/observability/builder.py`
 
 In particular:

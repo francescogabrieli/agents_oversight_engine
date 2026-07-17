@@ -1,0 +1,65 @@
+{
+  "tools": [
+    {
+      "tool_name": "mcp.local_test.echo",
+      "backend": "mcp",
+      "capability": "read",
+      "risk_level": "low",
+      "enabled": true,
+      "requires_human_review": false,
+      "timeout_seconds": 5,
+      "required_fields": ["text"],
+      "mcp_server_id": "local_test",
+      "mcp_tool_name": "echo",
+      "max_content_chars": 4000
+    },
+    {
+      "tool_name": "mcp.local_test.read_fixture",
+      "backend": "mcp",
+      "capability": "read",
+      "risk_level": "low",
+      "enabled": true,
+      "requires_human_review": false,
+      "timeout_seconds": 5,
+      "required_fields": ["path"],
+      "mcp_server_id": "local_test",
+      "mcp_tool_name": "read_fixture",
+      "max_content_chars": 4000
+    },
+    {
+      "tool_name": "mcp.local_test.text_stats",
+      "backend": "mcp",
+      "capability": "read",
+      "risk_level": "low",
+      "enabled": true,
+      "requires_human_review": false,
+      "timeout_seconds": 5,
+      "required_fields": ["text"],
+      "mcp_server_id": "local_test",
+      "mcp_tool_name": "text_stats",
+      "max_content_chars": 4000
+    },
+    {
+      "tool_name": "mcp.local_test.calculate_expression",
+      "backend": "mcp",
+      "capability": "read",
+      "risk_level": "low",
+      "enabled": true,
+      "requires_human_review": false,
+      "timeout_seconds": 5,
+      "required_fields": ["expression"],
+      "mcp_server_id": "local_test",
+      "mcp_tool_name": "calculate_expression",
+      "max_content_chars": 4000
+    }
+  ],
+  "mcp_servers": {
+    "local_test": {
+      "enabled": true,
+      "command": "{python}",
+      "args": ["{repo_root}\\tests\\fixtures\\mcp_local_test_server.py"],
+      "allowed_tools": ["echo", "read_fixture", "text_stats", "calculate_expression"],
+      "timeout_seconds": 5
+    }
+  }
+}

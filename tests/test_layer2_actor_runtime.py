@@ -25,7 +25,7 @@ class Layer2ActorExecutionTests(unittest.TestCase):
 
     def test_bedrock_settings_load_aws_profile_from_environment(self) -> None:
         with patch.dict(os.environ, {"AWS_PROFILE": "datareply-pua"}, clear=True), patch(
-            "layer2_runtime_governance.bedrock_client._load_env_file_values",
+            "layer2_runtime_governance.execution.providers.bedrock_runtime._load_env_file_values",
             return_value={},
         ):
             settings = bedrock_client_module.BedrockRuntimeSettings.from_env()

@@ -1,0 +1,3 @@
+# Production HITL persistence recommended by the LangGraph documentation.
+langgraph-checkpoint-postgres
+psycopg[binary,pool]

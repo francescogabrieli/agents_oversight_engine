@@ -326,7 +326,6 @@ class Layer2RuntimeTrace:
     behavioral_assessments: tuple[TraceBehavioralAssessment, ...]
     judge_assessments: tuple[TraceJudgeAssessment, ...]
     governance_decisions: tuple[TraceGovernanceDecision, ...]
-    oversight_assessments: tuple[TraceOversightAssessment, ...]
     human_review: TraceHumanReviewSummary
     external_communication: TraceExternalCommunicationSummary | None
 

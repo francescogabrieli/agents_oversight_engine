@@ -38,7 +38,7 @@ def evaluate_opa_first_governance(
     thread_id: str | None = None,
 ) -> GovernanceEvaluationResult:
     from ..behavioral import build_behavioral_assessment
-    from ..governance_input_builder import (
+    from .input_document import (
         build_governance_base_facts,
         build_governance_decision_input,
         validate_governance_decision_input,

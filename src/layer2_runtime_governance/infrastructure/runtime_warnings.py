@@ -1,3 +1,5 @@
+"""Targeted dependency-warning filters owned by runtime infrastructure."""
+
 from __future__ import annotations
 
 import warnings

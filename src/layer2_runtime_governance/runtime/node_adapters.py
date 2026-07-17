@@ -95,7 +95,7 @@ def build_human_review_node():
     ) -> dict[str, TaskState]:
         return {
             "task_state": human_review(
-                copy_task_state(state["task_state"]),
+                state["task_state"],
                 thread_id=extract_thread_id(state, config=config),
             )
         }
@@ -138,7 +138,7 @@ def observe_tool_result_node(state: Layer2GraphState) -> dict[str, TaskState]:
 
 # Close the runtime slice through the canonical finalization transition.
 def finalize_node(state: Layer2GraphState) -> dict[str, TaskState]:
-    return {"task_state": finalize_bootstrap(copy_task_state(state["task_state"]))}
+    return {"task_state": finalize_bootstrap(state["task_state"])}
 
 
 __all__ = [

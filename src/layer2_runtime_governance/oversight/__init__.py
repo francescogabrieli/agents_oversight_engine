@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING
 
 from layer1_intake import SensitivityLevel
 
-from .actor_contract import ActorResultType, CapabilityAccessMode
-from .domain import PlanStepKind, StepValidation, StepValidationDecision, TaskState
-from .tool_contract import EvidenceSourceKind, EvidenceSupportLevel
-from .tools import (
+from ..actor_contract import ActorResultType, CapabilityAccessMode
+from ..domain import PlanStepKind, StepValidation, StepValidationDecision, TaskState
+from ..tool_contract import EvidenceSourceKind, EvidenceSupportLevel
+from ..tools import (
     ToolCapability,
     ToolGatewayConfig,
     ToolDefinition,
@@ -22,7 +22,7 @@ from .tools import (
 )
 
 if TYPE_CHECKING:
-    from .governance_components import PolicyEvaluationInput
+    from ..governance_components import PolicyEvaluationInput
 
 
 class DynamicPolicyRecommendedDirective(str, Enum):
@@ -208,21 +208,21 @@ class RuntimeActionRiskContext:
 
 # Load deterministic oversight scoring settings from repository configuration.
 def load_oversight_policy_config(*, config_path: Path | None = None) -> OversightPolicyConfig:
-    from .governance_components.oversight_config import load_oversight_policy_config as load
+    from ..governance_components.oversight_config import load_oversight_policy_config as load
 
     return load(config_path=config_path)
 
 
 # Return the repository-local oversight policy configuration path.
 def get_default_oversight_policy_config_path() -> Path:
-    from .governance_components.oversight_config import get_default_oversight_policy_config_path
+    from ..governance_components.oversight_config import get_default_oversight_policy_config_path
 
     return get_default_oversight_policy_config_path()
 
 
 # Build a conservative fallback if the JSON policy file is unavailable.
 def build_default_oversight_policy_config() -> OversightPolicyConfig:
-    from .governance_components.oversight_config import build_default_oversight_policy_config
+    from ..governance_components.oversight_config import build_default_oversight_policy_config
 
     return build_default_oversight_policy_config()
 

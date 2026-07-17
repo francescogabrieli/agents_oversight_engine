@@ -11,9 +11,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from llm_retry import llm_retry
 
-from .actor_contract import ActorResultType
-from .behavioral import BehavioralAssessment, BehavioralRecommendedDirective
-from .oversight import (
+from ..actor_contract import ActorResultType
+from ..behavioral import BehavioralAssessment, BehavioralRecommendedDirective
+from ..infrastructure.environment import candidate_env_paths, load_env_file_values
+from ..oversight import (
     DynamicPolicyAssessment,
     DynamicPolicyRecommendedDirective,
     OversightSignalLevel,
@@ -23,8 +24,8 @@ from .oversight import (
     _precision_mismatch_detected as _runtime_precision_mismatch_detected,
     _required_evidence_support_level,
 )
-from .domain import ExternalCommunicationPhase, TaskState
-from .tool_contract import EvidenceSupportLevel
+from ..domain import ExternalCommunicationPhase, TaskState
+from ..tool_contract import EvidenceSupportLevel
 
 try:
     from openai import OpenAI
@@ -32,7 +33,7 @@ except ImportError:  # pragma: no cover - handled at runtime if dependency is mi
     OpenAI = None
 
 if TYPE_CHECKING:
-    from .governance_components import PolicyEvaluationInput, StaticPolicyAssessment
+    from ..governance_components import PolicyEvaluationInput, StaticPolicyAssessment
 
 
 class JudgeRecommendedDirective(str, Enum):
@@ -580,30 +581,12 @@ def _normalize_flag(value: str) -> str:
 
 # Load simple KEY=VALUE pairs from the supported .env file locations.
 def _load_env_file_values() -> dict[str, str]:
-    env_values: dict[str, str] = {}
-    for candidate in _candidate_env_paths():
-        if not candidate.exists():
-            continue
-        for raw_line in candidate.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith("export "):
-                line = line[len("export ") :].strip()
-            if "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            key = key.strip()
-            value = value.strip().strip("\"'")
-            if key:
-                env_values[key] = value
-    return env_values
+    return dict(load_env_file_values())
 
 
 # Search both repository root and src-level env files for local development.
 def _candidate_env_paths() -> list[Path]:
-    repo_root = Path(__file__).resolve().parents[2]
-    return [repo_root / ".env", repo_root / "src" / ".env"]
+    return list(candidate_env_paths())
 
 
 __all__ = [

@@ -23,11 +23,19 @@ from layer1_intake import (
     TaskSpec,
 )
 from layer1_intake.infrastructure import build_intake_service
-from layer2_runtime_governance import build_default_checkpointer, build_runtime_graph
+from layer2_runtime_governance import build_default_checkpointer
 from layer2_runtime_governance import HumanReviewDecision
 from layer2_runtime_governance.actor_contract import ActorPort
 from layer2_runtime_governance.behavioral import BehavioralStorePort
 from layer2_runtime_governance.governance_components import PolicyEnginePort
+from layer2_runtime_governance.infrastructure.checkpoint_retention import (
+    prune_expired_checkpoint_threads,
+)
+from layer2_runtime_governance.infrastructure.checkpointing import close_checkpointer
+from layer2_runtime_governance.composition import (
+    Layer2RuntimeDependencies,
+    compose_layer2_runtime,
+)
 from layer2_runtime_governance.judge import JudgePort
 from layer2_runtime_governance.persistence import RuntimeArtifactStore, persist_runtime_artifacts
 from layer2_runtime_governance.planning import PlannerPort
@@ -73,16 +81,21 @@ def run_layer2_flow(
     live_trace: bool = False,
 ) -> dict[str, Any]:
     # Run Layer 1 plus the current Layer 2 graph and return the resulting trace.
-    runtime_graph = build_runtime_graph(
-        planner_service=planner_service,
-        actor_service=actor_service,
-        tool_gateway_service=tool_gateway_service,
-        replanner_service=replanner_service,
-        policy_engine_service=policy_engine_service,
-        judge_service=judge_service,
-        behavioral_store_service=behavioral_store_service,
-        checkpointer=checkpointer,
-        hitl_event_callback=hitl_event_callback,
+    uses_default_checkpointer = checkpointer is None
+    resolved_checkpointer = checkpointer or build_default_checkpointer()
+    resolved_artifact_store = artifact_store or RuntimeArtifactStore()
+    runtime_graph = compose_layer2_runtime(
+        Layer2RuntimeDependencies(
+            planner=planner_service,
+            actor=actor_service,
+            tool_gateway=tool_gateway_service,
+            replanner=replanner_service,
+            policy_engine=policy_engine_service,
+            judge=judge_service,
+            behavioral_store=behavioral_store_service,
+            checkpointer=resolved_checkpointer,
+            hitl_event_callback=hitl_event_callback,
+        )
     )
 
     resolved_thread_id = thread_id or f"layer2-{uuid4()}"
@@ -138,7 +151,13 @@ def run_layer2_flow(
         "intake_result": intake_result,
         "final_result": final_result,
     }
-    _persist_runtime_artifacts_from_trace(trace, artifact_store=artifact_store)
+    _persist_runtime_artifacts_from_trace(trace, artifact_store=resolved_artifact_store)
+    if uses_default_checkpointer:
+        _prune_expired_checkpoints(
+            checkpointer=resolved_checkpointer,
+            artifact_store=resolved_artifact_store,
+        )
+        close_checkpointer(resolved_checkpointer)
     return trace
 
 
@@ -157,15 +176,20 @@ def resume_layer2_flow(
     checkpointer: Any | None = None,
     artifact_store: RuntimeArtifactStore | None = None,
 ) -> dict[str, Any]:
-    runtime_graph = build_runtime_graph(
-        planner_service=planner_service,
-        actor_service=actor_service,
-        tool_gateway_service=tool_gateway_service,
-        replanner_service=replanner_service,
-        policy_engine_service=policy_engine_service,
-        judge_service=judge_service,
-        behavioral_store_service=behavioral_store_service,
-        checkpointer=checkpointer,
+    uses_default_checkpointer = checkpointer is None
+    resolved_checkpointer = checkpointer or build_default_checkpointer()
+    resolved_artifact_store = artifact_store or RuntimeArtifactStore()
+    runtime_graph = compose_layer2_runtime(
+        Layer2RuntimeDependencies(
+            planner=planner_service,
+            actor=actor_service,
+            tool_gateway=tool_gateway_service,
+            replanner=replanner_service,
+            policy_engine=policy_engine_service,
+            judge=judge_service,
+            behavioral_store=behavioral_store_service,
+            checkpointer=resolved_checkpointer,
+        )
     )
 
     config = {"configurable": {"thread_id": thread_id}}
@@ -191,8 +215,29 @@ def resume_layer2_flow(
     }
     if intake_result is not None:
         trace["intake_result"] = intake_result
-        _persist_runtime_artifacts_from_trace(trace, artifact_store=artifact_store)
+        _persist_runtime_artifacts_from_trace(trace, artifact_store=resolved_artifact_store)
+    if uses_default_checkpointer:
+        _prune_expired_checkpoints(
+            checkpointer=resolved_checkpointer,
+            artifact_store=resolved_artifact_store,
+        )
+        close_checkpointer(resolved_checkpointer)
     return trace
+
+
+# Keep retention maintenance non-blocking for the live task result.
+def _prune_expired_checkpoints(
+    *,
+    checkpointer: Any,
+    artifact_store: RuntimeArtifactStore,
+) -> None:
+    try:
+        prune_expired_checkpoint_threads(
+            checkpointer=checkpointer,
+            artifact_store=artifact_store,
+        )
+    except Exception:
+        return
 
 
 # Reuse the canonical invoke output when it contains the typed runtime state.
@@ -559,14 +604,12 @@ def _build_demo_intake_result(
 def main() -> None:
     # Run the current Layer 2 slice from the command line.
     args = parse_cli_args()
-    checkpointer = build_default_checkpointer()
     trace = run_layer2_flow(
         raw_task_text=args.task,
         context_hint=args.context,
         policy_profile=args.policy_profile,
         thread_id=args.thread_id,
         demo_intake_profile=args.demo_intake_profile,
-        checkpointer=checkpointer,
         progress_callback=None if args.quiet else _print_progress,
         live_trace=args.live_trace,
     )

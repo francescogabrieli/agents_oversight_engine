@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,12 @@ def load_tool_gateway_config(*, config_path: Path | None = None) -> ToolGatewayC
     resolved_path = config_path or get_default_tool_gateway_config_path()
     if not resolved_path.exists():
         return build_default_tool_gateway_config()
+    return _load_tool_gateway_config_cached(resolved_path.resolve())
+
+
+# Cache the immutable registry so governance does not reread JSON on every actor turn.
+@lru_cache(maxsize=8)
+def _load_tool_gateway_config_cached(resolved_path: Path) -> ToolGatewayConfig:
     payload = json.loads(resolved_path.read_text(encoding="utf-8"))
     repo_root = Path(__file__).resolve().parents[3]
     mcp_servers = {

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from tests.layer2_runtime_fixtures import *
+from layer2_runtime_governance.infrastructure.checkpointing import (
+    build_default_checkpointer,
+)
 
 
 class Layer2HumanReviewRuntimeTests(unittest.TestCase):
@@ -433,6 +436,54 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
         self.assertEqual(len(resumed_state.human_review_history), 1)
         self.assertTrue(resumed_state.bootstrap_completed)
 
+    # Verify an interrupt survives graph reconstruction through LangGraph's SQLite saver.
+    def test_human_review_resumes_from_official_sqlite_checkpoint(self) -> None:
+        temp_dir = REPO_ROOT / f"_sqlite_hitl_test_{uuid4().hex}"
+        first_saver = None
+        second_saver = None
+        try:
+            checkpoint_path = Path(temp_dir) / "hitl.sqlite3"
+            first_saver = build_default_checkpointer(storage_path=checkpoint_path)
+            first_graph = _build_test_graph(
+                policy_engine_service=ReviewPolicyEngine(),
+                checkpointer=first_saver,
+            )
+            thread_id = f"sqlite-hitl-{uuid4()}"
+            initial = first_graph.invoke(
+                {"intake_result": _build_research_intake_result()},
+                config={"configurable": {"thread_id": thread_id}},
+            )
+            interrupt_payload = initial["__interrupt__"][0].value
+            first_saver.conn.close()
+            first_saver = None
+
+            second_saver = build_default_checkpointer(storage_path=checkpoint_path)
+            second_graph = _build_test_graph(
+                policy_engine_service=ReviewPolicyEngine(),
+                checkpointer=second_saver,
+            )
+            resumed = second_graph.invoke(
+                Command(
+                    resume={
+                        "request_id": interrupt_payload["request_id"],
+                        "decision_type": "approve_continue",
+                    }
+                ),
+                config={"configurable": {"thread_id": thread_id}},
+            )
+
+            self.assertEqual(
+                resumed["task_state"].current_state,
+                RuntimeState.COMPLETED,
+            )
+            self.assertEqual(len(resumed["task_state"].human_review_history), 1)
+        finally:
+            if first_saver is not None:
+                first_saver.conn.close()
+            if second_saver is not None:
+                second_saver.conn.close()
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 
     def test_human_review_decision_routes_are_typed_and_request_id_is_checked(self) -> None:
         graph = _build_test_graph(policy_engine_service=ReviewPolicyEngine())
@@ -703,4 +754,3 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ...actor_contract import ActorPort, ActorResult, ActorTask
-from ...bedrock_client import BedrockChatClient, BedrockRuntimeError, BedrockRuntimeSettings
+from .bedrock_runtime import BedrockChatClient, BedrockRuntimeError, BedrockRuntimeSettings
 from ..action_schemas import build_actor_runtime_tools
 from ..errors import ActorExecutionError
 from ..prompts import build_actor_system_prompt, build_actor_user_prompt

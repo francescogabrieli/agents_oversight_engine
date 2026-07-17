@@ -131,7 +131,7 @@ from layer2_runtime_governance.runtime.governance_service import (
 from layer2_runtime_governance.runtime.planning_service import planner
 from layer2_runtime_governance.runtime.tool_service import observe_tool_result
 from layer2_runtime_governance.tool_contract import ObservedEvidence
-import layer2_runtime_governance.bedrock_client as bedrock_client_module
+import layer2_runtime_governance.execution.providers.bedrock_runtime as bedrock_client_module
 
 
 # Build Bedrock actor settings for legacy behavior fixtures without making network calls.
@@ -2126,11 +2126,12 @@ def _build_test_graph(
     replanner_service: ReplannerPort | None = None,
     policy_engine_service: PolicyEnginePort | None = None,
     judge_service: JudgePort | None = None,
+    checkpointer=None,
 ):
     return _ThreadIdInjectingGraph(
         build_runtime_graph(
             # Unit graph fixtures must not share durable checkpoints across test runs.
-            checkpointer=InMemorySaver(serde=build_runtime_serializer()),
+            checkpointer=checkpointer or InMemorySaver(serde=build_runtime_serializer()),
             planner_service=planner_service or StubPlanner(),
             actor_service=actor_service or StubActor(),
             tool_gateway_service=tool_gateway_service or StubToolGateway(),

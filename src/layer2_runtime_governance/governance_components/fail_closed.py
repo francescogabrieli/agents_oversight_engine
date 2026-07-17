@@ -36,7 +36,7 @@ def _build_fail_closed_governance_result(
     behavioral_assessment: BehavioralAssessment | None = None,
     judge_assessment: JudgeAssessment | None = None,
 ) -> GovernanceEvaluationResult:
-    from ..governance_input_builder import build_governance_decision_input
+    from .input_document import build_governance_decision_input
 
     resolved_requirements = pillar_requirements or {
         "require_evidence": True,

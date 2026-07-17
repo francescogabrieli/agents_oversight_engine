@@ -47,9 +47,6 @@ from .runtime_records import ExecutedPlanStep, ScratchpadEntry, StepValidation
 class TaskState:
     # Direct handoff from Layer 1.
     intake_payload: IntakeResult
-    task_spec: TaskSpec
-    execution_policy: ExecutionPolicy
-    intake_metadata: IntakeMetadata
 
     # Bootstrap outcome.
     current_state: RuntimeState
@@ -88,25 +85,116 @@ class TaskState:
     tool_call_count: int = 0
 
     # Governance snapshot.
-    last_static_policy_assessment: StaticPolicyAssessment | None = None
     static_policy_history: list[StaticPolicyAssessment] = field(default_factory=list)
-    last_dynamic_policy_assessment: DynamicPolicyAssessment | None = None
     dynamic_policy_history: list[DynamicPolicyAssessment] = field(default_factory=list)
-    last_behavioral_assessment: BehavioralAssessment | None = None
     behavioral_history: list[BehavioralAssessment] = field(default_factory=list)
-    last_judge_assessment: JudgeAssessment | None = None
     judge_history: list[JudgeAssessment] = field(default_factory=list)
-    last_governance_decision: GovernanceDecisionTrace | None = None
     governance_history: list[GovernanceDecisionTrace] = field(default_factory=list)
-    # Keep the legacy oversight fields populated until all dependent surfaces migrate.
-    last_oversight_assessment: OversightAssessment | None = None
-    oversight_history: list[OversightAssessment] = field(default_factory=list)
 
     # Human-in-the-loop snapshot.
     pending_human_review_request: HumanReviewRequest | None = None
     last_human_review_request: HumanReviewRequest | None = None
     human_review_history: list[HumanReviewDecision] = field(default_factory=list)
-    last_human_review_decision: HumanReviewDecision | None = None
+
+    @property
+    def task_spec(self) -> TaskSpec:
+        # Derive the task contract from the canonical Layer 1 handoff.
+        return self.intake_payload.structured_task.task_spec
+
+    @property
+    def execution_policy(self) -> ExecutionPolicy:
+        # Derive the current execution envelope from the canonical Layer 1 handoff.
+        return self.intake_payload.structured_task.execution_policy
+
+    @execution_policy.setter
+    def execution_policy(self, value: ExecutionPolicy) -> None:
+        # Keep human-approved policy changes inside the canonical intake payload.
+        self.intake_payload.structured_task.execution_policy = value
+
+    @property
+    def intake_metadata(self) -> IntakeMetadata:
+        # Derive intake metadata instead of serializing a duplicate reference.
+        return self.intake_payload.metadata
+
+    @property
+    def last_static_policy_assessment(self) -> StaticPolicyAssessment | None:
+        # Expose the latest static assessment without duplicating checkpoint state.
+        return self.static_policy_history[-1] if self.static_policy_history else None
+
+    @last_static_policy_assessment.setter
+    def last_static_policy_assessment(self, value: StaticPolicyAssessment | None) -> None:
+        # Preserve the former assignment API for fixtures and checkpoint recovery.
+        _replace_latest(self.static_policy_history, value)
+
+    @property
+    def last_dynamic_policy_assessment(self) -> DynamicPolicyAssessment | None:
+        # Expose the latest dynamic assessment without a parallel oversight history.
+        return self.dynamic_policy_history[-1] if self.dynamic_policy_history else None
+
+    @last_dynamic_policy_assessment.setter
+    def last_dynamic_policy_assessment(self, value: DynamicPolicyAssessment | None) -> None:
+        # Preserve the former assignment API for fixtures and checkpoint recovery.
+        _replace_latest(self.dynamic_policy_history, value)
+
+    @property
+    def last_oversight_assessment(self) -> DynamicPolicyAssessment | None:
+        # Keep the legacy read alias without persisting the same assessment twice.
+        return self.last_dynamic_policy_assessment
+
+    @last_oversight_assessment.setter
+    def last_oversight_assessment(self, value: DynamicPolicyAssessment | None) -> None:
+        # Route legacy writes into the canonical dynamic history.
+        self.last_dynamic_policy_assessment = value
+
+    @property
+    def oversight_history(self) -> list[DynamicPolicyAssessment]:
+        # Keep the legacy history alias as a non-serialized view.
+        return self.dynamic_policy_history
+
+    @oversight_history.setter
+    def oversight_history(self, value: list[DynamicPolicyAssessment]) -> None:
+        # Normalize legacy checkpoint payloads onto the canonical history.
+        self.dynamic_policy_history = value
+
+    @property
+    def last_behavioral_assessment(self) -> BehavioralAssessment | None:
+        # Expose the latest behavioural assessment without duplicate state.
+        return self.behavioral_history[-1] if self.behavioral_history else None
+
+    @last_behavioral_assessment.setter
+    def last_behavioral_assessment(self, value: BehavioralAssessment | None) -> None:
+        # Preserve the former assignment API for fixtures and checkpoint recovery.
+        _replace_latest(self.behavioral_history, value)
+
+    @property
+    def last_judge_assessment(self) -> JudgeAssessment | None:
+        # Expose the latest judge assessment without duplicate state.
+        return self.judge_history[-1] if self.judge_history else None
+
+    @last_judge_assessment.setter
+    def last_judge_assessment(self, value: JudgeAssessment | None) -> None:
+        # Preserve the former assignment API for fixtures and checkpoint recovery.
+        _replace_latest(self.judge_history, value)
+
+    @property
+    def last_governance_decision(self) -> GovernanceDecisionTrace | None:
+        # Expose the latest OPA decision without duplicate state.
+        return self.governance_history[-1] if self.governance_history else None
+
+    @last_governance_decision.setter
+    def last_governance_decision(self, value: GovernanceDecisionTrace | None) -> None:
+        # Preserve the former assignment API for fixtures and checkpoint recovery.
+        _replace_latest(self.governance_history, value)
+
+    @property
+    def last_human_review_decision(self) -> HumanReviewDecision | None:
+        # Expose the latest operator decision from its canonical history.
+        return self.human_review_history[-1] if self.human_review_history else None
+
+    @last_human_review_decision.setter
+    def last_human_review_decision(self, value: HumanReviewDecision | None) -> None:
+        # Preserve the former assignment API for fixtures and checkpoint recovery.
+        _replace_latest(self.human_review_history, value)
 
     @property
     def current_plan_step(self) -> PlanStep | None:
@@ -147,9 +235,6 @@ class TaskState:
 
         return cls(
             intake_payload=intake_result,
-            task_spec=intake_result.structured_task.task_spec,
-            execution_policy=intake_result.structured_task.execution_policy,
-            intake_metadata=intake_result.metadata,
             current_state=current_state,
             runtime_flags=runtime_flags,
             human_review_resume_state=(
@@ -173,6 +258,17 @@ class TaskState:
                 intake_result.structured_task.task_spec
             ),
         )
+
+
+# Replace only the latest derived value while keeping one canonical history.
+def _replace_latest(history: list[Any], value: Any | None) -> None:
+    if value is None:
+        history.clear()
+        return
+    if history:
+        history[-1] = value
+    else:
+        history.append(value)
 
 
 # Canonical domain contract extracted from the legacy state facade.

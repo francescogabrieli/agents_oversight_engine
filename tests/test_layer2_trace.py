@@ -100,9 +100,9 @@ class Layer2TraceTests(unittest.TestCase):
         self.assertEqual(trace.observed_evidence[0].source_kind, "tool_observation")
         self.assertEqual(len(trace.governance_decisions), 2)
         self.assertEqual(trace.governance_decisions[0].directive, "continue_read_only")
-        self.assertEqual(len(trace.oversight_assessments), 2)
-        self.assertIsInstance(trace.oversight_assessments[0], TraceOversightAssessment)
-        self.assertEqual(trace.oversight_assessments[0].evidence_quality.level, "strong")
+        self.assertEqual(len(trace.dynamic_policy_assessments), 2)
+        self.assertIsInstance(trace.dynamic_policy_assessments[0], TraceOversightAssessment)
+        self.assertEqual(trace.dynamic_policy_assessments[0].evidence_quality.level, "strong")
         self.assertEqual(len(trace.static_policy_assessments), 2)
         self.assertEqual(len(trace.dynamic_policy_assessments), 2)
         self.assertEqual(len(trace.behavioral_assessments), 1)
@@ -176,7 +176,7 @@ class Layer2TraceTests(unittest.TestCase):
         self.assertEqual(payload["runtime"]["current_state"], "completed")
         self.assertEqual(decoded["governance_decisions"][0]["policy_decision"], "allow_read_only")
         self.assertEqual(
-            decoded["oversight_assessments"][0]["operational_risk"]["reason_codes"],
+            decoded["dynamic_policy_assessments"][0]["operational_risk"]["reason_codes"],
             ["tool_risk_low"],
         )
 

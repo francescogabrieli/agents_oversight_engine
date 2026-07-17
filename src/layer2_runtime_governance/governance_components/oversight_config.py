@@ -16,10 +16,14 @@ def load_oversight_policy_config(*, config_path: Path | None = None) -> Oversigh
     if not resolved_path.exists():
         return build_default_oversight_policy_config()
     payload = json.loads(resolved_path.read_text(encoding="utf-8"))
+    payload = payload.get("policy_config", payload)
     thresholds = payload.get("thresholds", {})
-    weights = payload.get("evidence_quality_weights", {})
-    risk_scores = payload.get("risk_scores", {})
-    trajectory_penalties = payload.get("trajectory_penalties", {})
+    weights = payload.get("evidence_weights", payload.get("evidence_quality_weights", {}))
+    risk_scores = payload.get("risk_weights", payload.get("risk_scores", {}))
+    trajectory_penalties = payload.get(
+        "trajectory_weights",
+        payload.get("trajectory_penalties", {}),
+    )
     return OversightPolicyConfig(
         min_actor_confidence=float(thresholds.get("min_actor_confidence", 0.65)),
         min_evidence_quality=float(thresholds.get("min_evidence_quality", 0.70)),
@@ -77,7 +81,7 @@ def load_oversight_policy_config(*, config_path: Path | None = None) -> Oversigh
 # Return the repository-local oversight configuration path.
 def get_default_oversight_policy_config_path() -> Path:
     repo_root = Path(__file__).resolve().parents[3]
-    return repo_root / "configs" / "layer2_oversight_policy.json"
+    return repo_root / "configs" / "opa" / "layer2_governance" / "data.json"
 
 
 # Build a conservative fallback when the JSON policy file is unavailable.

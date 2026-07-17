@@ -115,6 +115,33 @@ class Layer2ArchitectureTests(unittest.TestCase):
     def test_runtime_test_monolith_is_removed(self) -> None:
         self.assertFalse((REPO_ROOT / "tests" / "test_layer2_runtime_governance.py").exists())
 
+    # Large capability implementations belong to packages rather than the Layer 2 root.
+    def test_root_keeps_capability_implementations_out_of_flat_modules(self) -> None:
+        package_names = {
+            "behavioral",
+            "evaluation",
+            "hitl",
+            "judge",
+            "oversight",
+            "planning",
+        }
+        for package_name in package_names:
+            self.assertTrue((LAYER2_ROOT / package_name / "__init__.py").exists())
+            self.assertFalse((LAYER2_ROOT / f"{package_name}.py").exists())
+        self.assertTrue(
+            (LAYER2_ROOT / "governance_components" / "input_document.py").exists()
+        )
+        self.assertTrue(
+            (LAYER2_ROOT / "infrastructure" / "runtime_artifacts.py").exists()
+        )
+
+    # Entrypoints must use the explicit dependency-injection composition root.
+    def test_live_entrypoints_use_explicit_composition_root(self) -> None:
+        for path in (SRC_ROOT / "main_layer2.py", SRC_ROOT / "main_layer2_dashboard.py"):
+            source = path.read_text(encoding="utf-8")
+            self.assertIn("compose_layer2_runtime", source)
+            self.assertNotIn("build_runtime_graph(", source)
+
     # Persisted threads must accept both pre-refactor and canonical domain type paths.
     def test_checkpoint_allowlist_preserves_legacy_state_and_governance_paths(self) -> None:
         from layer2_runtime_governance.infrastructure.checkpointing import (
@@ -125,6 +152,10 @@ class Layer2ArchitectureTests(unittest.TestCase):
         self.assertIn(("layer2_runtime_governance.state", "TaskState"), legacy_paths)
         self.assertIn(
             ("layer2_runtime_governance.governance", "GovernanceDecisionTrace"),
+            legacy_paths,
+        )
+        self.assertIn(
+            ("layer2_runtime_governance.replanning", "ReplanDecision"),
             legacy_paths,
         )
 

@@ -77,10 +77,6 @@ def build_layer2_runtime_trace(
         governance_decisions=tuple(
             _build_governance_decision(decision) for decision in task_state.governance_history
         ),
-        oversight_assessments=tuple(
-            _build_oversight_assessment(assessment)
-            for assessment in task_state.oversight_history
-        ),
         human_review=_build_human_review_summary(task_state=task_state),
         external_communication=_build_external_communication_summary(
             task_state.external_communication

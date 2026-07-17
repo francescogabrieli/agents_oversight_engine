@@ -18,6 +18,7 @@ from .contracts import (
     PolicyEvaluationInput,
     PolicyEvaluationResult,
 )
+from ..infrastructure.environment import candidate_env_paths, load_env_file_values
 from .decision_parser import _parse_non_empty_text, _parse_policy_decision, _parse_reason_codes
 from .policy_input import build_opa_input_document
 
@@ -143,29 +144,11 @@ def build_default_policy_engine() -> PolicyEnginePort:
 
 # Keep policy transport configuration and I/O behind the OPA adapter.
 def _load_env_file_values() -> dict[str, str]:
-    env_values: dict[str, str] = {}
-    for candidate in _candidate_env_paths():
-        if not candidate.exists():
-            continue
-        for raw_line in candidate.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith("export "):
-                line = line[len("export ") :].strip()
-            if "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            key = key.strip()
-            value = value.strip().strip("\"'")
-            if key:
-                env_values[key] = value
-    return env_values
+    return dict(load_env_file_values())
 
 # Keep policy transport configuration and I/O behind the OPA adapter.
 def _candidate_env_paths() -> list[Path]:
-    repo_root = Path(__file__).resolve().parents[2]
-    return [repo_root / ".env", repo_root / "src" / ".env"]
+    return list(candidate_env_paths())
 
 __all__ = [
     "OPAHttpPolicyEngineSettings",

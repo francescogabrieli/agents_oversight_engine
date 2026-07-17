@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from pathlib import Path
 
-from ..bedrock_client import BedrockRuntimeSettings
+from .providers.bedrock_runtime import BedrockRuntimeSettings
+from ..infrastructure.environment import load_env_file_values
 
 
 @dataclass(frozen=True)
@@ -72,30 +72,7 @@ def resolve_actor_provider() -> str:
 
 # Load simple KEY=VALUE pairs from supported local environment files.
 def _load_env_file_values() -> dict[str, str]:
-    env_values: dict[str, str] = {}
-    for candidate in _candidate_env_paths():
-        if not candidate.exists():
-            continue
-        for raw_line in candidate.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith("export "):
-                line = line[len("export ") :].strip()
-            if "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            key = key.strip()
-            value = value.strip().strip("\"'")
-            if key:
-                env_values[key] = value
-    return env_values
-
-
-# Search repository root and src-level env files for local development.
-def _candidate_env_paths() -> list[Path]:
-    repo_root = Path(__file__).resolve().parents[3]
-    return [repo_root / ".env", repo_root / "src" / ".env"]
+    return dict(load_env_file_values())
 
 
 __all__ = ["BedrockNovaActorSettings", "OpenAIActorSettings", "resolve_actor_provider"]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from .runtime_warnings import suppress_known_runtime_warnings
+from .infrastructure.runtime_warnings import suppress_known_runtime_warnings
 
 # Install targeted filters before importing LangGraph dependencies.
 suppress_known_runtime_warnings()
@@ -11,7 +11,7 @@ from langgraph.graph import END, START, StateGraph
 
 from .acting import build_default_actor
 from .actor_contract import ActorPort
-from .behavioral import BehavioralStorePort
+from .behavioral import BehavioralStorePort, build_default_behavioral_store
 from .governance_components import PolicyEnginePort, build_default_policy_engine
 from .infrastructure.checkpointing import build_default_checkpointer
 from .judge import JudgePort
@@ -53,6 +53,7 @@ def build_runtime_graph(
     resolved_tool_gateway = tool_gateway_service or build_default_tool_gateway()
     resolved_replanner = replanner_service or build_default_replanner()
     resolved_policy_engine = policy_engine_service or build_default_policy_engine()
+    resolved_behavioral_store = behavioral_store_service or build_default_behavioral_store()
 
     builder = StateGraph(
         Layer2GraphState,
@@ -67,7 +68,7 @@ def build_runtime_graph(
         build_governance_node(
             resolved_policy_engine,
             judge_service=judge_service,
-            behavioral_store_service=behavioral_store_service,
+            behavioral_store_service=resolved_behavioral_store,
             hitl_event_callback=hitl_event_callback,
         ),
     )

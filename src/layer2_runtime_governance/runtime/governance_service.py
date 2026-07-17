@@ -1,7 +1,11 @@
 from copy import deepcopy
 from typing import Callable
 
-from ..behavioral import BehavioralStorePort, persist_behavioral_snapshot, persist_judge_snapshot
+from ..behavioral import (
+    BehavioralStorePort,
+    persist_behavioral_runtime_snapshot,
+    persist_judge_snapshot,
+)
 from ..actor_contract import ActorResultType
 from ..governance_components import (
     GovernanceDecision,
@@ -57,17 +61,10 @@ def governance(
     judge_assessment = governance_evaluation.judge_assessment
     governance_decision = governance_evaluation.governance_decision
 
-    state.last_static_policy_assessment = static_policy_assessment
     state.static_policy_history.append(static_policy_assessment)
-    state.last_dynamic_policy_assessment = dynamic_policy_assessment
     state.dynamic_policy_history.append(dynamic_policy_assessment)
-    state.last_behavioral_assessment = behavioral_assessment
     state.behavioral_history.append(behavioral_assessment)
-    state.last_judge_assessment = judge_assessment
     state.judge_history.append(judge_assessment)
-    state.last_oversight_assessment = dynamic_policy_assessment
-    state.oversight_history.append(dynamic_policy_assessment)
-    state.last_governance_decision = governance_decision
     state.governance_history.append(governance_decision)
     _apply_governance_decision(
         state,
@@ -87,24 +84,30 @@ def governance(
         state.pending_human_review_request = None
         state.human_review_resume_state = None
 
-    # Persist the behavioural read model after each governance pass without affecting the decision path.
-    try:
-        persist_behavioral_snapshot(
-            thread_id=resolved_thread_id,
-            intake_result=state.intake_payload,
-            task_state=state,
-            behavioral_store=behavioral_store_service,
-        )
-    except Exception:
-        pass
-    try:
-        persist_judge_snapshot(
-            thread_id=resolved_thread_id,
-            task_state=state,
-            behavioral_store=behavioral_store_service,
-        )
-    except Exception:
-        pass
+    # Materialize the cross-thread read model only at stable audit boundaries.
+    if state.current_state in {
+        RuntimeState.WAITING_HUMAN_REVIEW,
+        RuntimeState.COMPLETED,
+        RuntimeState.ABORTED,
+    }:
+        try:
+            persist_behavioral_runtime_snapshot(
+                thread_id=resolved_thread_id,
+                intake_result=state.intake_payload,
+                task_state=state,
+                behavioral_store=behavioral_store_service,
+            )
+        except Exception:
+            pass
+    else:
+        try:
+            persist_judge_snapshot(
+                thread_id=resolved_thread_id,
+                task_state=state,
+                behavioral_store=behavioral_store_service,
+            )
+        except Exception:
+            pass
 
     _append_step_record(
         state,

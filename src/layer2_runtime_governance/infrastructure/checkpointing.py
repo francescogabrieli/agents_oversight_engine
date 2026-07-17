@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
@@ -48,7 +50,7 @@ from ..oversight import (
     TrajectoryHealthAssessment,
     TrajectoryPenalties,
 )
-from ..persistence import build_sqlite_checkpointer
+from .runtime_artifacts import build_sqlite_checkpointer
 from ..replanning import ReplanDecision
 from ..domain import (
     ExecutedPlanStep,
@@ -81,6 +83,37 @@ from ..tool_contract import (
     ToolRequest,
     ToolSource,
 )
+from .environment import get_env_value
+
+
+class CheckpointBackend(str, Enum):
+    # Keep supported LangGraph persistence implementations explicit.
+    SQLITE = "sqlite"
+    POSTGRES = "postgres"
+
+
+@dataclass(frozen=True)
+class CheckpointSettings:
+    # Select an official LangGraph checkpointer without exposing credentials to graph state.
+    backend: CheckpointBackend = CheckpointBackend.SQLITE
+    postgres_uri: str | None = None
+    postgres_pool_min_size: int = 1
+    postgres_pool_max_size: int = 4
+
+    # Resolve deployment settings once at the composition boundary.
+    @classmethod
+    def from_env(cls) -> "CheckpointSettings":
+        backend_value = get_env_value("LAYER2_CHECKPOINT_BACKEND", "sqlite") or "sqlite"
+        return cls(
+            backend=CheckpointBackend(backend_value.strip().lower()),
+            postgres_uri=get_env_value("LAYER2_CHECKPOINT_POSTGRES_URI"),
+            postgres_pool_min_size=int(
+                get_env_value("LAYER2_CHECKPOINT_POSTGRES_POOL_MIN_SIZE", "1") or "1"
+            ),
+            postgres_pool_max_size=int(
+                get_env_value("LAYER2_CHECKPOINT_POSTGRES_POOL_MAX_SIZE", "4") or "4"
+            ),
+        )
 
 
 # Build the serializer shared by durable and in-memory checkpoint adapters.
@@ -98,9 +131,62 @@ def build_runtime_serializer() -> JsonPlusSerializer:
 
 
 # Build the default checkpointer with every persisted runtime type allowlisted.
-def build_default_checkpointer(*, storage_path: Any | None = None) -> Any:
+def build_default_checkpointer(
+    *,
+    storage_path: Any | None = None,
+    settings: CheckpointSettings | None = None,
+) -> Any:
     serializer = build_runtime_serializer()
-    return build_sqlite_checkpointer(serde=serializer, storage_path=storage_path)
+    resolved_settings = settings or CheckpointSettings.from_env()
+    if storage_path is not None or resolved_settings.backend == CheckpointBackend.SQLITE:
+        return build_sqlite_checkpointer(serde=serializer, storage_path=storage_path)
+    return _build_postgres_checkpointer(
+        settings=resolved_settings,
+        serializer=serializer,
+    )
+
+
+# Release the connection or pool owned by a short-lived checkpointer.
+def close_checkpointer(checkpointer: Any) -> None:
+    connection = getattr(checkpointer, "conn", None)
+    close = getattr(connection, "close", None)
+    if callable(close):
+        close()
+
+
+# Build the production-grade LangGraph saver recommended for deployed workflows.
+def _build_postgres_checkpointer(
+    *,
+    settings: CheckpointSettings,
+    serializer: JsonPlusSerializer,
+) -> Any:
+    if not settings.postgres_uri:
+        raise RuntimeError(
+            "LAYER2_CHECKPOINT_POSTGRES_URI is required when the checkpoint backend is postgres."
+        )
+    try:
+        from langgraph.checkpoint.postgres import PostgresSaver
+        from psycopg.rows import dict_row
+        from psycopg_pool import ConnectionPool
+    except ImportError as exc:
+        raise RuntimeError(
+            "PostgreSQL checkpointing requires langgraph-checkpoint-postgres and psycopg[pool]."
+        ) from exc
+
+    pool = ConnectionPool(
+        conninfo=settings.postgres_uri,
+        min_size=settings.postgres_pool_min_size,
+        max_size=settings.postgres_pool_max_size,
+        kwargs={
+            "autocommit": True,
+            "prepare_threshold": 0,
+            "row_factory": dict_row,
+        },
+        open=True,
+    )
+    saver = PostgresSaver(pool, serde=serializer)
+    saver.setup()
+    return saver
 
 
 # Keep the serializer registry explicit and isolated from graph wiring.
@@ -193,7 +279,15 @@ def _legacy_persisted_type_paths() -> set[tuple[str, str]]:
     return {
         *(("layer2_runtime_governance.state", name) for name in state_type_names),
         *(("layer2_runtime_governance.governance", name) for name in governance_type_names),
+        # ReplanDecision moved into the planning capability after older checkpoints existed.
+        ("layer2_runtime_governance.replanning", "ReplanDecision"),
     }
 
 
-__all__ = ["build_default_checkpointer", "build_runtime_serializer"]
+__all__ = [
+    "CheckpointBackend",
+    "CheckpointSettings",
+    "build_default_checkpointer",
+    "build_runtime_serializer",
+    "close_checkpointer",
+]

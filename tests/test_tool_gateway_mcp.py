@@ -58,7 +58,6 @@ from layer2_runtime_governance.tool_gateway import (
     ToolCapability,
     ToolDefinition,
     ToolRiskLevel,
-    get_default_tool_gateway_config_path,
     load_tool_gateway_config,
 )
 from layer2_runtime_governance.infrastructure.checkpointing import (
@@ -66,16 +65,26 @@ from layer2_runtime_governance.infrastructure.checkpointing import (
 )
 
 
+MCP_TEST_CONFIG_PATH = REPO_ROOT / "configs" / "layer2_tool_gateway.test.json"
+
+
+# Build the gateway from the test-only MCP registry instead of polluting runtime defaults.
+def _build_mcp_test_gateway() -> OpenAIToolGateway:
+    return OpenAIToolGateway(
+        config=load_tool_gateway_config(config_path=MCP_TEST_CONFIG_PATH)
+    )
+
+
 class GatewayMCPTests(unittest.TestCase):
     def test_default_config_loads_mcp_tools(self) -> None:
-        config = load_tool_gateway_config(config_path=get_default_tool_gateway_config_path())
+        config = load_tool_gateway_config(config_path=MCP_TEST_CONFIG_PATH)
 
         self.assertIn(ToolName.MCP_LOCAL_TEST_ECHO, config.tools)
         self.assertIn("local_test", config.mcp_servers)
         self.assertIn("echo", config.mcp_servers["local_test"].allowed_tools)
 
     def test_mcp_echo_tool_executes_through_gateway(self) -> None:
-        gateway = OpenAIToolGateway()
+        gateway = _build_mcp_test_gateway()
 
         result = gateway.execute(
             tool_request=ToolRequest(
@@ -91,7 +100,7 @@ class GatewayMCPTests(unittest.TestCase):
         self.assertEqual(result.sources[0].locator, "mcp://local_test/echo")
 
     def test_mcp_text_stats_tool_executes_through_gateway(self) -> None:
-        gateway = OpenAIToolGateway()
+        gateway = _build_mcp_test_gateway()
 
         result = gateway.execute(
             tool_request=ToolRequest(
@@ -108,7 +117,7 @@ class GatewayMCPTests(unittest.TestCase):
         self.assertIn('"dma", 2', result.content or "")
 
     def test_mcp_calculate_expression_blocks_unsupported_syntax(self) -> None:
-        gateway = OpenAIToolGateway()
+        gateway = _build_mcp_test_gateway()
 
         result = gateway.execute(
             tool_request=ToolRequest(
@@ -123,7 +132,7 @@ class GatewayMCPTests(unittest.TestCase):
         self.assertIn("unsupported syntax", result.error_message or "")
 
     def test_mcp_read_fixture_is_limited_to_fixture_directory(self) -> None:
-        gateway = OpenAIToolGateway()
+        gateway = _build_mcp_test_gateway()
 
         allowed = gateway.execute(
             tool_request=ToolRequest(
@@ -148,7 +157,7 @@ class GatewayMCPTests(unittest.TestCase):
         self.assertIn("outside the allowed fixture", blocked.error_message or "")
 
     def test_not_allowlisted_mcp_tool_returns_structured_failure(self) -> None:
-        config = load_tool_gateway_config(config_path=get_default_tool_gateway_config_path())
+        config = load_tool_gateway_config(config_path=MCP_TEST_CONFIG_PATH)
         original = config.tools[ToolName.MCP_LOCAL_TEST_ECHO]
         blocked_config = ToolGatewayConfig(
             tools={
@@ -186,7 +195,7 @@ class GatewayMCPTests(unittest.TestCase):
         self.assertIn("not allowlisted", result.error_message or "")
 
     def test_missing_required_field_returns_structured_failure(self) -> None:
-        gateway = OpenAIToolGateway()
+        gateway = _build_mcp_test_gateway()
 
         result = gateway.execute(
             tool_request=ToolRequest(
@@ -339,7 +348,7 @@ class GatewayMCPTests(unittest.TestCase):
         graph = build_runtime_graph(
             planner_service=SingleStepPlanner(),
             actor_service=MCPThenCompleteActor(),
-            tool_gateway_service=OpenAIToolGateway(),
+            tool_gateway_service=_build_mcp_test_gateway(),
             replanner_service=NoopReplanner(),
             policy_engine_service=AllowPolicyEngine(),
             checkpointer=InMemorySaver(serde=build_runtime_serializer()),

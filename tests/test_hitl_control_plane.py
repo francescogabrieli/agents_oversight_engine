@@ -55,21 +55,24 @@ class HitlControlPlaneTests(unittest.TestCase):
     def test_governance_notifies_when_human_review_is_requested(self) -> None:
         task_state = _build_actor_ready_state()
         notifications: list[object] = []
+        temp_root = REPO_ROOT / "_test_behavioral_hitl_notify"
         behavioral_store = _build_empty_behavioral_store("hitl_notify")
+        try:
+            result = governance(
+                task_state,
+                policy_engine_service=_ReviewPolicyEngine(),
+                behavioral_store_service=behavioral_store,
+                thread_id="thread-hitl",
+                hitl_event_callback=notifications.append,
+            )
 
-        result = governance(
-            task_state,
-            policy_engine_service=_ReviewPolicyEngine(),
-            behavioral_store_service=behavioral_store,
-            thread_id="thread-hitl",
-            hitl_event_callback=notifications.append,
-        )
-
-        self.assertEqual(len(notifications), 1)
-        self.assertEqual(result.current_state, RuntimeState.WAITING_HUMAN_REVIEW)
-        self.assertIsNotNone(result.pending_human_review_request)
-        self.assertEqual(notifications[0].current_state, RuntimeState.WAITING_HUMAN_REVIEW)
-        self.assertIsNotNone(notifications[0].pending_human_review_request)
+            self.assertEqual(len(notifications), 1)
+            self.assertEqual(result.current_state, RuntimeState.WAITING_HUMAN_REVIEW)
+            self.assertIsNotNone(result.pending_human_review_request)
+            self.assertEqual(notifications[0].current_state, RuntimeState.WAITING_HUMAN_REVIEW)
+            self.assertIsNotNone(notifications[0].pending_human_review_request)
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
 
     # Verify the review summary remains deduplicated when governance and oversight overlap.
     def test_human_review_summary_is_not_duplicated(self) -> None:
@@ -151,7 +154,7 @@ class HitlControlPlaneTests(unittest.TestCase):
             def get_state(self, _config):
                 return mock.Mock(values={"thread_id": "thread-resume-only"}, interrupts=[])
 
-        with mock.patch("main_layer2.build_runtime_graph", return_value=_FakeGraph()):
+        with mock.patch("main_layer2.compose_layer2_runtime", return_value=_FakeGraph()):
             trace = resume_layer2_flow(
                 thread_id="thread-resume-only",
                 human_review_decision={

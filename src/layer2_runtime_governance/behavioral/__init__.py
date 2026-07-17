@@ -2,26 +2,27 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from layer1_intake import IntakeResult
 
-from .actor_contract import ActorResultType
-from .oversight import (
+from ..actor_contract import ActorResultType
+from ..oversight import (
     DynamicPolicyAssessment,
     DynamicPolicyRecommendedDirective,
     OversightSignalLevel,
     _available_evidence_support_level,
 )
-from .domain import TaskState
-from .tool_contract import EvidenceSupportLevel
+from ..domain import TaskState
+from ..tool_contract import EvidenceSupportLevel
 
 if TYPE_CHECKING:
-    from .judge import JudgeAssessment
+    from ..judge import JudgeAssessment
 
 
 class BehavioralRecommendedDirective(str, Enum):
@@ -82,11 +83,21 @@ class BehavioralStorePort(Protocol):
         task_state: TaskState,
     ) -> None: ...
 
+    def persist_runtime_snapshot(
+        self,
+        *,
+        thread_id: str,
+        intake_result: IntakeResult,
+        task_state: TaskState,
+    ) -> None: ...
+
 
 @dataclass
 class SQLiteBehavioralStore(BehavioralStorePort):
     # SQLiteBehavioralStore keeps behavioural history local, durable, and queryable.
     settings: BehavioralStoreSettings
+    _schema_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
+    _schema_initialized: bool = field(default=False, init=False, repr=False)
 
     # Build the behavioural assessment from comparable historical runs and current runtime state.
     def build_behavioral_assessment(
@@ -97,7 +108,7 @@ class SQLiteBehavioralStore(BehavioralStorePort):
         dynamic_policy_assessment: DynamicPolicyAssessment | None = None,
     ) -> BehavioralAssessment:
         with closing(self._connect()) as connection:
-            self._ensure_schema(connection)
+            self._ensure_schema_once(connection)
             historical_run_count = int(
                 connection.execute(
                     "SELECT COUNT(*) FROM runs WHERE thread_id <> ?",
@@ -213,7 +224,7 @@ class SQLiteBehavioralStore(BehavioralStorePort):
         task_state: TaskState,
     ) -> None:
         with closing(self._connect()) as connection:
-            self._ensure_schema(connection)
+            self._ensure_schema_once(connection)
             self._replace_run_snapshot(
                 connection=connection,
                 thread_id=thread_id,
@@ -230,32 +241,53 @@ class SQLiteBehavioralStore(BehavioralStorePort):
         task_state: TaskState,
     ) -> None:
         with closing(self._connect()) as connection:
-            self._ensure_schema(connection)
-            connection.execute("DELETE FROM judge_assessments WHERE thread_id = ?", (thread_id,))
-            for assessment_index, assessment in enumerate(task_state.judge_history, start=1):
-                connection.execute(
-                    """
-                    INSERT INTO judge_assessments (
-                        thread_id, assessment_index, invoked, recommendation,
-                        confidence, evaluated_target, flags_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        thread_id,
-                        assessment_index,
-                        int(bool(assessment.invoked)),
-                        assessment.recommendation.value,
-                        assessment.confidence,
-                        assessment.evaluated_target,
-                        json.dumps(list(assessment.flags), ensure_ascii=False),
-                    ),
+            self._ensure_schema_once(connection)
+            if task_state.judge_history:
+                self._upsert_judge_assessment(
+                    connection=connection,
+                    thread_id=thread_id,
+                    assessment_index=len(task_state.judge_history),
+                    assessment=task_state.judge_history[-1],
                 )
+            connection.commit()
+
+    # Persist behavioural and judge projections in one SQLite transaction.
+    def persist_runtime_snapshot(
+        self,
+        *,
+        thread_id: str,
+        intake_result: IntakeResult,
+        task_state: TaskState,
+    ) -> None:
+        with closing(self._connect()) as connection:
+            self._ensure_schema_once(connection)
+            self._replace_run_snapshot(
+                connection=connection,
+                thread_id=thread_id,
+                intake_result=intake_result,
+                task_state=task_state,
+            )
+            self._replace_judge_snapshot(
+                connection=connection,
+                thread_id=thread_id,
+                task_state=task_state,
+            )
             connection.commit()
 
     # Open one SQLite connection and ensure the parent directory exists first.
     def _connect(self) -> sqlite3.Connection:
         self.settings.database_path.parent.mkdir(parents=True, exist_ok=True)
         return sqlite3.connect(self.settings.database_path)
+
+    # Initialize or migrate the schema once per store instance.
+    def _ensure_schema_once(self, connection: sqlite3.Connection) -> None:
+        if self._schema_initialized:
+            return
+        with self._schema_lock:
+            if self._schema_initialized:
+                return
+            self._ensure_schema(connection)
+            self._schema_initialized = True
 
     # Create the behavioural schema needed for similarity, deviation, and judge persistence.
     def _ensure_schema(self, connection: sqlite3.Connection) -> None:
@@ -433,6 +465,50 @@ class SQLiteBehavioralStore(BehavioralStorePort):
             ),
         ).fetchall()
         return [_row_to_candidate(row) for row in fallback_rows]
+
+    # Replace the materialized judge projection inside the caller transaction.
+    def _replace_judge_snapshot(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        thread_id: str,
+        task_state: TaskState,
+    ) -> None:
+        connection.execute("DELETE FROM judge_assessments WHERE thread_id = ?", (thread_id,))
+        for assessment_index, assessment in enumerate(task_state.judge_history, start=1):
+            self._upsert_judge_assessment(
+                connection=connection,
+                thread_id=thread_id,
+                assessment_index=assessment_index,
+                assessment=assessment,
+            )
+
+    # Upsert one judge record so intermediate governance passes stay incremental.
+    def _upsert_judge_assessment(
+        self,
+        *,
+        connection: sqlite3.Connection,
+        thread_id: str,
+        assessment_index: int,
+        assessment: JudgeAssessment,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO judge_assessments (
+                thread_id, assessment_index, invoked, recommendation,
+                confidence, evaluated_target, flags_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                thread_id,
+                assessment_index,
+                int(bool(assessment.invoked)),
+                assessment.recommendation.value,
+                assessment.confidence,
+                assessment.evaluated_target,
+                json.dumps(list(assessment.flags), ensure_ascii=False),
+            ),
+        )
 
     # Load feature snapshots into one per-thread dictionary.
     def _load_feature_map(
@@ -755,6 +831,34 @@ def persist_judge_snapshot(
     behavioral_store: BehavioralStorePort | None = None,
 ) -> None:
     resolved_store = behavioral_store or build_default_behavioral_store()
+    resolved_store.persist_judge_snapshot(
+        thread_id=thread_id,
+        task_state=task_state,
+    )
+
+
+# Persist both behavioural projections through one transaction when supported.
+def persist_behavioral_runtime_snapshot(
+    *,
+    thread_id: str,
+    intake_result: IntakeResult,
+    task_state: TaskState,
+    behavioral_store: BehavioralStorePort | None = None,
+) -> None:
+    resolved_store = behavioral_store or build_default_behavioral_store()
+    combined_persist = getattr(resolved_store, "persist_runtime_snapshot", None)
+    if callable(combined_persist):
+        combined_persist(
+            thread_id=thread_id,
+            intake_result=intake_result,
+            task_state=task_state,
+        )
+        return
+    resolved_store.persist_behavioral_snapshot(
+        thread_id=thread_id,
+        intake_result=intake_result,
+        task_state=task_state,
+    )
     resolved_store.persist_judge_snapshot(
         thread_id=thread_id,
         task_state=task_state,
@@ -1254,5 +1358,6 @@ __all__ = [
     "evaluate_behavioral_policy",
     "get_default_behavioral_store_path",
     "persist_behavioral_snapshot",
+    "persist_behavioral_runtime_snapshot",
     "persist_judge_snapshot",
 ]

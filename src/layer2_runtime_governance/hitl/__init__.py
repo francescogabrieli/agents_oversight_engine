@@ -7,10 +7,10 @@ from typing import Any
 
 from langgraph.types import interrupt
 
-from .actor_contract import ActorResultType
-from .behavioral import BehavioralAssessment
-from .oversight import DynamicPolicyAssessment, OversightAssessment
-from .domain import (
+from ..actor_contract import ActorResultType
+from ..behavioral import BehavioralAssessment
+from ..oversight import DynamicPolicyAssessment, OversightAssessment
+from ..domain import (
     ExternalCommunicationPhase,
     ExternalCommunicationDraft,
     HumanReviewDecision,
@@ -125,7 +125,6 @@ def human_review(state: TaskState, *, thread_id: str) -> TaskState:
     runtime_state.human_review_resume_state = pending_request.resume_state
     runtime_state.last_human_review_request = pending_request
     runtime_state.pending_human_review_request = None
-    runtime_state.last_human_review_decision = human_review_decision
     runtime_state.human_review_history.append(human_review_decision)
     runtime_state.step_index += 1
     runtime_state.step_history.append(

@@ -65,9 +65,11 @@ def build_compact_trace_from_runtime_trace(trace: Layer2RuntimeTrace) -> dict[st
             "last_governance_decision": (
                 asdict(trace.governance_decisions[-1]) if trace.governance_decisions else None
             ),
-            "oversight_pass_count": len(trace.oversight_assessments),
+            "oversight_pass_count": len(trace.dynamic_policy_assessments),
             "last_oversight_assessment": (
-                asdict(trace.oversight_assessments[-1]) if trace.oversight_assessments else None
+                asdict(trace.dynamic_policy_assessments[-1])
+                if trace.dynamic_policy_assessments
+                else None
             ),
         },
         "human_review_snapshot": asdict(trace.human_review),

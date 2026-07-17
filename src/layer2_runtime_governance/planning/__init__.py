@@ -10,8 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from llm_retry import llm_retry
 
-from .domain import PlanStep, PlanStepKind, PlannerDecision, TaskState
-from .tool_contract import EvidenceSupportLevel
+from ..domain import PlanStep, PlanStepKind, PlannerDecision, TaskState
+from ..infrastructure.environment import candidate_env_paths, load_env_file_values
+from ..tool_contract import EvidenceSupportLevel
 
 try:
     from openai import OpenAI
@@ -237,35 +238,8 @@ def build_default_planner() -> PlannerPort:
 
 
 def _load_env_file_values() -> dict[str, str]:
-    # Load simple KEY=VALUE pairs from the supported .env file locations.
-    env_values: dict[str, str] = {}
-
-    for candidate in _candidate_env_paths():
-        if not candidate.exists():
-            continue
-
-        for raw_line in candidate.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith("export "):
-                line = line[len("export ") :].strip()
-            if "=" not in line:
-                continue
-
-            key, value = line.split("=", 1)
-            key = key.strip()
-            value = value.strip().strip("\"'")
-            if key:
-                env_values[key] = value
-
-    return env_values
+    return dict(load_env_file_values())
 
 
 def _candidate_env_paths() -> list[Path]:
-    # Search both repository root and src-level env files for local development.
-    repo_root = Path(__file__).resolve().parents[2]
-    return [
-        repo_root / ".env",
-        repo_root / "src" / ".env",
-    ]
+    return list(candidate_env_paths())

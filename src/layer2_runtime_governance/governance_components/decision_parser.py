@@ -126,7 +126,7 @@ def _build_governance_trace_from_opa_output(
 
 # Parse and validate one bounded part of the untrusted OPA response.
 def _validate_governance_decision_output(raw_output: dict[str, Any]) -> None:
-    from ..schema_validation import validate_json_schema
+    from .schema_validation import validate_json_schema
 
     validate_json_schema(schema_name="governance_decision_output", payload=raw_output)
     required_fields = (

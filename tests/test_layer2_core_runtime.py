@@ -182,7 +182,7 @@ class Layer2RuntimeCoreTests(unittest.TestCase):
             paths = artifact_store.build_paths(trace["thread_id"])
             self.assertTrue(paths.full_trace_path.exists())
             self.assertEqual(paths.full_trace_path.name, "full-trace-2.json")
-            self.assertTrue(paths.compact_trace_path.exists())
+            self.assertFalse((paths.thread_dir / "trace.compact.json").exists())
             self.assertTrue(paths.dashboard_snapshot_path.exists())
             self.assertTrue(paths.runtime_summary_path.exists())
 

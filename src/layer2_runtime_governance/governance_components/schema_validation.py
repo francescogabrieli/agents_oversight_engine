@@ -1,20 +1,29 @@
+"""Schema validation used exclusively by OPA governance contracts."""
+
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 
 # Validate repository contracts with jsonschema when installed, otherwise a strict local Draft subset.
 def validate_json_schema(*, schema_name: str, payload: dict[str, Any]) -> None:
-    schema_path = Path(__file__).resolve().parents[2] / "schemas" / f"{schema_name}.schema.json"
-    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    schema = _load_schema(schema_name)
     try:
         import jsonschema
     except ImportError:
         _validate_subset(schema=schema, value=payload, path="$")
         return
     jsonschema.Draft202012Validator(schema).validate(payload)
+
+
+# Cache repository schemas because their contents are immutable during one runtime process.
+@lru_cache(maxsize=8)
+def _load_schema(schema_name: str) -> dict[str, Any]:
+    schema_path = Path(__file__).resolve().parents[3] / "schemas" / f"{schema_name}.schema.json"
+    return json.loads(schema_path.read_text(encoding="utf-8"))
 
 
 # Keep local development fail-closed when the optional validator dependency is absent.

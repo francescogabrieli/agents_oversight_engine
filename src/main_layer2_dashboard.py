@@ -26,10 +26,14 @@ from layer2_runtime_governance import (
     ToolName,
     ToolRequest,
     build_default_checkpointer,
-    build_runtime_graph,
 )
 from layer2_runtime_governance.persistence import RuntimeArtifactStore
 from layer2_runtime_governance.domain import TaskState
+from layer2_runtime_governance.infrastructure.checkpointing import close_checkpointer
+from layer2_runtime_governance.composition import (
+    Layer2RuntimeDependencies,
+    compose_layer2_runtime,
+)
 
 from main_layer2 import resume_layer2_flow
 
@@ -75,6 +79,22 @@ class DashboardServerContext:
     static_root: Path
 
 
+class Layer2DashboardHTTPServer(ThreadingHTTPServer):
+    # Own and release only the checkpointer created by the dashboard server factory.
+    def __init__(self, *args, owned_checkpointer: Any | None = None, **kwargs) -> None:
+        self._owned_checkpointer = owned_checkpointer
+        super().__init__(*args, **kwargs)
+
+    # Close the saver connection or pool together with the HTTP server.
+    def server_close(self) -> None:
+        try:
+            super().server_close()
+        finally:
+            if self._owned_checkpointer is not None:
+                close_checkpointer(self._owned_checkpointer)
+                self._owned_checkpointer = None
+
+
 # Rebuild a checkpoint-backed dashboard session from an in-memory trace payload.
 def build_dashboard_session_from_trace(
     trace: dict[str, Any],
@@ -103,7 +123,9 @@ def build_dashboard_session_from_thread_id(
 ) -> DashboardSession:
     resolved_checkpointer = checkpointer or build_default_checkpointer()
     resolved_artifact_store = artifact_store or RuntimeArtifactStore()
-    runtime_graph = build_runtime_graph(checkpointer=resolved_checkpointer)
+    runtime_graph = compose_layer2_runtime(
+        Layer2RuntimeDependencies(checkpointer=resolved_checkpointer)
+    )
     snapshot = runtime_graph.get_state({"configurable": {"thread_id": thread_id}})
     snapshot_values = snapshot.values if snapshot is not None else {}
     if not isinstance(snapshot_values, dict):
@@ -652,13 +674,19 @@ def build_dashboard_httpd(
     resume_flow: DashboardRunner = resume_layer2_flow,
     static_root: Path = DEFAULT_STATIC_ROOT,
 ) -> ThreadingHTTPServer:
+    owns_checkpointer = checkpointer is None
+    resolved_checkpointer = checkpointer or build_default_checkpointer()
     context = DashboardServerContext(
         artifact_store=artifact_store or RuntimeArtifactStore(),
-        checkpointer=checkpointer or build_default_checkpointer(),
+        checkpointer=resolved_checkpointer,
         resume_flow=resume_flow,
         static_root=static_root,
     )
-    return ThreadingHTTPServer((host, port), _build_request_handler(context=context))
+    return Layer2DashboardHTTPServer(
+        (host, port),
+        _build_request_handler(context=context),
+        owned_checkpointer=resolved_checkpointer if owns_checkpointer else None,
+    )
 
 
 # Build one request handler class bound to the shared dashboard server context.

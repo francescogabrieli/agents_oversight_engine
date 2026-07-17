@@ -1,3 +1,5 @@
+"""Offline evaluation over exported Layer 2 runtime traces."""
+
 from __future__ import annotations
 
 import json
@@ -304,7 +306,10 @@ def _normalize_trace_payload(payload: Any, *, source_path: Path) -> _NormalizedT
             source_path=source_path,
         ),
         oversight_assessments=_normalize_oversight_assessments(
-            payload.get("oversight_assessments"),
+            payload.get(
+                "dynamic_policy_assessments",
+                payload.get("oversight_assessments"),
+            ),
             source_path=source_path,
         ),
         human_review=_normalize_human_review(payload.get("human_review"), source_path=source_path),

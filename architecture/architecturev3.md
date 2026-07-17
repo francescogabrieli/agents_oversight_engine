@@ -49,7 +49,7 @@ L'architettura viene compressa in cinque macro-blocchi:
 - `Task Intake`: codice esterno al grafo. Prepara il payload iniziale prima dell'avvio del runtime.
 - `Runtime & Governance`: implementato principalmente come nodi e subgraph LangGraph.
 - `Governance PDP`: OPA (Open Policy Agent) è il policy decision point esterno; il nodo LangGraph `governance` è il policy enforcement point che costruisce fatti, invoca OPA e applica la direttiva restituita.
-- `HITL Gateway`: nodo LangGraph con `interrupt()` più control plane di review standalone servito da `src/main_layer2_dashboard.py`, che riprende esclusivamente checkpoint LangGraph SQLite con `Command(resume=...)`; gli artifact runtime sono osservabilità, non stato ripristinabile.
+- `HITL Gateway`: nodo LangGraph con `interrupt()` più control plane di review standalone servito da `src/main_layer2_dashboard.py`, che riprende esclusivamente checkpoint ufficiali LangGraph con `Command(resume=...)` (`SqliteSaver` locale, `PostgresSaver` in produzione); gli artifact runtime sono osservabilità, non stato ripristinabile.
 - `Tool Bus / External Capabilities`: componente esterno al grafo, invocato dal nodo `tool_gateway`.
 - `State, Evidence & Observability`: componente ibrido che fonde gli artefatti nativi prodotti da LangGraph, come stato runtime, checkpoint, thread history, task metadata e interrupt, con il tracciamento custom dell'architettura, come evidenze semantiche, output di governance, rationale, score e audit trail.
 - `Evaluation & Continuous Improvement`: codice esterno, eseguito fuori dal ciclo live del task.
@@ -370,11 +370,11 @@ Le direttive possibili sono `continue`, `continue_read_only`, `request_more_evid
 
 #### HITL Gateway
 
-Il nodo `human_review` chiama `interrupt()` con un payload tipizzato e JSON-safe. La dashboard riceve la decisione umana e riprende lo stesso `thread_id` tramite `Command(resume=...)` sul checkpointer SQLite LangGraph. Non ricostruisce mai il runtime da trace o artifact.
+Il nodo `human_review` chiama `interrupt()` con un payload tipizzato e JSON-safe. La dashboard riceve la decisione umana e riprende lo stesso `thread_id` tramite `Command(resume=...)` sul checkpointer ufficiale LangGraph. Il backend locale è `SqliteSaver`; un deployment multi-worker può selezionare `PostgresSaver`. La dashboard non ricostruisce mai il runtime da trace o artifact.
 
 Azioni umane canoniche: `approve_continue`, `approve_continue_read_only`, `modify_and_continue` (solo draft di comunicazione esterna), `request_more_evidence`, `replan`, `ask_clarification` e `abort`.
 
-Gli artifact per thread (`full-trace-2.json`, snapshot dashboard e payload pending) sono materiale di osservabilità. Il checkpoint autoritativo è `artifacts/runtime/checkpoints/layer2_checkpoints.sqlite3`.
+Gli artifact per thread (`full-trace-2.json`, snapshot dashboard e payload pending) sono materiale di osservabilità. In locale il checkpoint autoritativo è `artifacts/runtime/checkpoints/layer2_checkpoints.sqlite3`; in produzione può risiedere nel backend PostgreSQL configurato. I checkpoint terminali hanno retention limitata, mentre interrupt pendenti e thread non terminali vengono preservati.
 
 ### 2.3 Output
 
@@ -502,7 +502,7 @@ Aree logiche principali:
 
 Responsabilità:
 - working state del task
-- checkpoint SQLite della run
+- checkpoint ufficiale LangGraph della run (`SqliteSaver` locale, `PostgresSaver` in produzione)
 - supporto a pause e resume
 - stato minimo necessario al workflow live
 
@@ -547,7 +547,7 @@ Output disponibili:
 
 ### 4.4 Framework / Librerie
 
-`SqliteSaver` LangGraph, SQLite behavioural read model, JSON di trace/artifact, Pydantic.
+`SqliteSaver` / `PostgresSaver` LangGraph, SQLite behavioural read model, JSON di trace/artifact, Pydantic.
 
 ---
 

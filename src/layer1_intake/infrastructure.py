@@ -249,7 +249,7 @@ class JsonExecutionPolicyRepository(ExecutionPolicyRepositoryPort):
         sensitivity: SensitivityLevel,
     ) -> PolicyProfile:
         # Merge default policy with progressively more specific overrides.
-        if profile_name:
+        if profile_name and profile_name != "default":
             named_profiles = self._config.get("named_profiles", {})
             profile_data = named_profiles.get(profile_name)
             if profile_data is None:
