@@ -111,45 +111,26 @@ class TraceObservedEvidence:
     support_level: str
 
 
-# Read-only observability component extracted from the trace facade.
+# Read-only canonical governance record; pillar outputs are stored exactly once per pass.
 @dataclass(frozen=True)
-class TraceGovernanceDecision:
-    # TraceGovernanceDecision makes each policy/combiner decision readable.
-    directive: str
-    policy_decision: str
-    reason_codes: tuple[str, ...]
-    summary: str
-    constrains_capability_use: bool
+class TraceGovernancePass:
+    pass_index: int
+    evaluated_plan_step_id: str | None
     evaluated_actor_result_type: str
     evaluated_tool_name: str | None
-    policy_engine_name: str
-    policy_bundle_version: str
-    policy_directive: str
-    oversight_recommended_directive: str
-    behavioral_recommended_directive: str
-    judge_recommended_directive: str
-    judge_invoked: bool
-    static_policy_summary: str | None
-    dynamic_policy_summary: str | None
-    behavioral_summary: str | None
-    judge_summary: str | None
-    behavioral_similarity_score: float | None
-    behavioral_deviation_score: float | None
-    behavioral_novelty_score: float | None
-    oversight_summary: str | None
-    combiner_dominant_dimension: str | None
-    combiner_support_by_directive: dict[str, float] | None
-    combiner_selected_reason: str | None
-    combiner_rejected_alternatives: dict[str, str] | None
-    combiner_safety_invariants_checked: tuple[str, ...]
-    combiner_signals: tuple[dict[str, Any], ...]
-    combiner_normalized_directive: str | None
-    combiner_normalization_reason: str | None
     governance_input_schema_version: str | None
-    pillar_requirements: dict[str, bool] | None
-    pillar_results: dict[str, Any] | None
-    pillar_errors: dict[str, str] | None
-    policy_config_version: str | None = None
+    policy_bundle_version: str
+    policy_config_version: str | None
+    pillar_requirements: dict[str, bool]
+    pillar_results: dict[str, Any]
+    pillar_errors: dict[str, str]
+    directive: str
+    policy_decision: str
+    requires_human_review: bool
+    reason_codes: tuple[str, ...]
+    selected_reason: str
+    rejected_alternatives: dict[str, str]
+    safety_invariants: tuple[str, ...]
 
 
 # Read-only observability component extracted from the trace facade.
@@ -308,6 +289,7 @@ class TraceExternalCommunicationSummary:
 @dataclass(frozen=True)
 class Layer2RuntimeTrace:
     # Layer2RuntimeTrace is the stable JSON-exportable audit artifact for Layer 2.
+    trace_version: str
     runtime: TraceRuntimeSummary
     intake: TraceIntakeSummary
     planner_name: str | None
@@ -321,11 +303,7 @@ class Layer2RuntimeTrace:
     execution: TraceExecutionSummary
     tool_calls: tuple[TraceToolCall, ...]
     observed_evidence: tuple[TraceObservedEvidence, ...]
-    static_policy_assessments: tuple[TraceStaticPolicyAssessment, ...]
-    dynamic_policy_assessments: tuple[TraceOversightAssessment, ...]
-    behavioral_assessments: tuple[TraceBehavioralAssessment, ...]
-    judge_assessments: tuple[TraceJudgeAssessment, ...]
-    governance_decisions: tuple[TraceGovernanceDecision, ...]
+    governance_passes: tuple[TraceGovernancePass, ...]
     human_review: TraceHumanReviewSummary
     external_communication: TraceExternalCommunicationSummary | None
 
@@ -337,7 +315,7 @@ __all__ = [
     "TraceActorTurn",
     "TraceToolCall",
     "TraceObservedEvidence",
-    "TraceGovernanceDecision",
+    "TraceGovernancePass",
     "TraceOversightSignal",
     "TraceOversightAssessment",
     "TraceStaticPolicyAssessment",

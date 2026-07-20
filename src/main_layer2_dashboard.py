@@ -491,14 +491,19 @@ def _load_review_detail(
 ) -> dict[str, Any] | None:
     runtime_summary = artifact_store.read_runtime_summary(thread_id)
     dashboard_snapshot = artifact_store.read_dashboard_snapshot(thread_id)
-    pending_review = artifact_store.read_pending_human_review(thread_id)
+    legacy_pending_review = artifact_store.read_pending_human_review(thread_id)
     if runtime_summary is None and dashboard_snapshot is None:
         return None
+    # Legacy standalone requests are projected into the sole dashboard DTO location.
+    if legacy_pending_review is not None:
+        dashboard_snapshot = dict(dashboard_snapshot or {})
+        human_review = dict(dashboard_snapshot.get("human_review") or {})
+        human_review.setdefault("pending_request", legacy_pending_review)
+        dashboard_snapshot["human_review"] = human_review
     return {
         "thread_id": thread_id,
         "runtime_summary": runtime_summary,
         "dashboard_snapshot": dashboard_snapshot,
-        "pending_human_review": pending_review,
     }
 
 
@@ -614,7 +619,7 @@ def _list_pending_reviews(*, artifact_store: RuntimeArtifactStore) -> list[dict[
             thread_id,
             runtime_summary=detail["runtime_summary"],
             dashboard_snapshot=detail["dashboard_snapshot"],
-            pending_review=detail["pending_human_review"],
+            pending_review=None,
         )
         if entry is not None:
             entries.append(entry)
@@ -760,7 +765,6 @@ def _build_request_handler(*, context: DashboardServerContext):
                             "has_pending_human_review": task_state.pending_human_review_request is not None,
                         },
                         "dashboard_snapshot": None,
-                        "pending_human_review": None,
                     }
                 detail["operator_feedback"] = _build_operator_feedback_message(decision)
                 self._write_json(detail)

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+from json_serialization import to_jsonable as _to_jsonable
+
 from ..behavioral import BehavioralAssessment
 from ..governance_components import GovernanceDecision
-from ..oversight import DynamicPolicyAssessment, OversightAssessment
+from ..oversight.contracts import DynamicPolicyAssessment, OversightAssessment
 from ..domain import (
     HumanReviewDecision,
     HumanReviewDecisionType,
@@ -41,8 +43,10 @@ class DashboardPlanStep:
 # DashboardGovernancePanel exposes the latest policy/control decision.
 @dataclass(frozen=True)
 class DashboardGovernancePanel:
+    governance_input_schema_version: str | None
     directive: str
     policy_decision: str
+    requires_human_review: bool
     reason_codes: tuple[str, ...]
     summary: str
     constrains_capability_use: bool
@@ -52,6 +56,7 @@ class DashboardGovernancePanel:
     evaluated_tool_name: str | None
     policy_engine_name: str
     policy_bundle_version: str
+    policy_config_version: str | None
     static_policy_summary: str | None
     dynamic_policy_summary: str | None
     behavioral_summary: str | None
@@ -62,15 +67,12 @@ class DashboardGovernancePanel:
     behavioral_similarity_score: float | None
     behavioral_deviation_score: float | None
     behavioral_novelty_score: float | None
-    oversight_summary: str | None
-    combiner_dominant_dimension: str | None
-    combiner_support_by_directive: dict[str, float] | None
-    combiner_selected_reason: str | None
-    combiner_rejected_alternatives: dict[str, str] | None
-    combiner_safety_invariants_checked: tuple[str, ...]
-    combiner_signals: tuple[dict[str, Any], ...]
-    combiner_normalized_directive: str | None
-    combiner_normalization_reason: str | None
+    pillar_requirements: dict[str, bool] | None
+    pillar_results: dict[str, Any] | None
+    pillar_errors: dict[str, str] | None
+    selected_reason: str | None
+    rejected_alternatives: dict[str, str] | None
+    safety_invariants_checked: tuple[str, ...]
 
 
 # DashboardOversightPanel exposes the deterministic adaptive oversight result.
@@ -166,7 +168,7 @@ def build_governance_hitl_dashboard_snapshot(
     current_plan_step = task_state.current_plan_step
 
     return GovernanceHitlDashboardSnapshot(
-        dashboard_version="governance_hitl_dashboard_v1",
+        dashboard_version="governance_hitl_dashboard_v2",
         focus=focus,
         runtime_state=current_state.value,
         runtime_thread_id=task_state.runtime_thread_id,
@@ -223,8 +225,10 @@ def _build_governance_panel(
         return None
 
     return DashboardGovernancePanel(
+        governance_input_schema_version=governance_decision.governance_input_schema_version,
         directive=governance_decision.directive.value,
         policy_decision=governance_decision.policy_decision.value,
+        requires_human_review=governance_decision.requires_human_review,
         reason_codes=tuple(code.value for code in governance_decision.reason_codes),
         summary=governance_decision.summary,
         constrains_capability_use=governance_decision.constrains_capability_use,
@@ -238,6 +242,7 @@ def _build_governance_panel(
         ),
         policy_engine_name=governance_decision.policy_engine_name,
         policy_bundle_version=governance_decision.policy_bundle_version,
+        policy_config_version=governance_decision.policy_config_version,
         static_policy_summary=governance_decision.static_policy_summary,
         dynamic_policy_summary=governance_decision.dynamic_policy_summary,
         behavioral_summary=governance_decision.behavioral_summary,
@@ -248,15 +253,12 @@ def _build_governance_panel(
         behavioral_similarity_score=governance_decision.behavioral_similarity_score,
         behavioral_deviation_score=governance_decision.behavioral_deviation_score,
         behavioral_novelty_score=governance_decision.behavioral_novelty_score,
-        oversight_summary=governance_decision.oversight_summary,
-        combiner_dominant_dimension=governance_decision.combiner_dominant_dimension,
-        combiner_support_by_directive=governance_decision.combiner_support_by_directive,
-        combiner_selected_reason=governance_decision.combiner_selected_reason,
-        combiner_rejected_alternatives=governance_decision.combiner_rejected_alternatives,
-        combiner_safety_invariants_checked=governance_decision.combiner_safety_invariants_checked,
-        combiner_signals=governance_decision.combiner_signals,
-        combiner_normalized_directive=governance_decision.combiner_normalized_directive,
-        combiner_normalization_reason=governance_decision.combiner_normalization_reason,
+        pillar_requirements=governance_decision.pillar_requirements,
+        pillar_results=governance_decision.pillar_results,
+        pillar_errors=governance_decision.pillar_errors,
+        selected_reason=governance_decision.combiner_selected_reason,
+        rejected_alternatives=governance_decision.combiner_rejected_alternatives,
+        safety_invariants_checked=governance_decision.combiner_safety_invariants_checked,
     )
 
 
@@ -437,18 +439,3 @@ def _build_review_summary_from_history(
     if last_decision is not None:
         parts.append(f"Last human decision: {last_decision.decision_type.value}.")
     return " ".join(parts) if parts else None
-
-
-# Convert nested dataclasses and enums into JSON-safe primitives.
-def _to_jsonable(value: Any) -> Any:
-    if is_dataclass(value):
-        return _to_jsonable(asdict(value))
-    if isinstance(value, dict):
-        return {str(key): _to_jsonable(item) for key, item in value.items()}
-    if isinstance(value, tuple):
-        return [_to_jsonable(item) for item in value]
-    if isinstance(value, list):
-        return [_to_jsonable(item) for item in value]
-    if isinstance(value, Enum):
-        return value.value
-    return value

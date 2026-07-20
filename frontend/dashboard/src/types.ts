@@ -56,7 +56,6 @@ export type ReviewDetailResponse = {
   thread_id: string;
   runtime_summary?: Record<string, unknown> | null;
   dashboard_snapshot?: DashboardSnapshot | null;
-  pending_human_review?: HumanReviewPendingRequest | null;
   operator_feedback?: string;
 };
 

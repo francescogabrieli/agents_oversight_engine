@@ -12,6 +12,12 @@ from .planning import PlannerPort
 from .planning.replanning import ReplannerPort
 from .domain import TaskState
 from .tool_contract import ToolGatewayPort
+from .execution import build_default_actor
+from .tools import (
+    ToolGatewayConfig,
+    build_default_tool_gateway,
+    load_tool_gateway_config,
+)
 
 
 @dataclass(frozen=True)
@@ -20,6 +26,7 @@ class Layer2RuntimeDependencies:
     planner: PlannerPort | None = None
     actor: ActorPort | None = None
     tool_gateway: ToolGatewayPort | None = None
+    tool_gateway_config: ToolGatewayConfig | None = None
     replanner: ReplannerPort | None = None
     policy_engine: PolicyEnginePort | None = None
     judge: JudgePort | None = None
@@ -33,11 +40,18 @@ def compose_layer2_runtime(
     dependencies: Layer2RuntimeDependencies | None = None,
 ):
     resolved = dependencies or Layer2RuntimeDependencies()
+    # Load one immutable registry and share it across actor schema and gateway construction.
+    tool_gateway_config = resolved.tool_gateway_config or load_tool_gateway_config()
+    actor = resolved.actor or build_default_actor(tool_gateway_config=tool_gateway_config)
+    tool_gateway = resolved.tool_gateway or build_default_tool_gateway(
+        config=tool_gateway_config
+    )
     return build_runtime_graph(
         checkpointer=resolved.checkpointer,
         planner_service=resolved.planner,
-        actor_service=resolved.actor,
-        tool_gateway_service=resolved.tool_gateway,
+        actor_service=actor,
+        tool_gateway_service=tool_gateway,
+        tool_gateway_config=tool_gateway_config,
         replanner_service=resolved.replanner,
         policy_engine_service=resolved.policy_engine,
         judge_service=resolved.judge,

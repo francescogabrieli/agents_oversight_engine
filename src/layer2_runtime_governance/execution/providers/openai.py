@@ -6,7 +6,8 @@ from ...actor_contract import ActorPort, ActorResult, ActorTask
 from ..action_schemas import build_actor_runtime_tools
 from ..errors import ActorExecutionError
 from ..prompts import build_actor_system_prompt, build_actor_user_prompt
-from ..response_parser import extract_single_function_call
+from ..response_parser import extract_single_function_call, validate_tool_call_action
+from ...tools import ToolGatewayConfig
 from ..result_builder import (
     build_provider_replan_result,
     convert_tool_call_to_actor_result,
@@ -24,8 +25,15 @@ class OpenAIActor(ActorPort):
     actor_name = "openai_layer2_actor"
     prompt_version = "actor_v4_runtime_tool_binding"
 
-    def __init__(self, settings: OpenAIActorSettings | None = None) -> None:
+    def __init__(
+        self,
+        settings: OpenAIActorSettings | None = None,
+        *,
+        tool_gateway_config: ToolGatewayConfig | None = None,
+    ) -> None:
         self._settings = settings or OpenAIActorSettings.from_env()
+        self._runtime_tools = build_actor_runtime_tools(tool_gateway_config)
+        self._allowed_action_names = {str(tool["name"]) for tool in self._runtime_tools}
         if OpenAI is None:
             raise RuntimeError(
                 "The 'openai' package is not installed. Install it before using the Layer 2 actor."
@@ -48,7 +56,10 @@ class OpenAIActor(ActorPort):
         try:
             return convert_tool_call_to_actor_result(
                 actor_task=actor_task,
-                tool_call=extract_single_function_call(response),
+                tool_call=validate_tool_call_action(
+                    tool_call=extract_single_function_call(response),
+                    allowed_action_names=self._allowed_action_names,
+                ),
             )
         except ActorExecutionError as exc:
             return build_provider_replan_result(actor_task=actor_task, detail=str(exc))
@@ -62,7 +73,7 @@ class OpenAIActor(ActorPort):
                 {"role": "system", "content": build_actor_system_prompt()},
                 {"role": "user", "content": build_actor_user_prompt(actor_task=actor_task)},
             ],
-            tools=build_actor_runtime_tools(),
+            tools=self._runtime_tools,
             tool_choice="required",
             parallel_tool_calls=False,
             max_tool_calls=1,

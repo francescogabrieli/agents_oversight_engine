@@ -179,6 +179,8 @@ def _build_observed_evidence_from_tool_result(
         support_level = (
             EvidenceSupportLevel.SOURCE_DISCOVERY
             if not _is_meaningful_evidence_excerpt(source.snippet)
+            else source.support_level_hint
+            if source.support_level_hint is not None
             else _classify_observed_evidence_support_level(
                 tool_name=tool_result.request.tool_name,
                 locator=source.locator,
@@ -273,8 +275,6 @@ def _is_meaningful_evidence_excerpt(value: str | None) -> bool:
             "official source",
             "official sources",
             "source shortlist",
-            "eur-lex",
-            "european commission",
             "portal",
             "legislation page",
             "purpose",
@@ -350,7 +350,6 @@ def _classify_observed_evidence_support_level(
             "overview",
             "what the ",
             "purpose",
-            "gatekeepers",
             "core platform services",
             "obligations",
             "prohibitions",
@@ -370,16 +369,12 @@ def _classify_observed_evidence_support_level(
     if tool_name != ToolName.FETCH_URL_TEXT:
         return EvidenceSupportLevel.DETAILED_EXTRACTED
 
-    if "eur-lex.europa.eu" in lowered_locator and "/summary/" not in lowered_locator:
-        return EvidenceSupportLevel.PRIMARY_LEGAL
-
     if any(
         marker in lowered_locator
         for marker in (
             "/summary/",
             "legislation_en",
             "index_en",
-            "gatekeepers_en",
         )
     ):
         return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY

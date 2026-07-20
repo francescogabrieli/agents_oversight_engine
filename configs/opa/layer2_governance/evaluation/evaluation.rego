@@ -31,58 +31,59 @@ status := "pass" if {
 }
 
 findings contains "deny_must_come_from_static_policy" if {
-	some decision in input.trace.governance_decisions
+	some decision in input.trace.governance_passes
 	decision.directive == "stop"
 	not decision.policy_decision == "deny"
 }
 
 findings contains "hitl_directive_requires_human_review" if {
-	some decision in input.trace.governance_decisions
+	some decision in input.trace.governance_passes
 	decision.directive == "wait_human_review"
 	decision.requires_human_review != true
 }
 
 findings contains "evidence_precision_not_supported" if {
-	some decision in input.trace.governance_decisions
+	some decision in input.trace.governance_passes
 	evidence := decision.pillar_results.evidence
 	evidence.precision_mismatch == true
 	decision.directive == "continue"
 }
 
 findings contains "replan_limit_not_stopped" if {
-	some decision in input.trace.governance_decisions
+	some decision in input.trace.governance_passes
 	trajectory := decision.pillar_results.trajectory
 	trajectory.replan_limit_exceeded == true
 	decision.directive != "stop"
 }
 
 findings contains "provider_loop_not_replanned_or_reviewed" if {
-	some decision in input.trace.governance_decisions
+	some decision in input.trace.governance_passes
 	trajectory := decision.pillar_results.trajectory
 	trajectory.provider_runtime_action_missing == true
 	not decision.directive in {"replan", "wait_human_review", "stop"}
 }
 
 findings contains "fail_closed_not_reviewed" if {
-	some decision in input.trace.governance_decisions
+	some decision in input.trace.governance_passes
 	"opa_failure_fail_closed" in decision.reason_codes
 	decision.directive != "wait_human_review"
 }
 
 findings contains "behavioral_forced_hitl_without_corroboration" if {
-	some decision in input.trace.governance_decisions
+	some decision in input.trace.governance_passes
 	decision.directive == "wait_human_review"
-	decision.behavioral_recommended_directive == "wait_human_review"
-	decision.oversight_recommended_directive == "continue"
-	decision.judge_recommended_directive == "continue"
+	decision.pillar_results.behavioral.strong == true
+	decision.pillar_results.judge.strong_signal != true
+	decision.pillar_results.evidence.precision_mismatch != true
+	decision.pillar_results.risk.level != "high"
+	decision.pillar_results.static_policy.hitl_mandatory != true
 }
 
 findings contains "judge_used_as_hard_deny" if {
-	some decision in input.trace.governance_decisions
+	some decision in input.trace.governance_passes
 	decision.policy_decision == "deny"
-	decision.judge_invoked == true
-	decision.static_policy_summary != null
-	not contains(lower(decision.static_policy_summary), "write")
+	decision.pillar_results.judge.invoked == true
+	decision.pillar_results.static_policy.write_blocked != true
 }
 
 # Aggregated search fallback text cannot represent extracted source-level content.
@@ -104,28 +105,21 @@ findings contains "web_search_fallback_missing_source_locator" if {
 
 # The final actor and governance views must expose the same deterministic mismatch fact.
 findings contains "actor_governance_precision_mismatch_disagrees" if {
-	count(input.trace.governance_decisions) > 0
-	final_index := count(input.trace.governance_decisions) - 1
-	final_decision := input.trace.governance_decisions[final_index]
+	count(input.trace.governance_passes) > 0
+	final_index := count(input.trace.governance_passes) - 1
+	final_decision := input.trace.governance_passes[final_index]
 	input.trace.actor.precision_mismatch_detected != final_decision.pillar_results.evidence.precision_mismatch
 }
 
 # Scored OPA evidence must not be serialized with a stale default diagnostic level.
 findings contains "evidence_score_level_inconsistent" if {
-	some assessment in input.trace.dynamic_policy_assessments
-	assessment.evidence_quality.score >= data.policy_config.thresholds.min_evidence_quality
-	assessment.evidence_quality.level != "strong"
+	some decision in input.trace.governance_passes
+	decision.pillar_results.evidence.score >= data.policy_config.thresholds.min_evidence_quality
+	decision.pillar_results.evidence.level != "strong"
 }
 
 findings contains "evidence_score_level_inconsistent" if {
-	some assessment in input.trace.dynamic_policy_assessments
-	assessment.evidence_quality.score < 0.35
-	assessment.evidence_quality.level != "weak"
-}
-
-# Governance summaries must use the final scored pillars rather than the pre-OPA unscored snapshot.
-findings contains "governance_dynamic_summary_stale" if {
-	some decision in input.trace.governance_decisions
-	decision.pillar_results.evidence.score > 0
-	contains(decision.dynamic_policy_summary, "evidence weak (0.00)")
+	some decision in input.trace.governance_passes
+	decision.pillar_results.evidence.score < 0.35
+	decision.pillar_results.evidence.level != "weak"
 }

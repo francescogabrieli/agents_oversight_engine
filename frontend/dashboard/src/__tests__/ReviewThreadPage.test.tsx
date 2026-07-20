@@ -17,17 +17,6 @@ describe("ReviewThreadPage", () => {
             runtime_summary: {
               task_goal: "Inspect a governed draft.",
             },
-            pending_human_review: {
-              request_id: "thread-1:hitl",
-              allowed_decisions: ["approve_continue", "modify_and_continue"],
-              external_communication_draft: {
-                channel: "email",
-                body: "Draft body.",
-                recipient: "ops@example.com",
-                subject: "Draft subject",
-                metadata: { priority: "high" },
-              },
-            },
             dashboard_snapshot: {
               runtime_state: "waiting_human_review",
               has_pending_review: true,
@@ -117,7 +106,7 @@ describe("ReviewThreadPage", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("Collect evidence.")).toBeInTheDocument();
+    expect((await screen.findAllByText("Collect evidence.")).length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: "Submit decision" }));
 
     expect(fetch).toHaveBeenCalledWith(

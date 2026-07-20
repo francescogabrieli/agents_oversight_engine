@@ -11,7 +11,7 @@ OPA is the policy decision point.
 It owns static policy, thresholds, weights, precedence, caps, invariants, and the final directive.
 
 Signal services are fact producers only.
-They may compute diagnostic scores and score components for observability, but they do not decide runtime directives.
+Python signal services emit typed raw facts and unscored components. Rego alone computes scores, applies thresholds, requests the judge, and selects the final runtime directive.
 
 ## Runtime Flow
 

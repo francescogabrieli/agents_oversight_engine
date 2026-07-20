@@ -2,8 +2,9 @@ from typing import Any
 
 from ..behavioral import BehavioralAssessment, BehavioralStorePort
 from ..judge import JudgeAssessment, JudgePort
-from ..oversight import DynamicPolicyAssessment
+from ..oversight.contracts import DynamicPolicyAssessment
 from ..domain import TaskState
+from ..tools import ToolGatewayConfig
 
 # PolicyDecision is the deterministic outcome returned by the policy engine.
 from .contracts import (
@@ -35,6 +36,7 @@ def evaluate_opa_first_governance(
     policy_engine_service: PolicyEnginePort,
     judge_service: JudgePort | None = None,
     behavioral_store_service: BehavioralStorePort | None = None,
+    tool_gateway_config: ToolGatewayConfig | None = None,
     thread_id: str | None = None,
 ) -> GovernanceEvaluationResult:
     from ..behavioral import build_behavioral_assessment
@@ -98,6 +100,7 @@ def evaluate_opa_first_governance(
         pillars["risk"] = build_risk_signal(
             policy_input=policy_input,
             thresholds_version=thresholds_version,
+            tool_gateway_config=tool_gateway_config,
         )
         pillars["trajectory"] = build_trajectory_signal(
             task_state=task_state,

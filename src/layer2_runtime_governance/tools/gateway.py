@@ -71,8 +71,11 @@ class OpenAIToolGateway(ToolGatewayPort):
 
 
 # Build the production gateway used by the live Layer 2 runtime.
-def build_default_tool_gateway() -> ToolGatewayPort:
-    return OpenAIToolGateway()
+def build_default_tool_gateway(
+    *,
+    config: ToolGatewayConfig | None = None,
+) -> ToolGatewayPort:
+    return OpenAIToolGateway(config=config)
 
 
 __all__ = ["OpenAIToolGateway", "build_default_tool_gateway"]

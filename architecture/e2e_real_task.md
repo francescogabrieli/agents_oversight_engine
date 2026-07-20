@@ -124,7 +124,7 @@ Artifact chiave:
 - `artifacts/runtime/checkpoints/layer2_checkpoints.sqlite3`
 - `artifacts/runtime/<thread_id>/full-trace-2.json`
 - `artifacts/runtime/<thread_id>/runtime_summary.json`
-- `artifacts/runtime/<thread_id>/pending_human_review.json`
+- `artifacts/runtime/<thread_id>/dashboard_snapshot.json` (includes the single pending-review DTO when present)
 
 ## 8. Uscita E Valutazione
 

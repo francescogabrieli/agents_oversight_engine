@@ -35,7 +35,7 @@ from ..governance_components import (
     StaticPolicyAssessment,
 )
 from ..judge import JudgeAssessment, JudgeRecommendedDirective
-from ..oversight import (
+from ..oversight.contracts import (
     DynamicPolicyAssessment,
     DynamicPolicyRecommendedDirective,
     EvidenceQualityAssessment,

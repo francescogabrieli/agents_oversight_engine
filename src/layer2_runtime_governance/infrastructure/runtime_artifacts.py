@@ -13,7 +13,6 @@ from layer1_intake import IntakeResult
 
 from ..hitl.dashboard import (
     build_governance_hitl_dashboard_snapshot,
-    governance_hitl_dashboard_snapshot_to_dict,
     governance_hitl_dashboard_snapshot_to_json,
 )
 from .ports import RuntimeArtifactPaths, RuntimeArtifactStorePort
@@ -77,12 +76,6 @@ class RuntimeArtifactStore:
             task_state=task_state,
         )
         dashboard_snapshot = build_governance_hitl_dashboard_snapshot(task_state)
-        dashboard_snapshot_dict = governance_hitl_dashboard_snapshot_to_dict(dashboard_snapshot)
-        pending_request = (
-            dashboard_snapshot_dict.get("human_review", {}).get("pending_request")
-            if task_state.pending_human_review_request is not None
-            else None
-        )
 
         paths.full_trace_path.write_text(layer2_trace_to_json(runtime_trace), encoding="utf-8")
         paths.dashboard_snapshot_path.write_text(
@@ -129,15 +122,6 @@ class RuntimeArtifactStore:
             encoding="utf-8",
         )
 
-        if pending_request is None:
-            if paths.pending_human_review_path.exists():
-                paths.pending_human_review_path.unlink()
-        else:
-            paths.pending_human_review_path.write_text(
-                json.dumps(pending_request, indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
-
         return paths
 
     # Reconstruct the canonical artifact locations for one thread.
@@ -169,7 +153,7 @@ class RuntimeArtifactStore:
     def read_dashboard_snapshot(self, thread_id: str) -> dict[str, Any] | None:
         return self._read_json_artifact(self.build_paths(thread_id).dashboard_snapshot_path)
 
-    # Read the persisted pending human review payload for one thread when available.
+    # Read the retired standalone payload only for pre-consolidation artifact compatibility.
     def read_pending_human_review(self, thread_id: str) -> dict[str, Any] | None:
         return self._read_json_artifact(self.build_paths(thread_id).pending_human_review_path)
 

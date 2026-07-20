@@ -2,7 +2,7 @@ from typing import Any
 
 from ..behavioral import BehavioralAssessment
 from ..judge import JudgeAssessment, JudgeRecommendedDirective
-from ..oversight import DynamicPolicyAssessment
+from ..oversight.contracts import DynamicPolicyAssessment
 from ..domain import TaskState
 
 # PolicyDecision is the deterministic outcome returned by the policy engine.
@@ -83,6 +83,8 @@ def _build_fail_closed_governance_result(
         policy_bundle_version=policy_engine_service.policy_bundle_version,
         policy_directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
         oversight_recommended_directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
+        requires_human_review=True,
+        evaluated_plan_step_id=policy_input.current_plan_step_id,
         behavioral_recommended_directive=map_behavioral_directive(behavioral.behavioral_recommended_directive),
         judge_recommended_directive=map_judge_directive(judge.recommendation),
         judge_invoked=judge.invoked,

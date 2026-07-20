@@ -12,22 +12,42 @@ from uuid import uuid4
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
+LEGACY_TRACE_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "layer2_trace.v2.legacy.json"
 
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 
-from layer2_runtime_governance.evaluation import (
+from evaluation_service import (
     evaluate_layer2_trace_inputs,
     layer2_evaluation_report_to_dict,
     layer2_evaluation_report_to_markdown,
     write_layer2_evaluation_report,
 )
+from evaluation_service.trace_normalizer import normalize_trace_json
 
 
 class Layer2EvaluationTests(unittest.TestCase):
+    def test_legacy_trace_derives_requires_human_review_without_overriding_new_field(self) -> None:
+        legacy = _completed_trace_payload()
+        legacy["governance_decisions"] = [
+            {"directive": "wait_human_review", "policy_decision": "require_human_review"},
+            {"directive": "continue", "policy_decision": "allow"},
+            {
+                "directive": "wait_human_review",
+                "policy_decision": "require_human_review",
+                "requires_human_review": False,
+            },
+        ]
+
+        decisions = normalize_trace_json(legacy)["trace"]["governance_passes"]
+
+        self.assertTrue(decisions[0]["requires_human_review"])
+        self.assertFalse(decisions[1]["requires_human_review"])
+        self.assertFalse(decisions[2]["requires_human_review"])
+
     def test_real_trace_export_is_evaluated_successfully(self) -> None:
-        report = evaluate_layer2_trace_inputs([REPO_ROOT / "full-trace-1.json"])
+        report = evaluate_layer2_trace_inputs([LEGACY_TRACE_FIXTURE])
 
         self.assertEqual(report.aggregate.parsed_runs, 1)
         self.assertEqual(report.runs[0].status, "ok")
@@ -106,7 +126,7 @@ class Layer2EvaluationTests(unittest.TestCase):
         self.assertIn("parse_failed", {run.status for run in report.runs})
 
     def test_report_serialization_is_stable_for_the_same_report(self) -> None:
-        report = evaluate_layer2_trace_inputs([REPO_ROOT / "full-trace-1.json"])
+        report = evaluate_layer2_trace_inputs([LEGACY_TRACE_FIXTURE])
 
         payload_one = layer2_evaluation_report_to_dict(report)
         payload_two = layer2_evaluation_report_to_dict(report)
@@ -132,7 +152,7 @@ class Layer2EvaluationTests(unittest.TestCase):
 
     def test_evaluation_report_can_be_written_to_disk(self) -> None:
         with _workspace_temp_dir() as temp_path:
-            report = evaluate_layer2_trace_inputs([REPO_ROOT / "full-trace-1.json"])
+            report = evaluate_layer2_trace_inputs([LEGACY_TRACE_FIXTURE])
             json_path = temp_path / "report.json"
             md_path = temp_path / "report.md"
 

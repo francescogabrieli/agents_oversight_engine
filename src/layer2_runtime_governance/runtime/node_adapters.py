@@ -17,6 +17,7 @@ from ..planning import PlannerPort
 from ..planning.replanning import ReplannerPort
 from ..domain import TaskState
 from ..tool_contract import ToolGatewayPort
+from ..tools import ToolGatewayConfig
 from .context import copy_task_state, extract_bootstrap_thread_id, extract_thread_id
 from .contracts import Layer2GraphInput, Layer2GraphState
 
@@ -63,6 +64,7 @@ def build_actor_node(actor_service: ActorPort):
 def build_governance_node(
     policy_engine_service: PolicyEnginePort,
     *,
+    tool_gateway_config: ToolGatewayConfig | None = None,
     judge_service: JudgePort | None = None,
     behavioral_store_service: BehavioralStorePort | None = None,
     hitl_event_callback: Callable[[TaskState], None] | None = None,
@@ -78,6 +80,7 @@ def build_governance_node(
                 policy_engine_service=policy_engine_service,
                 judge_service=judge_service,
                 behavioral_store_service=behavioral_store_service,
+                tool_gateway_config=tool_gateway_config,
                 thread_id=extract_thread_id(state, config=config),
                 hitl_event_callback=hitl_event_callback,
             )

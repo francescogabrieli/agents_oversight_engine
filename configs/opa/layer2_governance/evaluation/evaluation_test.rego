@@ -5,8 +5,7 @@ base_evaluation_input := {
 	"trace": {
 		"actor": {"precision_mismatch_detected": false},
 		"observed_evidence": [],
-		"dynamic_policy_assessments": [],
-		"governance_decisions": [],
+		"governance_passes": [],
 	},
 }
 
@@ -42,7 +41,7 @@ test_web_search_query_fallback_fails if {
 test_precision_mismatch_disagreement_fails if {
 	trace := object.union(base_evaluation_input.trace, {
 		"actor": {"precision_mismatch_detected": true},
-		"governance_decisions": [{
+		"governance_passes": [{
 			"directive": "continue",
 			"policy_decision": "allow",
 			"pillar_results": {"evidence": {"precision_mismatch": false}},
@@ -55,8 +54,8 @@ test_precision_mismatch_disagreement_fails if {
 # A strong numeric score cannot retain the old weak default level.
 test_evidence_score_level_disagreement_fails if {
 	trace := object.union(base_evaluation_input.trace, {
-		"dynamic_policy_assessments": [{
-			"evidence_quality": {"score": 0.93, "level": "weak"},
+		"governance_passes": [{
+			"pillar_results": {"evidence": {"score": 0.93, "level": "weak"}},
 		}],
 	})
 	result := compliance with input as object.union(base_evaluation_input, {"trace": trace})

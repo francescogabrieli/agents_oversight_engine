@@ -18,15 +18,16 @@ from ..judge import JudgePort
 from ..hitl import build_human_review_request
 from ..domain import (
     ExternalCommunicationPhase,
-    PlanStepStatus,
     RuntimeState,
     TaskState,
 )
+from ..tools import ToolGatewayConfig
 
 # Nodes.py contains the executable Layer 2 business logic.
 # At this stage the runtime performs bootstrap, planning, and the actor/tool loop.
 from .actor_service import _set_external_communication_phase
 from .lifecycle_service import _append_step_record
+from ..domain.step_recovery import restore_actor_step_for_more_evidence
 
 # Apply a validated policy outcome to canonical runtime state.
 def governance(
@@ -35,6 +36,7 @@ def governance(
     policy_engine_service: PolicyEnginePort,
     judge_service: JudgePort | None = None,
     behavioral_store_service: BehavioralStorePort | None = None,
+    tool_gateway_config: ToolGatewayConfig | None = None,
     thread_id: str | None = None,
     hitl_event_callback: Callable[[TaskState], None] | None = None,
 ) -> TaskState:
@@ -52,6 +54,7 @@ def governance(
         policy_engine_service=policy_engine_service,
         judge_service=judge_service,
         behavioral_store_service=behavioral_store_service,
+        tool_gateway_config=tool_gateway_config,
         thread_id=resolved_thread_id,
     )
     policy_input = governance_evaluation.policy_input
@@ -203,7 +206,7 @@ def _apply_governance_decision(
         ):
             state.current_state = RuntimeState.READY_TOOL_EXECUTION
             return
-        _restore_actor_step_for_more_evidence(state)
+        restore_actor_step_for_more_evidence(state)
         state.current_state = RuntimeState.ACTING
         state.current_tool_request = None
         return
@@ -243,25 +246,6 @@ def _apply_governance_decision(
     state.current_state = RuntimeState.ACTING
 
 # Apply a validated policy outcome to canonical runtime state.
-def _restore_actor_step_for_more_evidence(state: TaskState) -> None:
-    actor_result = state.actor_result
-    if actor_result is None:
-        return
-
-    for index, step in enumerate(state.plan_steps):
-        if step.step_id == actor_result.plan_step_id:
-            step.status = PlanStepStatus.IN_PROGRESS
-            state.current_plan_step_index = index
-        elif step.status == PlanStepStatus.IN_PROGRESS:
-            step.status = PlanStepStatus.PENDING
-
-    state.executed_steps = [
-        step for step in state.executed_steps if step.step_id != actor_result.plan_step_id
-    ]
-    if state.final_output_text == actor_result.output_text:
-        state.final_output_text = None
-
-# Apply a validated policy outcome to canonical runtime state.
 def _infer_human_review_resume_state(
     *,
     state: TaskState,
@@ -290,6 +274,5 @@ def _infer_human_review_resume_state(
 __all__ = [
     "governance",
     "_apply_governance_decision",
-    "_restore_actor_step_for_more_evidence",
     "_infer_human_review_resume_state"
 ]

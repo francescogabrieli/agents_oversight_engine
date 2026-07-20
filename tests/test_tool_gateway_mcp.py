@@ -32,6 +32,7 @@ from layer2_runtime_governance import (
     ActorResultType,
     ActorTask,
     CapabilityAccessMode,
+    EvidenceSupportLevel,
     GovernanceReasonCode,
     PlanStep,
     PlannerDecision,
@@ -306,8 +307,9 @@ class GatewayMCPTests(unittest.TestCase):
                 )
 
         self.assertTrue(result.success)
-        self.assertIn("CELLAR fallback", result.summary)
+        self.assertIn("publication fallback", result.summary)
         self.assertIn("proper functioning of the internal market", result.content or "")
+        self.assertEqual(result.sources[0].support_level_hint, EvidenceSupportLevel.PRIMARY_LEGAL)
         self.assertEqual(
             result.sources[0].locator,
             "http://publications.europa.eu/resource/celex/32022R1925",

@@ -5,12 +5,20 @@ from typing import Any
 
 
 # Build the JSON report emitted by the decoupled evaluation service.
-def build_report(*, evaluation_input: dict[str, Any], compliance_result: dict[str, Any]) -> dict[str, Any]:
-    return {
+def build_report(
+    *,
+    evaluation_input: dict[str, Any],
+    compliance_result: dict[str, Any],
+    aggregate_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    report = {
         "schema_version": "evaluation_report.v1",
         "evaluation_input_summary": evaluation_input.get("derived", {}),
         "compliance": compliance_result,
     }
+    if aggregate_result is not None:
+        report["aggregate_report"] = aggregate_result
+    return report
 
 
 # Build a compact Markdown report from the JSON report.

@@ -9,6 +9,7 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from langgraph.types import Command
+from json_serialization import to_jsonable
 
 from layer1_intake import (
     BudgetConfig,
@@ -47,14 +48,9 @@ from layer2_runtime_governance.domain import RuntimeState, TaskState
 from layer2_runtime_governance.observability import (
     build_compact_trace_from_runtime_trace,
     build_layer2_runtime_trace,
-    layer2_trace_to_dict,
     layer2_trace_to_json,
 )
 from layer2_runtime_governance.tool_contract import ToolGatewayPort
-
-
-# Keep the CLI trace output on a stable default file unless the caller overrides it.
-DEFAULT_FULL_TRACE_PATH = Path("full-trace-1.json")
 
 
 class IntakeExecutorPort(Protocol):
@@ -357,11 +353,6 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
     return build_compact_trace_from_runtime_trace(runtime_trace)
 
 
-def to_jsonable(value: Any) -> Any:
-    # Keep a small compatibility helper for existing terminal printing code.
-    return layer2_trace_to_dict(value) if hasattr(value, "__dataclass_fields__") else value
-
-
 def _print_section(title: str, payload: Any) -> None:
     # Print one section of the Layer 2 trace with a stable visual format.
     print(f"\n=== {title} ===")
@@ -423,7 +414,7 @@ def print_layer2_trace(trace: dict[str, Any]) -> None:
 def write_layer2_trace_file(
     trace: dict[str, Any],
     *,
-    output_path: str | Path = DEFAULT_FULL_TRACE_PATH,
+    output_path: str | Path,
 ) -> Path:
     runtime_trace = _build_runtime_trace(trace)
     resolved_output_path = Path(output_path)
@@ -539,8 +530,8 @@ def parse_cli_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--trace-file",
-        default=str(DEFAULT_FULL_TRACE_PATH),
-        help="Write the full Layer 2 trace JSON to this file.",
+        default=None,
+        help="Optionally write an additional full trace JSON outside per-thread artifacts.",
     )
     return parser.parse_args()
 
@@ -616,7 +607,8 @@ def main() -> None:
         progress_callback=None if args.quiet else _print_progress,
         live_trace=args.live_trace,
     )
-    write_layer2_trace_file(trace, output_path=args.trace_file)
+    if args.trace_file is not None:
+        write_layer2_trace_file(trace, output_path=args.trace_file)
 
     if args.full_trace:
         print_layer2_trace(trace)

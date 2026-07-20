@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from tests.layer2_runtime_fixtures import *
+from layer2_runtime_governance.domain import ExecutedPlanStep
 
 
 class Layer2ActorExecutionTests(unittest.TestCase):
@@ -323,7 +324,7 @@ class Layer2ActorExecutionTests(unittest.TestCase):
         system_prompt = build_actor_system_prompt()
         user_prompt = build_actor_user_prompt(actor_task=actor_task)
 
-        self.assertIn("keep obligation language broad", system_prompt)
+        self.assertIn("keep claim language broad", system_prompt)
         self.assertIn(
             "describe them as procedural/implementation sources",
             system_prompt,
@@ -337,8 +338,96 @@ class Layer2ActorExecutionTests(unittest.TestCase):
             '"avoid_granular_obligation_examples_unless_directly_observed": true',
             user_prompt,
         )
-        self.assertIn("self-preferencing", user_prompt)
-        self.assertIn("obligations and prohibitions for gatekeepers", user_prompt)
+        self.assertIn("safe_high_level_claim_guidance", user_prompt)
+        self.assertNotIn("self-preferencing", user_prompt)
+
+
+    def test_actor_prompt_projection_avoids_duplicates_and_keeps_prior_evidence(self) -> None:
+        state = _build_policy_input_task_state()
+        state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Collect source evidence.",
+                rationale="The final synthesis needs grounded material.",
+                expected_outcome="A relevant source excerpt.",
+                status=PlanStepStatus.COMPLETED,
+            ),
+            PlanStep(
+                step_id="step_2",
+                objective="Synthesize the final answer.",
+                rationale="Use evidence collected in the completed source step.",
+                expected_outcome="A concise grounded final answer.",
+                step_kind=PlanStepKind.FINAL_SYNTHESIS,
+                status=PlanStepStatus.IN_PROGRESS,
+            ),
+        ]
+        state.current_plan_step_index = 1
+        state.executed_steps = [
+            ExecutedPlanStep(
+                step_id="step_1",
+                objective="Collect source evidence.",
+                result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+                summary="Collected the source excerpt.",
+                output_text="A large intermediate transcript that is not needed twice.",
+            )
+        ]
+        state.observed_evidence = [
+            ObservedEvidence(
+                evidence_id="intake:goal",
+                plan_step_id="intake",
+                title="Task goal",
+                locator="intake://task_spec/goal",
+                excerpt=state.task_spec.goal,
+                source_kind=EvidenceSourceKind.INTAKE_PROVIDED,
+                support_level=EvidenceSupportLevel.LOCAL_ONLY,
+            ),
+            ObservedEvidence(
+                evidence_id="step_1:tool:1:source:1",
+                plan_step_id="step_1",
+                title="Prior source",
+                locator="https://example.org/prior-source",
+                excerpt="Evidence collected during the completed source step.",
+                source_tool=ToolName.FETCH_URL_TEXT,
+                support_level=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
+            ),
+        ]
+        state.last_tool_result = ToolExecutionResult(
+            request=ToolRequest(
+                plan_step_id="step_1",
+                tool_name=ToolName.FETCH_URL_TEXT,
+                reason="Collect prior source evidence.",
+                url="https://example.org/prior-source",
+            ),
+            success=True,
+            summary="Prior source fetched.",
+            content="Evidence collected during the completed source step.",
+            sources=(
+                ToolSource(
+                    title="Prior source",
+                    locator="https://example.org/prior-source",
+                    snippet="Evidence collected during the completed source step.",
+                ),
+            ),
+        )
+
+        prompt = build_actor_user_prompt(actor_task=build_actor_task(task_state=state))
+        payload = json.loads(prompt.split("\n\n", 1)[1])
+
+        self.assertNotIn("objective", payload)
+        self.assertEqual(payload["task_spec"]["goal"], state.task_spec.goal)
+        self.assertEqual(payload["plan"]["current_plan_step"]["step_id"], "step_2")
+        self.assertEqual(
+            [step["step_id"] for step in payload["plan"]["other_steps"]],
+            ["step_1"],
+        )
+        self.assertNotIn("rationale", payload["plan"]["other_steps"][0])
+        self.assertEqual(
+            [item["evidence_id"] for item in payload["observed_evidence"]],
+            ["step_1:tool:1:source:1"],
+        )
+        self.assertNotIn("content", payload["last_tool_result"])
+        self.assertNotIn("sources", payload["last_tool_result"])
+        self.assertNotIn("output_text", payload["past_steps"][0])
 
 
     def test_openrouter_completion_with_unsupported_precision_stays_in_progress(self) -> None:
@@ -460,7 +549,7 @@ class Layer2ActorExecutionTests(unittest.TestCase):
         self.assertEqual(result.step_validation.next_action, StepValidationDecision.COMPLETE_STEP)
 
 
-    def test_openrouter_procedural_implementation_summary_softens_enforcement_language(self) -> None:
+    def test_openrouter_does_not_rewrite_provider_text_with_domain_specific_regex(self) -> None:
         actor = OpenRouterActor(
             settings=OpenRouterActorSettings(
                 model="openai/gpt-oss-120b:free",
@@ -476,13 +565,8 @@ class Layer2ActorExecutionTests(unittest.TestCase):
         result = actor.act(actor_task=actor_task)
 
         self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
-        self.assertNotIn("enforces the rules", result.output_text.lower())
-        self.assertNotIn(
-            "establishes enforcement by the european commission",
-            result.output_text.lower(),
-        )
         self.assertIn(
-            "describes implementation and enforcement through the European Commission",
+            "establishes enforcement by the European Commission",
             result.output_text,
         )
 

@@ -224,6 +224,8 @@ class MainLayer2DashboardTests(unittest.TestCase):
         self.assertEqual(payload["thread_id"], "thread-detail")
         self.assertEqual(payload["runtime_summary"]["task_goal"], "Prepare a cautious external communication draft.")
         self.assertEqual(payload["dashboard_snapshot"]["runtime_state"], "waiting_human_review")
+        self.assertNotIn("pending_human_review", payload)
+        self.assertIsNotNone(payload["dashboard_snapshot"]["human_review"]["pending_request"])
 
     # Verify session loading uses the canonical state supplied by the LangGraph checkpointer.
     def test_build_dashboard_session_uses_canonical_checkpoint_state(self) -> None:

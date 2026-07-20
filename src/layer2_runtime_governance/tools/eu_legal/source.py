@@ -4,7 +4,7 @@ import re
 from urllib.parse import parse_qs, unquote, urlparse
 
 
-# Convert an official EUR-Lex CELEX URL into the CELLAR content endpoint.
+# Convert a validated official legal-document URL into the publication endpoint.
 def build_cellar_fallback_url(url: str | None) -> str | None:
     celex = celex_identifier(url)
     if celex is None:
@@ -16,7 +16,7 @@ def build_cellar_fallback_url(url: str | None) -> str | None:
     return f"http://publications.europa.eu/resource/celex/{base_celex}"
 
 
-# Extract a CELEX identifier only from a validated EUR-Lex URL.
+# Extract the legal-document identifier only from the supported official host.
 def celex_identifier(url: str | None) -> str | None:
     if not url:
         return None
@@ -31,8 +31,8 @@ def celex_identifier(url: str | None) -> str | None:
     return match.group(1) if match is not None else None
 
 
-# Detect EUR-Lex anti-bot interstitials before they become observed evidence.
-def is_eur_lex_bot_challenge(*, url: str | None, extracted_text: str) -> bool:
+# Detect the supported portal's anti-bot interstitial before it becomes evidence.
+def is_bot_challenge(*, url: str | None, extracted_text: str) -> bool:
     if celex_identifier(url) is None:
         return False
     normalized = " ".join(extracted_text.lower().split())
@@ -43,4 +43,4 @@ def is_eur_lex_bot_challenge(*, url: str | None, extracted_text: str) -> bool:
     )
 
 
-__all__ = ["build_cellar_fallback_url", "celex_identifier", "is_eur_lex_bot_challenge"]
+__all__ = ["build_cellar_fallback_url", "celex_identifier", "is_bot_challenge"]

@@ -4,7 +4,6 @@ import re
 
 from ..domain.evidence_policy import (
     _extract_precision_claim_markers,
-    _looks_like_primary_legal_text_source,
     _normalize_output_text_for_precision_checks,
     evidence_support_level_rank as _evidence_support_level_rank,
     required_evidence_support_level_from_output_text,
@@ -51,7 +50,7 @@ def build_actor_execution_hints(*, actor_task: ActorTask) -> dict[str, object]:
         )
     ]
     has_primary_legal_text_excerpt = any(
-        _looks_like_primary_legal_text_source(title=evidence.title, locator=evidence.locator)
+        evidence.support_level == EvidenceSupportLevel.PRIMARY_LEGAL
         for evidence in direct_support_evidence
     )
     has_procedural_implementation_source = any(
@@ -87,15 +86,9 @@ def build_actor_execution_hints(*, actor_task: ActorTask) -> dict[str, object]:
         ),
         "high_level_summary_mode": high_level_summary_mode,
         "avoid_granular_obligation_examples_unless_directly_observed": high_level_summary_mode,
-        "safe_high_level_obligation_phrase": "obligations and prohibitions for gatekeepers",
-        "granular_obligation_examples_that_need_direct_support": [
-            "self-preferencing",
-            "interoperability",
-            "data portability",
-            "ranking",
-            "non-discriminatory access",
-            "transparent terms",
-        ],
+        "safe_high_level_claim_guidance": (
+            "Use broad categories instead of unsupported named examples."
+        ),
         "current_or_prior_steps_have_primary_legal_text_excerpt": has_primary_legal_text_excerpt,
         "current_or_prior_steps_have_procedural_implementation_source": (
             has_procedural_implementation_source

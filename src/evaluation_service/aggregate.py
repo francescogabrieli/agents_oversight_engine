@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field, is_dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Sequence
+
+from json_serialization import to_jsonable
 
 
 # Version the offline evaluation contract so report consumers can track changes over time.
@@ -144,7 +146,7 @@ def write_layer2_evaluation_report(
 
 # Convert the report into JSON-safe structures.
 def layer2_evaluation_report_to_dict(report: Layer2EvaluationReport) -> dict[str, Any]:
-    return _to_jsonable(report)
+    return to_jsonable(report)
 
 
 # Convert the report into formatted JSON.
@@ -302,14 +304,11 @@ def _normalize_trace_payload(payload: Any, *, source_path: Path) -> _NormalizedT
             source_path=source_path,
         ),
         governance_decisions=_normalize_governance_decisions(
-            payload.get("governance_decisions"),
+            payload.get("governance_passes", payload.get("governance_decisions")),
             source_path=source_path,
         ),
         oversight_assessments=_normalize_oversight_assessments(
-            payload.get(
-                "dynamic_policy_assessments",
-                payload.get("oversight_assessments"),
-            ),
+            _oversight_payload(payload),
             source_path=source_path,
         ),
         human_review=_normalize_human_review(payload.get("human_review"), source_path=source_path),
@@ -790,6 +789,31 @@ def _normalize_governance_decisions(
     )
 
 
+# Project v3 OPA pillar results into the aggregate score view used by thesis metrics.
+def _oversight_payload(payload: dict[str, Any]) -> Any:
+    governance_passes = payload.get("governance_passes")
+    if isinstance(governance_passes, list):
+        projected: list[dict[str, Any]] = []
+        for item in governance_passes:
+            if not isinstance(item, dict):
+                continue
+            pillars = item.get("pillar_results")
+            if not isinstance(pillars, dict):
+                continue
+            projected.append(
+                {
+                    "evidence_quality": pillars.get("evidence", {}),
+                    "operational_risk": pillars.get("risk", {}),
+                    "trajectory_health": pillars.get("trajectory", {}),
+                }
+            )
+        return projected
+    return payload.get(
+        "dynamic_policy_assessments",
+        payload.get("oversight_assessments"),
+    )
+
+
 # Normalize oversight assessments.
 def _normalize_oversight_assessments(
     payload: Any,
@@ -1121,19 +1145,6 @@ def _format_counts(counts: dict[str, int]) -> str:
 # Render ratios in a human-friendly but stable way.
 def _format_ratio(value: float) -> str:
     return f"{value:.3f}"
-
-
-# Convert the report tree into JSON-safe primitives.
-def _to_jsonable(value: Any) -> Any:
-    if is_dataclass(value):
-        return _to_jsonable(asdict(value))
-    if isinstance(value, dict):
-        return {key: _to_jsonable(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_to_jsonable(item) for item in value]
-    if isinstance(value, Path):
-        return str(value)
-    return value
 
 
 __all__ = [

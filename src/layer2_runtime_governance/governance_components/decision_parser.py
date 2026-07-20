@@ -3,7 +3,7 @@ from typing import Any
 from ..actor_contract import ActorResultType
 from ..behavioral import BehavioralAssessment
 from ..judge import JudgeAssessment
-from ..oversight import (
+from ..oversight.contracts import (
     DynamicPolicyAssessment,
     DynamicPolicyRecommendedDirective,
     EvidenceQualityAssessment,
@@ -69,6 +69,8 @@ def _build_governance_trace_from_opa_output(
         ),
         policy_directive=policy_directive,
         oversight_recommended_directive=_map_opa_directive_for_trace(directive),
+        requires_human_review=raw_output["requires_human_review"],
+        evaluated_plan_step_id=policy_input.current_plan_step_id,
         behavioral_recommended_directive=map_behavioral_directive(
             behavioral_assessment.behavioral_recommended_directive
         ),

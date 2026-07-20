@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
 
@@ -7,7 +7,7 @@ from layer1_intake import DomainType, SensitivityLevel
 from ..actor_contract import ActorResultType, CapabilityAccessMode
 from ..behavioral import BehavioralAssessment
 from ..judge import JudgeAssessment
-from ..oversight import DynamicPolicyAssessment
+from ..oversight.contracts import DynamicPolicyAssessment
 from ..domain import ExternalCommunicationPhase, RuntimeFlag, RuntimeState
 from ..tool_contract import ToolName
 
@@ -127,6 +127,9 @@ class GovernanceDecisionTrace:
     policy_bundle_version: str
     policy_directive: GovernanceDirective
     oversight_recommended_directive: GovernanceDirective
+    # None is accepted only while decoding legacy checkpoints and normalized immediately.
+    requires_human_review: bool = field(default=None)  # type: ignore[assignment]
+    evaluated_plan_step_id: str | None = None
     behavioral_recommended_directive: GovernanceDirective = GovernanceDirective.CONTINUE
     judge_recommended_directive: GovernanceDirective = GovernanceDirective.CONTINUE
     judge_invoked: bool = False
@@ -151,6 +154,16 @@ class GovernanceDecisionTrace:
     pillar_results: dict[str, Any] | None = None
     pillar_errors: dict[str, str] | None = None
     policy_config_version: str | None = None
+
+    # Derive the missing legacy value conservatively without overriding new OPA output.
+    def __post_init__(self) -> None:
+        if self.requires_human_review is None:
+            object.__setattr__(
+                self,
+                "requires_human_review",
+                self.policy_decision == PolicyDecision.REQUIRE_HUMAN_REVIEW
+                or self.directive == GovernanceDirective.WAIT_HUMAN_REVIEW,
+            )
 
 # Define the stable typed vocabulary shared by runtime and policy adapters.
 @dataclass(frozen=True)

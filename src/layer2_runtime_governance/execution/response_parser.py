@@ -9,7 +9,11 @@ from .errors import ActorExecutionError
 
 
 # Convert provider JSON into the same shape used by native function calls.
-def convert_json_payload_to_tool_call(payload: dict[str, Any]) -> SimpleNamespace:
+def convert_json_payload_to_tool_call(
+    payload: dict[str, Any],
+    *,
+    allowed_action_names: set[str] | None = None,
+) -> SimpleNamespace:
     normalized_payload = normalize_actor_payload(payload=payload)
     tool_name = normalized_payload.get("tool_name")
     arguments = normalized_payload.get("arguments")
@@ -17,10 +21,20 @@ def convert_json_payload_to_tool_call(payload: dict[str, Any]) -> SimpleNamespac
         raise ActorExecutionError("Actor JSON response must include string 'tool_name'.")
     if not isinstance(arguments, dict):
         raise ActorExecutionError("Actor JSON response must include object 'arguments'.")
-    allowed_names = {str(tool["name"]) for tool in build_actor_runtime_tools()}
+    allowed_names = allowed_action_names or {
+        str(tool["name"]) for tool in build_actor_runtime_tools()
+    }
     if tool_name not in allowed_names:
         raise ActorExecutionError(f"Actor emitted an unknown runtime action: {tool_name}")
     return SimpleNamespace(name=tool_name, arguments=json.dumps(arguments, ensure_ascii=False))
+
+
+# Reject native provider calls that are outside the registry selected for this actor.
+def validate_tool_call_action(*, tool_call: object, allowed_action_names: set[str]) -> object:
+    tool_name = getattr(tool_call, "name", None)
+    if tool_name not in allowed_action_names:
+        raise ActorExecutionError(f"Actor emitted an unknown runtime action: {tool_name}")
+    return tool_call
 
 
 # Normalize completion-shaped provider JSON without inventing capability intent.
@@ -130,4 +144,5 @@ __all__ = [
     "convert_json_payload_to_tool_call",
     "extract_single_function_call",
     "normalize_actor_payload",
+    "validate_tool_call_action",
 ]

@@ -5,6 +5,7 @@ from typing import Any
 from layer2_runtime_governance.actor_contract import CapabilityAccessMode
 from layer2_runtime_governance.governance_components import PolicyEvaluationInput
 from layer2_runtime_governance.tools import (
+    ToolGatewayConfig,
     build_default_tool_gateway_config,
     get_default_tool_gateway_config_path,
     load_tool_gateway_config,
@@ -12,11 +13,20 @@ from layer2_runtime_governance.tools import (
 
 
 # Build operational-risk facts while leaving risk interpretation to OPA.
-def build_risk_signal(*, policy_input: PolicyEvaluationInput, thresholds_version: str) -> dict[str, Any]:
-    try:
-        tool_config = load_tool_gateway_config(config_path=get_default_tool_gateway_config_path())
-    except Exception:
-        tool_config = build_default_tool_gateway_config()
+def build_risk_signal(
+    *,
+    policy_input: PolicyEvaluationInput,
+    thresholds_version: str,
+    tool_gateway_config: ToolGatewayConfig | None = None,
+) -> dict[str, Any]:
+    # Runtime composition supplies the selected registry; fallback supports isolated callers.
+    if tool_gateway_config is not None:
+        tool_config = tool_gateway_config
+    else:
+        try:
+            tool_config = load_tool_gateway_config(config_path=get_default_tool_gateway_config_path())
+        except Exception:
+            tool_config = build_default_tool_gateway_config()
     tool_name = policy_input.tool_name.value if policy_input.tool_name is not None else None
     tool_definition = tool_config.tools.get(tool_name) if tool_name else None
     tool_risk_level = tool_definition.risk_level.value if tool_definition is not None else "none"

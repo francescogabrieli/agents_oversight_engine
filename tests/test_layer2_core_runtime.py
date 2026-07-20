@@ -185,6 +185,11 @@ class Layer2RuntimeCoreTests(unittest.TestCase):
             self.assertFalse((paths.thread_dir / "trace.compact.json").exists())
             self.assertTrue(paths.dashboard_snapshot_path.exists())
             self.assertTrue(paths.runtime_summary_path.exists())
+            self.assertFalse(paths.pending_human_review_path.exists())
+            self.assertEqual(
+                sorted(path.name for path in paths.thread_dir.glob("*.json")),
+                ["dashboard_snapshot.json", "full-trace-2.json", "runtime_summary.json"],
+            )
 
             dashboard_payload = json.loads(paths.dashboard_snapshot_path.read_text(encoding="utf-8"))
             runtime_summary = json.loads(paths.runtime_summary_path.read_text(encoding="utf-8"))

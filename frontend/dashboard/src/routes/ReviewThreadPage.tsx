@@ -32,8 +32,7 @@ export function ReviewThreadPage() {
 
   const detail = detailOverride ?? resource.data;
   const snapshot = detail?.dashboard_snapshot;
-  const pendingRequest =
-    detail?.pending_human_review ?? snapshot?.human_review?.pending_request;
+  const pendingRequest = snapshot?.human_review?.pending_request;
   const draftBody = pendingRequest?.external_communication_draft?.body ?? null;
   const taskGoal = valueToString(detail?.runtime_summary?.task_goal);
   const governance = snapshot?.governance as Record<string, unknown> | null | undefined;

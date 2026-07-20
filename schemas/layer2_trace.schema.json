@@ -1,15 +1,67 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://local/layer2/layer2_trace.schema.json",
-  "title": "Layer2RuntimeTrace",
+  "title": "Layer2RuntimeTraceV3",
   "type": "object",
-  "required": ["runtime", "intake", "governance_decisions"],
+  "required": [
+    "trace_version", "runtime", "intake", "planner_name", "planner_prompt_version",
+    "planner_rationale", "planning_source", "plan_steps", "current_plan_step_index",
+    "current_plan_step_id", "actor", "execution", "tool_calls", "observed_evidence",
+    "governance_passes", "human_review", "external_communication"
+  ],
   "properties": {
+    "trace_version": { "const": "layer2_trace.v3" },
     "runtime": { "type": "object" },
     "intake": { "type": "object" },
+    "planner_name": { "type": ["string", "null"] },
+    "planner_prompt_version": { "type": ["string", "null"] },
+    "planner_rationale": { "type": ["string", "null"] },
+    "planning_source": { "type": ["string", "null"] },
     "plan_steps": { "type": "array" },
+    "current_plan_step_index": { "type": ["integer", "null"] },
+    "current_plan_step_id": { "type": ["string", "null"] },
+    "actor": { "type": "object" },
+    "execution": { "type": "object" },
+    "tool_calls": { "type": "array" },
     "observed_evidence": { "type": "array" },
-    "governance_decisions": { "type": "array" }
+    "governance_passes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/governancePass" }
+    },
+    "human_review": { "type": "object" },
+    "external_communication": { "type": ["object", "null"] }
   },
-  "additionalProperties": true
+  "$defs": {
+    "governancePass": {
+      "type": "object",
+      "required": [
+        "pass_index", "evaluated_plan_step_id", "evaluated_actor_result_type",
+        "evaluated_tool_name", "governance_input_schema_version", "policy_bundle_version",
+        "policy_config_version", "pillar_requirements", "pillar_results", "pillar_errors",
+        "directive", "policy_decision", "requires_human_review", "reason_codes",
+        "selected_reason", "rejected_alternatives", "safety_invariants"
+      ],
+      "properties": {
+        "pass_index": { "type": "integer", "minimum": 1 },
+        "evaluated_plan_step_id": { "type": ["string", "null"] },
+        "evaluated_actor_result_type": { "type": "string" },
+        "evaluated_tool_name": { "type": ["string", "null"] },
+        "governance_input_schema_version": { "type": ["string", "null"] },
+        "policy_bundle_version": { "type": "string" },
+        "policy_config_version": { "type": ["string", "null"] },
+        "pillar_requirements": { "type": "object" },
+        "pillar_results": { "type": "object" },
+        "pillar_errors": { "type": "object" },
+        "directive": { "type": "string" },
+        "policy_decision": { "type": "string" },
+        "requires_human_review": { "type": "boolean" },
+        "reason_codes": { "type": "array", "items": { "type": "string" } },
+        "selected_reason": { "type": "string" },
+        "rejected_alternatives": { "type": "object" },
+        "safety_invariants": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
 }

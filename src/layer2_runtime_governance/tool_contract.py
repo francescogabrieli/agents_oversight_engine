@@ -53,6 +53,8 @@ class ToolSource:
     title: str
     locator: str
     snippet: str | None = None
+    # Specialized adapters may declare a conservative support ceiling for this source.
+    support_level_hint: EvidenceSupportLevel | None = None
 
 
 @dataclass(frozen=True)

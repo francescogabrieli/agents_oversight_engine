@@ -25,8 +25,7 @@ function prettyMetadata(metadata: Record<string, unknown>) {
 }
 
 export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
-  const pendingRequest =
-    detail.pending_human_review ?? detail.dashboard_snapshot?.human_review?.pending_request;
+  const pendingRequest = detail.dashboard_snapshot?.human_review?.pending_request;
   const allowedDecisions = pendingRequest?.allowed_decisions ?? [];
   const draft = pendingRequest?.external_communication_draft;
   const [decisionType, setDecisionType] = useState<string>(

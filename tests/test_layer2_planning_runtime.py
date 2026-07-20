@@ -80,8 +80,8 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
             }
         )
         self.assertEqual(compact_trace["planning_snapshot"]["planning_source"], "replanner")
-        self.assertEqual(compact_trace["governance_snapshot"]["oversight_pass_count"], 2)
-        self.assertIsNotNone(compact_trace["governance_snapshot"]["last_oversight_assessment"])
+        self.assertEqual(compact_trace["governance_snapshot"]["governance_pass_count"], 2)
+        self.assertIsNotNone(compact_trace["governance_snapshot"]["last_governance_pass"])
 
 
     def test_replanner_clears_stale_live_tool_context(self) -> None:
@@ -285,6 +285,59 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         self.assertIn("normalized to the task scope", task_state.step_history[0].summary)
         self.assertIn("high-level evidence", task_state.plan_steps[0].objective)
         self.assertIn("precision level supported", task_state.plan_steps[1].objective)
+
+
+    def test_generic_external_email_plan_preserves_planner_semantics(self) -> None:
+        task_state = TaskState.from_intake(_build_external_communication_intake_result())
+
+        class GenericExternalEmailPlanner:
+            planner_name = "generic_external_email_planner"
+            prompt_version = "stub_v1"
+
+            # Return a deliberately detailed plan whose wording must remain planner-owned.
+            def plan(self, *, task_state):
+                return PlannerDecision(
+                    plan_steps=[
+                        PlanStep(
+                            step_id="step_1",
+                            objective="Identify the approved product update points.",
+                            rationale="The email must use only the supplied product notes.",
+                            expected_outcome="A bounded list of approved update points.",
+                        ),
+                        PlanStep(
+                            step_id="step_2",
+                            objective="Draft a customer product update email.",
+                            rationale="The requested channel is an external email.",
+                            expected_outcome="A complete customer-facing draft.",
+                        ),
+                        PlanStep(
+                            step_id="step_3",
+                            objective="Refine wording for clarity.",
+                            rationale="Keep the supplied tone and scope.",
+                            expected_outcome="A clear draft without new claims.",
+                        ),
+                        PlanStep(
+                            step_id="step_4",
+                            objective="Prepare the draft for human review.",
+                            rationale="External communication remains review-gated.",
+                            expected_outcome="The same draft in review-ready form.",
+                        ),
+                    ],
+                    rationale="Prepare the requested product update without adding facts.",
+                    planner_name=self.planner_name,
+                    prompt_version=self.prompt_version,
+                )
+
+        planned_state = planner(task_state, planner_service=GenericExternalEmailPlanner())
+        plan_text = " ".join(
+            f"{step.objective} {step.rationale} {step.expected_outcome}"
+            for step in planned_state.plan_steps
+        ).lower()
+
+        self.assertEqual(len(planned_state.plan_steps), 4)
+        self.assertIn("customer product update email", plan_text)
+        for forbidden in ("60 minutes", "data loss", "delayed processing", "incident"):
+            self.assertNotIn(forbidden, plan_text)
 
 
 if __name__ == "__main__":

@@ -38,7 +38,7 @@ It already includes:
 - audit-safe scratchpad entries
 - typed step self-validations
 - an active `replanner` branch for `NEEDS_REPLAN`
-- deterministic dynamic policy assessment for evidence quality, operational risk, and trajectory health
+- typed Python raw-fact collection for evidence quality, operational risk, and trajectory health, scored only by OPA
 - explicit separation of static policy, dynamic policy, behavioural foundation, judge signals, and OPA-owned final decision policy
 - local SQLite behavioural memory as a non-authoritative read model for historical run features
 - behavioural similarity, deviation, and novelty scoring with conservative escalation recommendations
@@ -49,7 +49,7 @@ It already includes:
 - durable local LangGraph checkpoint persistence and per-thread runtime artifacts on disk
 - typed `external_communication` phase tracking for evidence, draft, review/edit, approval, and blocked states
 - the external communication draft body is taken from the latest governed draft output for the branch, while the trace retains the canonical final body and diagnostics for claim precision vs typed evidence requirements
-- over-decomposed external communication plans may be compacted to a shorter governed draft flow when the planner adds a redundant refinement step after the review-ready draft
+- external communication plan semantics remain planner-owned; runtime compaction must not introduce facts or rewrite the requested communication
 - typed runtime trace export through `observability/`, surfaced by `src/main_layer2.py`
 - offline trace evaluation and reporting through `evaluation/`, surfaced by `src/main_layer2_evaluation.py`
 
@@ -143,7 +143,7 @@ Purpose:
 - observe tool results and feed them back into the actor loop
 - replace the current and pending semantic trajectory through `replanner` when the actor signals `NEEDS_REPLAN`
 - evaluate actor outcomes through a typed governance node backed by an OPA policy engine
-- combine OPA hard policy decisions with deterministic dynamic policy signals and non-blocking behavioural context
+- send typed raw facts and advisory context to OPA, which alone scores and returns the final directive
 - selectively invoke a typed semantic judge and combine it conservatively with static, dynamic, and behavioural signals
 - persist governance decisions in `TaskState` with an explicit `ABORTED` stop state for hard denials
 - persist oversight assessments in `TaskState` for audit and thesis traceability
@@ -200,7 +200,7 @@ Current design:
 - OPA/Rego is the sole final directive authority; Python may normalize and validate transport data but must not recreate a competing final decision combiner
 - `behavioral/` defines the behavioural foundation contract, SQLite-backed historical read model, similarity/deviation/novelty scoring, and conservative behavioural recommendations
 - `judge/` defines the selective semantic judge port, invocation policy, and typed judge assessments
-- `oversight/` defines deterministic dynamic policy assessment for `evidence_quality`, `operational_risk`, and `trajectory_health`, plus the recommendation consumed by governance
+- `oversight/contracts.py` retains typed assessment/checkpoint contracts; `signal_services/` produces raw facts and OPA owns scoring, thresholds, judge requirements, and directives
 - `oversight/` resolves operational risk from an explicit runtime posture (`none`, `read_only`, `write`) and resolves evidence requirements from typed plan-step metadata before falling back to legacy heuristics
 - `configs/opa/layer2_governance/data.json` includes a `tool_risk.none` level so no-tool executions are not treated as the old medium-risk default
 - `execution/providers/bedrock_runtime.py` defines the Amazon Bedrock Converse adapter used by the Layer 2 actor with the approved Nova 2 Lite EU inference profile; `bedrock_client.py` is import-compatible
@@ -214,7 +214,7 @@ Current design:
 - `main_layer2_dashboard.py` rebuilds a persisted thread directly from the configured official LangGraph checkpointer, so the standalone dashboard can resume runs created by a separate `main_layer2.py` process without relying on stale in-memory state or trace artifacts
 - the dashboard review inbox is intentionally action-oriented and now hides pending-review threads whose persisted `updated_at` is older than 2 minutes; old artifacts remain on disk and detail views can still be resolved directly by thread id
 - `frontend/dashboard` contains the standalone React + TypeScript + Tailwind + daisyUI dashboard frontend that is built into static assets and served by `main_layer2_dashboard.py`
-- `configs/opa/layer2_governance/data.json` is the canonical source for weights, thresholds, risk scores, sensitivity multipliers, and trajectory penalties consumed by OPA and the compatibility evaluator
+- `configs/opa/layer2_governance/data.json` is the sole source for weights, thresholds, risk scores, sensitivity multipliers, and trajectory penalties consumed by OPA
 - `infrastructure/runtime_warnings.py` centralizes warning suppression needed before importing selected LangGraph/LangChain dependencies
 - `graph.py` contains the current LangGraph wiring for the planner/actor/governance/tool/replanner/human-review loop:
   `START -> bootstrap_from_intake -> planner -> actor -> governance -> { tool_gateway | replanner | human_review | finalize_bootstrap }`
@@ -360,7 +360,7 @@ Current relevant files:
 - the active baseline includes `bootstrap_from_intake -> planner -> actor -> governance -> tool_gateway -> observe_tool_result -> actor`
 - the active baseline also includes the real `replanner` branch triggered by `NEEDS_REPLAN`
 - the active baseline also includes a typed governance branch after `actor` that can continue, replan, escalate, or abort
-- governance sends five explicit inputs to OPA: static policy facts, deterministic dynamic policy, behavioural intelligence, selective judge review, and runtime recovery facts; OPA returns the final directive, and denials, required review, and clarification decisions remain non-negotiable
+- governance sends static facts, raw evidence/risk/trajectory facts, behavioural intelligence, OPA-requested judge output, and runtime recovery facts; OPA returns the only final directive
 - the OPA decision preserves the static read-only envelope as an explicit trace signal; Python validates and applies the returned directive without running a second final-decision algorithm
 - adaptive governance escalation is now weighted: dynamic policy, behavioural, and judge signals each contribute explicit authority, and no single advisory layer should force `WAIT_HUMAN_REVIEW` on its own unless the weighted threshold is met
 - governance still evaluates every actor turn, but intermediate local outputs that explicitly remain in recovery (`continue_acting` / `request_more_evidence`) should prefer local continuation over premature human-review escalation unless a hard policy or explicit blocking condition requires review
@@ -394,7 +394,7 @@ Current relevant files:
 - source discovery alone is not factual support; simple URL discovery is weaker than extracted content and should not justify detailed factual completion by itself
 - evaluation now distinguishes mismatch caused by typed requirements from mismatch caused by heuristic fallback, using resolved provenance exported in the trace
 - actor completion outputs that are more specific than the available evidence support level should remain in-progress rather than complete the step, even when the LLM self-reports `objective_satisfied=true` and `evidence_sufficient=true`
-- deterministic dynamic policy may request more evidence when the evaluated step/output requires a stronger evidence support level than the observed evidence currently provides
+- OPA may request more evidence when typed raw facts show that the evaluated step/output requires stronger support than currently observed evidence
 - `INTERMEDIATE_OUTPUT` is a progress/local-output outcome and must not automatically complete the current plan step without positive validation
 - when the last semantic step completes with positive validation, its output should be promoted into canonical `final_output_text` even if the actor result type is `INTERMEDIATE_OUTPUT`
 - executed step history and current plan step cursor must remain explicit in `TaskState`
@@ -413,12 +413,12 @@ Current relevant files:
 - `max_tool_calls = null` means the current runtime does not impose a hard tool-call ceiling
 - `WAITING_HUMAN_REVIEW` is now the typed pause state that feeds the LangGraph `interrupt / resume` HITL path
 - governance is active as an explicit runtime node and uses OPA over HTTP as the deterministic static policy engine target
-- deterministic dynamic policy may only preserve or make the static policy decision more conservative; it must never make an OPA decision more permissive
+- Python fact normalization must never reinterpret or relax the OPA decision
 - the default LangGraph checkpointer is the official durable local SQLite saver rather than a process-local in-memory saver; production deployments may select the official PostgreSQL saver
 - the default checkpoint file is `artifacts/runtime/checkpoints/layer2_checkpoints.sqlite3`; LangGraph owns its checkpoint schema and serialization, and pending interrupts must never be reconstructed from artifact JSON
 - the runtime persists per-thread artifacts under `artifacts/runtime/<thread_id>/`, including the canonical trace, dashboard snapshot, runtime summary, and pending HITL payload when present
 - the behavioural SQLite store lives under `artifacts/runtime/behavioral/behavioral.sqlite3` by default and must remain a read model rather than the primary runtime source of truth
-- dynamic policy scoring must remain deterministic, explainable, and configured through `configs/opa/layer2_governance/data.json`
+- dynamic scoring must remain deterministic, explainable, and implemented only in Rego using `configs/opa/layer2_governance/data.json`
 - trajectory-health turn pressure should stay forgiving enough that short source-plus-summary tasks can make a few recovery turns without being forced into replanning
 - runtime trace export must be read-only over `TaskState`; it must not mutate runtime state or become a parallel source of truth
 - `main_layer2.py` may print trace views, but reusable trace construction belongs in `observability/`
@@ -428,7 +428,7 @@ Current relevant files:
 - HITL is wired as `interrupt / resume`; governance now pauses in typed states and resumes from typed human decisions
 - the local Layer 2 CLI no longer auto-launches the HITL control plane; the standalone dashboard process discovers new `WAITING_HUMAN_REVIEW` threads by polling persisted runtime artifacts
 - `runtime_summary.json` is now inbox-oriented and includes `task_goal`, `review_summary`, `pending_request_id`, `allowed_decisions`, `external_communication_phase`, `has_pending_human_review`, and `updated_at`
-- the standalone dashboard may now rebuild a pending review session from `pending_human_review.json` even when the refreshed checkpoint snapshot does not yet expose the full canonical `task_state`
+- the dashboard snapshot is the sole artifact DTO for pending-review data; the standalone dashboard may read legacy `pending_human_review.json` files but never writes new ones
 
 ### HITL Rules
 

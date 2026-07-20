@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import asdict, is_dataclass
-from datetime import datetime
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+from json_serialization import to_jsonable
 
 from layer1_intake import (
     InputNormalizer,
@@ -156,32 +153,6 @@ def run_layer1_flow(
         "final_result": final_result,
     }
 
-
-def to_jsonable(value: Any) -> Any:
-    # Convert Pydantic models, dataclasses, and enums into plain JSON-friendly structures.
-
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-
-    if isinstance(value, Enum):
-        return value.value
-
-    if isinstance(value, datetime):
-        return value.isoformat()
-
-    if isinstance(value, Path):
-        return str(value)
-
-    if is_dataclass(value):
-        return to_jsonable(asdict(value))
-
-    if isinstance(value, dict):
-        return {key: to_jsonable(item) for key, item in value.items()}
-
-    if isinstance(value, (list, tuple)):
-        return [to_jsonable(item) for item in value]
-
-    return value
 
 
 def print_layer1_trace(trace: dict[str, Any]) -> None:

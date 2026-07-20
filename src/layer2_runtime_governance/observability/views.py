@@ -45,31 +45,9 @@ def build_compact_trace_from_runtime_trace(trace: Layer2RuntimeTrace) -> dict[st
         "actor_snapshot": asdict(trace.actor),
         "execution_snapshot": asdict(trace.execution),
         "governance_snapshot": {
-            "static_policy_pass_count": len(trace.static_policy_assessments),
-            "last_static_policy_assessment": (
-                asdict(trace.static_policy_assessments[-1]) if trace.static_policy_assessments else None
-            ),
-            "dynamic_policy_pass_count": len(trace.dynamic_policy_assessments),
-            "last_dynamic_policy_assessment": (
-                asdict(trace.dynamic_policy_assessments[-1]) if trace.dynamic_policy_assessments else None
-            ),
-            "behavioral_pass_count": len(trace.behavioral_assessments),
-            "last_behavioral_assessment": (
-                asdict(trace.behavioral_assessments[-1]) if trace.behavioral_assessments else None
-            ),
-            "judge_pass_count": len(trace.judge_assessments),
-            "last_judge_assessment": (
-                asdict(trace.judge_assessments[-1]) if trace.judge_assessments else None
-            ),
-            "governance_pass_count": len(trace.governance_decisions),
-            "last_governance_decision": (
-                asdict(trace.governance_decisions[-1]) if trace.governance_decisions else None
-            ),
-            "oversight_pass_count": len(trace.dynamic_policy_assessments),
-            "last_oversight_assessment": (
-                asdict(trace.dynamic_policy_assessments[-1])
-                if trace.dynamic_policy_assessments
-                else None
+            "governance_pass_count": len(trace.governance_passes),
+            "last_governance_pass": (
+                asdict(trace.governance_passes[-1]) if trace.governance_passes else None
             ),
         },
         "human_review_snapshot": asdict(trace.human_review),

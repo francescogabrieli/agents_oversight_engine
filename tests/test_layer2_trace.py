@@ -98,18 +98,11 @@ class Layer2TraceTests(unittest.TestCase):
         self.assertEqual(len(trace.observed_evidence), 1)
         self.assertEqual(trace.observed_evidence[0].locator, "mcp://local_test/text_stats")
         self.assertEqual(trace.observed_evidence[0].source_kind, "tool_observation")
-        self.assertEqual(len(trace.governance_decisions), 2)
-        self.assertEqual(trace.governance_decisions[0].directive, "continue_read_only")
-        self.assertEqual(len(trace.dynamic_policy_assessments), 2)
-        self.assertIsInstance(trace.dynamic_policy_assessments[0], TraceOversightAssessment)
-        self.assertEqual(trace.dynamic_policy_assessments[0].evidence_quality.level, "strong")
-        self.assertEqual(len(trace.static_policy_assessments), 2)
-        self.assertEqual(len(trace.dynamic_policy_assessments), 2)
-        self.assertEqual(len(trace.behavioral_assessments), 1)
-        self.assertTrue(trace.behavioral_assessments[0].history_available)
-        self.assertEqual(len(trace.judge_assessments), 1)
-        self.assertIsInstance(trace.judge_assessments[0], TraceJudgeAssessment)
-        self.assertEqual(trace.judge_assessments[0].recommendation, "wait_human_review")
+        self.assertEqual(trace.trace_version, "layer2_trace.v3")
+        self.assertEqual(len(trace.governance_passes), 2)
+        self.assertEqual(trace.governance_passes[0].directive, "continue_read_only")
+        self.assertFalse(trace.governance_passes[0].requires_human_review)
+        self.assertFalse(trace.governance_passes[1].requires_human_review)
 
     def test_runtime_trace_handles_legacy_string_step_kind_values(self) -> None:
         state = _complete_task_state()
@@ -174,11 +167,39 @@ class Layer2TraceTests(unittest.TestCase):
         decoded = json.loads(encoded)
 
         self.assertEqual(payload["runtime"]["current_state"], "completed")
-        self.assertEqual(decoded["governance_decisions"][0]["policy_decision"], "allow_read_only")
-        self.assertEqual(
-            decoded["dynamic_policy_assessments"][0]["operational_risk"]["reason_codes"],
-            ["tool_risk_low"],
+        self.assertEqual(decoded["trace_version"], "layer2_trace.v3")
+        self.assertEqual(decoded["governance_passes"][0]["policy_decision"], "allow_read_only")
+        self.assertFalse(decoded["governance_passes"][0]["requires_human_review"])
+        self.assertNotIn("governance_decisions", decoded)
+        self.assertNotIn("dynamic_policy_assessments", decoded)
+
+        schema = json.loads(
+            (REPO_ROOT / "schemas" / "layer2_trace.schema.json").read_text(encoding="utf-8")
         )
+        self.assertEqual(schema["properties"]["trace_version"]["const"], "layer2_trace.v3")
+        self.assertFalse(schema["additionalProperties"])
+        self.assertFalse(schema["$defs"]["governancePass"]["additionalProperties"])
+
+    def test_wait_human_review_trace_exports_canonical_review_flag(self) -> None:
+        state = _complete_task_state()
+        state.governance_history = [
+            replace(
+                _governance_continue(),
+                directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
+                policy_decision=PolicyDecision.REQUIRE_HUMAN_REVIEW,
+                requires_human_review=True,
+            )
+        ]
+
+        payload = layer2_trace_to_dict(
+            build_layer2_runtime_trace(
+                thread_id="review-flag",
+                intake_result=state.intake_payload,
+                task_state=state,
+            )
+        )
+
+        self.assertTrue(payload["governance_passes"][0]["requires_human_review"])
 
     def test_compact_trace_is_derived_from_runtime_trace(self) -> None:
         state = _complete_task_state()
@@ -192,16 +213,9 @@ class Layer2TraceTests(unittest.TestCase):
 
         self.assertEqual(compact["planning_snapshot"]["plan_step_count"], 2)
         self.assertEqual(compact["governance_snapshot"]["governance_pass_count"], 2)
-        self.assertEqual(compact["governance_snapshot"]["oversight_pass_count"], 2)
-        self.assertEqual(compact["governance_snapshot"]["static_policy_pass_count"], 2)
-        self.assertEqual(compact["governance_snapshot"]["dynamic_policy_pass_count"], 2)
-        self.assertEqual(compact["governance_snapshot"]["behavioral_pass_count"], 1)
-        self.assertEqual(compact["governance_snapshot"]["judge_pass_count"], 1)
         self.assertEqual(
-            compact["governance_snapshot"]["last_oversight_assessment"]["trajectory_health"][
-                "level"
-            ],
-            "healthy",
+            compact["governance_snapshot"]["last_governance_pass"]["directive"],
+            "continue",
         )
         self.assertEqual(compact["tool_snapshot"]["observed_evidence_count"], 1)
         self.assertIsNone(compact["tool_snapshot"]["current_tool_request"])

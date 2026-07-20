@@ -6,6 +6,7 @@ from ..action_schemas import build_actor_runtime_tools
 from ..errors import ActorExecutionError
 from ..prompts import build_actor_system_prompt, build_actor_user_prompt
 from ..response_parser import convert_json_payload_to_tool_call
+from ...tools import ToolGatewayConfig
 from ..result_builder import (
     build_provider_blocked_result,
     build_provider_replan_result,
@@ -19,8 +20,15 @@ class BedrockNovaActor(ActorPort):
     actor_name = "bedrock_nova_2_lite_actor"
     prompt_version = "actor_v6_bedrock_converse_tool_calling"
 
-    def __init__(self, settings: BedrockNovaActorSettings | None = None) -> None:
+    def __init__(
+        self,
+        settings: BedrockNovaActorSettings | None = None,
+        *,
+        tool_gateway_config: ToolGatewayConfig | None = None,
+    ) -> None:
         self._settings = settings or BedrockNovaActorSettings.from_env()
+        self._runtime_tools = build_actor_runtime_tools(tool_gateway_config)
+        self._allowed_action_names = {str(tool["name"]) for tool in self._runtime_tools}
         self._client = BedrockChatClient(
             BedrockRuntimeSettings(
                 model_id=self._settings.model_id,
@@ -40,7 +48,7 @@ class BedrockNovaActor(ActorPort):
             payload = self._client.complete_tool_call(
                 system_prompt=build_actor_system_prompt(),
                 user_prompt=build_actor_user_prompt(actor_task=actor_task),
-                tools=build_actor_runtime_tools(),
+                tools=self._runtime_tools,
             )
         except BedrockRuntimeError as exc:
             if "no tool use" in str(exc):
@@ -49,7 +57,10 @@ class BedrockNovaActor(ActorPort):
         try:
             return convert_tool_call_to_actor_result(
                 actor_task=actor_task,
-                tool_call=convert_json_payload_to_tool_call(payload),
+                tool_call=convert_json_payload_to_tool_call(
+                    payload,
+                    allowed_action_names=self._allowed_action_names,
+                ),
             )
         except ActorExecutionError as exc:
             return build_provider_replan_result(actor_task=actor_task, detail=str(exc))

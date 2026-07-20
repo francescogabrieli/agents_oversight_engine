@@ -43,8 +43,7 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
     ".judge": (
         "DisabledJudge", "JudgeAssessment", "JudgeExecutionError", "JudgePort",
         "JudgeRecommendedDirective", "JudgeSettings", "OpenAIJudge", "build_default_judge",
-        "build_judge_system_prompt", "build_judge_user_prompt", "evaluate_judge",
-        "should_invoke_judge",
+        "build_judge_system_prompt", "build_judge_user_prompt",
     ),
     ".hitl.dashboard": (
         "DashboardBehavioralPanel", "DashboardExternalCommunicationPanel", "DashboardFocus",
@@ -65,10 +64,7 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
         "OversightAssessment", "OversightPolicyConfig", "OversightReasonCode",
         "OversightRecommendedDirective", "OversightSignalLevel", "RiskScores",
         "TrajectoryHealthAssessment", "TrajectoryPenalties",
-        "build_default_oversight_policy_config", "evaluate_confidence_risk_trajectory",
-        "evaluate_dynamic_policy", "evaluate_evidence_quality", "evaluate_operational_risk",
-        "evaluate_trajectory_health", "get_default_oversight_policy_config_path",
-        "load_oversight_policy_config", "resolve_required_evidence_support_context",
+        "resolve_required_evidence_support_context",
     ),
     ".infrastructure.runtime_artifacts": (
         "build_sqlite_checkpointer", "RuntimeArtifactPaths", "RuntimeArtifactStore",
@@ -105,7 +101,7 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
     ".observability": (
         "Layer2RuntimeTrace", "TraceActorTurn", "TraceBehavioralAssessment",
         "TraceExecutionSummary", "TraceExternalCommunicationDraft",
-        "TraceExternalCommunicationSummary", "TraceGovernanceDecision",
+        "TraceExternalCommunicationSummary", "TraceGovernancePass",
         "TraceHumanReviewDecision", "TraceHumanReviewExternalEdit", "TraceHumanReviewRequest",
         "TraceHumanReviewSummary", "TraceIntakeSummary", "TraceJudgeAssessment",
         "TraceObservedEvidence", "TraceOversightAssessment", "TracePlanStep",

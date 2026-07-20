@@ -7,14 +7,16 @@ from ..actor_contract import ActorResult
 from ..behavioral import BehavioralAssessment
 from ..governance_components import GovernanceDecision, StaticPolicyAssessment
 from ..judge import JudgeAssessment
-from ..oversight import (
+from ..oversight.contracts import (
     EvidenceQualityAssessment,
     OperationalRiskAssessment,
     OversightAssessment,
-    _output_claim_support_level,
-    _precision_mismatch_detected,
-    resolve_required_evidence_support_context,
     TrajectoryHealthAssessment,
+)
+from ..domain.evidence_policy import (
+    output_claim_support_level,
+    precision_mismatch_detected,
+    resolve_required_evidence_support_context,
 )
 from .serialization import enum_value, to_jsonable
 from ..domain import (
@@ -39,7 +41,7 @@ from .models import (
     TraceExecutionSummary,
     TraceExternalCommunicationDraft,
     TraceExternalCommunicationSummary,
-    TraceGovernanceDecision,
+    TraceGovernancePass,
     TraceHumanReviewDecision,
     TraceHumanReviewExternalEdit,
     TraceHumanReviewRequest,
@@ -64,6 +66,7 @@ def build_layer2_runtime_trace(
 ) -> Layer2RuntimeTrace:
     normalize_task_state_serialization(task_state)
     return Layer2RuntimeTrace(
+        trace_version="layer2_trace.v3",
         runtime=_build_runtime_summary(thread_id=thread_id, task_state=task_state),
         intake=_build_intake_summary(intake_result=intake_result),
         planner_name=task_state.planner_name,
@@ -83,20 +86,9 @@ def build_layer2_runtime_trace(
         observed_evidence=tuple(
             _build_observed_evidence(evidence) for evidence in task_state.observed_evidence
         ),
-        static_policy_assessments=tuple(
-            _build_static_policy_assessment(assessment) for assessment in task_state.static_policy_history
-        ),
-        dynamic_policy_assessments=tuple(
-            _build_oversight_assessment(assessment) for assessment in task_state.dynamic_policy_history
-        ),
-        behavioral_assessments=tuple(
-            _build_behavioral_assessment(assessment) for assessment in task_state.behavioral_history
-        ),
-        judge_assessments=tuple(
-            _build_judge_assessment(assessment) for assessment in task_state.judge_history
-        ),
-        governance_decisions=tuple(
-            _build_governance_decision(decision) for decision in task_state.governance_history
+        governance_passes=tuple(
+            _build_governance_pass(pass_index=index, decision=decision)
+            for index, decision in enumerate(task_state.governance_history, start=1)
         ),
         human_review=_build_human_review_summary(task_state=task_state),
         external_communication=_build_external_communication_summary(
@@ -167,7 +159,7 @@ def _build_plan_step(*, step: Any, task_state: TaskState) -> TracePlanStep:
 # Read-only observability component extracted from the trace facade.
 def _build_actor_turn(*, actor_result: ActorResult | None, task_state: TaskState) -> TraceActorTurn:
     output_claim_level = (
-        _output_claim_support_level(task_state=task_state) if actor_result is not None else None
+        output_claim_support_level(task_state=task_state) if actor_result is not None else None
     )
     return TraceActorTurn(
         actor_name=task_state.actor_name,
@@ -188,7 +180,7 @@ def _build_actor_turn(*, actor_result: ActorResult | None, task_state: TaskState
         precision_mismatch_detected=bool(
             actor_result is not None
             and actor_result.output_text
-            and _precision_mismatch_detected(task_state=task_state)
+            and precision_mismatch_detected(task_state=task_state)
         ),
     )
 
@@ -283,46 +275,34 @@ def _build_observed_evidence(evidence: ObservedEvidence) -> TraceObservedEvidenc
     )
 
 
-# Read-only observability component extracted from the trace facade.
-def _build_governance_decision(decision: GovernanceDecision) -> TraceGovernanceDecision:
-    return TraceGovernanceDecision(
-        directive=decision.directive.value,
-        policy_decision=decision.policy_decision.value,
-        reason_codes=tuple(code.value for code in decision.reason_codes),
-        summary=decision.summary,
-        constrains_capability_use=decision.constrains_capability_use,
+# Collapse the former parallel governance histories into one audit record per OPA pass.
+def _build_governance_pass(
+    *,
+    pass_index: int,
+    decision: GovernanceDecision,
+) -> TraceGovernancePass:
+    return TraceGovernancePass(
+        pass_index=pass_index,
+        evaluated_plan_step_id=decision.evaluated_plan_step_id,
         evaluated_actor_result_type=decision.evaluated_actor_result_type.value,
         evaluated_tool_name=(
-            decision.evaluated_tool_name.value if decision.evaluated_tool_name is not None else None
+            decision.evaluated_tool_name.value
+            if decision.evaluated_tool_name is not None
+            else None
         ),
-        policy_engine_name=decision.policy_engine_name,
+        governance_input_schema_version=decision.governance_input_schema_version,
         policy_bundle_version=decision.policy_bundle_version,
         policy_config_version=decision.policy_config_version,
-        policy_directive=decision.policy_directive.value,
-        oversight_recommended_directive=decision.oversight_recommended_directive.value,
-        behavioral_recommended_directive=decision.behavioral_recommended_directive.value,
-        judge_recommended_directive=decision.judge_recommended_directive.value,
-        judge_invoked=decision.judge_invoked,
-        static_policy_summary=decision.static_policy_summary,
-        dynamic_policy_summary=decision.dynamic_policy_summary,
-        behavioral_summary=decision.behavioral_summary,
-        judge_summary=decision.judge_summary,
-        behavioral_similarity_score=decision.behavioral_similarity_score,
-        behavioral_deviation_score=decision.behavioral_deviation_score,
-        behavioral_novelty_score=decision.behavioral_novelty_score,
-        oversight_summary=decision.oversight_summary,
-        combiner_dominant_dimension=decision.combiner_dominant_dimension,
-        combiner_support_by_directive=decision.combiner_support_by_directive,
-        combiner_selected_reason=decision.combiner_selected_reason,
-        combiner_rejected_alternatives=decision.combiner_rejected_alternatives,
-        combiner_safety_invariants_checked=decision.combiner_safety_invariants_checked,
-        combiner_signals=decision.combiner_signals,
-        combiner_normalized_directive=decision.combiner_normalized_directive,
-        combiner_normalization_reason=decision.combiner_normalization_reason,
-        governance_input_schema_version=decision.governance_input_schema_version,
-        pillar_requirements=decision.pillar_requirements,
-        pillar_results=decision.pillar_results,
-        pillar_errors=decision.pillar_errors,
+        pillar_requirements=dict(decision.pillar_requirements or {}),
+        pillar_results=dict(decision.pillar_results or {}),
+        pillar_errors=dict(decision.pillar_errors or {}),
+        directive=decision.directive.value,
+        policy_decision=decision.policy_decision.value,
+        requires_human_review=decision.requires_human_review,
+        reason_codes=tuple(code.value for code in decision.reason_codes),
+        selected_reason=decision.combiner_selected_reason or decision.summary,
+        rejected_alternatives=dict(decision.combiner_rejected_alternatives or {}),
+        safety_invariants=tuple(decision.combiner_safety_invariants_checked),
     )
 
 
@@ -596,6 +576,7 @@ __all__ = [
     "_build_tool_source",
     "_build_observed_evidence",
     "_build_governance_decision",
+    "_build_governance_pass",
     "_build_static_policy_assessment",
     "_build_oversight_assessment",
     "_build_behavioral_assessment",

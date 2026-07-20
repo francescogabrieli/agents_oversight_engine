@@ -1,8 +1,29 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from enum import Enum
+from typing import TYPE_CHECKING, Any
 
 from ..tool_contract import EvidenceSupportLevel
+
+if TYPE_CHECKING:
+    from .task_state import TaskState
+
+
+class EvidenceRequirementSource(str, Enum):
+    STEP_VALIDATION = "step_validation"
+    PLAN_STEP_EVIDENCE_REQUIREMENT = "plan_step_evidence_requirement"
+    PLAN_STEP_CLAIM_PRECISION_CEILING = "plan_step_claim_precision_ceiling"
+    PLAN_STEP_KIND = "plan_step_kind"
+    HEURISTIC_STEP = "heuristic_step"
+    HEURISTIC_OUTPUT = "heuristic_output"
+
+
+@dataclass(frozen=True)
+class EvidenceRequirementResolution:
+    required_level: EvidenceSupportLevel
+    source: EvidenceRequirementSource
 
 
 # Rank typed evidence levels for deterministic threshold comparisons.
@@ -54,11 +75,8 @@ def required_evidence_support_level_from_scope_text(*, step_text: str) -> Eviden
             "overview",
             "high-level",
             "concise",
-            "gatekeeper",
-            "gatekeepers",
             "core platform services",
             "do's and don'ts",
-            "what the dma is",
             "objectives",
             "legal instrument",
             "citation of the legal instrument",
@@ -203,7 +221,6 @@ def required_evidence_support_level_from_output_text(*, text: str) -> EvidenceSu
             "interoperability",
             "data portability",
             "ranking",
-            "self-preferencing",
             "non-discriminatory access",
         )
     ):
@@ -222,6 +239,125 @@ def required_evidence_support_level_from_output_text(*, text: str) -> EvidenceSu
         return EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
 
     return EvidenceSupportLevel.LOCAL_ONLY
+
+
+# Resolve typed step metadata before falling back to conservative semantic wording.
+def resolve_required_evidence_support_context(
+    *,
+    task_state: "TaskState",
+    current_step: Any | None = None,
+) -> EvidenceRequirementResolution:
+    step = current_step or _evaluated_plan_step(task_state=task_state)
+    if step is None:
+        return EvidenceRequirementResolution(
+            EvidenceSupportLevel.LOCAL_ONLY,
+            EvidenceRequirementSource.HEURISTIC_STEP,
+        )
+    if step.evidence_requirement is not None:
+        return EvidenceRequirementResolution(
+            _coerce_support_level(step.evidence_requirement),
+            EvidenceRequirementSource.PLAN_STEP_EVIDENCE_REQUIREMENT,
+        )
+    if step.claim_precision_ceiling is not None:
+        return EvidenceRequirementResolution(
+            _coerce_support_level(step.claim_precision_ceiling),
+            EvidenceRequirementSource.PLAN_STEP_CLAIM_PRECISION_CEILING,
+        )
+    if step.step_kind is not None:
+        return EvidenceRequirementResolution(
+            required_evidence_support_level_from_step_kind(step_kind=step.step_kind),
+            EvidenceRequirementSource.PLAN_STEP_KIND,
+        )
+    scope = " ".join((step.objective, step.rationale, step.expected_outcome)).lower()
+    return EvidenceRequirementResolution(
+        required_evidence_support_level_from_scope_text(step_text=scope),
+        EvidenceRequirementSource.HEURISTIC_STEP,
+    )
+
+
+# Return evidence items with substantive excerpts for raw OPA facts.
+def meaningful_observed_evidence(*, task_state: "TaskState") -> tuple[Any, ...]:
+    return tuple(
+        item
+        for item in task_state.observed_evidence
+        if item.excerpt.strip()
+        and "content has not been extracted" not in item.excerpt.lower()
+        and "extracted readable text was empty" not in item.excerpt.lower()
+    )
+
+
+# Return the strongest support level available in canonical observed evidence.
+def available_evidence_support_level(*, task_state: "TaskState") -> EvidenceSupportLevel:
+    evidence = meaningful_observed_evidence(task_state=task_state)
+    if not evidence:
+        return EvidenceSupportLevel.LOCAL_ONLY
+    return max((item.support_level for item in evidence), key=evidence_support_level_rank)
+
+
+# Return the current typed evidence requirement.
+def required_evidence_support_level(*, task_state: "TaskState") -> EvidenceSupportLevel:
+    return resolve_required_evidence_support_context(task_state=task_state).required_level
+
+
+# Infer claim precision from the latest actor output without changing that output.
+def output_claim_support_level(*, task_state: "TaskState") -> EvidenceSupportLevel:
+    output_text = task_state.actor_result.output_text if task_state.actor_result is not None else None
+    return required_evidence_support_level_from_output_text(text=output_text or "")
+
+
+# Compare emitted precision with both step need and available evidence.
+def precision_mismatch_detected(*, task_state: "TaskState") -> bool:
+    available = available_evidence_support_level(task_state=task_state)
+    required = effective_support_check_level(
+        required_level=required_evidence_support_level(task_state=task_state),
+        output_claim_level=output_claim_support_level(task_state=task_state),
+    )
+    return evidence_support_level_rank(available) < evidence_support_level_rank(required)
+
+
+# Use the stricter of semantic requirement and emitted claim precision.
+def effective_support_check_level(
+    *,
+    required_level: EvidenceSupportLevel,
+    output_claim_level: EvidenceSupportLevel,
+) -> EvidenceSupportLevel:
+    return max((required_level, output_claim_level), key=evidence_support_level_rank)
+
+
+# Return the last validation associated with the currently evaluated actor step.
+def latest_relevant_validation(*, task_state: "TaskState"):
+    step_id = task_state.actor_result.plan_step_id if task_state.actor_result is not None else None
+    for validation in reversed(task_state.step_validations):
+        if step_id is None or validation.plan_step_id == step_id:
+            return validation
+    return None
+
+
+# Return the latest tool result associated with the evaluated actor step.
+def latest_tool_result_for_evaluated_step(*, task_state: "TaskState"):
+    step_id = task_state.actor_result.plan_step_id if task_state.actor_result is not None else None
+    candidates = [*task_state.tool_results_history]
+    if task_state.last_tool_result is not None:
+        candidates.append(task_state.last_tool_result)
+    for result in reversed(candidates):
+        if step_id is None or result.request.plan_step_id == step_id:
+            return result
+    return None
+
+
+# Resolve the semantic step associated with the latest actor result.
+def _evaluated_plan_step(*, task_state: "TaskState"):
+    step_id = task_state.actor_result.plan_step_id if task_state.actor_result is not None else None
+    if step_id is not None:
+        for step in task_state.plan_steps:
+            if step.step_id == step_id:
+                return step
+    return task_state.current_plan_step
+
+
+# Accept legacy string values while keeping public callers typed.
+def _coerce_support_level(value: Any) -> EvidenceSupportLevel:
+    return value if isinstance(value, EvidenceSupportLevel) else EvidenceSupportLevel(value)
 
 # Detect step wording that explicitly permits a conservative high-level answer.
 def _step_allows_conservative_high_level_summary(scope_text: str) -> bool:
@@ -254,8 +390,6 @@ def _output_text_is_conservative_high_level_summary(text: str) -> bool:
         "intended to",
         "in general",
         "at a high level",
-        "gatekeeper",
-        "gatekeepers",
         "core platform services",
         "official sources",
     )
@@ -273,7 +407,6 @@ def _output_text_is_conservative_high_level_summary(text: str) -> bool:
         "shall ",
         "cannot ",
         "non-discriminatory access",
-        "self-preferencing",
         "data portability",
         "interoperability",
         "ranking",
@@ -306,14 +439,11 @@ def _output_text_is_source_shortlist_only(text: str) -> bool:
 
     source_identity_markers = (
         "official sources",
-        "official eu sources",
         "shortlist of official",
         "source shortlist",
-        "dma portal",
         "summary page",
         "legislation page",
-        "eur-lex",
-        "european commission",
+        "official portal",
     )
     if not any(marker in text for marker in source_identity_markers):
         return False
@@ -337,12 +467,6 @@ def _step_is_source_discovery_only(scope_text: str) -> bool:
     return any(marker in scope_text for marker in discovery_markers) and not any(
         marker in scope_text for marker in summary_markers
     )
-
-# Recognize authoritative legal locators without performing network I/O.
-def _looks_like_primary_legal_text_source(*, title: str, locator: str) -> bool:
-    lowered_title = title.lower()
-    lowered_locator = locator.lower()
-    return "eur-lex.europa.eu" in lowered_locator or "eli/reg/" in lowered_locator or "regulation" in lowered_title
 
 # Normalize punctuation variants before deterministic precision checks.
 def _normalize_output_text_for_precision_checks(text: str) -> str:
@@ -401,4 +525,15 @@ __all__ = [
     "required_evidence_support_level_from_scope_text",
     "required_evidence_support_level_from_step_kind",
     "required_evidence_support_level_from_output_text",
+    "EvidenceRequirementResolution",
+    "EvidenceRequirementSource",
+    "available_evidence_support_level",
+    "effective_support_check_level",
+    "latest_relevant_validation",
+    "latest_tool_result_for_evaluated_step",
+    "meaningful_observed_evidence",
+    "output_claim_support_level",
+    "precision_mismatch_detected",
+    "required_evidence_support_level",
+    "resolve_required_evidence_support_context",
 ]

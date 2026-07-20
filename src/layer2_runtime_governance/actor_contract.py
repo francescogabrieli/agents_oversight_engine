@@ -203,7 +203,7 @@ def _resolve_actor_required_evidence_support_level(
     task_state: TaskState,
     current_step,
 ) -> EvidenceSupportLevel:
-    from .oversight import resolve_required_evidence_support_context
+    from .domain.evidence_policy import resolve_required_evidence_support_context
 
     return resolve_required_evidence_support_context(
         task_state=task_state,

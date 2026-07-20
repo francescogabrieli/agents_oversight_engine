@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import asdict, is_dataclass
-from enum import Enum
 from typing import Any
 
 from langgraph.types import interrupt
+from json_serialization import to_jsonable as _to_jsonable
 
 from ..actor_contract import ActorResultType
 from ..behavioral import BehavioralAssessment
-from ..oversight import DynamicPolicyAssessment, OversightAssessment
+from ..oversight.contracts import DynamicPolicyAssessment, OversightAssessment
 from ..domain import (
     ExternalCommunicationPhase,
     ExternalCommunicationDraft,
@@ -19,11 +18,11 @@ from ..domain import (
     HumanReviewRequest,
     RuntimeFlag,
     RuntimeState,
-    PlanStepStatus,
     StepRecord,
     TaskState,
     normalize_task_state_serialization,
 )
+from ..domain.step_recovery import restore_actor_step_for_more_evidence
 
 
 # Build the canonical human review request from the current runtime state.
@@ -232,7 +231,7 @@ def _apply_human_review_decision(
             summary="Human review sent the external communication branch back for more evidence.",
             review_ready=False,
         )
-        _restore_actor_step_for_more_evidence(state)
+        restore_actor_step_for_more_evidence(state)
         state.current_tool_request = None
         state.current_state = RuntimeState.ACTING
         return
@@ -406,21 +405,6 @@ def _append_unique_review_part(
     normalized_parts.append(normalized_part)
 
 
-# Convert a review payload into JSON-safe primitives for interrupt() and tracing.
-def _to_jsonable(value: Any) -> Any:
-    if is_dataclass(value):
-        return _to_jsonable(asdict(value))
-    if isinstance(value, dict):
-        return {str(key): _to_jsonable(item) for key, item in value.items()}
-    if isinstance(value, tuple):
-        return [_to_jsonable(item) for item in value]
-    if isinstance(value, list):
-        return [_to_jsonable(item) for item in value]
-    if isinstance(value, Enum):
-        return value.value
-    return value
-
-
 # Parse decision enum values while failing closed on malformed resume payloads.
 def _parse_decision_type(value: Any) -> HumanReviewDecisionType:
     if isinstance(value, HumanReviewDecisionType):
@@ -507,26 +491,6 @@ def _optional_external_communication_edit(payload: dict[str, Any]) -> HumanRevie
     if edit_payload is None:
         return None
     return _coerce_external_communication_edit(edit_payload)
-
-
-# Reuse the existing step restoration helper without duplicating runtime semantics.
-def _restore_actor_step_for_more_evidence(state: TaskState) -> None:
-    actor_result = state.actor_result
-    if actor_result is None:
-        return
-
-    for index, step in enumerate(state.plan_steps):
-        if step.step_id == actor_result.plan_step_id:
-            step.status = PlanStepStatus.IN_PROGRESS
-            state.current_plan_step_index = index
-        elif step.status == PlanStepStatus.IN_PROGRESS:
-            step.status = PlanStepStatus.PENDING
-
-    state.executed_steps = [
-        step for step in state.executed_steps if step.step_id != actor_result.plan_step_id
-    ]
-    if state.final_output_text == actor_result.output_text:
-        state.final_output_text = None
 
 
 # Apply a validated external communication edit and preserve it in the audit trail.

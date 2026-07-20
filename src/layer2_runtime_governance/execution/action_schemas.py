@@ -2,62 +2,62 @@ from __future__ import annotations
 
 import json
 
+from ..tool_contract import ToolName
+from ..tools.models import ToolBackend, ToolGatewayConfig
+from ..tools.registry import load_tool_gateway_config
+
+
+_CAPABILITY_ACTIONS: dict[ToolName, tuple[str, str, dict[str, object], tuple[str, ...]]] = {
+    ToolName.WEB_SEARCH: (
+        "request_web_search",
+        "Request a read-only web search for external source discovery.",
+        {"summary": {"type": "string"}, "reason": {"type": "string"}, "query": {"type": "string"}, "max_results": {"type": "integer", "minimum": 1, "maximum": 10}, "extractive_goal": {"type": "string"}},
+        ("summary", "reason", "query"),
+    ),
+    ToolName.FETCH_URL_TEXT: (
+        "request_fetch_url_text",
+        "Request a read-only fetch of a concrete URL for source extraction.",
+        {"summary": {"type": "string"}, "reason": {"type": "string"}, "url": {"type": "string"}, "extractive_goal": {"type": "string"}},
+        ("summary", "reason", "url"),
+    ),
+    ToolName.MCP_LOCAL_TEST_ECHO: (
+        "request_mcp_echo",
+        "Request the configured read-only MCP echo tool.",
+        {"summary": {"type": "string"}, "reason": {"type": "string"}, "text": {"type": "string"}},
+        ("summary", "reason", "text"),
+    ),
+    ToolName.MCP_LOCAL_TEST_READ_FIXTURE: (
+        "request_mcp_read_fixture",
+        "Request a read-only configured MCP fixture.",
+        {"summary": {"type": "string"}, "reason": {"type": "string"}, "path": {"type": "string"}},
+        ("summary", "reason", "path"),
+    ),
+    ToolName.MCP_LOCAL_TEST_TEXT_STATS: (
+        "request_mcp_text_stats",
+        "Request read-only text statistics through MCP.",
+        {"summary": {"type": "string"}, "reason": {"type": "string"}, "text": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 20}},
+        ("summary", "reason", "text"),
+    ),
+    ToolName.MCP_LOCAL_TEST_CALCULATE_EXPRESSION: (
+        "request_mcp_calculate_expression",
+        "Request safe arithmetic calculation through MCP.",
+        {"summary": {"type": "string"}, "reason": {"type": "string"}, "expression": {"type": "string"}},
+        ("summary", "reason", "expression"),
+    ),
+}
+
 
 # Build the runtime actions bound to actor providers for one execution turn.
-def build_actor_runtime_tools() -> list[dict[str, object]]:
-    return [
-        _action(
-            "request_web_search",
-            "Request a read-only web search for external source discovery.",
-            {
-                "summary": _string(),
-                "reason": _string(),
-                "query": _string(),
-                "max_results": _integer(1, 10),
-                "extractive_goal": _string(),
-            },
-            ("summary", "reason", "query"),
-        ),
-        _action(
-            "request_fetch_url_text",
-            "Request a read-only fetch of a concrete URL for source extraction.",
-            {
-                "summary": _string(),
-                "reason": _string(),
-                "url": _string(),
-                "extractive_goal": _string(),
-            },
-            ("summary", "reason", "url"),
-        ),
-        _action(
-            "request_mcp_echo",
-            "Request the configured read-only MCP echo tool.",
-            {"summary": _string(), "reason": _string(), "text": _string()},
-            ("summary", "reason", "text"),
-        ),
-        _action(
-            "request_mcp_read_fixture",
-            "Request a read-only configured MCP fixture.",
-            {"summary": _string(), "reason": _string(), "path": _string()},
-            ("summary", "reason", "path"),
-        ),
-        _action(
-            "request_mcp_text_stats",
-            "Request read-only text statistics through MCP.",
-            {
-                "summary": _string(),
-                "reason": _string(),
-                "text": _string(),
-                "limit": _integer(1, 20),
-            },
-            ("summary", "reason", "text"),
-        ),
-        _action(
-            "request_mcp_calculate_expression",
-            "Request safe arithmetic calculation through MCP.",
-            {"summary": _string(), "reason": _string(), "expression": _string()},
-            ("summary", "reason", "expression"),
-        ),
+def build_actor_runtime_tools(
+    tool_gateway_config: ToolGatewayConfig | None = None,
+) -> list[dict[str, object]]:
+    config = tool_gateway_config or load_tool_gateway_config()
+    capability_actions = [
+        _action(name, description, properties, required)
+        for tool_name, (name, description, properties, required) in _CAPABILITY_ACTIONS.items()
+        if _tool_is_actor_available(config=config, tool_name=tool_name)
+    ]
+    return capability_actions + [
         _action(
             "emit_intermediate_output",
             "Emit grounded progress without completing the current step.",
@@ -94,7 +94,10 @@ def build_actor_runtime_tools() -> list[dict[str, object]]:
 
 
 # Build the JSON envelope described to providers without native tool calling.
-def build_json_actor_output_shape() -> str:
+def build_json_actor_output_shape(
+    tool_gateway_config: ToolGatewayConfig | None = None,
+) -> str:
+    runtime_tools = build_actor_runtime_tools(tool_gateway_config)
     return json.dumps(
         {
             "tool_name": "one of the allowed runtime action names",
@@ -104,10 +107,27 @@ def build_json_actor_output_shape() -> str:
                 "output_text": "required for emit_* output actions",
                 "confidence": "number from 0.0 to 1.0 when validating output",
             },
-            "allowed_tool_names": [str(tool["name"]) for tool in build_actor_runtime_tools()],
+            "allowed_tool_names": [str(tool["name"]) for tool in runtime_tools],
         },
         indent=2,
         ensure_ascii=False,
+    )
+
+
+# Expose a capability only when its configured backend is executable by this registry.
+def _tool_is_actor_available(*, config: ToolGatewayConfig, tool_name: ToolName) -> bool:
+    definition = config.tools.get(tool_name)
+    if definition is None or not definition.enabled:
+        return False
+    if definition.backend != ToolBackend.MCP:
+        return True
+    if not definition.mcp_server_id or not definition.mcp_tool_name:
+        return False
+    server = config.mcp_servers.get(definition.mcp_server_id)
+    return bool(
+        server
+        and server.enabled
+        and definition.mcp_tool_name in server.allowed_tools
     )
 
 

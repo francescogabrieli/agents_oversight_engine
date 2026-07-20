@@ -56,7 +56,7 @@ class Layer2ArchitectureTests(unittest.TestCase):
         )
         for filename in retired_root_facades:
             self.assertFalse((LAYER2_ROOT / filename).exists(), filename)
-        self.assertTrue((LAYER2_ROOT / "compat" / "README.md").exists())
+        self.assertFalse(any((LAYER2_ROOT / "compat").glob("*.py")))
 
     # Graph wiring must remain readable without serializer or node business logic.
     def test_graph_module_stays_a_small_composition_surface(self) -> None:
@@ -113,11 +113,6 @@ class Layer2ArchitectureTests(unittest.TestCase):
             "governance.py",
             "replanning.py",
             "state.py",
-            "compat/acting.py",
-            "compat/bedrock_client.py",
-            "compat/hitl_dashboard.py",
-            "compat/persistence.py",
-            "compat/tool_gateway.py",
         )
         for filename in legacy_facades:
             tree = ast.parse((LAYER2_ROOT / filename).read_text(encoding="utf-8"))
@@ -136,6 +131,21 @@ class Layer2ArchitectureTests(unittest.TestCase):
             (LAYER2_ROOT / "governance_components" / "legacy_combiner.py").exists()
         )
 
+    # Domain-specific legal fixtures must not leak into generic actor/evidence services.
+    def test_generic_runtime_has_no_case_specific_legal_markers(self) -> None:
+        generic_files = (
+            LAYER2_ROOT / "domain" / "evidence_policy.py",
+            LAYER2_ROOT / "execution" / "prompts.py",
+            LAYER2_ROOT / "execution" / "evidence_guard.py",
+            LAYER2_ROOT / "execution" / "result_builder.py",
+            LAYER2_ROOT / "runtime" / "tool_service.py",
+        )
+        forbidden_markers = ("dma", "gatekeeper", "self-preferencing", "sole enforcer")
+        for path in generic_files:
+            content = path.read_text(encoding="utf-8").lower()
+            for marker in forbidden_markers:
+                self.assertNotIn(marker, content, f"{marker!r} leaked into {path.name}")
+
     # Runtime characterization tests remain grouped by capability, not one giant module.
     def test_runtime_test_monolith_is_removed(self) -> None:
         self.assertFalse((REPO_ROOT / "tests" / "test_layer2_runtime_governance.py").exists())
@@ -144,7 +154,6 @@ class Layer2ArchitectureTests(unittest.TestCase):
     def test_root_keeps_capability_implementations_out_of_flat_modules(self) -> None:
         package_names = {
             "behavioral",
-            "evaluation",
             "hitl",
             "judge",
             "oversight",
@@ -153,6 +162,8 @@ class Layer2ArchitectureTests(unittest.TestCase):
         for package_name in package_names:
             self.assertTrue((LAYER2_ROOT / package_name / "__init__.py").exists())
             self.assertFalse((LAYER2_ROOT / f"{package_name}.py").exists())
+        self.assertFalse(any((LAYER2_ROOT / "evaluation").glob("*.py")))
+        self.assertTrue((SRC_ROOT / "evaluation_service" / "__init__.py").exists())
         self.assertTrue(
             (LAYER2_ROOT / "governance_components" / "input_document.py").exists()
         )

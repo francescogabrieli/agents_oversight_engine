@@ -32,7 +32,7 @@ from .runtime.node_adapters import (
 from .runtime.routing import route_after_governance, route_after_human_review
 from .domain import TaskState
 from .tool_contract import ToolGatewayPort
-from .tools import build_default_tool_gateway
+from .tools import ToolGatewayConfig, build_default_tool_gateway, load_tool_gateway_config
 
 
 # Compose Layer 2 capabilities into the executable LangGraph runtime.
@@ -42,6 +42,7 @@ def build_runtime_graph(
     planner_service: PlannerPort | None = None,
     actor_service: ActorPort | None = None,
     tool_gateway_service: ToolGatewayPort | None = None,
+    tool_gateway_config: ToolGatewayConfig | None = None,
     replanner_service: ReplannerPort | None = None,
     policy_engine_service: PolicyEnginePort | None = None,
     judge_service: JudgePort | None = None,
@@ -49,8 +50,14 @@ def build_runtime_graph(
     hitl_event_callback: Callable[[TaskState], None] | None = None,
 ):
     resolved_planner = planner_service or build_default_planner()
-    resolved_actor = actor_service or build_default_actor()
-    resolved_tool_gateway = tool_gateway_service or build_default_tool_gateway()
+    # Direct graph construction remains supported while sharing one selected registry.
+    resolved_tool_config = tool_gateway_config or load_tool_gateway_config()
+    resolved_actor = actor_service or build_default_actor(
+        tool_gateway_config=resolved_tool_config
+    )
+    resolved_tool_gateway = tool_gateway_service or build_default_tool_gateway(
+        config=resolved_tool_config
+    )
     resolved_replanner = replanner_service or build_default_replanner()
     resolved_policy_engine = policy_engine_service or build_default_policy_engine()
     resolved_behavioral_store = behavioral_store_service or build_default_behavioral_store()
@@ -67,6 +74,7 @@ def build_runtime_graph(
         "governance",
         build_governance_node(
             resolved_policy_engine,
+            tool_gateway_config=resolved_tool_config,
             judge_service=judge_service,
             behavioral_store_service=resolved_behavioral_store,
             hitl_event_callback=hitl_event_callback,

@@ -5,14 +5,8 @@ from typing import Callable, Protocol
 from urllib.request import Request, urlopen
 
 from ..contracts import ToolExecutionResult, ToolRequest, ToolSource
-from ..extractors import (
-    build_cellar_fallback_url,
-    celex_identifier,
-    extract_pdf_text,
-    extract_title,
-    extract_visible_text,
-    is_eur_lex_bot_challenge,
-)
+from ..eu_legal import try_fetch_specialized_legal_document
+from ..extractors import extract_pdf_text, extract_title, extract_visible_text
 from ..models import ToolDefinition
 from ..results import failure_result
 from ..text import is_meaningful_extracted_text, truncate_text
@@ -70,16 +64,16 @@ class HttpFetchAdapter:
             title = tool_request.url
             extracted_text = decoded_body
         content = truncate_text(extracted_text, definition.max_content_chars)
-        if (
-            not is_meaningful_extracted_text(content)
-            or is_eur_lex_bot_challenge(url=tool_request.url, extracted_text=extracted_text)
-        ):
-            fallback = self._try_eur_lex_fallback(
-                tool_request=tool_request,
-                definition=definition,
-            )
-            if fallback is not None:
-                return fallback
+        specialized_result = try_fetch_specialized_legal_document(
+            tool_request=tool_request,
+            definition=definition,
+            extracted_text=extracted_text,
+            fetch_document=self._fetch_document,
+            pdf_extractor=self._pdf_extractor,
+        )
+        if specialized_result is not None:
+            return specialized_result
+        if not is_meaningful_extracted_text(content):
             return failure_result(
                 tool_request,
                 "URL fetch succeeded but extracted readable text was empty.",
@@ -93,48 +87,6 @@ class HttpFetchAdapter:
                 ToolSource(
                     title=title,
                     locator=tool_request.url or "",
-                    snippet=truncate_text(content, 500),
-                ),
-            ),
-        )
-
-    # Attempt the official CELLAR fallback for EUR-Lex pages with no usable text.
-    def _try_eur_lex_fallback(
-        self,
-        *,
-        tool_request: ToolRequest,
-        definition: ToolDefinition,
-    ) -> ToolExecutionResult | None:
-        fallback_url = build_cellar_fallback_url(tool_request.url)
-        if fallback_url is None:
-            return None
-        fallback_result = self._fetch_document(
-            url=fallback_url,
-            timeout_seconds=definition.timeout_seconds,
-            max_bytes=max(definition.max_bytes, 2_000_000),
-            accept="application/pdf",
-            accept_language="eng",
-        )
-        if isinstance(fallback_result, str):
-            return None
-        body, charset, content_type = fallback_result
-        fallback_text = (
-            self._pdf_extractor(body)
-            if content_type == "application/pdf"
-            else extract_visible_text(body.decode(charset, errors="replace"))
-        )
-        content = truncate_text(fallback_text, definition.max_content_chars)
-        if not is_meaningful_extracted_text(content):
-            return None
-        return ToolExecutionResult(
-            request=tool_request,
-            success=True,
-            summary="EUR-Lex text fetched through the official CELLAR fallback.",
-            content=content,
-            sources=(
-                ToolSource(
-                    title=f"EUR-Lex CELEX content ({celex_identifier(tool_request.url)})",
-                    locator=fallback_url,
                     snippet=truncate_text(content, 500),
                 ),
             ),

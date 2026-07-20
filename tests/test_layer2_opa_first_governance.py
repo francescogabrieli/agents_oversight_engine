@@ -100,6 +100,7 @@ class OPAFirstGovernanceContractTests(unittest.TestCase):
         )
 
         self.assertEqual(result.governance_decision.directive, GovernanceDirective.WAIT_HUMAN_REVIEW)
+        self.assertTrue(result.governance_decision.requires_human_review)
         self.assertIn(GovernanceReasonCode.OPA_FAILURE_FAIL_CLOSED, result.governance_decision.reason_codes)
 
     # Final diagnostics and the governance trace must use the scored OPA pillar output.
@@ -117,6 +118,7 @@ class OPAFirstGovernanceContractTests(unittest.TestCase):
         )
         self.assertIn("evidence strong (0.93)", result.governance_decision.dynamic_policy_summary)
         self.assertNotIn("evidence weak (0.00)", result.governance_decision.dynamic_policy_summary)
+        self.assertFalse(result.governance_decision.requires_human_review)
 
 
 class EvaluationServiceDecouplingTests(unittest.TestCase):
@@ -157,6 +159,7 @@ class _AllowPolicyEngine(PolicyEnginePort):
     def evaluate_decision(self, *, decision_input):
         self.calls.append("decision")
         return {
+            "schema_version": "governance_decision_output.v1",
             "directive": "continue",
             "policy_decision": "allow",
             "reason_codes": ["allowed_by_policy"],

@@ -1,0 +1,41 @@
+{
+  "trace_version": "layer2_trace.v2",
+  "runtime": {
+    "thread_id": "legacy-evaluation-fixture",
+    "current_state": "completed",
+    "bootstrap_completed": true,
+    "runtime_flags": [],
+    "step_history": [],
+    "actor_turn_count": 1,
+    "tool_call_count": 0
+  },
+  "intake": {
+    "goal": "Evaluate a legacy governed trace.",
+    "domain_type": "analysis",
+    "domain_label": "evaluation_fixture",
+    "sensitivity": "low",
+    "parse_status": "complete",
+    "parser_name": "evaluation_fixture",
+    "prompt_version": "fixture.v1",
+    "schema_version": "1.0.0",
+    "policy_profile_name": "default",
+    "confidence_threshold": 0.65,
+    "read_only_mode": true
+  },
+  "actor": {"result_type": "final_output"},
+  "execution": {"final_output_text": "Done."},
+  "plan_steps": [],
+  "current_plan_step_id": null,
+  "tool_calls": [],
+  "observed_evidence": [],
+  "governance_decisions": [
+    {"directive": "continue", "policy_decision": "allow"}
+  ],
+  "oversight_assessments": [],
+  "human_review": {
+    "pending_request": null,
+    "last_request": null,
+    "last_decision": null,
+    "decision_history": []
+  }
+}
