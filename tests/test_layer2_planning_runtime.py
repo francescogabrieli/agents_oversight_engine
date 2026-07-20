@@ -149,7 +149,10 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
 
 
     def test_openai_replanner_converts_structured_payload_without_network(self) -> None:
-        from layer2_runtime_governance.replanning import _ReplanningPayload, _ReplanStepPayload
+        from layer2_runtime_governance.planning.replanning import (
+            _ReplanningPayload,
+            _ReplanStepPayload,
+        )
 
         task_state = _build_replanning_task_state()
         payload = _ReplanningPayload(
@@ -286,4 +289,3 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

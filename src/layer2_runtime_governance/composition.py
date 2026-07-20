@@ -9,7 +9,7 @@ from .governance_components import PolicyEnginePort
 from .graph import build_runtime_graph
 from .judge import JudgePort
 from .planning import PlannerPort
-from .replanning import ReplannerPort
+from .planning.replanning import ReplannerPort
 from .domain import TaskState
 from .tool_contract import ToolGatewayPort
 

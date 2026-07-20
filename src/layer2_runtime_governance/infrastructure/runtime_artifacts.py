@@ -11,7 +11,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 
 from layer1_intake import IntakeResult
 
-from ..hitl_dashboard import (
+from ..hitl.dashboard import (
     build_governance_hitl_dashboard_snapshot,
     governance_hitl_dashboard_snapshot_to_dict,
     governance_hitl_dashboard_snapshot_to_json,

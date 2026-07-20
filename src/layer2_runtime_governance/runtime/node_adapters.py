@@ -14,7 +14,7 @@ from .planning_service import planner
 from .replanning_service import replanner
 from .tool_service import observe_tool_result, tool_gateway
 from ..planning import PlannerPort
-from ..replanning import ReplannerPort
+from ..planning.replanning import ReplannerPort
 from ..domain import TaskState
 from ..tool_contract import ToolGatewayPort
 from .context import copy_task_state, extract_bootstrap_thread_id, extract_thread_id

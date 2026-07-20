@@ -9,14 +9,14 @@ suppress_known_runtime_warnings()
 
 from langgraph.graph import END, START, StateGraph
 
-from .acting import build_default_actor
+from .execution import build_default_actor
 from .actor_contract import ActorPort
 from .behavioral import BehavioralStorePort, build_default_behavioral_store
 from .governance_components import PolicyEnginePort, build_default_policy_engine
 from .infrastructure.checkpointing import build_default_checkpointer
 from .judge import JudgePort
 from .planning import PlannerPort, build_default_planner
-from .replanning import ReplannerPort, build_default_replanner
+from .planning.replanning import ReplannerPort, build_default_replanner
 from .runtime.contracts import Layer2GraphInput, Layer2GraphOutput, Layer2GraphState
 from .runtime.node_adapters import (
     bootstrap_node,

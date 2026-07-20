@@ -37,9 +37,12 @@ from layer2_runtime_governance.composition import (
     compose_layer2_runtime,
 )
 from layer2_runtime_governance.judge import JudgePort
-from layer2_runtime_governance.persistence import RuntimeArtifactStore, persist_runtime_artifacts
+from layer2_runtime_governance.infrastructure.runtime_artifacts import (
+    RuntimeArtifactStore,
+    persist_runtime_artifacts,
+)
 from layer2_runtime_governance.planning import PlannerPort
-from layer2_runtime_governance.replanning import ReplannerPort
+from layer2_runtime_governance.planning.replanning import ReplannerPort
 from layer2_runtime_governance.domain import RuntimeState, TaskState
 from layer2_runtime_governance.observability import (
     build_compact_trace_from_runtime_trace,

@@ -4,7 +4,7 @@ from ..domain import (
     RuntimeState,
     TaskState,
 )
-from ..replanning import ReplannerPort
+from ..planning.replanning import ReplannerPort
 
 # Nodes.py contains the executable Layer 2 business logic.
 # At this stage the runtime performs bootstrap, planning, and the actor/tool loop.

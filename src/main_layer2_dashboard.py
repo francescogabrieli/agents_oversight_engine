@@ -27,7 +27,7 @@ from layer2_runtime_governance import (
     ToolRequest,
     build_default_checkpointer,
 )
-from layer2_runtime_governance.persistence import RuntimeArtifactStore
+from layer2_runtime_governance.infrastructure.runtime_artifacts import RuntimeArtifactStore
 from layer2_runtime_governance.domain import TaskState
 from layer2_runtime_governance.infrastructure.checkpointing import close_checkpointer
 from layer2_runtime_governance.composition import (

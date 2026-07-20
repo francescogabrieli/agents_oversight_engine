@@ -22,20 +22,19 @@ Domain modules must remain independent from LangGraph, provider SDKs, HTTP, subp
 
 ## Capability map
 
-- `state.py`: compatibility facade for canonical contracts owned by `domain/`.
-- `planning/`: semantic planning and replanning capabilities; `replanning.py` is a
-  compatibility facade for the previous import path.
-- `acting.py`: small compatibility facade and production actor factory.
+- `state.py`, `governance.py`, and `replanning.py`: checkpoint compatibility anchors.
+  LangGraph may need their historical qualified type paths while restoring durable
+  checkpoints; new code must import from `domain/`, `governance_components/`, and
+  `planning.replanning` directly.
+- `compat/`: temporary, deprecated migration aliases for non-persistent legacy paths.
+- `planning/`: semantic planning and replanning capabilities.
 - `execution/`: actor prompts, provider-neutral action schemas, response normalization,
   result construction, evidence/claim guards, settings, and provider adapters.
 - `domain/evidence_policy.py`: canonical support-level and claim-precision
   classification shared by execution guards and governance compatibility surfaces.
 - `tools/`: governed tool registry, validation, adapters, and content extraction.
-- `governance.py`: checkpoint-only aliases for historical serialized governance types;
-  new imports must target `governance_components/`.
 - `signal_services/`: typed governance signal providers.
-- `hitl/`: typed human-review flow and dashboard projections; `hitl_dashboard.py`
-  remains a compatibility facade.
+- `hitl/`: typed human-review flow and dashboard projections.
 - `graph.py`: LangGraph composition and routing only.
 - `runtime/`: lifecycle, planning, actor, tool, replanning, governance services, and
   thin LangGraph node adapters. The former `nodes.py` facade has been removed.
@@ -46,11 +45,8 @@ Domain modules must remain independent from LangGraph, provider SDKs, HTTP, subp
   semantic judge, and deterministic dynamic governance signals.
 - `governance_components/`: OPA contracts, input-document construction, validation,
   response parsing, and fail-closed handling.
-- `persistence.py`: compatibility facade for `infrastructure/runtime_artifacts.py`.
 - `infrastructure/`: official checkpoint composition, bounded retention, environment
   loading, runtime artifacts, and dependency-warning filters.
-- `bedrock_client.py`: compatibility facade for the Bedrock transport under
-  `execution/providers/`.
 
 ## Persistence and interrupts
 
@@ -80,8 +76,9 @@ provide cross-thread application memory, while checkpointers persist graph execu
 5. Add capability-level tests before graph-level integration tests.
 6. Update this map if the extension creates a new architectural boundary.
 
-Only checkpoint-sensitive legacy modules remain import-compatible. New code must target
-the capability package; removed facades must not be recreated.
+Only checkpoint-compatible anchors remain at the package root. Production code must target
+the capability package; non-persistent facades belong solely under `compat/` during the
+external migration window and must not be recreated at the root.
 
 ## Test map
 

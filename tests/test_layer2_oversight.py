@@ -70,7 +70,7 @@ from layer2_runtime_governance.infrastructure.checkpointing import (
     build_runtime_serializer,
 )
 from layer2_runtime_governance.tool_contract import ObservedEvidence
-from layer2_runtime_governance.tool_gateway import (
+from layer2_runtime_governance.tools import (
     ToolBackend,
     ToolCapability,
     ToolDefinition,

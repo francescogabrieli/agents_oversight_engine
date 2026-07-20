@@ -53,7 +53,10 @@ from layer2_runtime_governance import (
     ToolRequest,
 )
 from layer2_runtime_governance import EvidenceQualityAssessment, TrajectoryHealthAssessment
-from layer2_runtime_governance.persistence import RuntimeArtifactStore, persist_runtime_artifacts
+from layer2_runtime_governance.infrastructure.runtime_artifacts import (
+    RuntimeArtifactStore,
+    persist_runtime_artifacts,
+)
 from main_layer2_dashboard import (
     DashboardSession,
     _build_response_headers,

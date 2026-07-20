@@ -99,11 +99,11 @@ from layer2_runtime_governance import (
 from layer2_runtime_governance.infrastructure.checkpointing import (
     build_runtime_serializer,
 )
-from layer2_runtime_governance.persistence import RuntimeArtifactStore
+from layer2_runtime_governance.infrastructure.runtime_artifacts import RuntimeArtifactStore
 from layer2_runtime_governance.hitl import _apply_human_review_decision, human_review
 from main_layer2 import build_compact_trace, write_layer2_trace_file
 from main_layer2 import run_layer2_flow
-from layer2_runtime_governance.replanning import (
+from layer2_runtime_governance.planning.replanning import (
     OpenAIReplanner,
     OpenAIReplannerSettings,
     ReplanDecision,
@@ -116,7 +116,7 @@ from layer2_runtime_governance.planning import (
     OpenAIPlannerSettings,
     build_planner_system_prompt,
 )
-from layer2_runtime_governance.acting import build_actor_system_prompt, build_actor_user_prompt
+from layer2_runtime_governance.execution import build_actor_system_prompt, build_actor_user_prompt
 from layer2_runtime_governance.governance_components import (
     OPAHttpPolicyEngine,
     OPAHttpPolicyEngineSettings,

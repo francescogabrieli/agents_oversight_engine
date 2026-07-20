@@ -51,7 +51,7 @@ from ..oversight import (
     TrajectoryPenalties,
 )
 from .runtime_artifacts import build_sqlite_checkpointer
-from ..replanning import ReplanDecision
+from ..planning.replanning import ReplanDecision
 from ..domain import (
     ExecutedPlanStep,
     ExternalCommunicationDraft,

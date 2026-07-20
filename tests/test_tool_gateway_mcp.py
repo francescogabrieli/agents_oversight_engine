@@ -52,7 +52,7 @@ from layer2_runtime_governance import (
     ToolRequest,
     build_runtime_graph,
 )
-from layer2_runtime_governance.tool_gateway import (
+from layer2_runtime_governance.tools import (
     OpenAIToolGateway,
     ToolBackend,
     ToolCapability,

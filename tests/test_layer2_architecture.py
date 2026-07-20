@@ -17,12 +17,10 @@ class Layer2ArchitectureTests(unittest.TestCase):
     # Tool capability modules must not depend on runtime orchestration or governance state.
     def test_tools_package_respects_inward_dependency_boundary(self) -> None:
         forbidden_modules = {
-            "layer2_runtime_governance.acting",
             "layer2_runtime_governance.graph",
             "layer2_runtime_governance.governance",
             "layer2_runtime_governance.nodes",
             "layer2_runtime_governance.state",
-            "layer2_runtime_governance.tool_gateway",
         }
         for path in (LAYER2_ROOT / "tools").rglob("*.py"):
             imported_modules = _absolute_imports(path)
@@ -32,19 +30,12 @@ class Layer2ArchitectureTests(unittest.TestCase):
                 f"{sorted(forbidden_modules.intersection(imported_modules))}",
             )
 
-    # The legacy Tool Gateway module must stay a small compatibility facade.
-    def test_tool_gateway_compatibility_facade_stays_small(self) -> None:
-        line_count = len((LAYER2_ROOT / "tool_gateway.py").read_text(encoding="utf-8").splitlines())
-        self.assertLessEqual(line_count, 80)
-
     # Actor orchestration modules must not depend back on graph or governance wiring.
     def test_execution_package_respects_runtime_dependency_boundary(self) -> None:
         forbidden_modules = {
-            "layer2_runtime_governance.acting",
             "layer2_runtime_governance.graph",
             "layer2_runtime_governance.governance",
             "layer2_runtime_governance.nodes",
-            "layer2_runtime_governance.tool_gateway",
         }
         for path in (LAYER2_ROOT / "execution").rglob("*.py"):
             imported_modules = _absolute_imports(path)
@@ -54,10 +45,18 @@ class Layer2ArchitectureTests(unittest.TestCase):
                 f"{sorted(forbidden_modules.intersection(imported_modules))}",
             )
 
-    # The legacy actor module must remain an import-compatible composition facade.
-    def test_acting_compatibility_facade_stays_small(self) -> None:
-        line_count = len((LAYER2_ROOT / "acting.py").read_text(encoding="utf-8").splitlines())
-        self.assertLessEqual(line_count, 80)
+    # Non-persistent facades must not obscure the root capability layout.
+    def test_non_persistent_compatibility_facades_are_removed_from_root(self) -> None:
+        retired_root_facades = (
+            "acting.py",
+            "bedrock_client.py",
+            "hitl_dashboard.py",
+            "persistence.py",
+            "tool_gateway.py",
+        )
+        for filename in retired_root_facades:
+            self.assertFalse((LAYER2_ROOT / filename).exists(), filename)
+        self.assertTrue((LAYER2_ROOT / "compat" / "README.md").exists())
 
     # Graph wiring must remain readable without serializer or node business logic.
     def test_graph_module_stays_a_small_composition_surface(self) -> None:
@@ -84,15 +83,19 @@ class Layer2ArchitectureTests(unittest.TestCase):
     def test_trace_compatibility_facade_is_removed(self) -> None:
         self.assertFalse((LAYER2_ROOT / "trace.py").exists())
 
-    # Production modules must consume canonical packages instead of checkpoint aliases.
-    def test_production_code_does_not_import_checkpoint_facades(self) -> None:
+    # Production modules must consume canonical packages instead of legacy import anchors.
+    def test_production_code_does_not_import_legacy_facades(self) -> None:
         forbidden_modules = {
             "layer2_runtime_governance.governance",
+            "layer2_runtime_governance.replanning",
             "layer2_runtime_governance.state",
+            "layer2_runtime_governance.compat",
         }
         excluded_paths = {
             LAYER2_ROOT / "governance.py",
+            LAYER2_ROOT / "replanning.py",
             LAYER2_ROOT / "state.py",
+            *(LAYER2_ROOT / "compat").glob("*.py"),
         }
         for path in LAYER2_ROOT.rglob("*.py"):
             if path in excluded_paths:
@@ -100,9 +103,31 @@ class Layer2ArchitectureTests(unittest.TestCase):
             imported_modules = _absolute_imports(path)
             self.assertTrue(
                 forbidden_modules.isdisjoint(imported_modules),
-                f"{path} imports checkpoint-only facade: "
+                f"{path} imports legacy facade: "
                 f"{sorted(forbidden_modules.intersection(imported_modules))}",
             )
+
+    # Compatibility anchors need an explicit public surface, never a wildcard re-export.
+    def test_legacy_facades_do_not_use_wildcard_imports(self) -> None:
+        legacy_facades = (
+            "governance.py",
+            "replanning.py",
+            "state.py",
+            "compat/acting.py",
+            "compat/bedrock_client.py",
+            "compat/hitl_dashboard.py",
+            "compat/persistence.py",
+            "compat/tool_gateway.py",
+        )
+        for filename in legacy_facades:
+            tree = ast.parse((LAYER2_ROOT / filename).read_text(encoding="utf-8"))
+            wildcard_imports = [
+                node
+                for node in ast.walk(tree)
+                if isinstance(node, ast.ImportFrom)
+                and any(alias.name == "*" for alias in node.names)
+            ]
+            self.assertFalse(wildcard_imports, f"{filename} has a wildcard re-export")
 
     # OPA is the sole final decision authority; the retired Python combiner stays absent.
     def test_legacy_python_decision_combiner_is_removed(self) -> None:

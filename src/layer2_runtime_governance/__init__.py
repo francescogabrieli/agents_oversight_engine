@@ -12,7 +12,7 @@ from typing import Any
 
 
 _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
-    ".acting": (
+    ".execution": (
         "ActorExecutionError", "BedrockNovaActor", "BedrockNovaActorSettings",
         "OpenAIActor", "OpenAIActorSettings", "build_default_actor",
     ),
@@ -46,7 +46,7 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
         "build_judge_system_prompt", "build_judge_user_prompt", "evaluate_judge",
         "should_invoke_judge",
     ),
-    ".hitl_dashboard": (
+    ".hitl.dashboard": (
         "DashboardBehavioralPanel", "DashboardExternalCommunicationPanel", "DashboardFocus",
         "DashboardGovernancePanel", "DashboardHumanReviewPanel", "DashboardOversightPanel",
         "DashboardPlanStep", "GovernanceHitlDashboardSnapshot",
@@ -70,7 +70,7 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
         "evaluate_trajectory_health", "get_default_oversight_policy_config_path",
         "load_oversight_policy_config", "resolve_required_evidence_support_context",
     ),
-    ".persistence": (
+    ".infrastructure.runtime_artifacts": (
         "build_sqlite_checkpointer", "RuntimeArtifactPaths", "RuntimeArtifactStore",
         "get_default_checkpointer_path", "get_default_runtime_artifacts_root",
         "persist_runtime_artifacts",
@@ -79,7 +79,7 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
         "OpenAIPlanner", "OpenAIPlannerSettings", "PlannerExecutionError", "PlannerPort",
         "build_default_planner",
     ),
-    ".replanning": (
+    ".planning.replanning": (
         "LocalConservativeReplanner", "OpenAIReplanner", "OpenAIReplannerSettings",
         "ReplanDecision", "ReplannerExecutionError", "ReplannerPort",
         "build_default_replanner", "build_replanner_system_prompt", "build_replanner_user_prompt",
@@ -96,7 +96,7 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
         "EvidenceSourceKind", "EvidenceSupportLevel", "ObservedEvidence",
         "ToolExecutionResult", "ToolGatewayPort", "ToolName", "ToolRequest", "ToolSource",
     ),
-    ".tool_gateway": (
+    ".tools": (
         "McpServerDefinition", "OpenAIToolGateway", "OpenAIToolGatewaySettings", "ToolBackend",
         "ToolCapability", "ToolDefinition", "ToolExecutionError", "ToolGatewayConfig",
         "ToolRiskLevel", "build_default_tool_gateway", "build_default_tool_gateway_config",

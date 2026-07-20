@@ -1,10 +1,6 @@
-"""Compatibility facade for the modular governed tool capability.
+"""Temporary governed tool capability import aliases."""
 
-New code should import from ``layer2_runtime_governance.tools``. This module
-keeps the previous public import path stable while callers migrate.
-"""
-
-from .tools import (
+from ..tools import (
     McpServerDefinition,
     OpenAIToolGateway,
     OpenAIToolGatewaySettings,

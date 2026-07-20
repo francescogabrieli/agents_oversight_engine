@@ -1,6 +1,6 @@
-"""Compatibility facade for the Bedrock execution transport."""
+"""Temporary Bedrock transport import aliases."""
 
-from .execution.providers.bedrock_runtime import (
+from ..execution.providers.bedrock_runtime import (
     BedrockChatClient,
     BedrockRuntimeError,
     BedrockRuntimeSettings,
