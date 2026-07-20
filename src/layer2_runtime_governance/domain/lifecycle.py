@@ -1,35 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any
 
-from layer1_intake import (
-    DomainType,
-    ExecutionPolicy,
-    IntakeMetadata,
-    IntakeResult,
-    ParseStatus,
-    SensitivityLevel,
-    TaskSpec,
-)
-
-from ..tool_contract import (
-    EvidenceSupportLevel,
-    ObservedEvidence,
-    ToolExecutionResult,
-    ToolRequest,
-)
-
-if TYPE_CHECKING:
-    from .actor_contract import ActorResult, ActorResultType
-    from .behavioral import BehavioralAssessment
-    from .judge import JudgeAssessment
-    from .oversight import DynamicPolicyAssessment, OversightAssessment
-
-
-# Layer 2 currently covers bootstrap, planning, and the actor/tool observation loop.
-# This file keeps the canonical runtime state shared by the graph nodes.
 
 # Canonical domain contract extracted from the legacy state facade.
 class RuntimeState(str, Enum):

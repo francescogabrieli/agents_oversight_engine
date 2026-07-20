@@ -25,7 +25,6 @@ from layer1_intake import (
     get_default_policy_config_path,
 )
 from layer1_intake.service import (
-    InputNormalizer,
     IntakeResultValidator,
     PolicyResolver,
     TaskSpecBuilder,
@@ -520,7 +519,6 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
 
 def _build_intake_service(task_spec: TaskSpec) -> IntakeService:
     return IntakeService(
-        normalizer=InputNormalizer(),
         task_spec_builder=TaskSpecBuilder(parser=StubParser(task_spec)),
         policy_resolver=PolicyResolver(
             repository=JsonExecutionPolicyRepository(

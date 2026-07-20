@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from layer1_intake import (
@@ -15,18 +14,17 @@ from layer1_intake import (
 )
 
 from ..tool_contract import (
-    EvidenceSupportLevel,
     ObservedEvidence,
     ToolExecutionResult,
     ToolRequest,
 )
 
 if TYPE_CHECKING:
-    from .actor_contract import ActorResult, ActorResultType
-    from .behavioral import BehavioralAssessment
+    from ..actor_contract import ActorResult
+    from ..behavioral import BehavioralAssessment
     from ..governance_components.contracts import GovernanceDecisionTrace, StaticPolicyAssessment
-    from .judge import JudgeAssessment
-    from .oversight import DynamicPolicyAssessment, OversightAssessment
+    from ..judge import JudgeAssessment
+    from ..oversight import DynamicPolicyAssessment
 
 
 # Layer 2 currently covers bootstrap, planning, and the actor/tool observation loop.

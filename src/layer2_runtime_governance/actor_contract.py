@@ -7,13 +7,11 @@ from typing import Protocol
 from layer1_intake import ExecutionPolicy, IntakeMetadata, TaskSpec
 
 from .domain import (
-    ExecutedPlanStep,
     PlanStepStatus,
     PlanStepKind,
     RuntimeFlag,
     RuntimeState,
     ScratchpadEntry,
-    ScratchpadEntryType,
     StepValidation,
     TaskState,
 )

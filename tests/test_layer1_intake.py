@@ -16,19 +16,24 @@ if str(SRC_ROOT) not in sys.path:
 
 from layer1_intake.infrastructure import JsonExecutionPolicyRepository
 from layer1_intake.models import (
+    BudgetConfig,
     DomainType,
+    ExecutionPolicy,
+    IntakeMetadata,
+    IntakeValidationError,
     ParseStatus,
     SensitivityLevel,
+    StructuredTask,
     TaskSpec,
 )
 from layer1_intake.service import (
     IntakeCommand,
     IntakeService,
-    InputNormalizer,
     IntakeResultValidator,
     PolicyProfile,
     PolicyResolver,
     TaskSpecBuilder,
+    assess_task_completeness,
 )
 
 
@@ -59,6 +64,67 @@ class FixedFingerprintService:
 
 
 class Layer1IntakeTests(unittest.TestCase):
+    # The pure assessor is the single source for warnings, missing fields, and status.
+    def test_task_completeness_assessment_centralizes_all_rules(self) -> None:
+        assessment = assess_task_completeness(
+            TaskSpec(
+                goal="Review a sensitive request.",
+                context="",
+                constraints=[],
+                domain_type=DomainType.OTHER,
+                domain_label="other",
+                sensitivity=SensitivityLevel.HIGH,
+                success_criteria=[],
+            )
+        )
+
+        self.assertEqual(assessment.parse_status, ParseStatus.NEEDS_CLARIFICATION)
+        self.assertEqual(assessment.missing_information, ["constraints", "success_criteria"])
+        self.assertEqual(
+            assessment.warnings,
+            [
+                "Domain taxonomy fallback OTHER was used.",
+                "High-sensitivity task without explicit constraints.",
+                "No explicit success criteria were extracted.",
+                "Task context is empty.",
+            ],
+        )
+
+    # Final validation accepts metadata produced by the canonical completeness assessor.
+    def test_intake_result_validator_accepts_consistent_metadata(self) -> None:
+        task_spec = _incomplete_sensitive_task_spec()
+        assessment = assess_task_completeness(task_spec)
+        metadata = IntakeMetadata(
+            parse_status=assessment.parse_status,
+            warnings=assessment.warnings,
+            missing_information=assessment.missing_information,
+        )
+
+        result = IntakeResultValidator().validate(
+            structured_task=_structured_task(task_spec),
+            metadata=metadata,
+        )
+
+        self.assertEqual(result.metadata, metadata)
+
+    # Final validation rejects contradictory metadata instead of repairing it silently.
+    def test_intake_result_validator_rejects_inconsistent_metadata(self) -> None:
+        task_spec = _incomplete_sensitive_task_spec()
+        metadata = IntakeMetadata(
+            parse_status=ParseStatus.COMPLETE,
+            warnings=[],
+            missing_information=[],
+        )
+
+        with self.assertRaisesRegex(
+            IntakeValidationError,
+            "parse_status, missing_information, warnings",
+        ):
+            IntakeResultValidator().validate(
+                structured_task=_structured_task(task_spec),
+                metadata=metadata,
+            )
+
     # These tests cover the core intake contracts and policy resolution rules.
     def test_intake_command_normalizes_raw_input(self) -> None:
         # Raw user input should be normalized before any parsing happens.
@@ -110,7 +176,6 @@ class Layer1IntakeTests(unittest.TestCase):
         )
 
         service = IntakeService(
-            normalizer=InputNormalizer(),
             task_spec_builder=TaskSpecBuilder(parser=parser),
             policy_resolver=PolicyResolver(repository=_StubPolicyRepository()),
             validator=IntakeResultValidator(),
@@ -156,7 +221,6 @@ class Layer1IntakeTests(unittest.TestCase):
         )
 
         service = IntakeService(
-            normalizer=InputNormalizer(),
             task_spec_builder=TaskSpecBuilder(parser=parser),
             policy_resolver=PolicyResolver(repository=_StubPolicyRepository()),
             validator=IntakeResultValidator(),
@@ -242,6 +306,32 @@ class _StubPolicyRepository:
             max_tool_calls=None,
             read_only_mode=False,
         )
+
+
+# Build one deliberately incomplete task shared by final-validation regressions.
+def _incomplete_sensitive_task_spec() -> TaskSpec:
+    return TaskSpec(
+        goal="Review a sensitive request.",
+        context="",
+        constraints=[],
+        domain_type=DomainType.OTHER,
+        domain_label="other",
+        sensitivity=SensitivityLevel.HIGH,
+        success_criteria=[],
+    )
+
+
+# Attach a valid system-controlled policy without affecting completeness semantics.
+def _structured_task(task_spec: TaskSpec) -> StructuredTask:
+    return StructuredTask(
+        task_spec=task_spec,
+        execution_policy=ExecutionPolicy(
+            policy_profile_name="default",
+            confidence_threshold=0.65,
+            budget=BudgetConfig(max_steps=None, max_tool_calls=None),
+            read_only_mode=True,
+        ),
+    )
 
 
 if __name__ == "__main__":

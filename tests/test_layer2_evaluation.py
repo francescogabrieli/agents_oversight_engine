@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 import shutil
@@ -28,6 +29,23 @@ from evaluation_service.trace_normalizer import normalize_trace_json
 
 
 class Layer2EvaluationTests(unittest.TestCase):
+    # Freeze the complete legacy-fixture report shape before splitting the evaluator modules.
+    def test_legacy_fixture_report_serialization_characterization(self) -> None:
+        report = evaluate_layer2_trace_inputs([LEGACY_TRACE_FIXTURE])
+        payload = layer2_evaluation_report_to_dict(report)
+        payload["generated_at_utc"] = "<timestamp>"
+        payload["input_paths"] = [Path(path).name for path in payload["input_paths"]]
+        payload["discovered_files"] = [Path(path).name for path in payload["discovered_files"]]
+        for run in payload["runs"]:
+            run["source_path"] = Path(run["source_path"]).name
+
+        serialized = json.dumps(payload, indent=2, ensure_ascii=False)
+
+        self.assertEqual(
+            hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
+            "257edfb6b0c1d151dd7ff11aea5a20b45823fb279c8bbab1a7454db249869d3b",
+        )
+
     def test_legacy_trace_derives_requires_human_review_without_overriding_new_field(self) -> None:
         legacy = _completed_trace_payload()
         legacy["governance_decisions"] = [

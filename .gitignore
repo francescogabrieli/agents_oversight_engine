@@ -35,6 +35,9 @@ langgraph_documentation.md
 # Runtime artifacts
 artifacts/
 .codex/
+*.log
+full-trace-*.json
+regal.exe
 
 # Frontend generated files
 frontend/dashboard/vite.config.js

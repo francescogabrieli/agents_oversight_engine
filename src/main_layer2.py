@@ -44,7 +44,7 @@ from layer2_runtime_governance.infrastructure.runtime_artifacts import (
 )
 from layer2_runtime_governance.planning import PlannerPort
 from layer2_runtime_governance.planning.replanning import ReplannerPort
-from layer2_runtime_governance.domain import RuntimeState, TaskState
+from layer2_runtime_governance.domain import TaskState
 from layer2_runtime_governance.observability import (
     build_compact_trace_from_runtime_trace,
     build_layer2_runtime_trace,

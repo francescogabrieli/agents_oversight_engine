@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,7 +15,6 @@ from ..behavioral import BehavioralAssessment
 from ..infrastructure.environment import candidate_env_paths, load_env_file_values
 from ..oversight.contracts import (
     DynamicPolicyAssessment,
-    OversightSignalLevel,
 )
 from ..domain.evidence_policy import (
     available_evidence_support_level,

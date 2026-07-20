@@ -8,7 +8,6 @@ from typing import Any
 from json_serialization import to_jsonable
 
 from layer1_intake import (
-    InputNormalizer,
     IntakeCommand,
     IntakeMetadata,
     IntakeResultValidator,
@@ -45,14 +44,12 @@ def build_layer1_components(
 
     parser = OpenAITaskSpecParser(settings=settings)
     repository = JsonExecutionPolicyRepository(config_path=resolved_policy_path)
-    normalizer = InputNormalizer()
     task_spec_builder = TaskSpecBuilder(parser=parser)
     policy_resolver = PolicyResolver(repository=repository)
     validator = IntakeResultValidator()
     clock = SystemClock()
     fingerprint_service = Sha256FingerprintService()
     intake_service = IntakeService(
-        normalizer=normalizer,
         task_spec_builder=task_spec_builder,
         policy_resolver=policy_resolver,
         validator=validator,

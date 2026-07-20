@@ -5,13 +5,11 @@ import re
 
 from ..actor_contract import ActorResult, ActorResultType, ActorTask, CapabilityAccessMode
 from ..domain import ScratchpadEntry, ScratchpadEntryType, StepValidation, StepValidationDecision
-from ..tool_contract import EvidenceSourceKind, EvidenceSupportLevel, ObservedEvidence, ToolName, ToolRequest
+from ..tool_contract import ToolName, ToolRequest
 from .errors import ActorExecutionError
 from .evidence_guard import (
-    _is_direct_fact_support_evidence,
     guard_completion_against_unsupported_precision as _guard_completion_against_unsupported_precision,
 )
-from .response_parser import coerce_provider_confidence as _coerce_provider_confidence
 
 # Convert empty provider responses into a typed blocked actor result instead of crashing the graph.
 def build_provider_blocked_result(*, actor_task: ActorTask, detail: str) -> ActorResult:

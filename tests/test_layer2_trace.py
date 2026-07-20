@@ -3,8 +3,12 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
+
+from jsonschema import Draft202012Validator, ValidationError
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -74,9 +78,100 @@ from layer2_runtime_governance import (
 )
 from layer2_runtime_governance.tool_contract import ObservedEvidence
 from layer2_runtime_governance.signal_services.evidence_service import build_evidence_signal
+from evaluation_service.trace_normalizer import normalize_trace_json
 
 
 class Layer2TraceTests(unittest.TestCase):
+    # A trace emitted directly by observability must satisfy the complete v3 schema.
+    def test_real_runtime_trace_validates_against_v3_schema(self) -> None:
+        state = _complete_task_state()
+        payload = layer2_trace_to_dict(
+            build_layer2_runtime_trace(
+                thread_id="schema-valid-v3",
+                intake_result=state.intake_payload,
+                task_state=state,
+            )
+        )
+        external_state = _external_communication_task_state()
+        external_payload = layer2_trace_to_dict(
+            build_layer2_runtime_trace(
+                thread_id="schema-valid-external-v3",
+                intake_result=external_state.intake_payload,
+                task_state=external_state,
+            )
+        )
+
+        _trace_schema_validator().validate(payload)
+        _trace_schema_validator().validate(external_payload)
+
+    # The v3 schema must reject a v2 artifact before evaluation normalization.
+    def test_v3_schema_rejects_v2_trace(self) -> None:
+        payload = json.loads(
+            (REPO_ROOT / "tests" / "fixtures" / "layer2_trace.v2.legacy.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        with self.assertRaises(ValidationError):
+            _trace_schema_validator().validate(payload)
+
+    # Retired root governance histories must not coexist with the canonical v3 pass list.
+    def test_v3_schema_rejects_legacy_root_governance_lists(self) -> None:
+        payload = _valid_v3_trace_payload()
+        payload["governance_decisions"] = deepcopy(payload["governance_passes"])
+
+        with self.assertRaises(ValidationError):
+            _trace_schema_validator().validate(payload)
+
+    # Closed v3 sections must reject unknown properties and missing required fields.
+    def test_v3_schema_rejects_unknown_and_missing_properties(self) -> None:
+        unknown = _valid_v3_trace_payload()
+        unknown["runtime"]["unexpected"] = True
+        missing = _valid_v3_trace_payload()
+        del missing["actor"]["precision_mismatch_detected"]
+
+        with self.assertRaises(ValidationError):
+            _trace_schema_validator().validate(unknown)
+        with self.assertRaises(ValidationError):
+            _trace_schema_validator().validate(missing)
+
+    # Stable enum and scalar contracts must reject values outside the producer vocabulary.
+    def test_v3_schema_rejects_wrong_enum_and_type(self) -> None:
+        wrong_enum = _valid_v3_trace_payload()
+        wrong_enum["runtime"]["current_state"] = "unknown_state"
+        wrong_type = _valid_v3_trace_payload()
+        wrong_type["runtime"]["actor_turn_count"] = "three"
+
+        with self.assertRaises(ValidationError):
+            _trace_schema_validator().validate(wrong_enum)
+        with self.assertRaises(ValidationError):
+            _trace_schema_validator().validate(wrong_type)
+
+    # Every governance pass must explicitly carry a boolean human-review flag.
+    def test_v3_schema_requires_boolean_human_review_flag(self) -> None:
+        missing = _valid_v3_trace_payload()
+        del missing["governance_passes"][0]["requires_human_review"]
+        wrong_type = _valid_v3_trace_payload()
+        wrong_type["governance_passes"][0]["requires_human_review"] = "false"
+
+        with self.assertRaises(ValidationError):
+            _trace_schema_validator().validate(missing)
+        with self.assertRaises(ValidationError):
+            _trace_schema_validator().validate(wrong_type)
+
+    # Evaluation is the only boundary allowed to project a legacy trace into valid v3.
+    def test_evaluation_normalized_v2_trace_validates_as_v3(self) -> None:
+        legacy = json.loads(
+            (REPO_ROOT / "tests" / "fixtures" / "layer2_trace.v2.legacy.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        normalized = normalize_trace_json(legacy)["trace"]
+
+        self.assertEqual(normalized["trace_version"], "layer2_trace.v3")
+        _trace_schema_validator().validate(normalized)
+
     def test_runtime_trace_includes_core_sections_and_histories(self) -> None:
         state = _complete_task_state()
 
@@ -270,6 +365,27 @@ class Layer2TraceTests(unittest.TestCase):
             trace.human_review.decision_history[0].external_communication_edit.draft.channel,
             "slack",
         )
+
+
+# Build the repository v3 schema validator used by positive and negative contract tests.
+def _trace_schema_validator() -> Draft202012Validator:
+    schema = json.loads(
+        (REPO_ROOT / "schemas" / "layer2_trace.schema.json").read_text(encoding="utf-8")
+    )
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema)
+
+
+# Build one real producer payload so negative tests change only the intended field.
+def _valid_v3_trace_payload() -> dict[str, Any]:
+    state = _complete_task_state()
+    return layer2_trace_to_dict(
+        build_layer2_runtime_trace(
+            thread_id="schema-negative-fixture",
+            intake_result=state.intake_payload,
+            task_state=state,
+        )
+    )
 
 
 # Build a canonical IntakeResult for trace tests.

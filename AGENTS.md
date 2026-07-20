@@ -130,6 +130,8 @@ Notes:
 - current parser implementation uses OpenAI for real parsing
 - execution policy is resolved from `configs/layer1_execution_policies.json`
 - `context` missing is a warning, not a mandatory downgrade to `partial`
+- Pydantic owns Layer 1 shape, type, and whitespace normalization; semantic completeness is resolved once by the pure `assess_task_completeness` function into `TaskCompletenessAssessment`
+- `TaskSpecBuilder` orchestrates parsing and completeness assessment, while `IntakeResultValidator` verifies only the final canonical invariants
 
 
 ### `src/layer2_runtime_governance`
@@ -177,6 +179,7 @@ Modular capability packages introduced for the active Layer 2 baseline:
 - `execution/` owns actor provider configuration, prompts, action schemas, response parsing, result construction, evidence guards, and provider adapters; `acting.py` is a compatibility facade and actor factory
 - `governance_components/` owns policy contracts, inputs, adapters, OPA-first evaluation, response parsing, and fail-closed handling
 - `observability/` owns immutable trace models, read-only builders, compact views, and JSON serialization
+- `src/evaluation_service/` owns runtime-independent trace discovery, loading, legacy normalization, per-run evaluation, metric aggregation, and report serialization; `aggregate.py` is a thin compatibility facade
 - `infrastructure/` owns checkpoint composition and persistence ports
 - `composition.py` is the explicit dependency-injection entry point for runtime construction
 
@@ -207,6 +210,7 @@ Current design:
 - `runtime/governance_service.py` applies the OPA-first governance result and persists static, dynamic, behavioral, and judge records before routing
 - `infrastructure/runtime_artifacts.py` configures the local official LangGraph SQLite saver plus the per-thread runtime artifact store; `persistence.py` is import-compatible and `infrastructure/checkpointing.py` can select the official PostgreSQL saver for deployed environments
 - `observability/` defines the typed, JSON-exportable Layer 2 trace models, builders, and compact views used for debugging, thesis evidence, HITL payloads, and evaluation; the retired `trace.py` facade must not be restored
+- `schemas/layer2_trace.schema.json` is the closed Draft 2020-12 contract for runtime-produced `layer2_trace.v3`; only `evaluation_service` may project legacy v1/v2 traces into that v3 read model
 - `evaluation/` defines the offline trace evaluation pipeline that reads exported trace JSON and produces JSON and Markdown reports, including typed-vs-heuristic evidence mismatch accounting
 - `hitl_dashboard.py` defines the dashboard-facing snapshot model derived from `TaskState`, governance, oversight, and HITL review payloads
 - `main_layer2_dashboard.py` now acts as a standalone multi-thread HITL control plane backend that serves the React dashboard build, exposes the review inbox/detail/resume API, and resolves resume actions from persisted checkpoints on demand
@@ -550,7 +554,8 @@ Run all current tests:
 
 The project currently uses:
 
-- Python in local virtual environment `.venv`
+- Python `>=3.12,<3.14` in local virtual environment `.venv`; Python 3.13 is recommended and declared in `.python-version`
+- `requirements-production.txt` for runtime dependencies and `requirements-dev.txt` for test/development-only dependencies such as `jsonschema`
 - OpenAI API for the real Layer 1 parser
 - OpenAI API for the default Layer 2 planner
 - Amazon Bedrock for the current Layer 2 actor backend through `eu.amazon.nova-2-lite-v1:0` in `eu-central-1`

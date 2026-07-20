@@ -8,12 +8,48 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
 LAYER2_ROOT = SRC_ROOT / "layer2_runtime_governance"
+EVALUATION_ROOT = SRC_ROOT / "evaluation_service"
 
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 
 class Layer2ArchitectureTests(unittest.TestCase):
+    # Offline evaluation stays split by capability with a thin public orchestrator.
+    def test_evaluation_service_keeps_explicit_module_boundaries(self) -> None:
+        expected_modules = {
+            "aggregate.py",
+            "contracts.py",
+            "discovery.py",
+            "loader.py",
+            "metrics.py",
+            "report_builder.py",
+            "run_evaluator.py",
+            "trace_normalizer.py",
+            "trace_projection.py",
+        }
+        self.assertTrue(expected_modules.issubset({path.name for path in EVALUATION_ROOT.glob("*.py")}))
+        aggregate_lines = len(
+            (EVALUATION_ROOT / "aggregate.py").read_text(encoding="utf-8").splitlines()
+        )
+        self.assertLessEqual(aggregate_lines, 120)
+        for path in EVALUATION_ROOT.glob("*.py"):
+            self.assertNotIn("layer2_runtime_governance", path.read_text(encoding="utf-8"), path)
+
+    # Domain modules must not regain the copied cross-capability import boilerplate.
+    def test_domain_leaf_contracts_keep_minimal_imports(self) -> None:
+        leaf_modules = ("lifecycle.py", "plan.py", "runtime_records.py")
+        forbidden_fragments = (
+            "from layer1_intake import",
+            "from .behavioral import",
+            "from .judge import",
+            "from .oversight import",
+        )
+        for filename in leaf_modules:
+            source = (LAYER2_ROOT / "domain" / filename).read_text(encoding="utf-8")
+            for fragment in forbidden_fragments:
+                self.assertNotIn(fragment, source, filename)
+
     # Tool capability modules must not depend on runtime orchestration or governance state.
     def test_tools_package_respects_inward_dependency_boundary(self) -> None:
         forbidden_modules = {

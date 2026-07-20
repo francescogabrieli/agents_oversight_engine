@@ -1,0 +1,4 @@
+-r requirements-production.txt
+
+# Contract and schema validation used by the test suite.
+jsonschema>=4.25,<5

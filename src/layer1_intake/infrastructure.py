@@ -23,7 +23,6 @@ from .models import (
 from .service import (
     ExecutionPolicyRepositoryPort,
     InputFingerprintPort,
-    InputNormalizer,
     IntakeResultValidator,
     IntakeService,
     PolicyProfile,
@@ -345,7 +344,6 @@ def build_intake_service(
     repository = JsonExecutionPolicyRepository(config_path=resolved_policy_path)
 
     return IntakeService(
-        normalizer=InputNormalizer(),
         task_spec_builder=TaskSpecBuilder(parser=parser),
         policy_resolver=PolicyResolver(repository=repository),
         validator=IntakeResultValidator(),

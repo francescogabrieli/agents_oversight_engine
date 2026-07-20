@@ -11,54 +11,366 @@
   ],
   "properties": {
     "trace_version": { "const": "layer2_trace.v3" },
-    "runtime": { "type": "object" },
-    "intake": { "type": "object" },
-    "planner_name": { "type": ["string", "null"] },
-    "planner_prompt_version": { "type": ["string", "null"] },
-    "planner_rationale": { "type": ["string", "null"] },
-    "planning_source": { "type": ["string", "null"] },
-    "plan_steps": { "type": "array" },
-    "current_plan_step_index": { "type": ["integer", "null"] },
-    "current_plan_step_id": { "type": ["string", "null"] },
-    "actor": { "type": "object" },
-    "execution": { "type": "object" },
-    "tool_calls": { "type": "array" },
-    "observed_evidence": { "type": "array" },
-    "governance_passes": {
-      "type": "array",
-      "items": { "$ref": "#/$defs/governancePass" }
-    },
-    "human_review": { "type": "object" },
-    "external_communication": { "type": ["object", "null"] }
+    "runtime": { "$ref": "#/$defs/runtime" },
+    "intake": { "$ref": "#/$defs/intake" },
+    "planner_name": { "$ref": "#/$defs/nullableString" },
+    "planner_prompt_version": { "$ref": "#/$defs/nullableString" },
+    "planner_rationale": { "$ref": "#/$defs/nullableString" },
+    "planning_source": { "type": ["string", "null"], "enum": ["planner", "replanner", null] },
+    "plan_steps": { "type": "array", "items": { "$ref": "#/$defs/planStep" }, "maxItems": 10000 },
+    "current_plan_step_index": { "type": ["integer", "null"], "minimum": 0, "maximum": 999999 },
+    "current_plan_step_id": { "$ref": "#/$defs/nullableString" },
+    "actor": { "$ref": "#/$defs/actor" },
+    "execution": { "$ref": "#/$defs/execution" },
+    "tool_calls": { "type": "array", "items": { "$ref": "#/$defs/toolCall" }, "maxItems": 1000000 },
+    "observed_evidence": { "type": "array", "items": { "$ref": "#/$defs/observedEvidence" }, "maxItems": 1000000 },
+    "governance_passes": { "type": "array", "items": { "$ref": "#/$defs/governancePass" }, "maxItems": 1000000 },
+    "human_review": { "$ref": "#/$defs/humanReview" },
+    "external_communication": {
+      "oneOf": [{ "$ref": "#/$defs/externalCommunication" }, { "type": "null" }]
+    }
   },
   "$defs": {
+    "nullableString": { "type": ["string", "null"] },
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "stringArray": { "type": "array", "items": { "type": "string" }, "maxItems": 1000000 },
+    "runtimeState": {
+      "enum": ["planning", "acting", "ready_next_step", "ready_tool_execution", "replanning", "waiting_human_review", "completed", "aborted"]
+    },
+    "actorResultType": {
+      "enum": ["propose_action", "intermediate_output", "final_output", "ask_clarification", "blocked", "needs_replan"]
+    },
+    "evidenceSupportLevel": {
+      "enum": ["local_only", "source_discovery", "high_level_summary", "detailed_extracted", "primary_legal"]
+    },
+    "governanceReasonCode": {
+      "enum": [
+        "allowed_by_policy", "read_only_allowed", "write_capability_blocked",
+        "read_only_mode_enforced", "local_output_allowed", "replan_allowed",
+        "ask_clarification_required", "human_review_required", "denied_by_policy",
+        "no_tool_request", "external_capability_requested",
+        "external_communication_review_required", "evidence_support_below_step_need",
+        "precision_mismatch", "trajectory_degraded",
+        "evidence_gap_and_trajectory_degraded", "high_operational_risk_external",
+        "replan_limit_exceeded", "provider_failures_repeated", "repeated_recovery",
+        "behavioral_anomaly_needs_corroboration", "behavioral_corroborated_risk",
+        "judge_reject_output", "judge_reject_external_or_high_risk",
+        "judge_flag_external_draft", "policy_version_mismatch",
+        "required_pillar_unavailable", "opa_failure_fail_closed"
+      ]
+    },
+    "runtime": {
+      "type": "object",
+      "required": ["thread_id", "current_state", "bootstrap_completed", "runtime_flags", "step_history", "actor_turn_count", "tool_call_count"],
+      "properties": {
+        "thread_id": { "$ref": "#/$defs/nonEmptyString" },
+        "current_state": { "$ref": "#/$defs/runtimeState" },
+        "bootstrap_completed": { "type": "boolean" },
+        "runtime_flags": {
+          "type": "array",
+          "items": { "enum": ["clarification_required", "incomplete_intake", "read_only_execution", "high_sensitivity", "extractability_limited"] },
+          "uniqueItems": true,
+          "maxItems": 5
+        },
+        "step_history": { "type": "array", "items": { "$ref": "#/$defs/stepRecord" }, "maxItems": 1000000 },
+        "actor_turn_count": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "tool_call_count": { "type": "integer", "minimum": 0, "maximum": 1000000 }
+      },
+      "additionalProperties": false
+    },
+    "stepRecord": {
+      "type": "object",
+      "required": ["step_index", "runtime_state", "node_name", "summary"],
+      "properties": {
+        "step_index": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "runtime_state": { "$ref": "#/$defs/runtimeState" },
+        "node_name": { "$ref": "#/$defs/nonEmptyString" },
+        "summary": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "intake": {
+      "type": "object",
+      "required": ["goal", "context", "domain_type", "domain_label", "sensitivity", "success_criteria", "constraints", "parse_status", "parser_name", "prompt_version", "schema_version", "policy_profile_name", "confidence_threshold", "max_steps", "max_tool_calls", "read_only_mode"],
+      "properties": {
+        "goal": { "$ref": "#/$defs/nonEmptyString" },
+        "context": { "type": "string" },
+        "domain_type": { "enum": ["research", "analysis", "summarization", "data_extraction", "content_generation", "external_communication", "customer_support", "productivity", "software_engineering", "other"] },
+        "domain_label": { "$ref": "#/$defs/nonEmptyString" },
+        "sensitivity": { "enum": ["low", "medium", "high", "critical"] },
+        "success_criteria": { "$ref": "#/$defs/stringArray" },
+        "constraints": { "$ref": "#/$defs/stringArray" },
+        "parse_status": { "enum": ["complete", "partial", "needs_clarification", "failed"] },
+        "parser_name": { "$ref": "#/$defs/nonEmptyString" },
+        "prompt_version": { "$ref": "#/$defs/nonEmptyString" },
+        "schema_version": { "$ref": "#/$defs/nonEmptyString" },
+        "policy_profile_name": { "$ref": "#/$defs/nonEmptyString" },
+        "confidence_threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+        "max_steps": { "type": ["integer", "null"], "minimum": 1, "maximum": 1000000 },
+        "max_tool_calls": { "type": ["integer", "null"], "minimum": 1, "maximum": 1000000 },
+        "read_only_mode": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "planStep": {
+      "type": "object",
+      "required": ["step_id", "objective", "rationale", "expected_outcome", "step_kind", "evidence_requirement", "claim_precision_ceiling", "resolved_required_evidence_support_level", "resolved_required_evidence_support_source", "status"],
+      "properties": {
+        "step_id": { "$ref": "#/$defs/nonEmptyString" },
+        "objective": { "$ref": "#/$defs/nonEmptyString" },
+        "rationale": { "type": "string" },
+        "expected_outcome": { "type": "string" },
+        "step_kind": { "type": ["string", "null"], "enum": ["local_transformation", "source_discovery", "high_level_summary", "detailed_extraction", "compliance_or_legal", "final_synthesis", null] },
+        "evidence_requirement": { "oneOf": [{ "$ref": "#/$defs/evidenceSupportLevel" }, { "type": "null" }] },
+        "claim_precision_ceiling": { "oneOf": [{ "$ref": "#/$defs/evidenceSupportLevel" }, { "type": "null" }] },
+        "resolved_required_evidence_support_level": { "oneOf": [{ "$ref": "#/$defs/evidenceSupportLevel" }, { "type": "null" }] },
+        "resolved_required_evidence_support_source": { "type": ["string", "null"], "enum": ["step_validation", "plan_step_evidence_requirement", "plan_step_claim_precision_ceiling", "plan_step_kind", "heuristic_step", "heuristic_output", null] },
+        "status": { "enum": ["pending", "in_progress", "completed", "blocked"] }
+      },
+      "additionalProperties": false
+    },
+    "actor": {
+      "type": "object",
+      "required": ["actor_name", "actor_prompt_version", "result_type", "plan_step_id", "summary", "capability_mode", "external_impact", "output_text", "blocking_reason", "proposed_tool_name", "output_claim_support_level", "precision_mismatch_detected"],
+      "properties": {
+        "actor_name": { "$ref": "#/$defs/nullableString" },
+        "actor_prompt_version": { "$ref": "#/$defs/nullableString" },
+        "result_type": { "oneOf": [{ "$ref": "#/$defs/actorResultType" }, { "type": "null" }] },
+        "plan_step_id": { "$ref": "#/$defs/nullableString" },
+        "summary": { "$ref": "#/$defs/nullableString" },
+        "capability_mode": { "type": ["string", "null"], "enum": ["none", "read_only", "write", null] },
+        "external_impact": { "type": ["boolean", "null"] },
+        "output_text": { "$ref": "#/$defs/nullableString" },
+        "blocking_reason": { "$ref": "#/$defs/nullableString" },
+        "proposed_tool_name": { "$ref": "#/$defs/nullableString" },
+        "output_claim_support_level": { "oneOf": [{ "$ref": "#/$defs/evidenceSupportLevel" }, { "type": "null" }] },
+        "precision_mismatch_detected": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "execution": {
+      "type": "object",
+      "required": ["final_output_text", "executed_steps", "scratchpad", "step_validations"],
+      "properties": {
+        "final_output_text": { "$ref": "#/$defs/nullableString" },
+        "executed_steps": { "type": "array", "items": { "$ref": "#/$defs/executedStep" }, "maxItems": 1000000 },
+        "scratchpad": { "type": "array", "items": { "$ref": "#/$defs/scratchpadEntry" }, "maxItems": 1000000 },
+        "step_validations": { "type": "array", "items": { "$ref": "#/$defs/stepValidation" }, "maxItems": 1000000 }
+      },
+      "additionalProperties": false
+    },
+    "executedStep": {
+      "type": "object",
+      "required": ["step_id", "objective", "result_type", "summary", "output_text"],
+      "properties": {
+        "step_id": { "$ref": "#/$defs/nonEmptyString" },
+        "objective": { "$ref": "#/$defs/nonEmptyString" },
+        "result_type": { "$ref": "#/$defs/actorResultType" },
+        "summary": { "type": "string" },
+        "output_text": { "$ref": "#/$defs/nullableString" }
+      },
+      "additionalProperties": false
+    },
+    "scratchpadEntry": {
+      "type": "object",
+      "required": ["turn_index", "plan_step_id", "entry_type", "summary", "evidence_refs"],
+      "properties": {
+        "turn_index": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "plan_step_id": { "$ref": "#/$defs/nonEmptyString" },
+        "entry_type": { "enum": ["observation", "tool_decision", "progress_note", "uncertainty", "completion_rationale"] },
+        "summary": { "type": "string" },
+        "evidence_refs": { "$ref": "#/$defs/stringArray" }
+      },
+      "additionalProperties": false
+    },
+    "stepValidation": {
+      "type": "object",
+      "required": ["plan_step_id", "objective_satisfied", "evidence_sufficient", "confidence", "next_action", "rationale_summary", "residual_uncertainty"],
+      "properties": {
+        "plan_step_id": { "$ref": "#/$defs/nonEmptyString" },
+        "objective_satisfied": { "type": "boolean" },
+        "evidence_sufficient": { "type": "boolean" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "next_action": { "enum": ["complete_step", "continue_acting", "request_more_evidence", "ask_clarification", "needs_replan"] },
+        "rationale_summary": { "type": "string" },
+        "residual_uncertainty": { "$ref": "#/$defs/nullableString" }
+      },
+      "additionalProperties": false
+    },
+    "toolRequestFields": {
+      "type": "object",
+      "required": ["plan_step_id", "tool_name", "reason", "query", "url", "text", "path", "expression", "timezone", "limit", "max_results", "extractive_goal"],
+      "properties": {
+        "plan_step_id": { "$ref": "#/$defs/nonEmptyString" },
+        "tool_name": { "$ref": "#/$defs/nonEmptyString" },
+        "reason": { "type": "string" },
+        "query": { "$ref": "#/$defs/nullableString" },
+        "url": { "$ref": "#/$defs/nullableString" },
+        "text": { "$ref": "#/$defs/nullableString" },
+        "path": { "$ref": "#/$defs/nullableString" },
+        "expression": { "$ref": "#/$defs/nullableString" },
+        "timezone": { "$ref": "#/$defs/nullableString" },
+        "limit": { "type": ["integer", "null"], "minimum": 1, "maximum": 1000000 },
+        "max_results": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "extractive_goal": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "toolRequest": {
+      "allOf": [{ "$ref": "#/$defs/toolRequestFields" }],
+      "unevaluatedProperties": false
+    },
+    "toolCall": {
+      "allOf": [
+        { "$ref": "#/$defs/toolRequestFields" },
+        {
+          "type": "object",
+          "required": ["success", "summary", "content", "error_message", "sources"],
+          "properties": {
+            "success": { "type": ["boolean", "null"] },
+            "summary": { "$ref": "#/$defs/nullableString" },
+            "content": { "$ref": "#/$defs/nullableString" },
+            "error_message": { "$ref": "#/$defs/nullableString" },
+            "sources": { "type": "array", "items": { "$ref": "#/$defs/toolSource" }, "maxItems": 1000000 }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "toolSource": {
+      "type": "object",
+      "required": ["title", "locator", "snippet"],
+      "properties": {
+        "title": { "type": "string" },
+        "locator": { "type": "string" },
+        "snippet": { "$ref": "#/$defs/nullableString" }
+      },
+      "additionalProperties": false
+    },
+    "observedEvidence": {
+      "type": "object",
+      "required": ["evidence_id", "plan_step_id", "title", "locator", "excerpt", "source_kind", "source_tool", "support_level"],
+      "properties": {
+        "evidence_id": { "$ref": "#/$defs/nonEmptyString" },
+        "plan_step_id": { "$ref": "#/$defs/nonEmptyString" },
+        "title": { "type": "string" },
+        "locator": { "type": "string" },
+        "excerpt": { "type": "string" },
+        "source_kind": { "enum": ["intake_provided", "tool_observation"] },
+        "source_tool": { "$ref": "#/$defs/nullableString" },
+        "support_level": { "$ref": "#/$defs/evidenceSupportLevel" }
+      },
+      "additionalProperties": false
+    },
     "governancePass": {
       "type": "object",
-      "required": [
-        "pass_index", "evaluated_plan_step_id", "evaluated_actor_result_type",
-        "evaluated_tool_name", "governance_input_schema_version", "policy_bundle_version",
-        "policy_config_version", "pillar_requirements", "pillar_results", "pillar_errors",
-        "directive", "policy_decision", "requires_human_review", "reason_codes",
-        "selected_reason", "rejected_alternatives", "safety_invariants"
-      ],
+      "required": ["pass_index", "evaluated_plan_step_id", "evaluated_actor_result_type", "evaluated_tool_name", "governance_input_schema_version", "policy_bundle_version", "policy_config_version", "pillar_requirements", "pillar_results", "pillar_errors", "directive", "policy_decision", "requires_human_review", "reason_codes", "selected_reason", "rejected_alternatives", "safety_invariants"],
       "properties": {
-        "pass_index": { "type": "integer", "minimum": 1 },
-        "evaluated_plan_step_id": { "type": ["string", "null"] },
-        "evaluated_actor_result_type": { "type": "string" },
-        "evaluated_tool_name": { "type": ["string", "null"] },
-        "governance_input_schema_version": { "type": ["string", "null"] },
-        "policy_bundle_version": { "type": "string" },
-        "policy_config_version": { "type": ["string", "null"] },
-        "pillar_requirements": { "type": "object" },
-        "pillar_results": { "type": "object" },
-        "pillar_errors": { "type": "object" },
-        "directive": { "type": "string" },
-        "policy_decision": { "type": "string" },
+        "pass_index": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+        "evaluated_plan_step_id": { "$ref": "#/$defs/nullableString" },
+        "evaluated_actor_result_type": { "$ref": "#/$defs/actorResultType" },
+        "evaluated_tool_name": { "$ref": "#/$defs/nullableString" },
+        "governance_input_schema_version": { "$ref": "#/$defs/nullableString" },
+        "policy_bundle_version": { "$ref": "#/$defs/nonEmptyString" },
+        "policy_config_version": { "$ref": "#/$defs/nullableString" },
+        "pillar_requirements": { "type": "object", "additionalProperties": { "type": "boolean" } },
+        "pillar_results": { "type": "object", "additionalProperties": { "type": "object" } },
+        "pillar_errors": { "type": "object", "additionalProperties": { "type": "string" } },
+        "directive": { "enum": ["continue", "continue_read_only", "request_more_evidence", "replan", "ask_user_clarification", "wait_human_review", "stop"] },
+        "policy_decision": { "enum": ["allow", "allow_read_only", "ask_clarification", "require_human_review", "deny"] },
         "requires_human_review": { "type": "boolean" },
-        "reason_codes": { "type": "array", "items": { "type": "string" } },
+        "reason_codes": { "type": "array", "items": { "$ref": "#/$defs/governanceReasonCode" }, "maxItems": 1000000 },
         "selected_reason": { "type": "string" },
-        "rejected_alternatives": { "type": "object" },
-        "safety_invariants": { "type": "array", "items": { "type": "string" } }
+        "rejected_alternatives": { "type": "object", "additionalProperties": { "type": "string" } },
+        "safety_invariants": { "$ref": "#/$defs/stringArray" }
+      },
+      "additionalProperties": false
+    },
+    "externalCommunicationDraft": {
+      "type": "object",
+      "required": ["channel", "recipient", "subject", "body", "metadata"],
+      "properties": {
+        "channel": { "$ref": "#/$defs/nonEmptyString" },
+        "recipient": { "$ref": "#/$defs/nullableString" },
+        "subject": { "$ref": "#/$defs/nullableString" },
+        "body": { "$ref": "#/$defs/nullableString" },
+        "metadata": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "humanReviewExternalEdit": {
+      "type": "object",
+      "required": ["draft", "note"],
+      "properties": {
+        "draft": { "$ref": "#/$defs/externalCommunicationDraft" },
+        "note": { "$ref": "#/$defs/nullableString" }
+      },
+      "additionalProperties": false
+    },
+    "humanReviewRequest": {
+      "type": "object",
+      "required": ["request_id", "thread_id", "current_state", "resume_state", "current_plan_step_id", "current_plan_step_objective", "actor_result_type", "current_tool_request", "governance_directive", "governance_summary", "static_policy_summary", "dynamic_policy_summary", "behavioral_summary", "judge_summary", "oversight_summary", "external_communication_target_type", "external_communication_draft", "reason_codes", "allowed_decisions", "review_summary"],
+      "properties": {
+        "request_id": { "$ref": "#/$defs/nonEmptyString" },
+        "thread_id": { "$ref": "#/$defs/nonEmptyString" },
+        "current_state": { "$ref": "#/$defs/runtimeState" },
+        "resume_state": { "$ref": "#/$defs/runtimeState" },
+        "current_plan_step_id": { "$ref": "#/$defs/nullableString" },
+        "current_plan_step_objective": { "$ref": "#/$defs/nullableString" },
+        "actor_result_type": { "oneOf": [{ "$ref": "#/$defs/actorResultType" }, { "type": "null" }] },
+        "current_tool_request": { "oneOf": [{ "$ref": "#/$defs/toolRequest" }, { "type": "null" }] },
+        "governance_directive": { "type": ["string", "null"], "enum": ["continue", "continue_read_only", "request_more_evidence", "replan", "ask_user_clarification", "wait_human_review", "stop", null] },
+        "governance_summary": { "$ref": "#/$defs/nullableString" },
+        "static_policy_summary": { "$ref": "#/$defs/nullableString" },
+        "dynamic_policy_summary": { "$ref": "#/$defs/nullableString" },
+        "behavioral_summary": { "$ref": "#/$defs/nullableString" },
+        "judge_summary": { "$ref": "#/$defs/nullableString" },
+        "oversight_summary": { "$ref": "#/$defs/nullableString" },
+        "external_communication_target_type": { "$ref": "#/$defs/nullableString" },
+        "external_communication_draft": { "oneOf": [{ "$ref": "#/$defs/externalCommunicationDraft" }, { "type": "null" }] },
+        "reason_codes": { "$ref": "#/$defs/stringArray" },
+        "allowed_decisions": {
+          "type": "array",
+          "items": { "enum": ["approve_continue", "approve_continue_read_only", "modify_and_continue", "request_more_evidence", "replan", "ask_clarification", "abort"] },
+          "uniqueItems": true,
+          "maxItems": 7
+        },
+        "review_summary": { "$ref": "#/$defs/nullableString" }
+      },
+      "additionalProperties": false
+    },
+    "humanReviewDecision": {
+      "type": "object",
+      "required": ["request_id", "decision_type", "note", "clarification_text", "external_communication_edit", "reviewer_id"],
+      "properties": {
+        "request_id": { "$ref": "#/$defs/nonEmptyString" },
+        "decision_type": { "enum": ["approve_continue", "approve_continue_read_only", "modify_and_continue", "request_more_evidence", "replan", "ask_clarification", "abort"] },
+        "note": { "$ref": "#/$defs/nullableString" },
+        "clarification_text": { "$ref": "#/$defs/nullableString" },
+        "external_communication_edit": { "oneOf": [{ "$ref": "#/$defs/humanReviewExternalEdit" }, { "type": "null" }] },
+        "reviewer_id": { "$ref": "#/$defs/nullableString" }
+      },
+      "additionalProperties": false
+    },
+    "humanReview": {
+      "type": "object",
+      "required": ["pending_request", "last_request", "last_decision", "decision_history"],
+      "properties": {
+        "pending_request": { "oneOf": [{ "$ref": "#/$defs/humanReviewRequest" }, { "type": "null" }] },
+        "last_request": { "oneOf": [{ "$ref": "#/$defs/humanReviewRequest" }, { "type": "null" }] },
+        "last_decision": { "oneOf": [{ "$ref": "#/$defs/humanReviewDecision" }, { "type": "null" }] },
+        "decision_history": { "type": "array", "items": { "$ref": "#/$defs/humanReviewDecision" }, "maxItems": 1000000 }
+      },
+      "additionalProperties": false
+    },
+    "externalCommunication": {
+      "type": "object",
+      "required": ["phase", "draft", "last_applied_edit", "edit_history", "last_transition_summary"],
+      "properties": {
+        "phase": { "enum": ["evidence_collection", "draft_in_progress", "draft_proposal", "human_review_required", "approved_for_execution", "blocked"] },
+        "draft": { "oneOf": [{ "$ref": "#/$defs/externalCommunicationDraft" }, { "type": "null" }] },
+        "last_applied_edit": { "oneOf": [{ "$ref": "#/$defs/humanReviewExternalEdit" }, { "type": "null" }] },
+        "edit_history": { "type": "array", "items": { "$ref": "#/$defs/humanReviewExternalEdit" }, "maxItems": 1000000 },
+        "last_transition_summary": { "$ref": "#/$defs/nullableString" }
       },
       "additionalProperties": false
     }

@@ -151,6 +151,34 @@ class TaskSpec(BaseModel):
 
         return self
 
+
+# TaskCompletenessAssessment is the single typed result of semantic completeness rules.
+class TaskCompletenessAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    parse_status: ParseStatus
+    warnings: list[str] = Field(default_factory=list)
+    missing_information: list[str] = Field(default_factory=list)
+
+    @field_validator("warnings", "missing_information", mode="before")
+    @classmethod
+    def normalize_assessment_lists(cls, value: object) -> list[str]:
+        # Reuse Pydantic as the sole shape and whitespace normalization boundary.
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise TypeError("Expected a list of strings.")
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            if not isinstance(item, str):
+                raise TypeError("Each item must be a string.")
+            cleaned = " ".join(item.strip().split())
+            if cleaned and cleaned not in seen:
+                normalized.append(cleaned)
+                seen.add(cleaned)
+        return normalized
+
 # StructuredTask combines semantic intent with system-controlled execution limits.
 class StructuredTask(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -260,5 +288,6 @@ __all__ = [
     "ParseStatus",
     "SensitivityLevel",
     "StructuredTask",
+    "TaskCompletenessAssessment",
     "TaskSpec",
 ]

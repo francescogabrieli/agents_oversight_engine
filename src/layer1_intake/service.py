@@ -12,11 +12,13 @@ from .models import (
     ExecutionPolicy,
     IntakeMetadata,
     IntakeResult,
+    IntakeValidationError,
     ParseStatus,
-    SensitivityLevel,
     StructuredTask,
+    TaskCompletenessAssessment,
     TaskSpec,
 )
+from .completeness import assess_task_completeness
 
 # PolicyProfile is the repository-facing shape before conversion to ExecutionPolicy.
 @dataclass(frozen=True)
@@ -89,34 +91,25 @@ class IntakeCommand(BaseModel):
         cleaned = " ".join(value.strip().split())
         return cleaned or None
 
-# InputNormalizer keeps command cleanup in one place before parsing starts.
-class InputNormalizer:
-    # This helper centralizes command normalization before parsing and policy resolution.
-    def normalize(self, command: IntakeCommand) -> IntakeCommand:
-        # Return a normalized copy so the original command remains untouched.
-        return command.model_copy(
-            update={
-                "raw_task_text": self._normalize_optional_text(command.raw_task_text) or "",
-                "context_hint": self._normalize_optional_text(command.context_hint),
-                "policy_profile": self._normalize_optional_text(command.policy_profile),
-            }
-        )
-
-    @staticmethod
-    def _normalize_optional_text(value: str | None) -> str | None:
-        # Collapse whitespace and convert empty strings into null-like values.
-        if value is None:
-            return None
-        cleaned = " ".join(value.strip().split())
-        return cleaned or None
-
-
 @dataclass(frozen=True)
 class TaskSpecBuildResult:
     task_spec: TaskSpec
-    parse_status: ParseStatus
-    warnings: list[str]
-    missing_information: list[str]
+    assessment: TaskCompletenessAssessment
+
+    @property
+    def parse_status(self) -> ParseStatus:
+        # Preserve the established build-result API while storing one assessment contract.
+        return self.assessment.parse_status
+
+    @property
+    def warnings(self) -> list[str]:
+        # Return the canonical assessment warnings without recomputing completeness.
+        return self.assessment.warnings
+
+    @property
+    def missing_information(self) -> list[str]:
+        # Return the canonical missing-information list without recomputing completeness.
+        return self.assessment.missing_information
 
 # TaskSpecBuilder enriches parser output with warnings and completeness signals.
 class TaskSpecBuilder:
@@ -135,65 +128,15 @@ class TaskSpecBuilder:
         return self._parser.prompt_version
 
     def build(self, command: IntakeCommand) -> TaskSpecBuildResult:
-        # Parse the request and derive warnings plus missing information in one place.
+        # Parse the request and delegate all completeness rules to the pure assessor.
         task_spec = self._parser.parse(
             raw_task_text=command.raw_task_text,
             context_hint=command.context_hint,
         )
-
-        warnings: list[str] = []
-        missing_information: list[str] = []
-
-        if not task_spec.context:
-            warnings.append("Task context is empty.")
-
-        if not task_spec.success_criteria:
-            warnings.append("No explicit success criteria were extracted.")
-            missing_information.append("success_criteria")
-
-        if task_spec.domain_type == DomainType.OTHER:
-            warnings.append("Domain taxonomy fallback OTHER was used.")
-
-        if (
-            task_spec.sensitivity in {SensitivityLevel.HIGH, SensitivityLevel.CRITICAL}
-            and not task_spec.constraints
-        ):
-            warnings.append("High-sensitivity task without explicit constraints.")
-            missing_information.append("constraints")
-
         return TaskSpecBuildResult(
             task_spec=task_spec,
-            parse_status=self._resolve_parse_status(
-                task_spec=task_spec,
-                missing_information=missing_information,
-            ),
-            warnings=sorted(set(warnings)),
-            missing_information=sorted(set(missing_information)),
+            assessment=assess_task_completeness(task_spec),
         )
-
-    @staticmethod
-    def _resolve_parse_status(
-        *,
-        task_spec: TaskSpec,
-        missing_information: list[str],
-    ) -> ParseStatus:
-        # Sensitive or broadly incomplete tasks are escalated above a simple PARTIAL state.
-        if not missing_information:
-            return ParseStatus.COMPLETE
-
-        if task_spec.sensitivity == SensitivityLevel.CRITICAL:
-            return ParseStatus.NEEDS_CLARIFICATION
-
-        if (
-            "constraints" in missing_information
-            and task_spec.sensitivity == SensitivityLevel.HIGH
-        ):
-            return ParseStatus.NEEDS_CLARIFICATION
-
-        if len(missing_information) >= 2:
-            return ParseStatus.NEEDS_CLARIFICATION
-
-        return ParseStatus.PARTIAL
 
 
 class PolicyResolver:
@@ -224,7 +167,7 @@ class PolicyResolver:
             read_only_mode=profile.read_only_mode,
         )
 
-# IntakeResultValidator reconciles parser metadata with the final structured payload.
+# IntakeResultValidator verifies the final canonical contract without repairing inputs.
 class IntakeResultValidator:
     # This validator enforces coherence after task parsing and policy attachment.
     def validate(
@@ -233,45 +176,30 @@ class IntakeResultValidator:
         structured_task: StructuredTask,
         metadata: IntakeMetadata,
     ) -> IntakeResult:
-        # Normalize derived warnings and parse status one last time before returning the payload.
-        warnings = list(metadata.warnings)
-        missing_information = list(metadata.missing_information)
-        parse_status = metadata.parse_status
+        # Reuse the canonical assessor so validation never recreates completeness rules.
+        expected = assess_task_completeness(structured_task.task_spec)
+        inconsistent_fields: list[str] = []
+        if metadata.parse_status != expected.parse_status:
+            inconsistent_fields.append("parse_status")
+        if metadata.missing_information != expected.missing_information:
+            inconsistent_fields.append("missing_information")
+        if metadata.warnings != expected.warnings:
+            inconsistent_fields.append("warnings")
 
-        if (
-            structured_task.task_spec.domain_type == DomainType.OTHER
-            and "Domain taxonomy fallback OTHER was used." not in warnings
-        ):
-            warnings.append("Domain taxonomy fallback OTHER was used.")
+        # Reject inconsistent caller-provided metadata without silently repairing it.
+        if inconsistent_fields:
+            fields = ", ".join(inconsistent_fields)
+            raise IntakeValidationError(
+                f"Intake metadata is inconsistent with TaskSpec completeness: {fields}."
+            )
 
-        if (
-            not structured_task.task_spec.success_criteria
-            and "success_criteria" not in missing_information
-        ):
-            missing_information.append("success_criteria")
-
-        if parse_status == ParseStatus.COMPLETE and missing_information:
-            parse_status = ParseStatus.PARTIAL
-
-        normalized_metadata = metadata.model_copy(
-            update={
-                "warnings": sorted(set(warnings)),
-                "missing_information": sorted(set(missing_information)),
-                "parse_status": parse_status,
-            }
-        )
-
-        return IntakeResult(
-            structured_task=structured_task,
-            metadata=normalized_metadata,
-        )
+        return IntakeResult(structured_task=structured_task, metadata=metadata)
 
 class IntakeService:
     # This service is the orchestration entrypoint of Layer 1.
     def __init__(
         self,
         *,
-        normalizer: InputNormalizer,
         task_spec_builder: TaskSpecBuilder,
         policy_resolver: PolicyResolver,
         validator: IntakeResultValidator,
@@ -279,7 +207,6 @@ class IntakeService:
         fingerprint_service: InputFingerprintPort,
         schema_version: str = "1.0.0",
     ) -> None:
-        self._normalizer = normalizer
         self._task_spec_builder = task_spec_builder
         self._policy_resolver = policy_resolver
         self._validator = validator
@@ -294,11 +221,10 @@ class IntakeService:
 
     def execute(self, command: IntakeCommand) -> IntakeResult:
         # Run the full Layer 1 flow and return one canonical IntakeResult.
-        normalized_command = self._normalizer.normalize(command)
-        build_result = self._task_spec_builder.build(normalized_command)
+        build_result = self._task_spec_builder.build(command)
         execution_policy = self._policy_resolver.resolve(
             task_spec=build_result.task_spec,
-            profile_name=normalized_command.policy_profile,
+            profile_name=command.policy_profile,
         )
 
         structured_task = StructuredTask(
@@ -308,7 +234,7 @@ class IntakeService:
 
         metadata = IntakeMetadata(
             raw_input_fingerprint=self._fingerprint_service.fingerprint(
-                normalized_command.raw_task_text
+                command.raw_task_text
             ),
             parse_status=build_result.parse_status,
             parser_name=self._task_spec_builder.parser_name,
@@ -329,13 +255,14 @@ __all__ = [
     "ClockPort",
     "ExecutionPolicyRepositoryPort",
     "InputFingerprintPort",
-    "InputNormalizer",
     "IntakeCommand",
     "IntakeResultValidator",
     "IntakeService",
     "PolicyProfile",
     "PolicyResolver",
     "TaskSpecBuildResult",
+    "TaskCompletenessAssessment",
     "TaskSpecBuilder",
+    "assess_task_completeness",
     "TaskSpecParserPort",
 ]

@@ -20,13 +20,13 @@ from .models import (
     ParseStatus,
     SensitivityLevel,
     StructuredTask,
+    TaskCompletenessAssessment,
     TaskSpec,
 )
 from .service import (
     ClockPort,
     ExecutionPolicyRepositoryPort,
     InputFingerprintPort,
-    InputNormalizer,
     IntakeCommand,
     IntakeResultValidator,
     IntakeService,
@@ -35,6 +35,7 @@ from .service import (
     TaskSpecBuildResult,
     TaskSpecBuilder,
     TaskSpecParserPort,
+    assess_task_completeness,
 )
 
 __all__ = [
@@ -44,7 +45,6 @@ __all__ = [
     "ExecutionPolicy",
     "ExecutionPolicyRepositoryPort",
     "InputFingerprintPort",
-    "InputNormalizer",
     "IntakeCommand",
     "IntakeDomainError",
     "IntakeMetadata",
@@ -68,6 +68,8 @@ __all__ = [
     "TaskSpecBuildResult",
     "TaskSpecBuilder",
     "TaskSpecParserPort",
+    "TaskCompletenessAssessment",
+    "assess_task_completeness",
     "build_intake_service",
     "get_default_policy_config_path",
 ]
