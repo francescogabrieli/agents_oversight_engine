@@ -4,7 +4,6 @@ venv/
 # Environment files
 .env
 .env.*
-src/.env
 
 # Python cache / compiled files
 __pycache__/

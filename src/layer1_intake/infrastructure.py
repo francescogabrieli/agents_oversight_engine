@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import warnings
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -184,7 +185,7 @@ class OpenAITaskSpecParser(TaskSpecParserPort):
             )
         if not self._settings.api_key:
             raise RuntimeError(
-                "OPENAI_API_KEY is missing. Set it in the process environment or in src/.env."
+                "OPENAI_API_KEY is missing. Set it in the process environment or in .env."
             )
 
         self._client = OpenAI(
@@ -354,11 +355,18 @@ def build_intake_service(
 
 
 def _load_env_file_values() -> dict[str, str]:
-    # Load simple KEY=VALUE pairs from the supported .env file locations.
+    # Load simple KEY=VALUE pairs while keeping root .env authoritative.
     env_values: dict[str, str] = {}
 
-    for candidate in _candidate_env_paths():
-        # Read every supported env file in order so later files can override earlier values.
+    legacy_env_path, root_env_path = _candidate_env_paths()
+    if legacy_env_path.exists():
+        warnings.warn(
+            "src/.env is deprecated; move local settings to the repository root .env.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+    for candidate in (legacy_env_path, root_env_path):
         if not candidate.exists():
             continue
 
@@ -381,11 +389,11 @@ def _load_env_file_values() -> dict[str, str]:
 
 
 def _candidate_env_paths() -> list[Path]:
-    # Search both repository root and src-level env files for local development.
+    # Return settings from lowest to highest precedence for deterministic merging.
     repo_root = Path(__file__).resolve().parents[2]
     return [
-        repo_root / ".env",
         repo_root / "src" / ".env",
+        repo_root / ".env",
     ]
 
 

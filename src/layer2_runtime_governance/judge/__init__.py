@@ -162,7 +162,7 @@ class OpenAIJudge(JudgePort):
             )
         if not self._settings.api_key:
             raise RuntimeError(
-                "OPENAI_API_KEY is missing. Set it in the process environment or in src/.env."
+                "OPENAI_API_KEY is missing. Set it in the process environment or in .env."
             )
         self._client = OpenAI(
             api_key=self._settings.api_key,

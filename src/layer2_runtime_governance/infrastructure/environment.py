@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import os
+import warnings
 from functools import lru_cache
 from pathlib import Path
 
 
-# Resolve repository-local environment files from the infrastructure boundary.
+# Resolve the root environment file and the temporary legacy source-level fallback.
 def candidate_env_paths() -> tuple[Path, ...]:
     repo_root = Path(__file__).resolve().parents[3]
     return (repo_root / ".env", repo_root / "src" / ".env")
@@ -15,7 +16,16 @@ def candidate_env_paths() -> tuple[Path, ...]:
 @lru_cache(maxsize=1)
 def load_env_file_values() -> dict[str, str]:
     env_values: dict[str, str] = {}
-    for candidate in candidate_env_paths():
+    root_env_path, legacy_env_path = candidate_env_paths()
+    if legacy_env_path.exists():
+        warnings.warn(
+            "src/.env is deprecated; move local settings to the repository root .env.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+    # Read the legacy file first so root .env stays the authoritative file setting.
+    for candidate in (legacy_env_path, root_env_path):
         if not candidate.exists():
             continue
         for raw_line in candidate.read_text(encoding="utf-8").splitlines():
