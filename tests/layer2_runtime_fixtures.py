@@ -114,6 +114,7 @@ from layer2_runtime_governance.planning.replanning import (
 from layer2_runtime_governance.planning import (
     OpenAIPlanner,
     OpenAIPlannerSettings,
+    PlannerPort,
     build_planner_system_prompt,
 )
 from layer2_runtime_governance.execution import build_actor_system_prompt, build_actor_user_prompt

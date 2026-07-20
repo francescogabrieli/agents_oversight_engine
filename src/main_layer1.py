@@ -62,7 +62,6 @@ def build_layer1_components(
         "openai_settings": settings,
         "parser": parser,
         "repository": repository,
-        "normalizer": normalizer,
         "task_spec_builder": task_spec_builder,
         "policy_resolver": policy_resolver,
         "validator": validator,
@@ -94,28 +93,25 @@ def run_layer1_flow(
         policy_profile=policy_profile,
     )
 
-    # Step 2: normalize the command before parsing.
-    normalized_command = components["normalizer"].normalize(command)
+    # Step 2: call the parser; IntakeCommand already owns input normalization.
+    build_result = components["task_spec_builder"].build(command)
 
-    # Step 3: call the parser through the builder and collect warnings/status.
-    build_result = components["task_spec_builder"].build(normalized_command)
-
-    # Step 4: resolve the execution policy from task attributes and config.
+    # Step 3: resolve the execution policy from task attributes and config.
     execution_policy = components["policy_resolver"].resolve(
         task_spec=build_result.task_spec,
-        profile_name=normalized_command.policy_profile,
+        profile_name=command.policy_profile,
     )
 
-    # Step 5: combine semantic task data and execution constraints.
+    # Step 4: combine semantic task data and execution constraints.
     structured_task = StructuredTask(
         task_spec=build_result.task_spec,
         execution_policy=execution_policy,
     )
 
-    # Step 6: build operational metadata for traceability and debugging.
+    # Step 5: build operational metadata for traceability and debugging.
     metadata = IntakeMetadata(
         raw_input_fingerprint=components["fingerprint_service"].fingerprint(
-            normalized_command.raw_task_text
+            command.raw_task_text
         ),
         parse_status=build_result.parse_status,
         parser_name=components["task_spec_builder"].parser_name,
@@ -126,7 +122,7 @@ def run_layer1_flow(
         created_at=components["clock"].now(),
     )
 
-    # Step 7: run the final validator to obtain the canonical layer output.
+    # Step 6: run the final validator to obtain the canonical layer output.
     final_result = components["validator"].validate(
         structured_task=structured_task,
         metadata=metadata,
@@ -142,7 +138,8 @@ def run_layer1_flow(
             "prompt_version": components["task_spec_builder"].prompt_version,
         },
         "input_command": command,
-        "normalized_command": normalized_command,
+        # Preserve the trace key while exposing the already-normalized command contract.
+        "normalized_command": command,
         "task_spec_build_result": build_result,
         "execution_policy": execution_policy,
         "structured_task": structured_task,
