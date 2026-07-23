@@ -1234,10 +1234,11 @@ def _build_behavioral_summary(
     behavioral_directive: BehavioralRecommendedDirective,
 ) -> str:
     return (
-        "Behavioral analysis matched "
+        "Behavioral shadow telemetry matched "
         f"{matched_run_count} comparable runs, best similarity="
         f"{_format_score(historical_similarity_score)}, deviation={_format_score(behavior_deviation_score)}, "
-        f"novelty={_format_score(novelty_score)}, recommendation='{behavioral_directive.value}'."
+        f"novelty={_format_score(novelty_score)}. Counterfactual recommendation="
+        f"'{behavioral_directive.value}' (shadow only; no live decision influence)."
     )
 
 

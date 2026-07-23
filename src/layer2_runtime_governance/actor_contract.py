@@ -7,6 +7,7 @@ from typing import Protocol
 from layer1_intake import ExecutionPolicy, IntakeMetadata, TaskSpec
 
 from .domain import (
+    ExternalCommunicationDraft,
     PlanStepStatus,
     PlanStepKind,
     RuntimeFlag,
@@ -108,6 +109,8 @@ class ActorResult:
     scratchpad_entry: ScratchpadEntry | None = None
     # Required before local or final outputs can complete a plan step.
     step_validation: StepValidation | None = None
+    # Providers may propose communication content; runtime still owns normalization and authority.
+    external_communication_draft: ExternalCommunicationDraft | None = None
     # Runtime normalizers populate this field; provider-supplied boundary flags are not authoritative.
     external_operation_proposal: ExternalOperationProposal | None = None
 

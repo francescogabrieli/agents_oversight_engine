@@ -3,7 +3,10 @@ from __future__ import annotations
 from llm_retry import llm_retry
 
 from ...actor_contract import ActorPort, ActorResult, ActorTask
-from ..action_schemas import build_actor_runtime_tools
+from ..action_schemas import (
+    build_actor_runtime_tools,
+    select_actor_runtime_tools_for_turn,
+)
 from ..errors import ActorExecutionError
 from ..prompts import build_actor_system_prompt, build_actor_user_prompt
 from ..response_parser import extract_single_function_call, validate_tool_call_action
@@ -33,7 +36,6 @@ class OpenAIActor(ActorPort):
     ) -> None:
         self._settings = settings or OpenAIActorSettings.from_env()
         self._runtime_tools = build_actor_runtime_tools(tool_gateway_config)
-        self._allowed_action_names = {str(tool["name"]) for tool in self._runtime_tools}
         if OpenAI is None:
             raise RuntimeError(
                 "The 'openai' package is not installed. Install it before using the Layer 2 actor."
@@ -49,8 +51,17 @@ class OpenAIActor(ActorPort):
 
     # Ask the provider for one action and normalize it into ActorResult.
     def act(self, *, actor_task: ActorTask) -> ActorResult:
+        runtime_tools = select_actor_runtime_tools_for_turn(
+            self._runtime_tools,
+            domain_type=actor_task.task_spec.domain_type,
+            step_kind=actor_task.step_kind,
+        )
+        allowed_action_names = {str(tool["name"]) for tool in runtime_tools}
         try:
-            response = self._request_actor_response(actor_task=actor_task)
+            response = self._request_actor_response(
+                actor_task=actor_task,
+                runtime_tools=runtime_tools,
+            )
         except Exception as exc:  # pragma: no cover - provider errors are normalized.
             raise ActorExecutionError(f"Actor request failed: {exc}") from exc
         try:
@@ -58,7 +69,7 @@ class OpenAIActor(ActorPort):
                 actor_task=actor_task,
                 tool_call=validate_tool_call_action(
                     tool_call=extract_single_function_call(response),
-                    allowed_action_names=self._allowed_action_names,
+                    allowed_action_names=allowed_action_names,
                 ),
             )
         except ActorExecutionError as exc:
@@ -66,14 +77,19 @@ class OpenAIActor(ActorPort):
 
     # Retry only transient provider failures for one bounded action request.
     @llm_retry
-    def _request_actor_response(self, *, actor_task: ActorTask) -> object:
+    def _request_actor_response(
+        self,
+        *,
+        actor_task: ActorTask,
+        runtime_tools: list[dict[str, object]],
+    ) -> object:
         return self._client.responses.create(
             model=self._settings.model,
             input=[
                 {"role": "system", "content": build_actor_system_prompt()},
                 {"role": "user", "content": build_actor_user_prompt(actor_task=actor_task)},
             ],
-            tools=self._runtime_tools,
+            tools=runtime_tools,
             tool_choice="required",
             parallel_tool_calls=False,
             max_tool_calls=1,

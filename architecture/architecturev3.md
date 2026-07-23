@@ -367,6 +367,8 @@ I pillar e la loro autorità sono:
 
 La prima passata OPA richiede il judge esclusivamente quando la proposta è `execution_candidate`, il boundary è `governed_external` e lo static non ha già prodotto hard deny. Output locali, draft parziali e letture di evidenza pubblica (`web_search`, `fetch_url_text`) non pagano una chiamata judge. Il judge riceve goal, vincoli, step identificato da `actor_result.plan_step_id`, proposta, digest, target ed evidenza rilevante; non riceve behavioral, dynamic policy o risk e non emette direttive runtime.
 
+Per una comunicazione external, il passo di sintesi dell'actor espone soltanto l'azione tipizzata con `channel`, `recipient`, `subject` e `body`, mentre i completion generici restano esclusi da quel turno. Il runtime deriva boundary, effect, destination class e digest senza accettarli dal provider. Il piano viene normalizzato a un solo passo di draft, preceduto al massimo da un passo di evidence realmente necessario: planner e actor non devono anticipare il giudizio semantico né trasformarlo in meta-step di compliance.
+
 Le direttive possibili sono `continue`, `continue_read_only`, `request_more_evidence`, `revise_action`, `replan`, `wait_human_review`, `ask_user_clarification` e `stop`. `revise_action` invalida la proposta corrente, restituisce findings audit-safe all’actor e conta nella trajectory; non viene usato né `request_more_evidence` per correggere il tono né `replan` per una semplice revisione del payload.
 
 #### HITL Gateway

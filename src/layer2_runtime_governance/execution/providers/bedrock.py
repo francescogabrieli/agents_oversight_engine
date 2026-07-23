@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from ...actor_contract import ActorPort, ActorResult, ActorTask
 from .bedrock_runtime import BedrockChatClient, BedrockRuntimeError, BedrockRuntimeSettings
-from ..action_schemas import build_actor_runtime_tools
+from ..action_schemas import (
+    build_actor_runtime_tools,
+    select_actor_runtime_tools_for_turn,
+)
 from ..errors import ActorExecutionError
 from ..prompts import build_actor_system_prompt, build_actor_user_prompt
 from ..response_parser import convert_json_payload_to_tool_call
@@ -28,7 +31,6 @@ class BedrockNovaActor(ActorPort):
     ) -> None:
         self._settings = settings or BedrockNovaActorSettings.from_env()
         self._runtime_tools = build_actor_runtime_tools(tool_gateway_config)
-        self._allowed_action_names = {str(tool["name"]) for tool in self._runtime_tools}
         self._client = BedrockChatClient(
             BedrockRuntimeSettings(
                 model_id=self._settings.model_id,
@@ -44,11 +46,17 @@ class BedrockNovaActor(ActorPort):
 
     # Ask Bedrock for one action and normalize it into ActorResult.
     def act(self, *, actor_task: ActorTask) -> ActorResult:
+        runtime_tools = select_actor_runtime_tools_for_turn(
+            self._runtime_tools,
+            domain_type=actor_task.task_spec.domain_type,
+            step_kind=actor_task.step_kind,
+        )
+        allowed_action_names = {str(tool["name"]) for tool in runtime_tools}
         try:
             payload = self._client.complete_tool_call(
                 system_prompt=build_actor_system_prompt(),
                 user_prompt=build_actor_user_prompt(actor_task=actor_task),
-                tools=self._runtime_tools,
+                tools=runtime_tools,
             )
         except BedrockRuntimeError as exc:
             if "no tool use" in str(exc):
@@ -59,7 +67,7 @@ class BedrockNovaActor(ActorPort):
                 actor_task=actor_task,
                 tool_call=convert_json_payload_to_tool_call(
                     payload,
-                    allowed_action_names=self._allowed_action_names,
+                    allowed_action_names=allowed_action_names,
                 ),
             )
         except ActorExecutionError as exc:

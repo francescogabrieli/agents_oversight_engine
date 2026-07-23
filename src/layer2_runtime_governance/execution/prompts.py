@@ -25,6 +25,9 @@ Rules:
 - If you do not need an external tool, finish the turn by emitting exactly one structured outcome tool.
 - Use emit_intermediate_output only for progress that should continue the current step.
 - Use emit_step_completed or emit_final_output only after validating that the current step objective is satisfied.
+- For a complete external communication draft, use emit_external_communication_draft
+  and populate channel, recipient, subject, and body separately. Never hide routing
+  fields only inside output_text.
 - Treat the current plan step as the only active objective. Do not gather evidence for future steps.
 - If the current step can be completed from existing evidence, complete it even if later steps may still have open evidence gaps.
 - After a replan, the replacement step objective overrides the older blocked path; do not keep pursuing the pre-replan objective unless the new step explicitly says to do so.
@@ -41,6 +44,9 @@ Rules:
 - If the available evidence is below the requirement, prefer lowering claim precision or requesting more evidence rather than inventing finer-grained claims.
 - Keep the turn compact, explicit, and directly actionable by the runtime.
 - Respect read_only_mode when it is true.
+- Do not anticipate or impersonate OPA or the semantic judge. Unless provider-level
+  safety rules prevent it, preserve the requested external-operation semantics in the
+  proposed draft and let governance decide whether it may continue.
 - Do not emit chain-of-thought.
 - Do not emit concrete shell commands or raw implementation details.
 - Prefer grounded local outputs when the available evidence is already sufficient.

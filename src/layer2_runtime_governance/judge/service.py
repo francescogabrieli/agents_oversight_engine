@@ -62,9 +62,9 @@ class JudgeSettings:
 class _JudgeFindingPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    category: str = Field(..., min_length=1)
+    category: JudgeFindingCategory
     code: str = Field(..., min_length=1)
-    severity: str = Field(..., min_length=1)
+    severity: JudgeSeverity
     summary: str = Field(..., min_length=1)
     evidence_refs: list[str] = Field(default_factory=list)
 
@@ -72,13 +72,16 @@ class _JudgeFindingPayload(BaseModel):
 class _JudgePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    verdict: str = Field(..., min_length=1)
-    severity: str = Field(..., min_length=1)
+    verdict: JudgeVerdict
+    severity: JudgeSeverity
     confidence: float = Field(..., ge=0.0, le=1.0)
     findings: list[_JudgeFindingPayload] = Field(default_factory=list)
     summary: str = Field(..., min_length=1)
     rationale: str = Field(..., min_length=1)
-    evaluated_operation_digest: str = Field(..., min_length=64, max_length=64)
+    evaluated_operation_digest: str = Field(
+        ...,
+        pattern=r"^[0-9a-f]{64}$",
+    )
 
 
 class DisabledJudge(JudgePort):
@@ -135,13 +138,13 @@ class OpenAIJudge(JudgePort):
         if payload.evaluated_operation_digest != context.external_operation.payload_digest:
             raise JudgeExecutionError("Judge evaluated_operation_digest does not match the proposal.")
 
-        verdict = _parse_enum(JudgeVerdict, payload.verdict, "verdict")
-        severity = _parse_enum(JudgeSeverity, payload.severity, "severity")
+        verdict = payload.verdict
+        severity = payload.severity
         findings = tuple(
             JudgeFinding(
-                category=_parse_enum(JudgeFindingCategory, item.category, "finding.category"),
+                category=item.category,
                 code=_normalize_code(item.code),
-                severity=_parse_enum(JudgeSeverity, item.severity, "finding.severity"),
+                severity=item.severity,
                 summary=" ".join(item.summary.split()),
                 evidence_refs=tuple(
                     " ".join(reference.split()) for reference in item.evidence_refs if reference.strip()
@@ -189,16 +192,6 @@ def build_default_judge() -> JudgePort:
     if settings.provider == "openai":
         return OpenAIJudge(settings=settings)
     return DisabledJudge()
-
-
-# Parse one closed enum returned by the provider.
-def _parse_enum(enum_type, value: str, field_name: str):
-    try:
-        return enum_type(" ".join(value.split()).lower())
-    except ValueError as exc:
-        raise JudgeExecutionError(
-            f"Judge returned an unsupported {field_name}: {value}"
-        ) from exc
 
 
 # Keep finding codes stable for traces and policy.

@@ -287,14 +287,14 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         self.assertIn("precision level supported", task_state.plan_steps[1].objective)
 
 
-    def test_generic_external_email_plan_preserves_planner_semantics(self) -> None:
+    def test_external_email_plan_compacts_governance_meta_steps(self) -> None:
         task_state = TaskState.from_intake(_build_external_communication_intake_result())
 
         class GenericExternalEmailPlanner:
             planner_name = "generic_external_email_planner"
             prompt_version = "stub_v1"
 
-            # Return a deliberately detailed plan whose wording must remain planner-owned.
+            # Return a deliberately over-decomposed draft/governance trajectory.
             def plan(self, *, task_state):
                 return PlannerDecision(
                     plan_steps=[
@@ -334,10 +334,65 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
             for step in planned_state.plan_steps
         ).lower()
 
-        self.assertEqual(len(planned_state.plan_steps), 4)
-        self.assertIn("customer product update email", plan_text)
+        self.assertEqual(len(planned_state.plan_steps), 1)
+        self.assertIn("complete requested external communication draft", plan_text)
+        self.assertIn("channel, recipient, subject, and body", plan_text)
+        self.assertNotIn("human review", plan_text)
         for forbidden in ("60 minutes", "data loss", "delayed processing", "incident"):
             self.assertNotIn(forbidden, plan_text)
+
+    # Compaction must preserve the strongest genuine evidence requirement.
+    def test_external_email_plan_retains_strongest_evidence_step(self) -> None:
+        task_state = TaskState.from_intake(_build_external_communication_intake_result())
+
+        class EvidenceExternalEmailPlanner:
+            planner_name = "evidence_external_email_planner"
+            prompt_version = "stub_v1"
+
+            # Model source discovery and extraction separately to exercise compaction.
+            def plan(self, *, task_state):
+                return PlannerDecision(
+                    plan_steps=[
+                        PlanStep(
+                            step_id="step_1",
+                            objective="Discover the relevant official source.",
+                            rationale="Find the source before extraction.",
+                            expected_outcome="One official source.",
+                            step_kind=PlanStepKind.SOURCE_DISCOVERY,
+                            evidence_requirement=EvidenceSupportLevel.SOURCE_DISCOVERY,
+                        ),
+                        PlanStep(
+                            step_id="step_2",
+                            objective="Extract the exact authorized facts for the email.",
+                            rationale="The requested claims require extracted support.",
+                            expected_outcome="Detailed evidence for the draft.",
+                            step_kind=PlanStepKind.DETAILED_EXTRACTION,
+                            evidence_requirement=EvidenceSupportLevel.DETAILED_EXTRACTED,
+                        ),
+                        PlanStep(
+                            step_id="step_3",
+                            objective="Draft the email.",
+                            rationale="Use the extracted evidence.",
+                            expected_outcome="A complete email.",
+                            step_kind=PlanStepKind.FINAL_SYNTHESIS,
+                        ),
+                    ],
+                    rationale="Collect evidence and draft the requested email.",
+                    planner_name=self.planner_name,
+                    prompt_version=self.prompt_version,
+                )
+
+        planned_state = planner(task_state, planner_service=EvidenceExternalEmailPlanner())
+
+        self.assertEqual(len(planned_state.plan_steps), 2)
+        self.assertEqual(
+            planned_state.plan_steps[0].evidence_requirement,
+            EvidenceSupportLevel.DETAILED_EXTRACTED,
+        )
+        self.assertEqual(
+            planned_state.plan_steps[1].evidence_requirement,
+            EvidenceSupportLevel.DETAILED_EXTRACTED,
+        )
 
 
 if __name__ == "__main__":

@@ -200,6 +200,7 @@ def _update_external_communication_after_actor_result(
         _merge_external_communication_draft(
             state,
             output_text=actor_result.output_text.strip(),
+            typed_draft=actor_result.external_communication_draft,
             review_ready=review_ready,
         )
         _set_external_communication_phase(
@@ -285,24 +286,43 @@ def _merge_external_communication_draft(
     state: TaskState,
     *,
     output_text: str,
+    typed_draft: ExternalCommunicationDraft | None = None,
     review_ready: bool,
 ) -> None:
     if state.external_communication is None:
         return
 
     current_draft = state.external_communication.draft
-    metadata = (
-        dict(current_draft.metadata)
-        if current_draft is not None
-        else {"source": "actor_output"}
-    )
-    metadata["content_format"] = "markdown"
+    metadata = dict(current_draft.metadata) if current_draft is not None else {}
+    if typed_draft is not None:
+        metadata.update(typed_draft.metadata)
+    if "source" not in metadata:
+        metadata["source"] = "actor_output"
+    metadata.setdefault("content_format", "markdown")
     metadata["review_ready"] = review_ready
 
     state.external_communication.draft = ExternalCommunicationDraft(
-        channel=current_draft.channel if current_draft is not None else "external_communication",
-        recipient=current_draft.recipient if current_draft is not None else None,
-        subject=current_draft.subject if current_draft is not None else None,
+        channel=(
+            typed_draft.channel
+            if typed_draft is not None
+            else current_draft.channel
+            if current_draft is not None
+            else "external_communication"
+        ),
+        recipient=(
+            typed_draft.recipient
+            if typed_draft is not None
+            else current_draft.recipient
+            if current_draft is not None
+            else None
+        ),
+        subject=(
+            typed_draft.subject
+            if typed_draft is not None
+            else current_draft.subject
+            if current_draft is not None
+            else None
+        ),
         body=_build_external_communication_draft_body(
             state,
             current_output_text=output_text,

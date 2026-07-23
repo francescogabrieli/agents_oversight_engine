@@ -2,7 +2,11 @@
 
 from .errors import ActorExecutionError
 from .factory import build_default_actor
-from .action_schemas import build_actor_runtime_tools, build_json_actor_output_shape
+from .action_schemas import (
+    build_actor_runtime_tools,
+    build_json_actor_output_shape,
+    select_actor_runtime_tools_for_turn,
+)
 from .prompts import build_actor_system_prompt, build_actor_user_prompt
 from .prompt_projection import ACTOR_SCRATCHPAD_ENTRY_LIMIT, build_actor_prompt_payload
 from .response_parser import (
@@ -28,6 +32,7 @@ __all__ = [
     "build_actor_prompt_payload",
     "build_actor_runtime_tools",
     "build_json_actor_output_shape",
+    "select_actor_runtime_tools_for_turn",
     "coerce_provider_confidence",
     "convert_json_payload_to_tool_call",
     "extract_single_function_call",

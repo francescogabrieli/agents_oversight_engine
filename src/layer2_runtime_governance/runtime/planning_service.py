@@ -1,3 +1,5 @@
+from layer1_intake import DomainType
+
 from ..planning import PlannerPort
 from ..domain import (
     PlanStep,
@@ -6,6 +8,7 @@ from ..domain import (
     RuntimeState,
     TaskState,
 )
+from ..domain.evidence_policy import evidence_support_level_rank
 from ..tool_contract import EvidenceSupportLevel
 
 # Nodes.py contains the executable Layer 2 business logic.
@@ -23,9 +26,13 @@ def planner(state: TaskState, *, planner_service: PlannerPort) -> TaskState:
         return state
 
     decision = planner_service.plan(task_state=state)
-    planned_steps = _compact_small_source_summary_plan(
+    planned_steps = _compact_external_communication_plan(
         task_state=state,
         plan_steps=decision.plan_steps,
+    )
+    planned_steps = _compact_small_source_summary_plan(
+        task_state=state,
+        plan_steps=planned_steps,
     )
     state.plan_steps = _enforce_plan_step_budget(
         plan_steps=planned_steps,
@@ -40,7 +47,7 @@ def planner(state: TaskState, *, planner_service: PlannerPort) -> TaskState:
         state.current_plan_step.status = PlanStepStatus.IN_PROGRESS
 
     planner_summary = "Initial semantic full plan created from the current task state."
-    if len(planned_steps) != len(decision.plan_steps):
+    if planned_steps != decision.plan_steps:
         planner_summary = (
             "Initial semantic full plan created from the current task state and "
             "normalized to the task scope."
@@ -67,6 +74,93 @@ def _enforce_plan_step_budget(
     if max_steps is None:
         return list(plan_steps)
     return list(plan_steps[:max_steps])
+
+
+# Collapse governance-like communication meta-steps while retaining genuine evidence work.
+def _compact_external_communication_plan(
+    *,
+    task_state: TaskState,
+    plan_steps: list[PlanStep],
+) -> list[PlanStep]:
+    if task_state.task_spec.domain_type != DomainType.EXTERNAL_COMMUNICATION:
+        return plan_steps
+
+    evidence_steps = [
+        step
+        for step in plan_steps
+        if step.step_kind
+        in {
+            PlanStepKind.SOURCE_DISCOVERY,
+            PlanStepKind.DETAILED_EXTRACTION,
+        }
+        or (
+            step.evidence_requirement is not None
+            and step.evidence_requirement != EvidenceSupportLevel.LOCAL_ONLY
+        )
+    ]
+    evidence_step = max(
+        evidence_steps,
+        key=lambda step: evidence_support_level_rank(
+            _external_step_evidence_requirement(step=step)
+        ),
+        default=None,
+    )
+    required_level = (
+        _external_step_evidence_requirement(step=evidence_step)
+        if evidence_step is not None
+        else EvidenceSupportLevel.LOCAL_ONLY
+    )
+    draft_step = PlanStep(
+        step_id="step_2" if evidence_step is not None else "step_1",
+        objective=(
+            "Produce one complete requested external communication draft with explicit "
+            "channel, recipient, subject, and body. Preserve the authorized task semantics "
+            "and constraints without sending the communication."
+        ),
+        rationale=(
+            "Draft construction is one semantic operation; deterministic policy and the "
+            "semantic judge evaluate the normalized proposal after the actor produces it."
+        ),
+        expected_outcome=(
+            "A complete typed external communication draft ready for runtime normalization "
+            "and governance, with no external side effect."
+        ),
+        step_kind=PlanStepKind.FINAL_SYNTHESIS,
+        evidence_requirement=required_level,
+        claim_precision_ceiling=(
+            evidence_step.claim_precision_ceiling
+            if evidence_step is not None
+            and evidence_step.claim_precision_ceiling is not None
+            else required_level
+        ),
+    )
+    if evidence_step is None:
+        return [draft_step]
+    return [
+        PlanStep(
+            step_id="step_1",
+            objective=evidence_step.objective,
+            rationale=evidence_step.rationale,
+            expected_outcome=evidence_step.expected_outcome,
+            step_kind=evidence_step.step_kind,
+            evidence_requirement=required_level,
+            claim_precision_ceiling=evidence_step.claim_precision_ceiling,
+        ),
+        draft_step,
+    ]
+
+
+# Resolve the strongest explicit requirement represented by one retained evidence step.
+def _external_step_evidence_requirement(
+    *,
+    step: PlanStep,
+) -> EvidenceSupportLevel:
+    if step.evidence_requirement is not None:
+        return step.evidence_requirement
+    if step.step_kind == PlanStepKind.DETAILED_EXTRACTION:
+        return EvidenceSupportLevel.DETAILED_EXTRACTED
+    return EvidenceSupportLevel.SOURCE_DISCOVERY
+
 
 # Maintain a proportional typed semantic plan for the runtime.
 def _compact_small_source_summary_plan(
@@ -164,6 +258,8 @@ __all__ = [
     "planner",
     "_enforce_plan_step_budget",
     "_compact_small_source_summary_plan",
+    "_compact_external_communication_plan",
+    "_external_step_evidence_requirement",
     "_task_is_small_source_summary",
     "_plan_looks_like_extraction_pipeline"
 ]

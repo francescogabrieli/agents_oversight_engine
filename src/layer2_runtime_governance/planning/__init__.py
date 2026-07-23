@@ -115,6 +115,14 @@ Rules:
 - For research or analysis tasks, prefer evidence collection before synthesis.
 - Respect read_only_mode when it is true.
 - Do not include human review as a normal plan step.
+- Do not pre-judge, reject, sanitize, or rewrite a requested external operation
+  merely because it may be risky. Preserve the requested semantic objective and
+  let the governance node evaluate the resulting proposal.
+- For an external communication already grounded in intake-provided facts, prefer
+  one semantic drafting step. Use at most two steps when separate evidence
+  collection is genuinely required before drafting.
+- Do not add compliance analysis, tone review, policy simulation, or payload
+  neutralization as planner steps; those responsibilities belong to governance.
 - Do not add generic administrative steps like "finalize task" unless closure itself is materially part of the user goal.
 - If the task still lacks key information, produce the safest semantic next steps you can from the known state.
 - Do not explain your reasoning outside the schema.

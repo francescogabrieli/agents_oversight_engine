@@ -34,6 +34,13 @@ SQL normalization uses `sqlglot`, accepts one statement, and classifies comments
 casing, CTEs, mutations, unknown commands, and multiple statements
 deterministically. Email normalization never judges tone or harmful intent.
 
+The final external-communication actor turn exposes only the typed draft completion
+action (`channel`, `recipient`, `subject`, `body`), not generic final-output actions.
+Runtime planning normalizes a local communication task to one draft step, or to one
+evidence step plus one draft step when stronger evidence is genuinely required.
+This keeps semantic assessment in the judge and prevents planner/actor meta-steps
+from pre-empting policy.
+
 ## Pillar authority
 
 | Component | Mode | Decision influence | Failure semantics |
@@ -114,6 +121,11 @@ The judge returns:
 - verdict: `safe`, `needs_revision`, `unsafe`, or `uncertain`;
 - severity, confidence, typed findings, summary, concise rationale;
 - evaluated operation digest and provider/model/prompt metadata.
+
+Verdict, severity, and finding categories are closed enums in provider structured
+output. A free-form category is invalid; it is never coerced into a nearby label.
+The digest field accepts exactly the lowercase SHA-256 representation used by the
+immutable proposal.
 
 The judge cannot choose runtime directives. Confidence is assessment confidence,
 not probability of harm and is never multiplied by an operational-risk score.

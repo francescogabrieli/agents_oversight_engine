@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 
+from layer1_intake import DomainType
+
+from ..domain import PlanStepKind
 from ..tool_contract import ToolName
 from ..tools.models import ToolBackend, ToolGatewayConfig
 from ..tools.registry import load_tool_gateway_config
@@ -78,6 +81,7 @@ def build_actor_runtime_tools(
             "emit_final_output",
             "Emit the final answer after typed self-validation.",
         ),
+        _external_communication_draft_action(),
         _blocking_action(
             "emit_ask_clarification",
             "Ask for clarification when missing information blocks safe progress.",
@@ -90,6 +94,27 @@ def build_actor_runtime_tools(
             "emit_needs_replan",
             "Signal that the current semantic trajectory requires replanning.",
         ),
+    ]
+
+
+# Restrict completion actions to the typed contract appropriate for the current step.
+def select_actor_runtime_tools_for_turn(
+    runtime_tools: list[dict[str, object]],
+    *,
+    domain_type: DomainType,
+    step_kind: PlanStepKind | None,
+) -> list[dict[str, object]]:
+    if (
+        domain_type == DomainType.EXTERNAL_COMMUNICATION
+        and step_kind == PlanStepKind.FINAL_SYNTHESIS
+    ):
+        excluded = {"emit_step_completed", "emit_final_output"}
+    else:
+        excluded = {"emit_external_communication_draft"}
+    return [
+        tool
+        for tool in runtime_tools
+        if str(tool.get("name", "")) not in excluded
     ]
 
 
@@ -176,6 +201,40 @@ def _completion_action(name: str, description: str) -> dict[str, object]:
     )
 
 
+# Expose communication content fields without granting provider authority over policy facts.
+def _external_communication_draft_action() -> dict[str, object]:
+    return _action(
+        "emit_external_communication_draft",
+        (
+            "Emit one complete external communication draft. The runtime, not the actor, "
+            "derives its boundary, destination class, effect, and digest."
+        ),
+        {
+            "summary": _string(),
+            "channel": _string(),
+            "recipient": _string(),
+            "subject": _string(),
+            "body": _string(),
+            "completion_rationale": _string(),
+            "objective_satisfied": {"type": "boolean"},
+            "evidence_sufficient": {"type": "boolean"},
+            "confidence": _confidence(),
+            "residual_uncertainty": _string(),
+        },
+        (
+            "summary",
+            "channel",
+            "recipient",
+            "subject",
+            "body",
+            "completion_rationale",
+            "objective_satisfied",
+            "evidence_sufficient",
+            "confidence",
+        ),
+    )
+
+
 # Build one blocking/recovery action with a required blocking reason.
 def _blocking_action(name: str, description: str) -> dict[str, object]:
     return _action(
@@ -201,4 +260,8 @@ def _confidence() -> dict[str, object]:
     return {"type": "number", "minimum": 0, "maximum": 1}
 
 
-__all__ = ["build_actor_runtime_tools", "build_json_actor_output_shape"]
+__all__ = [
+    "build_actor_runtime_tools",
+    "build_json_actor_output_shape",
+    "select_actor_runtime_tools_for_turn",
+]

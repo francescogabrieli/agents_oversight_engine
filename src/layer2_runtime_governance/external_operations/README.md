@@ -10,6 +10,10 @@ single statement and derive AST-owned statement facts. It never executes SQL. Th
 production executor is deliberately deferred and performs no email, database, publish,
 or generic side effect.
 
+For communication synthesis, the actor emits the content through a dedicated typed
+action. The normalizer therefore receives channel, recipient, subject, and body as
+separate fields; the actor cannot supply boundary, effect, destination class, or digest.
+
 To extend the capability, add a bounded payload dataclass and a capability-specific
 normalizer, then map its normalized facts in OPA static policy. Do not add semantic harm
 classification to a normalizer; that belongs to the judge.

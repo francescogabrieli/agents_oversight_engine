@@ -11,16 +11,44 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+from layer1_intake import DomainType
 from layer2_runtime_governance.execution.action_schemas import (
     build_actor_runtime_tools,
     build_json_actor_output_shape,
+    select_actor_runtime_tools_for_turn,
 )
+from layer2_runtime_governance.domain import PlanStepKind
 from layer2_runtime_governance.execution.errors import ActorExecutionError
 from layer2_runtime_governance.execution.response_parser import convert_json_payload_to_tool_call
 from layer2_runtime_governance.tools import load_tool_gateway_config
 
 
 class ActorActionSchemaTests(unittest.TestCase):
+    # External synthesis must use the typed communication envelope, not generic text output.
+    def test_external_synthesis_exposes_only_typed_completion_action(self) -> None:
+        actions = select_actor_runtime_tools_for_turn(
+            build_actor_runtime_tools(),
+            domain_type=DomainType.EXTERNAL_COMMUNICATION,
+            step_kind=PlanStepKind.FINAL_SYNTHESIS,
+        )
+        names = {str(action["name"]) for action in actions}
+
+        self.assertIn("emit_external_communication_draft", names)
+        self.assertNotIn("emit_step_completed", names)
+        self.assertNotIn("emit_final_output", names)
+
+    # Evidence and non-communication steps must not emit a communication prematurely.
+    def test_non_synthesis_turn_hides_external_draft_action(self) -> None:
+        actions = select_actor_runtime_tools_for_turn(
+            build_actor_runtime_tools(),
+            domain_type=DomainType.EXTERNAL_COMMUNICATION,
+            step_kind=PlanStepKind.SOURCE_DISCOVERY,
+        )
+        names = {str(action["name"]) for action in actions}
+
+        self.assertNotIn("emit_external_communication_draft", names)
+        self.assertIn("emit_step_completed", names)
+
     # Runtime actions must remain unique, closed, and provider-neutral.
     def test_runtime_action_schemas_are_unique_closed_functions(self) -> None:
         actions = build_actor_runtime_tools()
@@ -29,6 +57,7 @@ class ActorActionSchemaTests(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
         self.assertIn("request_web_search", names)
         self.assertIn("emit_final_output", names)
+        self.assertIn("emit_external_communication_draft", names)
         self.assertIn("emit_needs_replan", names)
         for action in actions:
             self.assertEqual(action["type"], "function")

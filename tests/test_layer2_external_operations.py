@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, replace
+from types import SimpleNamespace
 from unittest.mock import patch
+
+from pydantic import ValidationError
 
 from tests.layer2_runtime_fixtures import *
 
@@ -31,11 +34,104 @@ from layer2_runtime_governance.judge import (
     JudgeSeverity,
     JudgeVerdict,
 )
+from layer2_runtime_governance.judge.service import _JudgePayload
+from layer2_runtime_governance.execution.result_builder import (
+    convert_tool_call_to_actor_result,
+)
 from layer2_runtime_governance.runtime.actor_service import actor
 from layer2_runtime_governance.tools import build_default_tool_gateway_config
 
 
 class ExternalOperationNormalizerTests(unittest.TestCase):
+    # OpenAI structured output must constrain semantic labels before service parsing.
+    def test_judge_payload_schema_rejects_free_form_finding_categories(self) -> None:
+        payload = {
+            "verdict": "unsafe",
+            "severity": "high",
+            "confidence": 0.91,
+            "findings": [
+                {
+                    "category": "Coercive / threatening tone",
+                    "code": "coercive_tone",
+                    "severity": "high",
+                    "summary": "The message uses coercive language.",
+                    "evidence_refs": [],
+                }
+            ],
+            "summary": "Unsafe external communication.",
+            "rationale": "The content is coercive.",
+            "evaluated_operation_digest": "a" * 64,
+        }
+
+        with self.assertRaises(ValidationError):
+            _JudgePayload.model_validate(payload)
+
+        payload["findings"][0]["category"] = "deception_or_coercion"
+        parsed = _JudgePayload.model_validate(payload)
+        self.assertEqual(
+            parsed.findings[0].category,
+            JudgeFindingCategory.DECEPTION_OR_COERCION,
+        )
+
+    # Typed actor drafts preserve routing fields through runtime normalization.
+    def test_typed_actor_email_draft_preserves_recipient_and_subject(self) -> None:
+        state = TaskState.from_intake(_build_external_communication_intake_result())
+        state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Produce the requested complete email draft.",
+                rationale="The intake already contains the necessary facts.",
+                expected_outcome="A typed external email draft.",
+                step_kind=PlanStepKind.FINAL_SYNTHESIS,
+                evidence_requirement=EvidenceSupportLevel.LOCAL_ONLY,
+                claim_precision_ceiling=EvidenceSupportLevel.LOCAL_ONLY,
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        state.current_plan_step_index = 0
+        actor_task = build_actor_task(task_state=state)
+        result = convert_tool_call_to_actor_result(
+            actor_task=actor_task,
+            tool_call=SimpleNamespace(
+                name="emit_external_communication_draft",
+                arguments=json.dumps(
+                    {
+                        "summary": "Produced the requested email draft.",
+                        "channel": "email",
+                        "recipient": "vendor@example.com",
+                        "subject": "Service issue",
+                        "body": "Please address the service issue.",
+                        "completion_rationale": "The local drafting objective is complete.",
+                        "objective_satisfied": True,
+                        "evidence_sufficient": True,
+                        "confidence": 0.95,
+                        "residual_uncertainty": "",
+                    }
+                ),
+            ),
+        )
+
+        actor(state, actor_service=_SingleResultActor(result))
+        proposal = prepare_external_operation_proposal(
+            task_state=state,
+            tool_gateway_config=build_default_tool_gateway_config(),
+        )
+
+        self.assertEqual(state.external_communication.draft.channel, "email")
+        self.assertEqual(
+            state.external_communication.draft.recipient,
+            "vendor@example.com",
+        )
+        self.assertEqual(
+            state.external_communication.draft.subject,
+            "Service issue",
+        )
+        self.assertEqual(proposal.target.kind, "recipient")
+        self.assertEqual(proposal.target.value, "vendor@example.com")
+        self.assertEqual(
+            proposal.target.destination_class,
+            DestinationClass.EXTERNAL,
+        )
     # SQL classification must follow the parsed root AST across comments, casing, and CTEs.
     def test_sql_select_variants_are_ast_classified_as_read(self) -> None:
         queries = (
@@ -605,6 +701,19 @@ class _ExplodingJudge(JudgePort):
     def evaluate(self, *, context):
         self.called = True
         raise AssertionError("Judge must not be invoked after static hard deny.")
+
+
+# Return one prebuilt actor result so runtime projection can be tested in isolation.
+class _SingleResultActor(ActorPort):
+    actor_name = "single_result_actor"
+    prompt_version = "single_result_actor_v1"
+
+    def __init__(self, result: ActorResult) -> None:
+        self._result = result
+
+    # Preserve the prepared result while binding it to the current actor port.
+    def act(self, *, actor_task: ActorTask) -> ActorResult:
+        return self._result
 
 
 # Produce a distinct request on the next actor turn without changing semantic step.

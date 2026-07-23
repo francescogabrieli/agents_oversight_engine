@@ -74,6 +74,12 @@ and returns audit-safe feedback to the actor. HITL approvals are bound to the ex
 payload digest, and every modification returns to governance with a new digest.
 Email/database side-effect backends remain intentionally deferred.
 
+External communication synthesis uses a dedicated actor action carrying `channel`,
+`recipient`, `subject`, and `body`; generic completion actions are not exposed on
+that turn. The runtime derives policy facts and the immutable operation digest from
+this typed draft. External communication plans are normalized to one draft step,
+preceded by at most one genuine evidence step when stronger evidence is required.
+
 - Local development defaults to the official `SqliteSaver` at
   `artifacts/runtime/checkpoints/layer2_checkpoints.sqlite3`.
 - Deployed multi-worker environments can select the official `PostgresSaver` with

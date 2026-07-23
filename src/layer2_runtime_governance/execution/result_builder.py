@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 import re
 
+from layer1_intake import DomainType
+
 from ..actor_contract import ActorResult, ActorResultType, ActorTask, CapabilityAccessMode
 from ..domain import ScratchpadEntry, ScratchpadEntryType, StepValidation, StepValidationDecision
+from ..domain import ExternalCommunicationDraft
 from ..tool_contract import ToolName, ToolRequest
 from .errors import ActorExecutionError
 from .evidence_guard import (
@@ -233,6 +236,72 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
             summary=completion_arguments["summary"],
             capability_mode=CapabilityAccessMode.NONE,
             output_text=completion_arguments["output_text"],
+            scratchpad_entry=_build_scratchpad_entry(
+                actor_task=actor_task,
+                entry_type=ScratchpadEntryType.COMPLETION_RATIONALE,
+                summary=completion_arguments["completion_rationale"],
+            ),
+            step_validation=_build_step_validation(
+                actor_task=actor_task,
+                arguments=completion_arguments,
+                next_action=next_action,
+                rationale_key="completion_rationale",
+            ),
+        )
+
+    if tool_name == "emit_external_communication_draft":
+        if actor_task.task_spec.domain_type != DomainType.EXTERNAL_COMMUNICATION:
+            raise ActorExecutionError(
+                "emit_external_communication_draft is valid only for external communication tasks."
+            )
+        _require_arguments(
+            arguments,
+            "summary",
+            "channel",
+            "recipient",
+            "subject",
+            "body",
+            "completion_rationale",
+        )
+        completion_arguments = _ensure_completion_arguments(
+            arguments={
+                **arguments,
+                "output_text": arguments["body"],
+            }
+        )
+        for key in ("summary", "output_text", "completion_rationale"):
+            completion_arguments[key] = _sanitize_completion_text(
+                str(completion_arguments.get(key, ""))
+            )
+        completion_arguments = _guard_completion_against_unsupported_precision(
+            actor_task=actor_task,
+            arguments=completion_arguments,
+        )
+        next_action = _resolve_completion_next_action(arguments=completion_arguments)
+        is_final_step = (
+            actor_task.current_plan_step_index == len(actor_task.plan_steps) - 1
+        )
+        return ActorResult(
+            plan_step_id=plan_step_id,
+            result_type=(
+                ActorResultType.FINAL_OUTPUT
+                if is_final_step
+                else ActorResultType.INTERMEDIATE_OUTPUT
+            ),
+            summary=completion_arguments["summary"],
+            capability_mode=CapabilityAccessMode.WRITE,
+            external_impact=True,
+            output_text=completion_arguments["output_text"],
+            external_communication_draft=ExternalCommunicationDraft(
+                channel=str(arguments["channel"]).strip(),
+                recipient=str(arguments["recipient"]).strip(),
+                subject=str(arguments["subject"]).strip(),
+                body=completion_arguments["output_text"],
+                metadata={
+                    "source": "actor_typed_draft",
+                    "content_format": "plain_text",
+                },
+            ),
             scratchpad_entry=_build_scratchpad_entry(
                 actor_task=actor_task,
                 entry_type=ScratchpadEntryType.COMPLETION_RATIONALE,
