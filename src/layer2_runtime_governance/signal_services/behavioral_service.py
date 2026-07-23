@@ -13,6 +13,10 @@ def build_behavioral_signal(
 ) -> dict[str, Any]:
     assessment = behavioral_assessment
     raw_facts = {
+        "mode": "shadow",
+        "decision_influence": False,
+        "status": assessment.status if assessment else "unavailable",
+        "pillar_unavailable": assessment is None or assessment.status == "unavailable",
         "history_available": bool(assessment and assessment.history_available),
         "historical_run_count": int(assessment.historical_run_count if assessment else 0),
         "matched_run_count": int(assessment.matched_run_count if assessment else 0),
@@ -38,6 +42,8 @@ def build_behavioral_signal(
         },
         "reason_facts": raw_facts["flags"],
         "summary": assessment.summary if assessment else "Behavioral pillar was unavailable.",
+        "mode": "shadow",
+        "decision_influence": False,
         "score_formula_version": "behavioral_features_v2",
         "thresholds_version": thresholds_version,
     }

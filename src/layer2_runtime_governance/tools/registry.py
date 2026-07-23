@@ -15,6 +15,11 @@ from .models import (
     ToolGatewayConfig,
     ToolRiskLevel,
 )
+from ..external_operations.contracts import (
+    ExternalOperationEffect,
+    ExternalOperationFamily,
+    OperationBoundary,
+)
 
 
 # Load the gateway registry from JSON or conservative built-in defaults.
@@ -60,6 +65,11 @@ def build_default_tool_gateway_config() -> ToolGatewayConfig:
                 requires_human_review=False,
                 timeout_seconds=30.0,
                 required_fields=("query",),
+                operation_boundary=OperationBoundary.EVIDENCE_READ,
+                operation_family=ExternalOperationFamily.GENERIC,
+                normalized_effect=ExternalOperationEffect.READ,
+                capability_profile_id="public_evidence.web_search",
+                capability_profile_version="1",
             ),
             ToolName.FETCH_URL_TEXT: ToolDefinition(
                 tool_name=ToolName.FETCH_URL_TEXT,
@@ -70,6 +80,11 @@ def build_default_tool_gateway_config() -> ToolGatewayConfig:
                 requires_human_review=False,
                 timeout_seconds=20.0,
                 required_fields=("url",),
+                operation_boundary=OperationBoundary.EVIDENCE_READ,
+                operation_family=ExternalOperationFamily.GENERIC,
+                normalized_effect=ExternalOperationEffect.READ,
+                capability_profile_id="public_evidence.fetch_url_text",
+                capability_profile_version="1",
             ),
         }
     )
@@ -115,6 +130,18 @@ def _parse_tool_definition(payload: dict[str, Any]) -> ToolDefinition:
         allowed_schemes=tuple(str(item) for item in payload.get("allowed_schemes", ["https"])),
         mcp_server_id=payload.get("mcp_server_id"),
         mcp_tool_name=payload.get("mcp_tool_name"),
+        # Unknown configured capabilities cross the governed boundary unless explicitly classified.
+        operation_boundary=OperationBoundary(
+            payload.get("operation_boundary", OperationBoundary.GOVERNED_EXTERNAL.value)
+        ),
+        operation_family=ExternalOperationFamily(
+            payload.get("operation_family", ExternalOperationFamily.GENERIC.value)
+        ),
+        normalized_effect=ExternalOperationEffect(
+            payload.get("normalized_effect", ExternalOperationEffect.UNKNOWN.value)
+        ),
+        capability_profile_id=payload.get("capability_profile_id"),
+        capability_profile_version=payload.get("capability_profile_version"),
     )
 
 

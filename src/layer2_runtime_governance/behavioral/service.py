@@ -12,11 +12,6 @@ from typing import TYPE_CHECKING, Any, Protocol
 from layer1_intake import IntakeResult
 
 from ..actor_contract import ActorResultType
-from ..oversight.contracts import (
-    DynamicPolicyAssessment,
-    DynamicPolicyRecommendedDirective,
-    OversightSignalLevel,
-)
 from ..domain.evidence_policy import available_evidence_support_level
 from ..domain import TaskState
 from ..tool_contract import EvidenceSupportLevel
@@ -50,6 +45,9 @@ class BehavioralAssessment:
     )
     behavioral_flags: tuple[str, ...] = ()
     matched_run_ids: tuple[str, ...] = ()
+    mode: str = "shadow"
+    decision_influence: bool = False
+    status: str = "shadow"
 
 
 @dataclass(frozen=True)
@@ -65,7 +63,6 @@ class BehavioralStorePort(Protocol):
         *,
         thread_id: str,
         task_state: TaskState,
-        dynamic_policy_assessment: DynamicPolicyAssessment | None = None,
     ) -> BehavioralAssessment: ...
 
     def persist_behavioral_snapshot(
@@ -105,7 +102,6 @@ class SQLiteBehavioralStore(BehavioralStorePort):
         *,
         thread_id: str,
         task_state: TaskState,
-        dynamic_policy_assessment: DynamicPolicyAssessment | None = None,
     ) -> BehavioralAssessment:
         with closing(self._connect()) as connection:
             self._ensure_schema_once(connection)
@@ -177,7 +173,6 @@ class SQLiteBehavioralStore(BehavioralStorePort):
         failure_rate = _compute_failure_rate(top_baseline)
         behavioral_directive, behavioral_flags = _recommend_behavioral_directive(
             task_state=task_state,
-            dynamic_policy_assessment=dynamic_policy_assessment,
             historical_similarity_score=historical_similarity_score,
             behavior_deviation_score=behavior_deviation_score,
             novelty_score=novelty_score,
@@ -339,11 +334,11 @@ class SQLiteBehavioralStore(BehavioralStorePort):
             CREATE TABLE IF NOT EXISTS dynamic_signals (
                 thread_id TEXT NOT NULL,
                 assessment_index INTEGER NOT NULL,
-                evidence_quality_score REAL NOT NULL,
+                evidence_quality_score REAL,
                 evidence_quality_level TEXT NOT NULL,
-                operational_risk_score REAL NOT NULL,
+                operational_risk_score REAL,
                 operational_risk_level TEXT NOT NULL,
-                trajectory_health_score REAL NOT NULL,
+                trajectory_health_score REAL,
                 trajectory_health_level TEXT NOT NULL,
                 recommended_directive TEXT NOT NULL,
                 PRIMARY KEY (thread_id, assessment_index)
@@ -367,6 +362,7 @@ class SQLiteBehavioralStore(BehavioralStorePort):
             """
         )
         self._migrate_runs_budget_columns_to_nullable(connection)
+        self._migrate_dynamic_signal_scores_to_nullable(connection)
 
     # Rebuild the runs table when older local schemas still require a non-null max_steps budget.
     def _migrate_runs_budget_columns_to_nullable(self, connection: sqlite3.Connection) -> None:
@@ -409,6 +405,55 @@ class SQLiteBehavioralStore(BehavioralStorePort):
                 max_evidence_support_level
             FROM runs_legacy_budget_migration;
             DROP TABLE runs_legacy_budget_migration;
+            """
+        )
+
+    # Preserve legacy SQLite history while allowing explicit unavailable/shadow scores.
+    def _migrate_dynamic_signal_scores_to_nullable(
+        self,
+        connection: sqlite3.Connection,
+    ) -> None:
+        columns = connection.execute("PRAGMA table_info(dynamic_signals)").fetchall()
+        score_columns = {
+            column[1]: column
+            for column in columns
+            if column[1] in {
+                "evidence_quality_score",
+                "operational_risk_score",
+                "trajectory_health_score",
+            }
+        }
+        if not score_columns or all(int(column[3]) == 0 for column in score_columns.values()):
+            return
+
+        connection.executescript(
+            """
+            ALTER TABLE dynamic_signals RENAME TO dynamic_signals_legacy_score_migration;
+            CREATE TABLE dynamic_signals (
+                thread_id TEXT NOT NULL,
+                assessment_index INTEGER NOT NULL,
+                evidence_quality_score REAL,
+                evidence_quality_level TEXT NOT NULL,
+                operational_risk_score REAL,
+                operational_risk_level TEXT NOT NULL,
+                trajectory_health_score REAL,
+                trajectory_health_level TEXT NOT NULL,
+                recommended_directive TEXT NOT NULL,
+                PRIMARY KEY (thread_id, assessment_index)
+            );
+            INSERT INTO dynamic_signals (
+                thread_id, assessment_index, evidence_quality_score,
+                evidence_quality_level, operational_risk_score,
+                operational_risk_level, trajectory_health_score,
+                trajectory_health_level, recommended_directive
+            )
+            SELECT
+                thread_id, assessment_index, evidence_quality_score,
+                evidence_quality_level, operational_risk_score,
+                operational_risk_level, trajectory_health_score,
+                trajectory_health_level, recommended_directive
+            FROM dynamic_signals_legacy_score_migration;
+            DROP TABLE dynamic_signals_legacy_score_migration;
             """
         )
 
@@ -780,14 +825,12 @@ def build_behavioral_assessment(
     *,
     thread_id: str,
     task_state: TaskState,
-    dynamic_policy_assessment: DynamicPolicyAssessment | None = None,
     behavioral_store: BehavioralStorePort | None = None,
 ) -> BehavioralAssessment:
     resolved_store = behavioral_store or build_default_behavioral_store()
     return resolved_store.build_behavioral_assessment(
         thread_id=thread_id,
         task_state=task_state,
-        dynamic_policy_assessment=dynamic_policy_assessment,
     )
 
 
@@ -796,13 +839,11 @@ def evaluate_behavioral_policy(
     *,
     thread_id: str,
     task_state: TaskState,
-    dynamic_policy_assessment: DynamicPolicyAssessment | None = None,
     behavioral_store: BehavioralStorePort | None = None,
 ) -> BehavioralAssessment:
     return build_behavioral_assessment(
         thread_id=thread_id,
         task_state=task_state,
-        dynamic_policy_assessment=dynamic_policy_assessment,
         behavioral_store=behavioral_store,
     )
 
@@ -1128,7 +1169,6 @@ def _compute_failure_rate(scored_candidates: list[dict[str, Any]]) -> float:
 def _recommend_behavioral_directive(
     *,
     task_state: TaskState,
-    dynamic_policy_assessment: DynamicPolicyAssessment | None,
     historical_similarity_score: float | None,
     behavior_deviation_score: float | None,
     novelty_score: float | None,
@@ -1136,10 +1176,6 @@ def _recommend_behavioral_directive(
     deviation_driver: str | None,
 ) -> tuple[BehavioralRecommendedDirective, tuple[str, ...]]:
     flags: list[str] = []
-    dynamic_signal_not_strong = (
-        dynamic_policy_assessment is None
-        or dynamic_policy_assessment.evidence_quality.level != OversightSignalLevel.STRONG
-    )
     support_not_high = available_evidence_support_level(task_state=task_state) in {
         EvidenceSupportLevel.LOCAL_ONLY,
         EvidenceSupportLevel.SOURCE_DISCOVERY,
@@ -1154,7 +1190,6 @@ def _recommend_behavioral_directive(
     if (
         novelty_score is not None
         and novelty_score >= 0.70
-        and dynamic_signal_not_strong
     ):
         flags.append("high_novelty")
         return BehavioralRecommendedDirective.REQUEST_MORE_EVIDENCE, tuple(flags)
@@ -1173,9 +1208,8 @@ def _recommend_behavioral_directive(
         flags.append("high_behavior_deviation")
         return BehavioralRecommendedDirective.WAIT_HUMAN_REVIEW, tuple(flags)
 
-    if review_rate >= 0.50 and _dynamic_signals_not_healthy(dynamic_policy_assessment):
+    if review_rate >= 0.50:
         flags.append("historical_review_rate_high")
-        flags.append("dynamic_signals_not_healthy")
         return BehavioralRecommendedDirective.WAIT_HUMAN_REVIEW, tuple(flags)
 
     if (
@@ -1318,28 +1352,6 @@ def _parse_json_dict(raw_value: Any) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return parsed_value if isinstance(parsed_value, dict) else {}
-
-
-# Decide whether the dynamic signal stack is already non-healthy.
-def _dynamic_signals_not_healthy(
-    dynamic_policy_assessment: DynamicPolicyAssessment | None,
-) -> bool:
-    if dynamic_policy_assessment is None:
-        return False
-    if dynamic_policy_assessment.recommended_directive in {
-        DynamicPolicyRecommendedDirective.REQUEST_MORE_EVIDENCE,
-        DynamicPolicyRecommendedDirective.REPLAN,
-        DynamicPolicyRecommendedDirective.WAIT_HUMAN_REVIEW,
-    }:
-        return True
-    if dynamic_policy_assessment.trajectory_health.level != OversightSignalLevel.HEALTHY:
-        return True
-    if dynamic_policy_assessment.operational_risk.level in {
-        OversightSignalLevel.MEDIUM,
-        OversightSignalLevel.HIGH,
-    }:
-        return True
-    return dynamic_policy_assessment.evidence_quality.level != OversightSignalLevel.STRONG
 
 
 # Format optional scores consistently in summaries.

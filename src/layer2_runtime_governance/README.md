@@ -9,6 +9,7 @@ bootstrap -> planning -> execution -> governance
                                   -> tool gateway -> observation -> execution
                                   -> replanning -> execution
                                   -> human review
+                                  -> payload revision -> governance
                                   -> finalization
 ```
 
@@ -33,6 +34,9 @@ Domain modules must remain independent from LangGraph, provider SDKs, HTTP, subp
 - `domain/evidence_policy.py`: canonical support-level and claim-precision
   classification shared by execution guards and governance compatibility surfaces.
 - `tools/`: governed tool registry, validation, adapters, and content extraction.
+- `external_operations/`: immutable external proposals, runtime/registry boundary
+  projection, AST-backed SQL and structural communication normalization, capability
+  consequence profiles, and a production executor seam that performs no side effects.
 - `signal_services/`: typed governance signal providers.
 - `hitl/`: typed human-review flow and dashboard projections.
 - `graph.py`: LangGraph composition and routing only.
@@ -41,8 +45,9 @@ Domain modules must remain independent from LangGraph, provider SDKs, HTTP, subp
 - `observability/`: trace models, read-only builders, compact views, and JSON
   serialization. The former `trace.py` facade has been removed.
 - `evaluation/`: offline evaluation over exported traces.
-- `behavioral/`, `judge/`, and `oversight/`: typed behavioural memory, selective
-  semantic judge, and deterministic dynamic governance signals.
+- `behavioral/`, `judge/`, and `oversight/`: shadow-only behavioural memory,
+  governed-external semantic assessment, active evidence/trajectory contracts, and
+  shadow operational consequence facts.
 - `governance_components/`: OPA contracts, input-document construction, validation,
   response parsing, and fail-closed handling.
 - `infrastructure/`: official checkpoint composition, bounded retention, environment
@@ -53,6 +58,21 @@ Domain modules must remain independent from LangGraph, provider SDKs, HTTP, subp
 LangGraph checkpoints are the only resumable memory for `interrupt()` / `Command(resume=...)`.
 Trace JSON, dashboard snapshots, and the behavioural database are read models and must never
 be used to reconstruct an interrupted graph.
+
+## Governance authority
+
+OPA/Rego is the sole directive authority. Static policy contains only deterministic
+hard guardrails; externality and write compatibility fields do not imply deny or HITL.
+Evidence and trajectory are active. Operational risk and behavioral are exported with
+`mode=shadow` and `decision_influence=false`. OPA requires the semantic judge before
+every non-denied `governed_external` execution candidate, but not for local work,
+partial drafts, `web_search`, or `fetch_url_text`.
+
+The judge returns typed semantic verdicts and findings, never runtime directives.
+`needs_revision` maps in OPA to `revise_action`; the runtime invalidates that payload
+and returns audit-safe feedback to the actor. HITL approvals are bound to the exact
+payload digest, and every modification returns to governance with a new digest.
+Email/database side-effect backends remain intentionally deferred.
 
 - Local development defaults to the official `SqliteSaver` at
   `artifacts/runtime/checkpoints/layer2_checkpoints.sqlite3`.
@@ -87,6 +107,8 @@ external migration window and must not be recreated at the root.
 - `test_layer2_actor_runtime.py`: actor contracts, providers, and evidence guards.
 - `test_layer2_tool_runtime.py`: gateway execution and observation.
 - `test_layer2_governance_runtime.py`: OPA-first enforcement and policy signals.
+- `test_layer2_external_operations.py`: external proposal normalization, AST SQL,
+  judge preflight, shadow isolation, revision, and digest integrity.
 - `test_layer2_hitl_runtime.py`: interrupt, review, edit, and resume behavior.
 - `test_layer2_checkpointing.py`: official saver selection and fail-safe retention.
 - `test_layer2_architecture.py`: dependency direction and retired-surface checks.

@@ -481,14 +481,14 @@ class MCPThenCompleteActor(ActorPort):
 
 class AllowPolicyEngine(PolicyEnginePort):
     policy_engine_name = "allow_policy_engine"
-    policy_bundle_version = "layer2_governance_v2"
+    policy_bundle_version = "layer2_governance_v3"
     policy_config_version = "layer2_governance_thresholds_v1"
 
     # Request deterministic pillars without invoking a semantic judge in this tool test.
     def evaluate_required_pillars(self, *, base_facts):
         return {
             "require_evidence": True,
-            "require_risk": True,
+            "require_risk": False,
             "require_trajectory": True,
             "require_behavioral": False,
             "require_judge": False,
@@ -497,12 +497,24 @@ class AllowPolicyEngine(PolicyEnginePort):
     # Return a schema-valid decision so this test remains focused on the tool loop.
     def evaluate_decision(self, *, decision_input):
         has_tool = decision_input["base_facts"]["tool"]["name"] is not None
+        pillar_results = dict(decision_input["pillars"])
+        pillar_results["static_policy"] = {
+            "hard_deny": False,
+            "constraints": ["execution_policy_read_only"],
+            "violations": [],
+            "reason_codes": ["read_only_allowed"],
+            "summary": "Static policy preserved the read-only execution envelope.",
+            "read_only_required": True,
+            "clarification_signaled": False,
+            "mode": "active",
+            "decision_influence": True,
+        }
         return {
             "schema_version": "governance_decision_output.v1",
             "directive": "continue_read_only" if has_tool else "continue",
             "policy_decision": "allow_read_only" if has_tool else "allow",
             "reason_codes": ["read_only_allowed" if has_tool else "allowed_by_policy"],
-            "pillar_results": decision_input["pillars"],
+            "pillar_results": pillar_results,
             "selected_reason": "Read-only runtime test action is allowed.",
             "rejected_alternatives": {},
             "safety_invariants_checked": ["read_only_envelope_preserved"],

@@ -1,4 +1,5 @@
 from copy import deepcopy
+from dataclasses import replace
 from typing import Callable
 
 from ..behavioral import (
@@ -28,6 +29,7 @@ from ..tools import ToolGatewayConfig
 from .actor_service import _set_external_communication_phase
 from .lifecycle_service import _append_step_record
 from ..domain.step_recovery import restore_actor_step_for_more_evidence
+from ..external_operations.contracts import GovernanceActionFeedback
 
 # Apply a validated policy outcome to canonical runtime state.
 def governance(
@@ -100,8 +102,15 @@ def governance(
                 task_state=state,
                 behavioral_store=behavioral_store_service,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            _append_step_record(
+                state,
+                node_name="behavioral_persistence",
+                summary=(
+                    "Behavioral snapshot persistence failed without changing the "
+                    f"runtime directive ({type(exc).__name__})."
+                ),
+            )
     else:
         try:
             persist_judge_snapshot(
@@ -109,8 +118,15 @@ def governance(
                 task_state=state,
                 behavioral_store=behavioral_store_service,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            _append_step_record(
+                state,
+                node_name="judge_persistence",
+                summary=(
+                    "Judge snapshot persistence failed without changing the "
+                    f"runtime directive ({type(exc).__name__})."
+                ),
+            )
 
     _append_step_record(
         state,
@@ -190,6 +206,10 @@ def _apply_governance_decision(
         state.current_tool_request = None
         return
 
+    if governance_decision.directive == GovernanceDirective.REVISE_ACTION:
+        _apply_action_revision(state, governance_decision=governance_decision)
+        return
+
     if governance_decision.directive == GovernanceDirective.REQUEST_MORE_EVIDENCE:
         _set_external_communication_phase(
             state,
@@ -243,6 +263,59 @@ def _apply_governance_decision(
     }:
         return
 
+    state.current_state = RuntimeState.ACTING
+
+
+# Invalidate one semantic payload and return audit-safe findings to the actor.
+def _apply_action_revision(
+    state: TaskState,
+    *,
+    governance_decision: GovernanceDecision,
+) -> None:
+    proposal = state.external_operation_proposal
+    if proposal is None:
+        # A malformed revision directive cannot route an absent payload toward execution.
+        state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        state.human_review_resume_state = RuntimeState.ACTING
+        return
+    judge_payload = (governance_decision.pillar_results or {}).get("judge", {})
+    findings = (
+        judge_payload.get("findings", [])
+        if isinstance(judge_payload, dict)
+        else []
+    )
+    state.external_operation_revision_count += 1
+    state.governance_action_feedback.append(
+        GovernanceActionFeedback(
+            operation_id=proposal.operation_id,
+            invalidated_payload_digest=proposal.payload_digest,
+            finding_codes=tuple(
+                str(item.get("code"))
+                for item in findings
+                if isinstance(item, dict) and item.get("code")
+            ),
+            summary=governance_decision.summary,
+            revision_index=state.external_operation_revision_count,
+        )
+    )
+    state.approved_external_operation_digest = None
+    state.external_operation_proposal = None
+    if state.actor_result is not None:
+        state.actor_result = replace(
+            state.actor_result,
+            external_operation_proposal=None,
+            external_impact=False,
+        )
+    _set_external_communication_phase(
+        state,
+        phase=ExternalCommunicationPhase.DRAFT_IN_PROGRESS,
+        summary="Governance invalidated the current payload and requested a bounded semantic revision.",
+        review_ready=False,
+    )
+    restore_actor_step_for_more_evidence(state)
+    state.current_tool_request = None
+    state.pending_human_review_request = None
+    state.human_review_resume_state = None
     state.current_state = RuntimeState.ACTING
 
 # Apply a validated policy outcome to canonical runtime state.

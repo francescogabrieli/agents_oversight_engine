@@ -35,7 +35,7 @@
     "nonEmptyString": { "type": "string", "minLength": 1 },
     "stringArray": { "type": "array", "items": { "type": "string" }, "maxItems": 1000000 },
     "runtimeState": {
-      "enum": ["planning", "acting", "ready_next_step", "ready_tool_execution", "replanning", "waiting_human_review", "completed", "aborted"]
+      "enum": ["planning", "acting", "ready_next_step", "ready_tool_execution", "ready_governance", "replanning", "waiting_human_review", "completed", "aborted"]
     },
     "actorResultType": {
       "enum": ["propose_action", "intermediate_output", "final_output", "ask_clarification", "blocked", "needs_replan"]
@@ -56,7 +56,14 @@
         "behavioral_anomaly_needs_corroboration", "behavioral_corroborated_risk",
         "judge_reject_output", "judge_reject_external_or_high_risk",
         "judge_flag_external_draft", "policy_version_mismatch",
-        "required_pillar_unavailable", "opa_failure_fail_closed"
+        "required_pillar_unavailable", "opa_failure_fail_closed",
+        "static_policy_hard_deny", "read_only_mutation_blocked",
+        "database_profile_mutation_blocked", "sql_ambiguous_or_multiple",
+        "prohibited_destination", "judge_required_unavailable",
+        "judge_needs_revision", "judge_unsafe", "judge_uncertain",
+        "provider_runtime_action_missing",
+        "precision_mismatch_external_or_sensitive",
+        "repeated_action_revision"
       ]
     },
     "runtime": {
@@ -144,7 +151,8 @@
         "blocking_reason": { "$ref": "#/$defs/nullableString" },
         "proposed_tool_name": { "$ref": "#/$defs/nullableString" },
         "output_claim_support_level": { "oneOf": [{ "$ref": "#/$defs/evidenceSupportLevel" }, { "type": "null" }] },
-        "precision_mismatch_detected": { "type": "boolean" }
+        "precision_mismatch_detected": { "type": "boolean" },
+        "external_operation": { "oneOf": [{ "$ref": "#/$defs/externalOperationProposal" }, { "type": "null" }] }
       },
       "additionalProperties": false
     },
@@ -275,7 +283,7 @@
         "pillar_requirements": { "type": "object", "additionalProperties": { "type": "boolean" } },
         "pillar_results": { "type": "object", "additionalProperties": { "type": "object" } },
         "pillar_errors": { "type": "object", "additionalProperties": { "type": "string" } },
-        "directive": { "enum": ["continue", "continue_read_only", "request_more_evidence", "replan", "ask_user_clarification", "wait_human_review", "stop"] },
+        "directive": { "enum": ["continue", "continue_read_only", "revise_action", "request_more_evidence", "replan", "ask_user_clarification", "wait_human_review", "stop"] },
         "policy_decision": { "enum": ["allow", "allow_read_only", "ask_clarification", "require_human_review", "deny"] },
         "requires_human_review": { "type": "boolean" },
         "reason_codes": { "type": "array", "items": { "$ref": "#/$defs/governanceReasonCode" }, "maxItems": 1000000 },
@@ -318,7 +326,7 @@
         "current_plan_step_objective": { "$ref": "#/$defs/nullableString" },
         "actor_result_type": { "oneOf": [{ "$ref": "#/$defs/actorResultType" }, { "type": "null" }] },
         "current_tool_request": { "oneOf": [{ "$ref": "#/$defs/toolRequest" }, { "type": "null" }] },
-        "governance_directive": { "type": ["string", "null"], "enum": ["continue", "continue_read_only", "request_more_evidence", "replan", "ask_user_clarification", "wait_human_review", "stop", null] },
+        "governance_directive": { "type": ["string", "null"], "enum": ["continue", "continue_read_only", "revise_action", "request_more_evidence", "replan", "ask_user_clarification", "wait_human_review", "stop", null] },
         "governance_summary": { "$ref": "#/$defs/nullableString" },
         "static_policy_summary": { "$ref": "#/$defs/nullableString" },
         "dynamic_policy_summary": { "$ref": "#/$defs/nullableString" },
@@ -334,7 +342,13 @@
           "uniqueItems": true,
           "maxItems": 7
         },
-        "review_summary": { "$ref": "#/$defs/nullableString" }
+        "review_summary": { "$ref": "#/$defs/nullableString" },
+        "operation_id": { "$ref": "#/$defs/nullableString" },
+        "operation_payload_digest": { "$ref": "#/$defs/nullableString" },
+        "operation_proposal_summary": { "$ref": "#/$defs/nullableString" },
+        "operation_target": { "$ref": "#/$defs/nullableString" },
+        "external_operation_proposal": { "oneOf": [{ "$ref": "#/$defs/externalOperationProposal" }, { "type": "null" }] },
+        "judge_findings": { "$ref": "#/$defs/stringArray" }
       },
       "additionalProperties": false
     },
@@ -347,7 +361,36 @@
         "note": { "$ref": "#/$defs/nullableString" },
         "clarification_text": { "$ref": "#/$defs/nullableString" },
         "external_communication_edit": { "oneOf": [{ "$ref": "#/$defs/humanReviewExternalEdit" }, { "type": "null" }] },
-        "reviewer_id": { "$ref": "#/$defs/nullableString" }
+        "reviewer_id": { "$ref": "#/$defs/nullableString" },
+        "approved_operation_digest": { "$ref": "#/$defs/nullableString" },
+        "external_operation_edit": { "type": ["object", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "externalOperationProposal": {
+      "type": "object",
+      "required": [
+        "operation_id", "plan_step_id", "capability_id", "boundary",
+        "operation_family", "normalized_effect", "execution_candidate", "target",
+        "payload", "payload_preview", "payload_digest", "facts_provenance",
+        "capability_profile_id", "capability_profile_version", "modifiable"
+      ],
+      "properties": {
+        "operation_id": { "$ref": "#/$defs/nonEmptyString" },
+        "plan_step_id": { "$ref": "#/$defs/nonEmptyString" },
+        "capability_id": { "$ref": "#/$defs/nonEmptyString" },
+        "boundary": { "enum": ["local", "evidence_read", "governed_external"] },
+        "operation_family": { "enum": ["communication", "database", "generic"] },
+        "normalized_effect": { "enum": ["read", "create", "update", "delete", "truncate", "send", "publish", "execute", "unknown"] },
+        "execution_candidate": { "type": "boolean" },
+        "target": { "type": "object" },
+        "payload": { "type": "object" },
+        "payload_preview": { "type": "string", "maxLength": 4096 },
+        "payload_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "facts_provenance": { "type": "object" },
+        "capability_profile_id": { "$ref": "#/$defs/nullableString" },
+        "capability_profile_version": { "$ref": "#/$defs/nullableString" },
+        "modifiable": { "type": "boolean" }
       },
       "additionalProperties": false
     },

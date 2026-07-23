@@ -16,6 +16,13 @@ Non è una vista “marketing” e non è una semplificazione user-facing.
 
 L’obiettivo è semplice: leggere questo file e capire davvero, dall’inizio alla fine, che cosa succede.
 
+> **Versione governance corrente.** La governance OPA-first descritta nelle
+> sezioni 8 e 9 di questo documento e in
+> `docs/governance_hitl_contract.md` sostituisce il precedente modello a
+> scoring/combiner ancora riportato nelle sezioni storiche 10-29. Quelle sezioni
+> sono conservate come materiale comparativo della tesi, non descrivono il
+> percorso live e non devono essere usate come contratto di implementazione.
+
 ## 1. Vista Generale Del Flusso
 
 La slice attiva del runtime è questa:
@@ -33,7 +40,7 @@ tool_gateway
 replanner
   -> actor
 human_review
-  -> { planner | actor | tool_gateway | replanner | finalize_bootstrap }
+  -> { planner | actor | governance | tool_gateway | replanner | finalize_bootstrap }
 finalize_bootstrap
   -> END
 ```
@@ -63,7 +70,10 @@ Ci sono alcuni principi forti che condizionano il comportamento di tutto il sist
 - l’actor lavora solo sullo step corrente
 - i tool passano sempre dal Tool Gateway
 - la governance è sempre in mezzo tra actor e azione successiva
-- dynamic policy, behavioral e judge non possono mai rendere il sistema più permissivo della static policy
+- OPA è l’unica autorità della direttiva finale; Python non combina direttive
+- static policy blocca soltanto violazioni deterministiche specifiche
+- evidence e trajectory sono active; operational risk e behavioral sono shadow-only
+- il judge produce assessment semantici, non direttive runtime
 - la trace esportata è derivata da `TaskState`, non è una seconda fonte di verità
 - la memoria behavioral è un read model SQLite, non la fonte di verità primaria
 - HITL usa `interrupt / resume` tipizzato
@@ -86,6 +96,11 @@ Se vuoi capire la run al 100%, devi sapere anche dove vive ogni responsabilità.
   - definisce il contratto centrale `TaskState`
   - definisce enum, step, validation, HITL ed external communication
 
+- `src/layer2_runtime_governance/external_operations/`
+  - definisce la proposta external canonica e immutable
+  - normalizza communication, SQL tramite AST e generic external
+  - espone un executor production deferred che non produce side effect
+
 - `src/layer2_runtime_governance/actor_contract.py`
   - definisce ciò che l’actor riceve
   - definisce ciò che l’actor può restituire
@@ -98,16 +113,17 @@ Se vuoi capire la run al 100%, devi sapere anche dove vive ogni responsabilità.
   - chiama e valida la decisione OPA
   - applica il fail-closed senza duplicare la policy finale in Python
 
-- `src/layer2_runtime_governance/oversight.py`
-  - implementa la dynamic policy numerica
+- `src/layer2_runtime_governance/signal_services/`
+  - raccoglie raw facts separati per evidence, trajectory, operational risk e behavioral
+  - non sceglie la direttiva finale
 
-- `src/layer2_runtime_governance/behavioral.py`
+- `src/layer2_runtime_governance/behavioral/`
   - legge e scrive il read model SQLite
-  - calcola similarity, novelty, deviation e raccomandazione behavioral
+  - calcola in shadow similarity, novelty, deviation e recommendation counterfactual
 
-- `src/layer2_runtime_governance/judge.py`
-  - decide se il judge deve partire
-  - costruisce il payload di valutazione semantica
+- `src/layer2_runtime_governance/judge/`
+  - valuta semanticamente l’esatta proposta external richiesta da OPA
+  - restituisce verdict e finding tipizzati senza scegliere una direttiva
 
 - `src/layer2_runtime_governance/tools/`
   - esegue davvero i tool ammessi
@@ -285,6 +301,7 @@ I valori possibili sono:
 - `acting`
 - `ready_next_step`
 - `ready_tool_execution`
+- `ready_governance`
 - `replanning`
 - `waiting_human_review`
 - `completed`
@@ -621,17 +638,27 @@ La governance può irrigidirlo.
 
 Il nodo `governance` esegue sempre questi passaggi, in questo ordine:
 
-1. costruisce `PolicyEvaluationInput`
-2. esegue static policy
-3. esegue dynamic policy
-4. esegue behavioral
-5. decide se invocare il judge
-6. combina tutto in una `GovernanceDecisionTrace`
-7. applica la decisione allo stato runtime
-8. prepara eventuale payload HITL
-9. persiste snapshot behavioral e judge
+1. deriva dal registry/runtime l’eventuale `ExternalOperationProposal`;
+2. costruisce `PolicyEvaluationInput` e `base_facts`;
+3. chiede a OPA `required_pillars`, che esegue anche lo static preflight;
+4. raccoglie evidence e trajectory active in blocchi di errore indipendenti;
+5. raccoglie operational risk e behavioral in modalità shadow, riusando il
+   behavioral assessment cached nella stessa run;
+6. invoca il judge soltanto se OPA lo richiede;
+7. valida `GovernanceDecisionInput`, chiama OPA per la decisione finale e valida
+   `GovernanceDecisionOutput`;
+8. costruisce gli assessment diagnostici esclusivamente dai rispettivi pillar
+   OPA e applica la direttiva allo stato;
+9. prepara l’eventuale payload HITL digest-bound e persiste il behavioral read
+   model ai confini stabili.
 
 Questo è il cuore del sistema.
+
+La precedenza OPA corrente è: static hard deny; fail-closed di judge/evidence/
+trajectory active; clarification; trajectory recovery/stop; judge
+`unsafe|uncertain`; `revise_action`; evidence gap; trajectory degradation;
+read-only envelope; continue. Operational risk e behavioral non compaiono in
+nessun branch decisionale.
 
 ## 9. `PolicyEvaluationInput`: Lo Snapshot Canonico Della Governance
 
@@ -654,7 +681,43 @@ Costruisce uno snapshot compatto e tipizzato:
 - conteggi tool call, evidenza osservata e actor turn
 - fase di `external_communication`
 
-Questo snapshot viene usato come confine comune tra i layer di governance.
+Questo snapshot mantiene `capability_mode` ed `external_impact` solo per
+compatibilità. La fonte di verità è `base_facts.external_operation`, con
+`boundary`, `operation_family`, effetto normalizzato, target, preview e digest.
+
+`web_search` e `fetch_url_text` sono `evidence_read`; una query DB aziendale,
+anche `SELECT`, è `governed_external`. Un external sconosciuto ha default
+conservativo `governed_external`.
+
+### 9.1 Matrice dei pillar corrente
+
+| Pillar | Modalità | Influenza |
+| --- | --- | --- |
+| static policy | active | hard guardrail deterministico |
+| evidence | active | gap e precision mismatch |
+| trajectory | active | recovery, replan, stop, loop di revisione |
+| judge | active quando richiesto da OPA | assessment semantico della proposta |
+| operational risk | shadow/not applicable | nessuna |
+| behavioral | shadow | nessuna |
+
+Il judge è richiesto soltanto per una proposta `governed_external` candidata
+all’esecuzione e non già hard-denied. Draft parziali, output locali e letture di
+evidenza pubblica non lo invocano. Se il judge richiesto è disabled, fallisce,
+non viene invocato, produce output invalido o valuta un digest diverso, OPA
+porta la run a HITL.
+
+### 9.2 Revisioni e HITL
+
+`needs_revision` produce `revise_action`: la proposta viene invalidata, i
+finding audit-safe tornano all’actor e la revisione conta nella trajectory.
+Tutte le pause HITL espongono le stesse sette decisioni, inclusa
+`modify_and_continue`. La modifica richiede un edit tipizzato valido, genera un
+nuovo digest e torna a `READY_GOVERNANCE`, mai direttamente al Tool Gateway.
+
+> **Archivio pre-refactor, non normativo.** Le sezioni 10-38 descrivono
+> l'implementazione precedente e restano soltanto come cronologia progettuale.
+> Per implementazione, test e tesi fanno fede le sezioni 8-9 di questo documento,
+> `docs/governance_hitl_contract.md`, il bundle OPA e i contratti tipizzati.
 
 ## 10. Static Policy: Primo Filtro Hard
 
@@ -2019,24 +2082,28 @@ Succede:
 2. `available_support_level` resta `source_discovery`
 3. `evidence_support_matches_step_need = false`
 4. `evidence_quality` viene capata al massimo a `0.343`
-5. se la validation tenta `COMPLETE_STEP`, la dynamic policy vede un fragile completion attempt
-6. la dynamic policy raccomanda `request_more_evidence`
-7. il judge probabilmente parte per `precision_support_mismatch`
-8. il combiner prende la direttiva più conservativa
-9. `_apply_governance_decision` ripristina lo step come `IN_PROGRESS`
+5. OPA valuta il mismatch tipizzato fra evidenza richiesta e disponibile
+6. OPA restituisce `request_more_evidence`
+7. `_apply_governance_decision` ripristina lo step come `IN_PROGRESS`
+
+Il judge non viene invocato per questa sola ragione: è riservato alle proposte
+`governed_external` candidate all'esecuzione che non siano già hard-denied.
 
 Questo è il comportamento voluto:
 il runtime non lascia chiudere con claim più precisi dell’evidenza disponibile.
 
 ## 40. Esempio Ragionato: Quando Scatta `wait_human_review`
 
-Può succedere in almeno tre modi:
+Può succedere quando:
 
-1. OPA lo impone direttamente
-2. `operational_risk > 0.60`
-3. behavioral segnala:
-   - `behavior_deviation_score >= 0.80`
-   - oppure `review_rate >= 0.50` con dynamic non healthy
+1. un pillar attivo obbligatorio è indisponibile o invalido
+2. il judge richiesto è indisponibile, incerto o valuta un digest diverso
+3. il judge segnala una proposta `unsafe`
+4. evidence e trajectory soddisfano le condizioni versionate nel bundle OPA
+5. il runtime incontra un'altra condizione esplicita di review
+
+Operational risk e behavioral restano osservabili in shadow e non possono
+modificare la direttiva.
 
 In questi casi:
 
@@ -2046,14 +2113,8 @@ In questi casi:
 
 ## 41. Esempio Ragionato: Quando Scatta `replan`
 
-Può succedere se:
-
-- `trajectory_health < 0.60`
-- oppure la behavioral vede `behavior_deviation_score >= 0.60` con driver su:
-  - actor turn count
-  - replan count
-  - tool call count
-- oppure l’actor stesso produce `NEEDS_REPLAN`
+Può succedere se la trajectory soddisfa le condizioni di replan definite in
+OPA oppure se l’actor produce `NEEDS_REPLAN`.
 
 In quel caso il sistema non insiste sulla traiettoria corrente.
 La sostituisce.
@@ -2065,8 +2126,8 @@ Vuol dire una cosa precisa:
 
 - non aumentare la permissività rispetto alla static policy
 - non permettere completamenti oltre il support level dell’evidenza
-- non ignorare deviazioni forti dalla storia
-- non far collassare task rischiose in execution automatica
+- non usare segnali shadow come autorità decisionale
+- validare l'integrità del digest fra proposta, judge, HITL ed esecuzione
 - preferire richiesta di evidenza, replan o review quando il segnale è ambiguo
 
 ## 43. In Sintesi: Il Flusso End-To-End
@@ -2079,13 +2140,14 @@ Task utente
   -> bootstrap costruisce TaskState
   -> planner crea plan_steps semantici
   -> actor lavora sul current step
-  -> governance costruisce PolicyEvaluationInput
-  -> static policy decide il vincolo hard
-  -> dynamic policy calcola evidence_quality, operational_risk, trajectory_health
-  -> behavioral confronta la run con la storia SQLite
-  -> judge parte solo se ci sono segnali semantici fragili
-  -> combiner prende la direttiva più conservativa compatibile con la static policy
-  -> runtime applica la decisione
+  -> governance normalizza l'eventuale ExternalOperationProposal
+  -> OPA preflight decide i pillar obbligatori
+  -> static policy applica guardrail deterministici specifici
+  -> evidence e trajectory producono fatti attivi
+  -> operational risk e behavioral producono telemetria shadow
+  -> judge valuta semanticamente solo il governed_external richiesto da OPA
+  -> OPA restituisce l'unica direttiva finale
+  -> LangGraph applica la direttiva validata
   -> se serve tool: Tool Gateway
   -> observe_tool_result trasforma il risultato in ObservedEvidence
   -> actor riparte con nuova evidenza
@@ -2096,11 +2158,14 @@ Task utente
 
 ## 44. Punto Più Importante Per Leggere Il Sistema
 
-Se vuoi capire il comportamento reale del runtime, devi leggere sempre insieme questi quattro livelli:
+Se vuoi capire il comportamento reale del runtime, devi leggere insieme questi
+cinque livelli:
 
 1. che cosa l’actor sta cercando di fare
 2. che support level richiede davvero quello che sta dicendo
 3. che support level è davvero disponibile nelle evidenze osservate
-4. quanto la traiettoria corrente assomiglia o devia dalla storia
+4. se esiste una proposta external normalizzata e quale digest è governato
+5. che cosa restituisce OPA dopo gli eventuali fatti semantici del judge
 
-Tutto il resto del sistema gira intorno a questo confronto.
+La memoria behavioral e l'operational risk restano disponibili per analisi ed
+evaluation, ma non partecipano alla decisione live.

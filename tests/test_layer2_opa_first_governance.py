@@ -103,6 +103,27 @@ class OPAFirstGovernanceContractTests(unittest.TestCase):
         self.assertTrue(result.governance_decision.requires_human_review)
         self.assertIn(GovernanceReasonCode.OPA_FAILURE_FAIL_CLOSED, result.governance_decision.reason_codes)
 
+    # A partial preflight response cannot silently disable a required pillar.
+    def test_incomplete_required_pillars_response_fails_closed(self) -> None:
+        state = _actor_ready_state()
+        engine = _IncompletePreflightPolicyEngine()
+
+        result = evaluate_opa_first_governance(
+            task_state=state,
+            policy_engine_service=engine,
+            thread_id="opa-first-incomplete-preflight",
+        )
+
+        self.assertEqual(
+            result.governance_decision.directive,
+            GovernanceDirective.WAIT_HUMAN_REVIEW,
+        )
+        self.assertIn(
+            GovernanceReasonCode.OPA_FAILURE_FAIL_CLOSED,
+            result.governance_decision.reason_codes,
+        )
+        self.assertNotIn("decision", engine.calls)
+
     # Final diagnostics and the governance trace must use the scored OPA pillar output.
     def test_scored_opa_levels_drive_dynamic_and_governance_summaries(self) -> None:
         result = evaluate_opa_first_governance(
@@ -136,8 +157,8 @@ class EvaluationServiceDecouplingTests(unittest.TestCase):
 
 
 class _AllowPolicyEngine(PolicyEnginePort):
-    policy_engine_name = "test_opa_v2_engine"
-    policy_bundle_version = "layer2_governance_v2"
+    policy_engine_name = "test_opa_v3_engine"
+    policy_bundle_version = "layer2_governance_v3"
     policy_config_version = "layer2_governance_thresholds_v1"
 
     def __init__(self) -> None:
@@ -149,9 +170,9 @@ class _AllowPolicyEngine(PolicyEnginePort):
         return {
             "schema_version": "governance_decision_output.v1",
             "require_evidence": True,
-            "require_risk": True,
+            "require_risk": False,
             "require_trajectory": True,
-            "require_behavioral": True,
+            "require_behavioral": False,
             "require_judge": False,
         }
 
@@ -164,7 +185,17 @@ class _AllowPolicyEngine(PolicyEnginePort):
             "policy_decision": "allow",
             "reason_codes": ["allowed_by_policy"],
             "pillar_results": {
-                "static_policy": {},
+                "static_policy": {
+                    "hard_deny": False,
+                    "constraints": [],
+                    "violations": [],
+                    "reason_codes": [],
+                    "summary": "Static deterministic guardrails passed.",
+                    "read_only_required": False,
+                    "clarification_signaled": False,
+                    "mode": "active",
+                    "decision_influence": True,
+                },
                 "evidence": decision_input["pillars"]["evidence"],
                 "risk": decision_input["pillars"]["risk"],
                 "trajectory": decision_input["pillars"]["trajectory"],
@@ -177,6 +208,19 @@ class _AllowPolicyEngine(PolicyEnginePort):
             "requires_human_review": False,
             "policy_bundle_version": self.policy_bundle_version,
             "policy_config_version": self.policy_config_version,
+        }
+
+
+class _IncompletePreflightPolicyEngine(_AllowPolicyEngine):
+    # Omit one mandatory boolean to exercise strict preflight validation.
+    def evaluate_required_pillars(self, *, base_facts):
+        self.calls.append("required_pillars")
+        return {
+            "schema_version": "governance_decision_output.v1",
+            "require_evidence": True,
+            "require_risk": False,
+            "require_trajectory": True,
+            "require_behavioral": False,
         }
 
     # Keep compatibility with the legacy protocol method.

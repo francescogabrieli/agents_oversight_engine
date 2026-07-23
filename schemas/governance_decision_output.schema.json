@@ -22,12 +22,12 @@
       "enum": [
         "continue",
         "continue_read_only",
+        "revise_action",
         "request_more_evidence",
         "replan",
         "ask_user_clarification",
         "wait_human_review",
-        "stop",
-        "deny"
+        "stop"
       ]
     },
     "policy_decision": {
@@ -38,7 +38,30 @@
       "items": { "type": "string", "minLength": 1 },
       "minItems": 1
     },
-    "pillar_results": { "type": "object" },
+    "pillar_results": {
+      "type": "object",
+      "required": ["static_policy", "evidence", "risk", "trajectory", "behavioral", "judge"],
+      "properties": {
+        "static_policy": {
+          "type": "object",
+          "required": ["hard_deny", "constraints", "violations", "reason_codes", "summary"],
+          "properties": {
+            "hard_deny": { "type": "boolean" },
+            "constraints": { "type": "array", "items": { "type": "string" } },
+            "violations": { "type": "array", "items": { "type": "string" } },
+            "reason_codes": { "type": "array", "items": { "type": "string" } },
+            "summary": { "type": "string" }
+          },
+          "additionalProperties": true
+        },
+        "evidence": { "type": "object" },
+        "risk": { "type": "object" },
+        "trajectory": { "type": "object" },
+        "behavioral": { "type": "object" },
+        "judge": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
     "selected_reason": { "type": "string", "minLength": 1 },
     "rejected_alternatives": { "type": "object" },
     "safety_invariants_checked": {

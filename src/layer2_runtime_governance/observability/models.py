@@ -72,6 +72,7 @@ class TraceActorTurn:
     proposed_tool_name: str | None
     output_claim_support_level: str | None
     precision_mismatch_detected: bool
+    external_operation: dict[str, Any] | None
 
 
 # Read-only observability component extracted from the trace facade.
@@ -137,9 +138,13 @@ class TraceGovernancePass:
 @dataclass(frozen=True)
 class TraceOversightSignal:
     # TraceOversightSignal keeps each adaptive score separate and explainable.
-    score: float
+    score: float | None
     level: str
     reason_codes: tuple[str, ...]
+    mode: str
+    decision_influence: bool
+    applicability: str
+    consequence_facts: dict[str, Any] | None
 
 
 # Read-only observability component extracted from the trace facade.
@@ -164,6 +169,11 @@ class TraceStaticPolicyAssessment:
     policy_engine_name: str
     policy_bundle_version: str
     policy_directive: str
+    hard_deny: bool
+    constraints: tuple[str, ...]
+    violations: tuple[str, ...]
+    mode: str
+    decision_influence: bool
 
 
 # Read-only observability component extracted from the trace facade.
@@ -182,6 +192,9 @@ class TraceBehavioralAssessment:
     behavioral_recommended_directive: str
     behavioral_flags: tuple[str, ...]
     matched_run_ids: tuple[str, ...]
+    mode: str
+    decision_influence: bool
+    status: str
 
 
 # Read-only observability component extracted from the trace facade.
@@ -195,6 +208,13 @@ class TraceJudgeAssessment:
     rationale: str
     flags: tuple[str, ...]
     evaluated_target: str
+    status: str
+    verdict: str | None
+    severity: str
+    findings: tuple[dict[str, Any], ...]
+    evaluated_operation_digest: str | None
+    prompt_version: str | None
+    model_metadata: dict[str, Any] | None
 
 
 # Read-only observability component extracted from the trace facade.
@@ -240,6 +260,12 @@ class TraceHumanReviewRequest:
     reason_codes: tuple[str, ...]
     allowed_decisions: tuple[str, ...]
     review_summary: str | None
+    operation_id: str | None
+    operation_payload_digest: str | None
+    operation_proposal_summary: str | None
+    operation_target: str | None
+    external_operation_proposal: dict[str, Any] | None
+    judge_findings: tuple[str, ...]
 
 
 # Read-only observability component extracted from the trace facade.
@@ -252,6 +278,8 @@ class TraceHumanReviewDecision:
     clarification_text: str | None
     external_communication_edit: TraceHumanReviewExternalEdit | None
     reviewer_id: str | None
+    approved_operation_digest: str | None
+    external_operation_edit: dict[str, Any] | None
 
 
 # Read-only observability component extracted from the trace facade.

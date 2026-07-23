@@ -7,6 +7,30 @@ from layer2_runtime_governance.infrastructure.checkpointing import (
 
 
 class Layer2HumanReviewRuntimeTests(unittest.TestCase):
+    # The operator receives the same complete action set for every HITL reason.
+    def test_human_review_always_exposes_all_seven_decisions(self) -> None:
+        task_state = TaskState.from_intake(_build_clarification_intake_result())
+        task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        task_state.human_review_resume_state = RuntimeState.ACTING
+
+        request = build_human_review_request(
+            state=task_state,
+            thread_id="uniform-hitl-actions",
+        )
+
+        self.assertEqual(
+            request.allowed_decisions,
+            (
+                HumanReviewDecisionType.APPROVE_CONTINUE,
+                HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY,
+                HumanReviewDecisionType.MODIFY_AND_CONTINUE,
+                HumanReviewDecisionType.REQUEST_MORE_EVIDENCE,
+                HumanReviewDecisionType.REPLAN,
+                HumanReviewDecisionType.ASK_CLARIFICATION,
+                HumanReviewDecisionType.ABORT,
+            ),
+        )
+
     # Scenarios remain grouped by the capability whose behavior they verify.
     def test_needs_clarification_skips_actor(self) -> None:
         graph = _build_test_graph()
@@ -62,7 +86,14 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
                 "Actor provider returned no usable runtime action: OpenRouter returned no "
                 "tool call and no assistant content. finish_reason='stop'."
             ),
+            scratchpad_entry=ScratchpadEntry(
+                turn_index=1,
+                plan_step_id="step_1",
+                entry_type=ScratchpadEntryType.UNCERTAINTY,
+                summary="Actor provider returned no usable runtime action.",
+            ),
         )
+        task_state.scratchpad.append(task_state.actor_result.scratchpad_entry)
 
         result = governance(
             task_state,
@@ -80,7 +111,7 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
         )
 
 
-    def test_opa_policy_denies_write_capability_without_external_impact(self) -> None:
+    def test_opa_policy_does_not_deny_write_compatibility_flag_alone(self) -> None:
         opa_path = shutil.which("opa")
         if opa_path is None:
             self.skipTest("OPA executable is not available.")
@@ -115,8 +146,8 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
         parsed = json.loads(completed.stdout)
         decision = parsed["result"][0]["expressions"][0]["value"]
 
-        self.assertEqual(decision["policy_decision"], "deny")
-        self.assertIn("write_capability_blocked", decision["reason_codes"])
+        self.assertNotEqual(decision["policy_decision"], "deny")
+        self.assertNotIn("write_capability_blocked", decision["reason_codes"])
 
 
     def test_opa_input_marks_external_communication_draft_phase(self) -> None:
@@ -533,6 +564,7 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
             HumanReviewDecision(
                 request_id=pending_request.request_id,
                 decision_type=HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY,
+                approved_operation_digest=pending_request.operation_payload_digest,
             ),
         )
         self.assertEqual(read_only_state.current_state, RuntimeState.READY_TOOL_EXECUTION)
@@ -588,10 +620,10 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(task_state.current_state, RuntimeState.ACTING)
+        self.assertEqual(task_state.current_state, RuntimeState.READY_GOVERNANCE)
         self.assertEqual(
             task_state.external_communication.phase,
-            ExternalCommunicationPhase.APPROVED_FOR_EXECUTION,
+            ExternalCommunicationPhase.DRAFT_PROPOSAL,
         )
         self.assertEqual(task_state.external_communication.draft.channel, "slack")
         self.assertEqual(task_state.external_communication.draft.recipient, "#ops")
@@ -650,8 +682,9 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
             thread_id="external-edit-restored",
         )
 
-        self.assertIsInstance(task_state.external_communication.draft, ExternalCommunicationDraft)
-        self.assertEqual(task_state.external_communication.draft.channel, "email")
+        # Building an operator view must not mutate the canonical checkpoint state.
+        self.assertIsInstance(task_state.external_communication.draft, dict)
+        self.assertEqual(task_state.external_communication.draft["channel"], "email")
         self.assertIsInstance(pending_request.external_communication_draft, ExternalCommunicationDraft)
         self.assertEqual(pending_request.external_communication_draft.recipient, "ops@example.com")
 
@@ -695,12 +728,12 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
         with patch("layer2_runtime_governance.hitl.interrupt", return_value=resume_payload):
             result_state = human_review(task_state, thread_id="external-edit-node")
 
-        self.assertEqual(result_state.current_state, RuntimeState.ACTING)
+        self.assertEqual(result_state.current_state, RuntimeState.READY_GOVERNANCE)
         self.assertIsNone(result_state.pending_human_review_request)
         self.assertEqual(result_state.last_human_review_decision.decision_type, HumanReviewDecisionType.MODIFY_AND_CONTINUE)
         self.assertEqual(
             result_state.external_communication.phase,
-            ExternalCommunicationPhase.APPROVED_FOR_EXECUTION,
+            ExternalCommunicationPhase.DRAFT_PROPOSAL,
         )
         self.assertEqual(result_state.external_communication.draft.channel, "slack")
         self.assertEqual(result_state.external_communication.draft.recipient, "#ops")
@@ -725,6 +758,12 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
         state.current_plan_step_index = 0
         state.external_communication.phase = ExternalCommunicationPhase.DRAFT_PROPOSAL
         state.external_communication.review_ready = True
+        state.external_communication.draft = ExternalCommunicationDraft(
+            channel="email",
+            recipient="ops@example.com",
+            subject="Operational update",
+            body="Draft email body.",
+        )
         state.actor_result = ActorResult(
             plan_step_id="step_1",
             result_type=ActorResultType.INTERMEDIATE_OUTPUT,
@@ -749,7 +788,10 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
         )
 
         self.assertTrue(result.last_judge_assessment.invoked)
-        self.assertEqual(result.last_judge_assessment.evaluated_target, "opa_required")
+        self.assertEqual(
+            result.last_judge_assessment.evaluated_operation_digest,
+            result.external_operation_proposal.payload_digest,
+        )
 
 
 if __name__ == "__main__":

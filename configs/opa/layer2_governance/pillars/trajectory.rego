@@ -42,6 +42,8 @@ result := {
 	"replan_limit_exceeded": facts.replan_count >= weights.max_replans,
 	"provider_failures_repeated": facts.consecutive_provider_failures >= thresholds.provider_failure_review_count,
 	"repeated_recovery": facts.repeated_recovery,
+	"action_revision_count": object.get(facts, "action_revision_count", 0),
+	"action_revision_limit_exceeded": object.get(facts, "action_revision_count", 0) >= object.get(thresholds, "max_action_revisions_before_review", 3),
 	"raw_facts": facts,
 	"score_components": input.pillars.trajectory.score_components,
 	"score_formula_version": input.pillars.trajectory.score_formula_version,

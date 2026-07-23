@@ -4,6 +4,12 @@ from typing import Any
 
 from .contracts import PolicyEvaluationInput
 from ..domain import TaskState
+from ..external_operations.contracts import (
+    CommunicationOperationPayload,
+    DatabaseOperationPayload,
+    ExternalOperationProposal,
+    GenericExternalOperationPayload,
+)
 
 
 # Build the base facts document sent to OPA before optional pillar selection.
@@ -12,7 +18,15 @@ def build_governance_base_facts(
     task_state: TaskState,
     policy_input: PolicyEvaluationInput,
 ) -> dict[str, Any]:
-    current_step = task_state.current_plan_step
+    current_step = next(
+        (
+            step
+            for step in task_state.plan_steps
+            if task_state.actor_result is not None
+            and step.step_id == task_state.actor_result.plan_step_id
+        ),
+        task_state.current_plan_step,
+    )
     validation = (
         task_state.actor_result.step_validation
         if task_state.actor_result is not None
@@ -71,8 +85,16 @@ def build_governance_base_facts(
             "name": policy_input.tool_name.value if policy_input.tool_name is not None else None,
             "has_query": policy_input.tool_has_query,
             "has_url": policy_input.tool_has_url,
-            "is_read_only": True if current_tool_request is not None else None,
+            "is_read_only": (
+                task_state.external_operation_proposal.normalized_effect.value == "read"
+                if current_tool_request is not None
+                and task_state.external_operation_proposal is not None
+                else None
+            ),
         },
+        "external_operation": _external_operation_facts(
+            task_state.external_operation_proposal
+        ),
         "external_communication": {
             "phase": (
                 policy_input.external_communication_phase.value
@@ -92,6 +114,92 @@ def build_governance_base_facts(
             else None
         ),
     }
+
+
+# Serialize the canonical proposal into a closed, policy-oriented fact shape.
+def _external_operation_facts(
+    proposal: ExternalOperationProposal | None,
+) -> dict[str, Any]:
+    if proposal is None:
+        return {
+            "operation_id": None,
+            "plan_step_id": None,
+            "capability_id": None,
+            "boundary": "local",
+            "operation_family": "generic",
+            "normalized_effect": "read",
+            "execution_candidate": False,
+            "target": {
+                "kind": "local",
+                "value": "runtime",
+                "destination_class": "internal",
+            },
+            "payload_digest": None,
+            "payload_preview": None,
+            "capability_profile_id": None,
+            "capability_profile_version": None,
+            "facts_provenance": None,
+            "payload": {"payload_type": "none"},
+        }
+    return {
+        "operation_id": proposal.operation_id,
+        "plan_step_id": proposal.plan_step_id,
+        "capability_id": proposal.capability_id,
+        "boundary": proposal.boundary.value,
+        "operation_family": proposal.operation_family.value,
+        "normalized_effect": proposal.normalized_effect.value,
+        "execution_candidate": proposal.execution_candidate,
+        "target": {
+            "kind": proposal.target.kind,
+            "value": proposal.target.value,
+            "destination_class": proposal.target.destination_class.value,
+        },
+        "payload_digest": proposal.payload_digest,
+        "payload_preview": proposal.payload_preview,
+        "capability_profile_id": proposal.capability_profile_id,
+        "capability_profile_version": proposal.capability_profile_version,
+        "facts_provenance": {
+            "normalizer_id": proposal.facts_provenance.normalizer_id,
+            "normalizer_version": proposal.facts_provenance.normalizer_version,
+            "source_kind": proposal.facts_provenance.source_kind,
+            "source_id": proposal.facts_provenance.source_id,
+            "registry_entry_id": proposal.facts_provenance.registry_entry_id,
+            "fact_notes": list(proposal.facts_provenance.fact_notes),
+        },
+        "payload": _external_payload_facts(proposal),
+    }
+
+
+# Serialize only capability-specific deterministic payload facts.
+def _external_payload_facts(
+    proposal: ExternalOperationProposal,
+) -> dict[str, Any]:
+    payload = proposal.payload
+    if isinstance(payload, CommunicationOperationPayload):
+        return {
+            "payload_type": "communication",
+            "channel": payload.channel,
+            "recipient": payload.recipient,
+            "subject": payload.subject,
+            "destination_class": payload.destination_class.value,
+        }
+    if isinstance(payload, DatabaseOperationPayload):
+        return {
+            "payload_type": "database",
+            "statement_class": payload.statement_class.value,
+            "statement_count": payload.statement_count,
+            "parse_valid": payload.parse_valid,
+            "ambiguous": payload.ambiguous,
+            "database_profile_id": payload.database_profile_id,
+        }
+    if isinstance(payload, GenericExternalOperationPayload):
+        return {
+            "payload_type": "generic",
+            "action": payload.action,
+            "target": payload.target,
+            "field_names": [item.name for item in payload.fields],
+        }
+    raise ValueError("Unsupported external operation payload.")
 
 
 # Build the final versioned OPA decision input from base facts and pillar outputs.
@@ -125,7 +233,7 @@ def validate_governance_decision_input(payload: dict[str, Any]) -> None:
     from .schema_validation import validate_json_schema
 
     validate_json_schema(schema_name="governance_decision_input", payload=payload)
-    for pillar_name in ("evidence", "risk", "trajectory"):
+    for pillar_name in ("evidence", "risk", "trajectory", "behavioral", "judge"):
         pillar = payload["pillars"].get(pillar_name)
         if not isinstance(pillar, dict):
             raise ValueError(f"GovernanceDecisionInput missing pillar '{pillar_name}'.")

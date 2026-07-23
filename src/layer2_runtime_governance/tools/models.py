@@ -6,6 +6,11 @@ from enum import Enum
 from pathlib import Path
 
 from ..infrastructure.environment import load_env_file_values
+from ..external_operations.contracts import (
+    ExternalOperationEffect,
+    ExternalOperationFamily,
+    OperationBoundary,
+)
 from .contracts import ToolName
 
 
@@ -59,6 +64,11 @@ class ToolDefinition:
     allowed_schemes: tuple[str, ...] = ("https",)
     mcp_server_id: str | None = None
     mcp_tool_name: str | None = None
+    operation_boundary: OperationBoundary = OperationBoundary.GOVERNED_EXTERNAL
+    operation_family: ExternalOperationFamily = ExternalOperationFamily.GENERIC
+    normalized_effect: ExternalOperationEffect = ExternalOperationEffect.UNKNOWN
+    capability_profile_id: str | None = None
+    capability_profile_version: str | None = None
 
 
 @dataclass(frozen=True)

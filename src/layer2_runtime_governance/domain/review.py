@@ -5,6 +5,10 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from ..tool_contract import ToolRequest
+from ..external_operations.contracts import (
+    ExternalOperationPayloadEdit,
+    ExternalOperationProposal,
+)
 from .lifecycle import RuntimeState
 
 if TYPE_CHECKING:
@@ -78,6 +82,12 @@ class HumanReviewRequest:
     reason_codes: tuple[str, ...] = field(default_factory=tuple)
     allowed_decisions: tuple[HumanReviewDecisionType, ...] = field(default_factory=tuple)
     review_summary: str | None = None
+    operation_id: str | None = None
+    operation_payload_digest: str | None = None
+    operation_proposal_summary: str | None = None
+    operation_target: str | None = None
+    external_operation_proposal: ExternalOperationProposal | None = None
+    judge_findings: tuple[str, ...] = field(default_factory=tuple)
 
 
 # Canonical domain contract extracted from the legacy state facade.
@@ -90,6 +100,8 @@ class HumanReviewDecision:
     clarification_text: str | None = None
     external_communication_edit: HumanReviewExternalEdit | None = None
     reviewer_id: str | None = None
+    approved_operation_digest: str | None = None
+    external_operation_edit: ExternalOperationPayloadEdit | None = None
 
 
 # Canonical domain contract extracted from the legacy state facade.

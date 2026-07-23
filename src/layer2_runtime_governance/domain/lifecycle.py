@@ -10,6 +10,7 @@ class RuntimeState(str, Enum):
     ACTING = "acting"
     READY_NEXT_STEP = "ready_next_step"
     READY_TOOL_EXECUTION = "ready_tool_execution"
+    READY_GOVERNANCE = "ready_governance"
     REPLANNING = "replanning"
     WAITING_HUMAN_REVIEW = "waiting_human_review"
     COMPLETED = "completed"

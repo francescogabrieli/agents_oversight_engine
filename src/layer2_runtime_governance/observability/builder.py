@@ -64,7 +64,7 @@ def build_layer2_runtime_trace(
     intake_result: IntakeResult,
     task_state: TaskState,
 ) -> Layer2RuntimeTrace:
-    normalize_task_state_serialization(task_state)
+    task_state = normalize_task_state_serialization(task_state)
     return Layer2RuntimeTrace(
         trace_version="layer2_trace.v3",
         runtime=_build_runtime_summary(thread_id=thread_id, task_state=task_state),
@@ -181,6 +181,18 @@ def _build_actor_turn(*, actor_result: ActorResult | None, task_state: TaskState
             actor_result is not None
             and actor_result.output_text
             and precision_mismatch_detected(task_state=task_state)
+        ),
+        external_operation=(
+            to_jsonable(
+                actor_result.external_operation_proposal
+                or task_state.external_operation_proposal
+            )
+            if actor_result is not None
+            and (
+                actor_result.external_operation_proposal is not None
+                or task_state.external_operation_proposal is not None
+            )
+            else None
         ),
     )
 
@@ -317,6 +329,11 @@ def _build_static_policy_assessment(
         policy_engine_name=assessment.policy_engine_name,
         policy_bundle_version=assessment.policy_bundle_version,
         policy_directive=assessment.policy_directive.value,
+        hard_deny=assessment.hard_deny,
+        constraints=assessment.constraints,
+        violations=assessment.violations,
+        mode=assessment.mode,
+        decision_influence=assessment.decision_influence,
     )
 
 
@@ -349,6 +366,9 @@ def _build_behavioral_assessment(
         behavioral_recommended_directive=assessment.behavioral_recommended_directive.value,
         behavioral_flags=assessment.behavioral_flags,
         matched_run_ids=assessment.matched_run_ids,
+        mode=assessment.mode,
+        decision_influence=assessment.decision_influence,
+        status=assessment.status,
     )
 
 
@@ -364,6 +384,17 @@ def _build_judge_assessment(
         rationale=assessment.rationale,
         flags=assessment.flags,
         evaluated_target=assessment.evaluated_target,
+        status=assessment.status.value,
+        verdict=assessment.verdict.value if assessment.verdict is not None else None,
+        severity=assessment.severity.value,
+        findings=tuple(to_jsonable(item) for item in assessment.findings),
+        evaluated_operation_digest=assessment.evaluated_operation_digest,
+        prompt_version=assessment.prompt_version,
+        model_metadata=(
+            to_jsonable(assessment.model_metadata)
+            if assessment.model_metadata is not None
+            else None
+        ),
     )
 
 
@@ -428,6 +459,16 @@ def _build_human_review_request(
         reason_codes=tuple(request.reason_codes),
         allowed_decisions=tuple(decision.value for decision in request.allowed_decisions),
         review_summary=request.review_summary,
+        operation_id=request.operation_id,
+        operation_payload_digest=request.operation_payload_digest,
+        operation_proposal_summary=request.operation_proposal_summary,
+        operation_target=request.operation_target,
+        external_operation_proposal=(
+            to_jsonable(request.external_operation_proposal)
+            if request.external_operation_proposal is not None
+            else None
+        ),
+        judge_findings=request.judge_findings,
     )
 
 
@@ -446,6 +487,12 @@ def _build_human_review_decision(
             else None
         ),
         reviewer_id=decision.reviewer_id,
+        approved_operation_digest=decision.approved_operation_digest,
+        external_operation_edit=(
+            to_jsonable(decision.external_operation_edit)
+            if decision.external_operation_edit is not None
+            else None
+        ),
     )
 
 
@@ -505,6 +552,25 @@ def _build_oversight_signal(
         score=signal.score,
         level=signal.level.value,
         reason_codes=tuple(code.value for code in signal.reason_codes),
+        mode=getattr(signal, "mode", "active"),
+        decision_influence=bool(getattr(signal, "decision_influence", True)),
+        applicability=getattr(signal, "applicability", "applicable"),
+        consequence_facts=(
+            {
+                "recoverability": signal.recoverability,
+                "blast_radius": signal.blast_radius,
+                "sensitivity": signal.sensitivity,
+                "exposure": signal.exposure,
+                "target_criticality": signal.target_criticality,
+                "impact_level": signal.impact_level,
+                "dominant_factors": list(signal.dominant_factors),
+                "unknown_facts": list(signal.unknown_facts),
+                "fact_provenance": list(signal.fact_provenance),
+                "profile_version": signal.profile_version,
+            }
+            if isinstance(signal, OperationalRiskAssessment)
+            else None
+        ),
     )
 
 

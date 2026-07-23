@@ -25,6 +25,7 @@ class GovernanceDirective(str, Enum):
     CONTINUE = "continue"
     CONTINUE_READ_ONLY = "continue_read_only"
     REQUEST_MORE_EVIDENCE = "request_more_evidence"
+    REVISE_ACTION = "revise_action"
     REPLAN = "replan"
     ASK_USER_CLARIFICATION = "ask_user_clarification"
     WAIT_HUMAN_REVIEW = "wait_human_review"
@@ -60,6 +61,18 @@ class GovernanceReasonCode(str, Enum):
     POLICY_VERSION_MISMATCH = "policy_version_mismatch"
     REQUIRED_PILLAR_UNAVAILABLE = "required_pillar_unavailable"
     OPA_FAILURE_FAIL_CLOSED = "opa_failure_fail_closed"
+    STATIC_POLICY_HARD_DENY = "static_policy_hard_deny"
+    READ_ONLY_MUTATION_BLOCKED = "read_only_mutation_blocked"
+    DATABASE_PROFILE_MUTATION_BLOCKED = "database_profile_mutation_blocked"
+    SQL_AMBIGUOUS_OR_MULTIPLE = "sql_ambiguous_or_multiple"
+    PROHIBITED_DESTINATION = "prohibited_destination"
+    JUDGE_REQUIRED_UNAVAILABLE = "judge_required_unavailable"
+    JUDGE_NEEDS_REVISION = "judge_needs_revision"
+    JUDGE_UNSAFE = "judge_unsafe"
+    JUDGE_UNCERTAIN = "judge_uncertain"
+    PROVIDER_RUNTIME_ACTION_MISSING = "provider_runtime_action_missing"
+    PRECISION_MISMATCH_EXTERNAL_OR_SENSITIVE = "precision_mismatch_external_or_sensitive"
+    REPEATED_ACTION_REVISION = "repeated_action_revision"
 
 # Define the stable typed vocabulary shared by runtime and policy adapters.
 @dataclass(frozen=True)
@@ -111,6 +124,11 @@ class StaticPolicyAssessment:
     policy_engine_name: str
     policy_bundle_version: str
     policy_directive: GovernanceDirective
+    hard_deny: bool = False
+    constraints: tuple[str, ...] = ()
+    violations: tuple[str, ...] = ()
+    mode: str = "active"
+    decision_influence: bool = True
 
 # Define the stable typed vocabulary shared by runtime and policy adapters.
 @dataclass(frozen=True)

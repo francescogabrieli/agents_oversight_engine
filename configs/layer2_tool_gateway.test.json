@@ -11,7 +11,12 @@
       "required_fields": ["text"],
       "mcp_server_id": "local_test",
       "mcp_tool_name": "echo",
-      "max_content_chars": 4000
+      "max_content_chars": 4000,
+      "operation_boundary": "local",
+      "operation_family": "generic",
+      "normalized_effect": "read",
+      "capability_profile_id": "local_test.echo",
+      "capability_profile_version": "1"
     },
     {
       "tool_name": "mcp.local_test.read_fixture",
@@ -24,7 +29,12 @@
       "required_fields": ["path"],
       "mcp_server_id": "local_test",
       "mcp_tool_name": "read_fixture",
-      "max_content_chars": 4000
+      "max_content_chars": 4000,
+      "operation_boundary": "local",
+      "operation_family": "generic",
+      "normalized_effect": "read",
+      "capability_profile_id": "local_test.read_fixture",
+      "capability_profile_version": "1"
     },
     {
       "tool_name": "mcp.local_test.text_stats",
@@ -37,7 +47,12 @@
       "required_fields": ["text"],
       "mcp_server_id": "local_test",
       "mcp_tool_name": "text_stats",
-      "max_content_chars": 4000
+      "max_content_chars": 4000,
+      "operation_boundary": "local",
+      "operation_family": "generic",
+      "normalized_effect": "read",
+      "capability_profile_id": "local_test.text_stats",
+      "capability_profile_version": "1"
     },
     {
       "tool_name": "mcp.local_test.calculate_expression",
@@ -50,7 +65,12 @@
       "required_fields": ["expression"],
       "mcp_server_id": "local_test",
       "mcp_tool_name": "calculate_expression",
-      "max_content_chars": 4000
+      "max_content_chars": 4000,
+      "operation_boundary": "local",
+      "operation_family": "generic",
+      "normalized_effect": "read",
+      "capability_profile_id": "local_test.calculate_expression",
+      "capability_profile_version": "1"
     }
   ],
   "mcp_servers": {

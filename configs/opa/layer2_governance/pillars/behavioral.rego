@@ -1,44 +1,18 @@
 package layer2.governance.pillars.behavioral
 
+import rego.v1
+
 facts := object.get(input.pillars.behavioral, "raw_facts", {})
-config := data.policy_config
-thresholds := config.thresholds
 
-default high_novelty := false
-
-default high_deviation := false
-
-default history_sparse := false
-
-default strong := false
-
-high_novelty if {
-	object.get(facts, "novelty_score", 0) >= thresholds.behavioral_high_novelty
-}
-
-high_deviation if {
-	object.get(facts, "deviation_score", 0) >= thresholds.behavioral_high_deviation
-}
-
-history_sparse if {
-	object.get(facts, "matched_run_count", 0) < 3
-}
-
+# Behavioral memory stays queryable and observable but cannot affect the directive.
 result := {
-	"strong": strong,
-	"high_novelty": high_novelty,
-	"high_deviation": high_deviation,
-	"history_sparse": history_sparse,
+	"mode": "shadow",
+	"decision_influence": false,
+	"status": object.get(facts, "status", "shadow"),
 	"raw_facts": facts,
+	"score": object.get(input.pillars.behavioral, "diagnostic_score", null),
+	"level": object.get(input.pillars.behavioral, "diagnostic_level", "shadow"),
 	"score_components": object.get(input.pillars.behavioral, "score_components", {}),
 	"score_formula_version": object.get(input.pillars.behavioral, "score_formula_version", "behavioral_features_v2"),
-	"thresholds_version": object.get(input.pillars.behavioral, "thresholds_version", config.thresholds_version),
-}
-
-strong if {
-	high_novelty
-}
-
-strong if {
-	high_deviation
+	"thresholds_version": object.get(input.pillars.behavioral, "thresholds_version", data.policy_config.thresholds_version),
 }

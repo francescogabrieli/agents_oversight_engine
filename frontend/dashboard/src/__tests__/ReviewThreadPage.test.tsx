@@ -41,7 +41,15 @@ describe("ReviewThreadPage", () => {
               human_review: {
                 pending_request: {
                   request_id: "thread-1:hitl",
-                  allowed_decisions: ["approve_continue", "modify_and_continue"],
+                  allowed_decisions: [
+                    "approve_continue",
+                    "approve_continue_read_only",
+                    "modify_and_continue",
+                    "request_more_evidence",
+                    "replan",
+                    "ask_clarification",
+                    "abort",
+                  ],
                   external_communication_draft: {
                     channel: "email",
                     body: "Draft body.",
@@ -107,6 +115,17 @@ describe("ReviewThreadPage", () => {
     );
 
     expect((await screen.findAllByText("Collect evidence.")).length).toBeGreaterThan(0);
+    for (const label of [
+      "Approve",
+      "Approve read-only",
+      "Modify",
+      "More evidence",
+      "Replan",
+      "Clarify",
+      "Abort",
+    ]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+    }
     await user.click(screen.getByRole("button", { name: "Submit decision" }));
 
     expect(fetch).toHaveBeenCalledWith(

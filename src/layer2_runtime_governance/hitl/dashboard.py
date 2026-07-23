@@ -78,13 +78,17 @@ class DashboardGovernancePanel:
 # DashboardOversightPanel exposes the deterministic adaptive oversight result.
 @dataclass(frozen=True)
 class DashboardOversightPanel:
-    evidence_quality_score: float
+    evidence_quality_score: float | None
     evidence_quality_level: str
     evidence_quality_reason_codes: tuple[str, ...]
-    operational_risk_score: float
+    operational_risk_score: float | None
     operational_risk_level: str
     operational_risk_reason_codes: tuple[str, ...]
-    trajectory_health_score: float
+    operational_risk_mode: str
+    operational_risk_decision_influence: bool
+    operational_risk_applicability: str
+    operational_risk_consequence_facts: dict[str, Any]
+    trajectory_health_score: float | None
     trajectory_health_level: str
     trajectory_health_reason_codes: tuple[str, ...]
     recommended_directive: str
@@ -107,6 +111,9 @@ class DashboardBehavioralPanel:
     behavioral_recommended_directive: str
     behavioral_flags: tuple[str, ...]
     matched_run_ids: tuple[str, ...]
+    mode: str
+    decision_influence: bool
+    status: str
 
 
 # DashboardHumanReviewPanel captures the review payload and resume path.
@@ -121,6 +128,11 @@ class DashboardHumanReviewPanel:
     review_summary: str | None
     external_communication_target_type: str | None
     external_communication_draft: ExternalCommunicationDraft | None
+    operation_id: str | None
+    operation_payload_digest: str | None
+    operation_proposal_summary: str | None
+    operation_target: str | None
+    judge_findings: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -156,7 +168,7 @@ class GovernanceHitlDashboardSnapshot:
 def build_governance_hitl_dashboard_snapshot(
     task_state: TaskState,
 ) -> GovernanceHitlDashboardSnapshot:
-    normalize_task_state_serialization(task_state)
+    task_state = normalize_task_state_serialization(task_state)
     current_state = task_state.current_state
     focus = _resolve_dashboard_focus(task_state=current_state)
     governance_panel = _build_governance_panel(task_state.last_governance_decision)
@@ -280,6 +292,27 @@ def _build_oversight_panel(
         operational_risk_reason_codes=tuple(
             code.value for code in oversight_assessment.operational_risk.reason_codes
         ),
+        operational_risk_mode=oversight_assessment.operational_risk.mode,
+        operational_risk_decision_influence=(
+            oversight_assessment.operational_risk.decision_influence
+        ),
+        operational_risk_applicability=oversight_assessment.operational_risk.applicability,
+        operational_risk_consequence_facts={
+            "recoverability": oversight_assessment.operational_risk.recoverability,
+            "blast_radius": oversight_assessment.operational_risk.blast_radius,
+            "sensitivity": oversight_assessment.operational_risk.sensitivity,
+            "exposure": oversight_assessment.operational_risk.exposure,
+            "target_criticality": oversight_assessment.operational_risk.target_criticality,
+            "impact_level": oversight_assessment.operational_risk.impact_level,
+            "dominant_factors": list(
+                oversight_assessment.operational_risk.dominant_factors
+            ),
+            "unknown_facts": list(oversight_assessment.operational_risk.unknown_facts),
+            "fact_provenance": list(
+                oversight_assessment.operational_risk.fact_provenance
+            ),
+            "profile_version": oversight_assessment.operational_risk.profile_version,
+        },
         trajectory_health_score=oversight_assessment.trajectory_health.score,
         trajectory_health_level=oversight_assessment.trajectory_health.level.value,
         trajectory_health_reason_codes=tuple(
@@ -311,6 +344,9 @@ def _build_behavioral_panel(
         behavioral_recommended_directive=behavioral_assessment.behavioral_recommended_directive.value,
         behavioral_flags=behavioral_assessment.behavioral_flags,
         matched_run_ids=behavioral_assessment.matched_run_ids,
+        mode=behavioral_assessment.mode,
+        decision_influence=behavioral_assessment.decision_influence,
+        status=behavioral_assessment.status,
     )
 
 
@@ -362,6 +398,23 @@ def _build_human_review_panel(*, task_state: TaskState) -> DashboardHumanReviewP
             pending_request.external_communication_draft
             if pending_request is not None
             else None
+        ),
+        operation_id=pending_request.operation_id if pending_request is not None else None,
+        operation_payload_digest=(
+            pending_request.operation_payload_digest
+            if pending_request is not None
+            else None
+        ),
+        operation_proposal_summary=(
+            pending_request.operation_proposal_summary
+            if pending_request is not None
+            else None
+        ),
+        operation_target=(
+            pending_request.operation_target if pending_request is not None else None
+        ),
+        judge_findings=(
+            pending_request.judge_findings if pending_request is not None else ()
         ),
     )
 

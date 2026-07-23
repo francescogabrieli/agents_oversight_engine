@@ -17,6 +17,10 @@ from .domain import (
 )
 from .tool_contract import ObservedEvidence, ToolExecutionResult, ToolRequest
 from .tool_contract import EvidenceSupportLevel
+from .external_operations.contracts import (
+    ExternalOperationProposal,
+    GovernanceActionFeedback,
+)
 
 
 # CapabilityAccessMode keeps external-read and external-write intent explicit.
@@ -85,6 +89,7 @@ class ActorTask:
     planner_rationale: str | None = None
     planner_name: str | None = None
     planner_prompt_version: str | None = None
+    governance_feedback: tuple[GovernanceActionFeedback, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -103,6 +108,8 @@ class ActorResult:
     scratchpad_entry: ScratchpadEntry | None = None
     # Required before local or final outputs can complete a plan step.
     step_validation: StepValidation | None = None
+    # Runtime normalizers populate this field; provider-supplied boundary flags are not authoritative.
+    external_operation_proposal: ExternalOperationProposal | None = None
 
 
 class ActorPort(Protocol):
@@ -183,6 +190,7 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
         planner_rationale=task_state.planner_rationale,
         planner_name=task_state.planner_name,
         planner_prompt_version=task_state.planner_prompt_version,
+        governance_feedback=tuple(task_state.governance_action_feedback),
     )
 
 

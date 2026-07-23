@@ -3,13 +3,13 @@ package layer2.evaluation
 default compliance := {
 	"status": "inconclusive",
 	"findings": [],
-	"policy_bundle_version": "layer2_governance_v2",
+	"policy_bundle_version": "layer2_governance_v3",
 }
 
 compliance := {
 	"status": status,
 	"findings": findings,
-	"policy_bundle_version": "layer2_governance_v2",
+	"policy_bundle_version": "layer2_governance_v3",
 }
 
 status := "inconclusive" if {
@@ -69,21 +69,53 @@ findings contains "fail_closed_not_reviewed" if {
 	decision.directive != "wait_human_review"
 }
 
-findings contains "behavioral_forced_hitl_without_corroboration" if {
+findings contains "behavioral_pillar_not_shadow_only" if {
 	some decision in input.trace.governance_passes
-	decision.directive == "wait_human_review"
-	decision.pillar_results.behavioral.strong == true
-	decision.pillar_results.judge.strong_signal != true
-	decision.pillar_results.evidence.precision_mismatch != true
-	decision.pillar_results.risk.level != "high"
-	decision.pillar_results.static_policy.hitl_mandatory != true
+	behavioral := decision.pillar_results.behavioral
+	behavioral.mode != "shadow"
+}
+
+findings contains "behavioral_pillar_not_shadow_only" if {
+	some decision in input.trace.governance_passes
+	decision.pillar_results.behavioral.decision_influence != false
+}
+
+findings contains "operational_risk_pillar_not_shadow_only" if {
+	some decision in input.trace.governance_passes
+	risk := decision.pillar_results.risk
+	risk.mode != "shadow"
+}
+
+findings contains "operational_risk_pillar_not_shadow_only" if {
+	some decision in input.trace.governance_passes
+	decision.pillar_results.risk.decision_influence != false
 }
 
 findings contains "judge_used_as_hard_deny" if {
 	some decision in input.trace.governance_passes
 	decision.policy_decision == "deny"
 	decision.pillar_results.judge.invoked == true
-	decision.pillar_results.static_policy.write_blocked != true
+	decision.pillar_results.static_policy.hard_deny != true
+}
+
+findings contains "required_judge_unavailable_not_reviewed" if {
+	some decision in input.trace.governance_passes
+	decision.pillar_requirements.require_judge == true
+	decision.pillar_results.judge.available != true
+	decision.directive != "wait_human_review"
+}
+
+findings contains "judge_digest_mismatch_not_reviewed" if {
+	some decision in input.trace.governance_passes
+	decision.pillar_requirements.require_judge == true
+	decision.pillar_results.judge.digest_matches != true
+	decision.directive != "wait_human_review"
+}
+
+findings contains "revision_directive_without_revision_verdict" if {
+	some decision in input.trace.governance_passes
+	decision.directive == "revise_action"
+	decision.pillar_results.judge.verdict != "needs_revision"
 }
 
 # Aggregated search fallback text cannot represent extracted source-level content.

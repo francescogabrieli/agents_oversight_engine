@@ -8,19 +8,37 @@
     "schema_version": { "const": "governance_decision_input.v1" },
     "policy_bundle_version": { "type": "string", "minLength": 1 },
     "policy_config_version": { "type": "string", "minLength": 1 },
-    "base_facts": { "type": "object" },
-    "pillar_requirements": { "type": "object" },
+    "base_facts": {
+      "type": "object",
+      "required": ["external_operation"],
+      "properties": {
+        "external_operation": { "$ref": "#/$defs/externalOperationFacts" }
+      },
+      "additionalProperties": true
+    },
+    "pillar_requirements": {
+      "type": "object",
+      "required": ["require_evidence", "require_risk", "require_trajectory", "require_behavioral", "require_judge"],
+      "properties": {
+        "require_evidence": { "type": "boolean" },
+        "require_risk": { "const": false },
+        "require_trajectory": { "type": "boolean" },
+        "require_behavioral": { "const": false },
+        "require_judge": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
     "pillars": {
       "type": "object",
-      "required": ["evidence", "risk", "trajectory"],
+      "required": ["evidence", "risk", "trajectory", "behavioral", "judge"],
       "properties": {
         "evidence": { "type": "object" },
         "risk": { "type": "object" },
         "trajectory": { "type": "object" },
         "behavioral": { "type": "object" },
-        "judge": { "type": "object" }
+        "judge": { "$ref": "#/$defs/judgePillar" }
       },
-      "additionalProperties": true
+      "additionalProperties": false
     },
     "pillar_errors": {
       "type": "object",
@@ -28,7 +46,148 @@
     },
     "pillar_unavailable": {
       "type": "object",
+      "required": ["evidence", "risk", "trajectory", "behavioral", "judge"],
       "additionalProperties": { "type": "boolean" }
+    }
+  },
+  "$defs": {
+    "externalOperationFacts": {
+      "type": "object",
+      "required": [
+        "operation_id", "plan_step_id", "capability_id", "boundary",
+        "operation_family", "normalized_effect", "execution_candidate",
+        "target", "payload_digest", "payload_preview", "capability_profile_id",
+        "capability_profile_version", "facts_provenance", "payload"
+      ],
+      "properties": {
+        "operation_id": { "type": ["string", "null"] },
+        "plan_step_id": { "type": ["string", "null"] },
+        "capability_id": { "type": ["string", "null"] },
+        "boundary": { "enum": ["local", "evidence_read", "governed_external"] },
+        "operation_family": { "enum": ["communication", "database", "generic"] },
+        "normalized_effect": { "enum": ["read", "create", "update", "delete", "truncate", "send", "publish", "execute", "unknown"] },
+        "execution_candidate": { "type": "boolean" },
+        "target": {
+          "type": "object",
+          "required": ["kind", "value", "destination_class"],
+          "properties": {
+            "kind": { "type": "string" },
+            "value": { "type": "string" },
+            "destination_class": { "enum": ["internal", "external", "prohibited", "unknown"] }
+          },
+          "additionalProperties": false
+        },
+        "payload_digest": {
+          "anyOf": [
+            { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            { "type": "null" }
+          ]
+        },
+        "payload_preview": { "type": ["string", "null"] },
+        "capability_profile_id": { "type": ["string", "null"] },
+        "capability_profile_version": { "type": ["string", "null"] },
+        "facts_provenance": { "type": ["object", "null"] },
+        "payload": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "judgePillar": {
+      "type": "object",
+      "required": [
+        "raw_facts",
+        "diagnostic_score",
+        "diagnostic_level",
+        "score_components",
+        "reason_facts",
+        "summary",
+        "score_formula_version",
+        "thresholds_version"
+      ],
+      "properties": {
+        "raw_facts": {
+          "type": "object",
+          "required": [
+            "invoked",
+            "required",
+            "status",
+            "pillar_unavailable",
+            "verdict",
+            "severity",
+            "confidence",
+            "findings",
+            "evaluated_operation_digest",
+            "expected_operation_digest",
+            "digest_matches"
+          ],
+          "properties": {
+            "invoked": { "type": "boolean" },
+            "required": { "type": "boolean" },
+            "status": {
+              "enum": ["active", "not_applicable", "unavailable", "invalid"]
+            },
+            "pillar_unavailable": { "type": "boolean" },
+            "verdict": {
+              "enum": ["safe", "needs_revision", "unsafe", "uncertain"]
+            },
+            "severity": { "enum": ["low", "medium", "high", "critical"] },
+            "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+            "findings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "category",
+                  "code",
+                  "severity",
+                  "summary",
+                  "evidence_refs"
+                ],
+                "properties": {
+                  "category": { "type": "string", "minLength": 1 },
+                  "code": { "type": "string", "minLength": 1 },
+                  "severity": {
+                    "enum": ["low", "medium", "high", "critical"]
+                  },
+                  "summary": { "type": "string", "minLength": 1 },
+                  "evidence_refs": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "summary": { "type": "string", "minLength": 1 },
+            "evaluated_operation_digest": {
+              "anyOf": [
+                { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                { "type": "null" }
+              ]
+            },
+            "expected_operation_digest": {
+              "anyOf": [
+                { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                { "type": "null" }
+              ]
+            },
+            "digest_matches": { "type": "boolean" },
+            "prompt_version": { "type": ["string", "null"] },
+            "model_metadata": { "type": ["object", "null"] }
+          },
+          "additionalProperties": false
+        },
+        "diagnostic_score": { "type": ["number", "null"] },
+        "diagnostic_level": { "type": "string" },
+        "score_components": { "type": "object" },
+        "reason_facts": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "summary": { "type": "string", "minLength": 1 },
+        "score_formula_version": { "type": "string", "minLength": 1 },
+        "thresholds_version": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

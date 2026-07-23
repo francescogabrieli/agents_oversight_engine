@@ -9,7 +9,12 @@
       "requires_human_review": false,
       "timeout_seconds": 30,
       "required_fields": ["query"],
-      "max_content_chars": 12000
+      "max_content_chars": 12000,
+      "operation_boundary": "evidence_read",
+      "operation_family": "generic",
+      "normalized_effect": "read",
+      "capability_profile_id": "public_evidence.web_search",
+      "capability_profile_version": "1"
     },
     {
       "tool_name": "fetch_url_text",
@@ -22,7 +27,12 @@
       "required_fields": ["url"],
       "allowed_schemes": ["https"],
       "max_bytes": 200000,
-      "max_content_chars": 12000
+      "max_content_chars": 12000,
+      "operation_boundary": "evidence_read",
+      "operation_family": "generic",
+      "normalized_effect": "read",
+      "capability_profile_id": "public_evidence.fetch_url_text",
+      "capability_profile_version": "1"
     }
   ]
 }

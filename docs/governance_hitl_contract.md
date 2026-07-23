@@ -1,171 +1,173 @@
 # Governance and HITL Contract
 
-This document extracts the current runtime boundary between:
+This document defines the implemented Layer 2 governance boundary. The LangGraph
+`governance` node is the Policy Enforcement Point (PEP); OPA/Rego is the only
+Policy Decision Point (PDP) and the sole authority for the final directive.
+Python collects typed facts, invokes bounded services, validates OPA output, and
+applies the returned directive. It does not run a second decision combiner.
 
-- `governance`
-- `oversight`
-- `human_review` / `interrupt-resume`
-- the typed `external_communication` subflow, including human edit/submit on the governed draft
+## External operation boundary
 
-It is intentionally operational, not aspirational: the goal is to make the current control contract explicit so a future dashboard can expose it without inventing new behavior.
+Every runtime action is classified by runtime-owned normalizers and the Tool
+Gateway registry:
 
-## Boundary Rules
-
-1. `governance` is the hard control point after actor execution.
-2. `oversight` can only make the runtime more conservative.
-3. `human_review` is the only pause/resume path for typed operator intervention.
-4. `external_communication` must remain gated behind evidence, draft, and human review.
-5. The dashboard is a view and decision surface over this contract, not a second policy engine.
-
-## Implementation Audit
-
-The table below separates what the code already implements from what is only a documented future slot.
-
-| Contract item | Status | Where it lives |
+| Boundary | Meaning | Judge preflight |
 | --- | --- | --- |
-| `governance` is the hard control point after actor execution | Implemented | `src/layer2_runtime_governance/runtime/governance_service.py`, `src/layer2_runtime_governance/governance_components/` |
-| `oversight` can only make the runtime more conservative | Implemented | `src/layer2_runtime_governance/governance_components/`, `src/layer2_runtime_governance/oversight.py` |
-| `human_review` is the only pause/resume path for typed operator intervention | Implemented | `src/layer2_runtime_governance/hitl.py`, `src/layer2_runtime_governance/graph.py` |
-| `external_communication` stays gated behind evidence, draft, edit, and human review | Partially implemented typed phase model | `src/layer2_runtime_governance/domain/review.py`, `src/layer2_runtime_governance/runtime/actor_service.py`, `src/layer2_runtime_governance/runtime/governance_service.py`, `src/layer2_runtime_governance/hitl.py` |
-| The dashboard is a view and decision surface over this contract | Implemented local HTML control plane | `src/main_layer2_dashboard.py`, `src/layer2_runtime_governance/hitl_dashboard.py` |
+| `local` | No operation crosses the runtime boundary | Not required |
+| `evidence_read` | Public/read-only evidence acquisition, including `web_search` and `fetch_url_text` | Not required |
+| `governed_external` | Enterprise reads, communication, mutation, publication, or an unknown external capability | Required for an execution candidate unless static policy already hard-denied it |
 
-## Dashboard Data Model
+The canonical `ExternalOperationProposal` is immutable and contains operation
+identity, evaluated plan step, capability, boundary, family, normalized effect,
+typed target, bounded/redacted preview, deterministic payload digest, capability
+profile version, and fact provenance. Compatibility fields `capability_mode` and
+`external_impact` are derived projections only.
 
-The dashboard should be derived from `TaskState` plus the pending human review payload.
+Payload families are deliberately small:
 
-Already available in code:
+- communication: channel, recipient, subject, body, destination class;
+- database: original and normalized SQL, AST-derived statement class, statement
+  count, validity, ambiguity, and database profile;
+- generic: bounded action, target, and typed string fields.
 
-- current runtime state
-- current plan step
-- latest governance directive
-- latest oversight summary
-- reason codes
-- pending human review request
-- allowed human review decisions
-- resume state
-- final or aborted state
+SQL normalization uses `sqlglot`, accepts one statement, and classifies comments,
+casing, CTEs, mutations, unknown commands, and multiple statements
+deterministically. Email normalization never judges tone or harmful intent.
 
-Already typed in the runtime:
+## Pillar authority
 
-- `TaskState`
-- `GovernanceDecision`
-- `OversightAssessment`
-- `HumanReviewRequest`
-- `HumanReviewDecision`
-- `HumanReviewDecisionType`
-- `ExternalCommunicationState`
-- `ExternalCommunicationPhase`
+| Component | Mode | Decision influence | Failure semantics |
+| --- | --- | --- | --- |
+| Static policy | active | Hard deterministic guardrails | Hard deny is absorbing |
+| Evidence | active | Evidence gap and precision support | Required failure goes fail-closed through OPA |
+| Trajectory | active | Recovery, replan, repeated revision/provider escalation | Required failure goes fail-closed through OPA |
+| Semantic judge | active when OPA requires it | OPA maps semantic assessment to a directive | Required unavailable/invalid/digest mismatch goes to HITL |
+| Operational risk | shadow | None | Error is traced; no fail-closed |
+| Behavioral | shadow | None | Error is traced; no fail-closed |
 
-## Decision Matrix
+Static policy blocks only configured deterministic violations. Externality or a
+write compatibility flag alone does not cause deny or HITL. Current hard
+violations include:
 
-| Situation | Decision owner | Runtime directive | Runtime state | Operator / dashboard implication |
-| --- | --- | --- | --- | --- |
-| Actor outcome is policy-compliant and evidence is sufficient | `governance` with no tightening from `oversight` | `continue` or `continue_read_only` | `ACTING` or next-step progression | Show current step and allow runtime to proceed without interruption |
-| Actor proposes a tool-backed action that remains within the read-only envelope | `governance` | `continue_read_only` | `READY_TOOL_EXECUTION` or continued runtime progression | Show that execution is constrained but still live |
-| Policy allows progress, but deterministic oversight says more evidence is needed | `oversight` combined by `governance` | `request_more_evidence` | `ACTING` | Show that the runtime should gather more evidence; no human decision required yet |
-| Actor step is semantically misaligned with the plan and needs correction | `governance` or actor self-validation | `replan` | `REPLANNING` | Show that the current trajectory is no longer stable and the planner must replace the active step |
-| Policy explicitly requires human review | `governance` | `wait_human_review` | `WAITING_HUMAN_REVIEW` | Show a pause card with the typed review payload and approved actions |
-| Policy requires clarification because input is incomplete or ambiguous | `governance` | `ask_user_clarification` | `WAITING_HUMAN_REVIEW` | Show a clarification-oriented review card; operator must resolve the missing information |
-| Policy denies the actor outcome | `governance` | `stop` | `ABORTED` | Show a terminal denial state; no resume path should be offered |
-| Human reviewer approves continuation | `human_review` | resume to the stored state | Usually `ACTING`, `READY_NEXT_STEP`, or `COMPLETED` | Return control to the runtime using the typed resume payload |
-| Human reviewer edits an external communication draft and submits it | `human_review` | resume to the stored state with the edited draft applied | Usually `ACTING`, `READY_NEXT_STEP`, or `COMPLETED` | Accept the modified draft as the approved governed version for `external_communication` |
-| Human reviewer asks for more evidence | `human_review` | resume after restoring the step | `ACTING` | Keep the task live, but force another evidence-gathering cycle |
-| Human reviewer requests replanning | `human_review` | resume to replanning | `REPLANNING` | Show that the current plan was invalidated and must be replaced |
-| Human reviewer aborts | `human_review` | terminal stop | `ABORTED` | Show final termination; no further action should be possible |
+- `read_only_mode` plus a mutating/unknown execution-candidate effect;
+- a non-`SELECT`, ambiguous, or multiple SQL statement under the
+  `enterprise_db.read_only` profile;
+- an explicitly prohibited destination or recipient domain.
 
-## Current Human Review Actions
+Operational risk is a shadow consequence assessment. It records applicability,
+recoverability, concrete compensation mechanism when known, blast radius,
+sensitivity, exposure, target criticality, impact level, dominant factors,
+unknown facts, fact provenance, and profile version. It does not use the former
+weighted external/write/review score.
 
-The current review contract is typed through `HumanReviewDecisionType`:
+Behavioral continues to persist SQLite history and export similarity, deviation,
+novelty, flags, and counterfactual recommendation. Its mode is `shadow` and
+`decision_influence=false`. The runtime reuses the assessment during a run and
+persists the read model at stable audit boundaries.
 
-- `approve_continue`
-- `approve_continue_read_only`
-- `modify_and_continue`
-- `request_more_evidence`
-- `replan`
-- `ask_clarification`
-- `abort`
+## OPA preflight and final matrix
 
-These are the only actions a dashboard should expose as canonical operator choices.
-`modify_and_continue` is only exposed when the pending review includes an `external_communication` draft.
+OPA performs two calls:
 
-## What the Dashboard Should Display
+1. `data.layer2.governance.required_pillars`;
+2. `data.layer2.governance.decision`.
 
-The UI should be derived from `TaskState` and the pending review payload, not from ad hoc UI logic.
+The mandatory judge condition is owned only by Rego:
 
-Minimum display fields:
+```text
+execution_candidate
+AND boundary == governed_external
+AND NOT static_policy.hard_deny
+```
 
-- current runtime state
-- current plan step
-- latest governance directive
-- latest oversight summary
-- reason codes
-- pending human review request
-- allowed human review decisions
-- resume state
-- final or aborted state, if terminal
-- external communication phase, when the task uses that branch
+The final deterministic precedence is:
 
-## What the Dashboard Should Not Do
+| Condition | Directive |
+| --- | --- |
+| Policy version mismatch | `wait_human_review` |
+| Static hard violation | `stop` / deny |
+| Required judge unavailable, invalid, non-invoked, or wrong digest | `wait_human_review` |
+| Required active evidence/trajectory unavailable | `wait_human_review` |
+| Explicit clarification | `ask_user_clarification` |
+| Trajectory stop/repeated provider failure/repeated revision | `stop` or `wait_human_review` according to Rego |
+| Judge `unsafe` or `uncertain` | `wait_human_review`, never hard deny |
+| Judge `needs_revision` | `revise_action` |
+| Evidence gap | `request_more_evidence` |
+| Trajectory degradation | `replan` |
+| Read-only envelope | `continue_read_only` |
+| Active checks satisfied, including judge `safe` when required | `continue` |
 
-- invent new directives
-- bypass `governance`
-- bypass `oversight`
-- mutate runtime state directly
-- execute `external_communication` without a typed draft/review boundary
+`revise_action` returns audit-safe finding codes to the actor, invalidates the
+current proposal and approval, increments the per-run revision counter, and
+returns to `ACTING`. Repeated revisions contribute to trajectory health.
 
-## Current Code Coverage
+## Semantic judge contract
 
-These parts of the contract are already directly reflected in code:
+OPA, not Python, decides when invocation is required. `JudgeContext` includes
+only the authorized task goal/constraints/context, the step identified by
+`actor_result.plan_step_id`, the exact proposal and digest, relevant evidence
+and support levels, target/destination facts, and invocation reason.
 
-- `governance` directive selection and conservative combination logic
-- deterministic oversight scoring and recommendation
-- typed HITL interrupt/resume request and decision handling
-- explicit runtime states for `WAITING_HUMAN_REVIEW`, `REPLANNING`, `ABORTED`, and normal progression
-- persisted governance, oversight, and human review history in `TaskState`
-- durable checkpoint persistence and thread-level runtime artifacts on disk
-- typed `external_communication` phase tracking for evidence, draft, review/edit, approval, and blocked states
+The judge returns:
 
-These parts still need a UI or an execution branch:
+- status: `active`, `not_applicable`, `unavailable`, or `invalid`;
+- verdict: `safe`, `needs_revision`, `unsafe`, or `uncertain`;
+- severity, confidence, typed findings, summary, concise rationale;
+- evaluated operation digest and provider/model/prompt metadata.
 
-- the externally impactful execution step for `external_communication`
+The judge cannot choose runtime directives. Confidence is assessment confidence,
+not probability of harm and is never multiplied by an operational-risk score.
 
-## Current `external_communication` Slot
+## Uniform HITL and digest integrity
 
-The current runtime now tracks a typed flow with these phases:
+Every HITL exposes the universally valid decisions:
 
-1. evidence collection
-2. draft proposal
-3. human review and edit
-4. approved for execution
-5. blocked
+- `approve_continue`;
+- `approve_continue_read_only`;
+- `modify_and_continue`;
+- `request_more_evidence`;
+- `replan`;
+- `ask_clarification`;
+- `abort`.
 
-What is still missing is the final externally impactful execution step.
+The seven controls are always present. `modify_and_continue` still requires a
+typed, valid edit at submission time; it cannot bypass the proposal contract
+when no editable payload exists. A review request includes operation id, digest,
+proposal summary, target/destination, judge findings, and the proposal where
+applicable.
 
-That branch should reuse the same boundary logic as the rest of Layer 2:
+Approval is bound to the exact current digest. Modification creates a new
+immutable proposal and digest, invalidates the earlier approval and judge
+assessment, clears any executable tool request, and enters `READY_GOVERNANCE`.
+It never routes directly to Tool Gateway or an external executor.
+`approve_continue_read_only` rejects an unchanged mutating proposal.
 
-- governance decides whether the branch is allowed
-- oversight can only tighten the decision
-- human review is required before impact outside the runtime boundary
+LangGraph `interrupt()` and `Command(resume=...)` remain the only pause/resume
+mechanism. Official LangGraph checkpoints are authoritative; trace, dashboard
+artifacts, and behavioral SQLite are read models.
 
-## Code Pointers
+## Execution status and deferred backends
 
+This refactor provides typed normalization and an
+`ExternalOperationExecutorPort`. The production
+`DeferredExternalOperationExecutor` verifies the approval digest and always
+returns `executed=false`. It does not send email, connect to enterprise
+databases, execute SQL, mutate external systems, add credentials, or perform any
+side effect. Test scenarios use deterministic fake proposals only.
+
+## Observability
+
+`layer2_trace.v3` keeps its top-level shape. Additive actor/HITL fields expose
+the current proposal and digest; governance pillar results expose `active`,
+`shadow`, `not_applicable`, `unavailable`, and `decision_influence`. Legacy v1/v2
+normalization and checkpoint compatibility fields remain supported.
+
+Primary implementation locations:
+
+- `src/layer2_runtime_governance/external_operations/`
 - `src/layer2_runtime_governance/governance_components/`
+- `src/layer2_runtime_governance/judge/`
+- `src/layer2_runtime_governance/signal_services/`
 - `src/layer2_runtime_governance/runtime/governance_service.py`
-- `src/layer2_runtime_governance/oversight.py`
-- `src/layer2_runtime_governance/hitl.py`
-- `src/layer2_runtime_governance/hitl_dashboard.py`
-- `src/main_layer2_dashboard.py`
-- `src/layer2_runtime_governance/domain/task_state.py`
-- `src/layer2_runtime_governance/runtime/node_adapters.py`
-- `src/layer2_runtime_governance/graph.py`
-
-## Practical Reading
-
-If a task is paused, the runtime is saying one of four things:
-
-- the policy envelope is too strict for autonomous continuation
-- the evidence is not yet sufficient
-- the plan no longer fits the observed trajectory
-- a human must decide before the task can continue
-
-That is the real contract the dashboard must expose.
+- `src/layer2_runtime_governance/hitl/`
+- `configs/opa/layer2_governance/`

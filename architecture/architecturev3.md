@@ -337,7 +337,7 @@ Nota operativa:
 - uno stesso `current_plan_step` può richiedere più iterazioni locali `actor -> tool_gateway -> observe_tool_result`
 - il `replanner` viene coinvolto quando il passo è completato, quando le evidenze raccolte invalidano il piano corrente, oppure quando la governance richiede correzione, chiarimento o escalation
 
-#### Governance Core: OPA-first e cinque pilastri
+#### Governance Core: OPA-first, operazioni external e pilastri active/shadow
 
 Il nodo LangGraph `governance` è il **Policy Enforcement Point (PEP)**. OPA è il solo **Policy Decision Point (PDP)**: possiede policy statica, soglie, pesi, precedenze, cap, invarianti e direttiva finale. Python non combina più direttive con un decision combiner nel percorso live.
 
@@ -345,34 +345,37 @@ Flusso di un turno governato:
 
 1. il PEP costruisce `base_facts` versionati da `TaskState` e `ActorResult`;
 2. interroga OPA `data.layer2.governance.required_pillars` per sapere quali segnali sono obbligatori;
-3. invoca i servizi locali che producono fatti per i cinque pilastri;
+3. normalizza l’eventuale azione in una `ExternalOperationProposal` immutabile e invoca separatamente i servizi dei pilastri;
 4. valida `GovernanceDecisionInput` e lo invia a OPA `data.layer2.governance.decision`;
 5. valida `GovernanceDecisionOutput`, registra `GovernanceDecisionTrace` e applica la direttiva al grafo;
-6. se OPA o il contratto non sono disponibili, applica fail-closed tracciato verso `wait_human_review`.
+6. se OPA, evidence o trajectory non sono disponibili applica fail-closed tracciato; un judge obbligatorio indisponibile o con digest non coincidente porta a `wait_human_review`, mentre failure dei pillar shadow resta solo osservabile.
 
 I servizi di segnale sono moduli locali tipizzati, non PDP separati: possono produrre componenti diagnostiche per trace, ma non scelgono direttive runtime.
 
-I **cinque pilastri** sono:
+I pillar e la loro autorità sono:
 
-| Pilastro | Producer | Decisione OPA |
-| --- | --- | --- |
-| `evidence` | evidenza osservata, validazione step e precisione del claim | sufficienza, gap e mismatch di precisione |
-| `risk` | posture capability, registry tool, sensibilità e impatto esterno | envelope read-only, rischio elevato e HITL |
-| `trajectory` | turni, errori tool/provider, replan e recovery | continuazione, raccolta evidenza, replan o stop |
-| `behavioral` | read model SQLite di similarità, deviazione e novelty | anomalia solo corroborata; mai escalation autonoma a HITL |
-| `judge` | valutazione semantica selettiva | requisito condizionale e escalation per output fragili o draft esterni |
+| Pilastro | Modalità | Producer | Autorità nella decisione OPA |
+| --- | --- | --- | --- |
+| `static_policy` | active | fatti deterministici, execution policy, profili capability | hard deny assorbente soltanto per violazioni specifiche |
+| `evidence` | active | evidenza osservata, validation e precisione del claim | gap e mismatch di precisione |
+| `trajectory` | active | contatori per-step, errori provider/tool, replan, recovery e revisioni | recovery, replan, HITL o stop |
+| `judge` | active quando richiesto | assessment semantico tipizzato dell’esatta proposta external | OPA mappa `safe`, `needs_revision`, `unsafe`, `uncertain` |
+| `risk` | shadow | consequence/impact facts da proposta e profilo versionato | nessuna influenza sulla direttiva |
+| `behavioral` | shadow | read model SQLite di similarity, deviation e novelty | nessuna influenza sulla direttiva |
 
-`static_policy` è il sesto modulo Rego di base: non è un pilastro di segnale, ma l'envelope hard che blocca write, impone review e preserva read-only.
+`static_policy` non blocca genericamente `write` o `external`: applica soltanto guardrail deterministici, come `read_only_mode` più effetto mutating, profilo database read-only più statement non-`SELECT`, statement SQL ambiguo/multiplo o destinazione esplicitamente proibita. Una `SELECT` aziendale resta `governed_external`, ma passa lo static e richiede il judge prima di essere candidata all’esecuzione.
 
-La configurazione OPA decide quando `judge` è obbligatorio; evidence, risk, trajectory e behavioral sono richiesti in ogni valutazione. Un pilastro obbligatorio indisponibile produce un fail-closed. I risultati dei pilastri, gli errori, le versioni e le invarianti vengono inclusi nella trace.
+La prima passata OPA richiede il judge esclusivamente quando la proposta è `execution_candidate`, il boundary è `governed_external` e lo static non ha già prodotto hard deny. Output locali, draft parziali e letture di evidenza pubblica (`web_search`, `fetch_url_text`) non pagano una chiamata judge. Il judge riceve goal, vincoli, step identificato da `actor_result.plan_step_id`, proposta, digest, target ed evidenza rilevante; non riceve behavioral, dynamic policy o risk e non emette direttive runtime.
 
-Le direttive possibili sono `continue`, `continue_read_only`, `request_more_evidence`, `replan`, `wait_human_review`, `ask_user_clarification` e `stop`. In particolare, `deny` statico resta assorbente, una review obbligatoria non viene declassata e behavioral/judge non possono produrre un hard deny.
+Le direttive possibili sono `continue`, `continue_read_only`, `request_more_evidence`, `revise_action`, `replan`, `wait_human_review`, `ask_user_clarification` e `stop`. `revise_action` invalida la proposta corrente, restituisce findings audit-safe all’actor e conta nella trajectory; non viene usato né `request_more_evidence` per correggere il tono né `replan` per una semplice revisione del payload.
 
 #### HITL Gateway
 
 Il nodo `human_review` chiama `interrupt()` con un payload tipizzato e JSON-safe. La dashboard riceve la decisione umana e riprende lo stesso `thread_id` tramite `Command(resume=...)` sul checkpointer ufficiale LangGraph. Il backend locale è `SqliteSaver`; un deployment multi-worker può selezionare `PostgresSaver`. La dashboard non ricostruisce mai il runtime da trace o artifact.
 
-Azioni umane canoniche: `approve_continue`, `approve_continue_read_only`, `modify_and_continue` (solo draft di comunicazione esterna), `request_more_evidence`, `replan`, `ask_clarification` e `abort`.
+Azioni umane canoniche, sempre disponibili in ogni HITL: `approve_continue`, `approve_continue_read_only`, `modify_and_continue`, `request_more_evidence`, `replan`, `ask_clarification` e `abort`. `modify_and_continue` richiede comunque un edit tipizzato valido al submit e non può aggirare il contratto della proposta. Approval e judge assessment sono legati al digest esatto; una modifica crea un nuovo digest, invalida approval e assessment precedenti e passa da `READY_GOVERNANCE` prima di qualunque seam esecutivo. `approve_continue_read_only` non può autorizzare una proposta mutating invariata.
+
+Il package `external_operations/` normalizza communication, SQL e generic external. SQL usa AST `sqlglot` e accetta una sola statement; email normalizza campi e destinazione senza giudicare il tono. I backend reali email/database e ogni side effect external restano differiti: il seam production restituisce un risultato `executed=false`.
 
 Gli artifact per thread (`full-trace-2.json`, snapshot dashboard e payload pending) sono materiale di osservabilità. In locale il checkpoint autoritativo è `artifacts/runtime/checkpoints/layer2_checkpoints.sqlite3`; in produzione può risiedere nel backend PostgreSQL configurato. I checkpoint terminali hanno retention limitata, mentre interrupt pendenti e thread non terminali vengono preservati.
 
@@ -381,6 +384,7 @@ Gli artifact per thread (`full-trace-2.json`, snapshot dashboard e payload pendi
 Output principali:
 - `continue`
 - `continue_read_only`
+- `revise_action`
 - `request_more_evidence`
 - `replan`
 - `wait_human_review`
@@ -612,4 +616,4 @@ CLI Python standalone, normalizzatore di trace, client OPA HTTP e report JSON/Ma
 
 # Use case e protocollo di valutazione
 
-I casi sperimentali devono coprire almeno: (1) ricerca read-only con evidenza insufficiente recuperabile, (2) degrado di traiettoria o failure provider che richiede replan, (3) draft di comunicazione esterna che richiede judge e HITL. Ogni caso deve esportare trace e outcome atteso dei cinque pilastri.
+I casi sperimentali devono coprire almeno: (1) ricerca read-only con evidenza insufficiente recuperabile, (2) degrado di traiettoria o failure provider che richiede replan, (3) proposta external benigna che richiede judge ma può continuare senza HITL, (4) proposta unsafe/uncertain o judge indisponibile che richiede HITL, e (5) revisione con nuovo digest. Ogni caso deve esportare trace, modalità active/shadow e outcome atteso dei pilastri.

@@ -34,6 +34,10 @@ def actor(state: TaskState, *, actor_service: ActorPort) -> TaskState:
     actor_task = build_actor_task(task_state=state)
     actor_result = actor_service.act(actor_task=actor_task)
 
+    # A successful actor turn creates a new action candidate. The previous immutable
+    # proposal remains in audit history but cannot govern or authorize the new result.
+    state.external_operation_proposal = None
+    state.approved_external_operation_digest = None
     state.actor_result = actor_result
     state.actor_name = actor_service.actor_name
     state.actor_prompt_version = actor_service.prompt_version

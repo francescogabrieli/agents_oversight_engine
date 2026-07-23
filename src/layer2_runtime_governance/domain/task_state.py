@@ -25,6 +25,10 @@ if TYPE_CHECKING:
     from ..governance_components.contracts import GovernanceDecisionTrace, StaticPolicyAssessment
     from ..judge import JudgeAssessment
     from ..oversight import DynamicPolicyAssessment
+    from ..external_operations.contracts import (
+        ExternalOperationProposal,
+        GovernanceActionFeedback,
+    )
 
 
 # Layer 2 currently covers bootstrap, planning, and the actor/tool observation loop.
@@ -81,6 +85,13 @@ class TaskState:
     tool_results_history: list[ToolExecutionResult] = field(default_factory=list)
     observed_evidence: list[ObservedEvidence] = field(default_factory=list)
     tool_call_count: int = 0
+
+    # Canonical external-operation snapshot derived by runtime normalizers.
+    external_operation_proposal: ExternalOperationProposal | None = None
+    external_operation_history: list[ExternalOperationProposal] = field(default_factory=list)
+    approved_external_operation_digest: str | None = None
+    governance_action_feedback: list[GovernanceActionFeedback] = field(default_factory=list)
+    external_operation_revision_count: int = 0
 
     # Governance snapshot.
     static_policy_history: list[StaticPolicyAssessment] = field(default_factory=list)

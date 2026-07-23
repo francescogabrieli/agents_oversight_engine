@@ -26,6 +26,9 @@ class OversightSignalLevel(str, Enum):
     HEALTHY = "healthy"
     WATCH = "watch"
     DEGRADED = "degraded"
+    NOT_APPLICABLE = "not_applicable"
+    UNAVAILABLE = "unavailable"
+    UNKNOWN = "unknown"
 
 
 class OversightReasonCode(str, Enum):
@@ -73,21 +76,35 @@ class OversightReasonCode(str, Enum):
 
 @dataclass(frozen=True)
 class EvidenceQualityAssessment:
-    score: float
+    score: float | None
     level: OversightSignalLevel
     reason_codes: tuple[OversightReasonCode, ...]
 
 
 @dataclass(frozen=True)
 class OperationalRiskAssessment:
-    score: float
+    score: float | None
     level: OversightSignalLevel
     reason_codes: tuple[OversightReasonCode, ...]
+    mode: str = "shadow"
+    decision_influence: bool = False
+    applicability: str = "not_applicable"
+    recoverability: str = "unknown"
+    blast_radius: str = "unknown"
+    sensitivity: str = "unknown"
+    exposure: str = "unknown"
+    target_criticality: str = "unknown"
+    impact_level: str = "unknown"
+    dominant_factors: tuple[str, ...] = ()
+    unknown_facts: tuple[str, ...] = ()
+    fact_provenance: tuple[str, ...] = ()
+    profile_version: str | None = None
+    error: str | None = None
 
 
 @dataclass(frozen=True)
 class TrajectoryHealthAssessment:
-    score: float
+    score: float | None
     level: OversightSignalLevel
     reason_codes: tuple[OversightReasonCode, ...]
 

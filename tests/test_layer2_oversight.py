@@ -30,6 +30,8 @@ from layer2_runtime_governance import (
     PlanStepKind,
     PlanStepStatus,
     RuntimeState,
+    ScratchpadEntry,
+    ScratchpadEntryType,
     StepValidation,
     StepValidationDecision,
     TaskState,
@@ -74,17 +76,31 @@ class Layer2OversightRawFactsTests(unittest.TestCase):
         state = _build_state()
         policy_input = build_policy_evaluation_input(task_state=state)
 
-        signal = build_risk_signal(policy_input=policy_input, thresholds_version="policy.v1")
+        signal = build_risk_signal(
+            policy_input=policy_input,
+            external_operation=None,
+            thresholds_version="policy.v1",
+        )
 
         self.assertIsNone(signal["diagnostic_score"])
-        self.assertEqual(signal["raw_facts"]["tool_risk_level"], "none")
-        self.assertFalse(signal["raw_facts"]["write_capability"])
+        self.assertEqual(signal["raw_facts"]["mode"], "shadow")
+        self.assertFalse(signal["raw_facts"]["decision_influence"])
+        self.assertEqual(signal["raw_facts"]["applicability"], "not_applicable")
         self.assertNotIn("recommended_directive", signal)
 
     # Verify trajectory counters stay factual and leave threshold interpretation to OPA.
     def test_trajectory_signal_contains_counters_without_python_scoring(self) -> None:
         state = _build_state()
         state.actor_turn_count = 3
+        state.scratchpad.extend(
+            ScratchpadEntry(
+                turn_index=index,
+                plan_step_id="step_1",
+                entry_type=ScratchpadEntryType.PROGRESS_NOTE,
+                summary=f"Per-step actor turn {index}.",
+            )
+            for index in range(1, 4)
+        )
         policy_input = build_policy_evaluation_input(task_state=state)
 
         signal = build_trajectory_signal(

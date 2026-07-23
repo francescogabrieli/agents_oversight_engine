@@ -57,7 +57,7 @@ class OPAHttpPolicyEngineSettings:
 # Keep policy transport configuration and I/O behind the OPA adapter.
 class OPAHttpPolicyEngine(PolicyEnginePort):
     policy_engine_name = "opa_http_policy_engine"
-    policy_bundle_version = "layer2_governance_v2"
+    policy_bundle_version = "layer2_governance_v3"
     policy_config_version = "layer2_governance_thresholds_v1"
 
     def __init__(self, settings: OPAHttpPolicyEngineSettings | None = None) -> None:
@@ -97,13 +97,18 @@ class OPAHttpPolicyEngine(PolicyEnginePort):
         )
         if not isinstance(result, dict):
             raise PolicyEngineExecutionError("OPA required_pillars response must be an object.")
-        return {
-            "require_evidence": bool(result.get("require_evidence", True)),
-            "require_risk": bool(result.get("require_risk", True)),
-            "require_trajectory": bool(result.get("require_trajectory", True)),
-            "require_behavioral": bool(result.get("require_behavioral", True)),
-            "require_judge": bool(result.get("require_judge", False)),
-        }
+        required_fields = (
+            "require_evidence",
+            "require_risk",
+            "require_trajectory",
+            "require_behavioral",
+            "require_judge",
+        )
+        if any(type(result.get(field_name)) is not bool for field_name in required_fields):
+            raise PolicyEngineExecutionError(
+                "OPA required_pillars response is missing one or more boolean fields."
+            )
+        return {field_name: result[field_name] for field_name in required_fields}
 
     # Ask OPA for the final governance decision from versioned base facts and pillar signals.
     def evaluate_decision(self, *, decision_input: dict[str, Any]) -> dict[str, Any]:

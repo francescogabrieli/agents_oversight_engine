@@ -1,75 +1,167 @@
 package layer2.governance.pillars.static_policy
 
-default write_blocked := false
+import rego.v1
 
+operation := object.get(input.base_facts, "external_operation", {})
+payload := object.get(operation, "payload", {})
+effect := object.get(operation, "normalized_effect", "unknown")
+profile_id := object.get(operation, "capability_profile_id", null)
+target := object.get(operation, "target", {})
+static_config := object.get(data.policy_config, "static_policy", {})
+mutating_effects := {"create", "update", "delete", "truncate", "send", "publish", "execute", "unknown"}
+
+default hard_deny := false
 default read_only_required := false
-
-default hitl_mandatory := false
-
 default clarification_signaled := false
 
-default result := {
-	"write_blocked": false,
-	"read_only_required": false,
-	"hitl_mandatory": false,
-	"clarification_signaled": false,
-	"deny_reason": null,
-	"reason_codes": [],
+hard_deny if {
+	input.base_facts.policy.read_only_mode == true
+	effect in mutating_effects
+	object.get(operation, "execution_candidate", false) == true
 }
 
-result := {
-	"write_blocked": write_blocked,
-	"read_only_required": read_only_required,
-	"hitl_mandatory": hitl_mandatory,
-	"clarification_signaled": clarification_signaled,
-	"deny_reason": deny_reason,
-	"reason_codes": reason_codes,
+hard_deny if {
+	profile_id == "enterprise_db.read_only"
+	object.get(payload, "statement_class", "unknown") != "select"
 }
 
-write_blocked if {
-	input.base_facts.actor.capability_mode == "write"
+hard_deny if {
+	profile_id == "enterprise_db.read_only"
+	object.get(payload, "ambiguous", false) == true
 }
 
-write_blocked if {
-	input.base_facts.actor.external_impact == true
+hard_deny if {
+	prohibited := object.get(static_config, "prohibited_destinations", [])
+	object.get(target, "value", "") in prohibited
+}
+
+hard_deny if {
+	prohibited_domains := object.get(static_config, "prohibited_destination_domains", [])
+	some recipient in normalized_recipients
+	some domain in prohibited_domains
+	endswith(lower(recipient), concat("", ["@", lower(domain)]))
+}
+
+hard_deny if {
+	prohibited := object.get(static_config, "prohibited_destinations", [])
+	some recipient in normalized_recipients
+	recipient in {lower(item) | some item in prohibited}
+}
+
+hard_deny if {
+	object.get(payload, "destination_class", "unknown") == "prohibited"
 }
 
 read_only_required if {
 	input.base_facts.policy.read_only_mode == true
+	not hard_deny
 }
 
 read_only_required if {
-	input.base_facts.actor.capability_mode == "read_only"
-}
-
-hitl_mandatory if {
-	input.base_facts.external_communication.review_ready == true
+	effect == "read"
+	object.get(operation, "boundary", "local") != "local"
 }
 
 clarification_signaled if {
 	input.base_facts.actor.result_type == "ask_clarification"
 }
 
-deny_reason := "write capability or external impact blocked by policy" if {
-	write_blocked
+constraints contains "execution_policy_read_only" if {
+	input.base_facts.policy.read_only_mode == true
 }
 
-deny_reason := null if {
-	not write_blocked
+constraints contains "database_profile_select_only" if {
+	profile_id == "enterprise_db.read_only"
 }
 
-reason_codes contains "write_capability_blocked" if {
-	write_blocked
+violations contains "read_only_mode_mutating_effect" if {
+	input.base_facts.policy.read_only_mode == true
+	effect in mutating_effects
+	object.get(operation, "execution_candidate", false) == true
+}
+
+violations contains "database_profile_mutation" if {
+	profile_id == "enterprise_db.read_only"
+	object.get(payload, "statement_class", "unknown") != "select"
+}
+
+violations contains "sql_ambiguous_or_multiple" if {
+	profile_id == "enterprise_db.read_only"
+	object.get(payload, "ambiguous", false) == true
+}
+
+violations contains "prohibited_destination" if {
+	prohibited := object.get(static_config, "prohibited_destinations", [])
+	object.get(target, "value", "") in prohibited
+}
+
+violations contains "prohibited_destination" if {
+	prohibited_domains := object.get(static_config, "prohibited_destination_domains", [])
+	some recipient in normalized_recipients
+	some domain in prohibited_domains
+	endswith(lower(recipient), concat("", ["@", lower(domain)]))
+}
+
+violations contains "prohibited_destination" if {
+	prohibited := object.get(static_config, "prohibited_destinations", [])
+	some recipient in normalized_recipients
+	recipient in {lower(item) | some item in prohibited}
+}
+
+violations contains "prohibited_destination" if {
+	object.get(payload, "destination_class", "unknown") == "prohibited"
+}
+
+reason_codes contains "read_only_mutation_blocked" if {
+	"read_only_mode_mutating_effect" in violations
+}
+
+reason_codes contains "database_profile_mutation_blocked" if {
+	"database_profile_mutation" in violations
+}
+
+reason_codes contains "sql_ambiguous_or_multiple" if {
+	"sql_ambiguous_or_multiple" in violations
+}
+
+reason_codes contains "prohibited_destination" if {
+	"prohibited_destination" in violations
 }
 
 reason_codes contains "read_only_allowed" if {
 	read_only_required
-}
-
-reason_codes contains "external_communication_review_required" if {
-	hitl_mandatory
+	not hard_deny
 }
 
 reason_codes contains "ask_clarification_required" if {
 	clarification_signaled
+	not hard_deny
+}
+
+normalized_recipients contains lower(trim_space(item)) if {
+	recipient := object.get(payload, "recipient", "")
+	item := split(recipient, ",")[_]
+	trim_space(item) != ""
+}
+
+summary := "Static policy hard-denied one or more deterministic violations." if {
+	hard_deny
+} else := "Static policy preserved the read-only execution envelope." if {
+	read_only_required
+} else := "Static policy preserved the actor clarification request." if {
+	clarification_signaled
+} else := "Static deterministic guardrails passed."
+
+result := {
+	"hard_deny": hard_deny,
+	"constraints": sort([item | item := constraints[_]]),
+	"violations": sort([item | item := violations[_]]),
+	"reason_codes": sort([item | item := reason_codes[_]]),
+	"summary": summary,
+	"read_only_required": read_only_required,
+	"clarification_signaled": clarification_signaled,
+	# Legacy fields remain observable but no longer encode generic external/write bans.
+	"write_blocked": hard_deny,
+	"hitl_mandatory": false,
+	"deny_reason": summary,
 }

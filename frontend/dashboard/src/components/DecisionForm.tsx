@@ -28,6 +28,7 @@ export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
   const pendingRequest = detail.dashboard_snapshot?.human_review?.pending_request;
   const allowedDecisions = pendingRequest?.allowed_decisions ?? [];
   const draft = pendingRequest?.external_communication_draft;
+  const operationProposal = pendingRequest?.external_operation_proposal;
   const [decisionType, setDecisionType] = useState<string>(
     allowedDecisions[0] ?? "approve_continue",
   );
@@ -36,6 +37,9 @@ export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
   const [clarificationText, setClarificationText] = useState("");
   const [draftBody, setDraftBody] = useState(draft?.body ?? "");
   const [draftMetadata, setDraftMetadata] = useState(prettyMetadata(draft?.metadata ?? {}));
+  const [operationPayload, setOperationPayload] = useState(
+    JSON.stringify(operationProposal?.payload ?? {}, null, 2),
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,11 +52,18 @@ export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
     setDraftMetadata(prettyMetadata(draft?.metadata ?? {}));
   }, [draft]);
 
+  useEffect(() => {
+    setOperationPayload(JSON.stringify(operationProposal?.payload ?? {}, null, 2));
+  }, [operationProposal]);
+
   if (!pendingRequest) return null;
 
   const isModify = decisionType === "modify_and_continue";
   const isClarification = decisionType === "ask_clarification";
   const isAbort = decisionType === "abort";
+  const modificationAllowed = draft
+    ? operationProposal?.modifiable !== false
+    : operationProposal?.modifiable === true;
 
   const submit = async () => {
     setSubmitting(true);
@@ -67,7 +78,11 @@ export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
         clarification_text: isClarification ? clarificationText || undefined : undefined,
       };
 
-      if (isModify) {
+      if (isModify && !modificationAllowed) {
+        throw new Error("The current review payload is not modifiable.");
+      }
+
+      if (isModify && draft) {
         let parsedMetadata: Record<string, unknown> = {};
         try {
           parsedMetadata = JSON.parse(draftMetadata || "{}") as Record<string, unknown>;
@@ -84,6 +99,22 @@ export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
             metadata: parsedMetadata,
           } satisfies ExternalCommunicationDraft,
         };
+      } else if (isModify && operationProposal) {
+        let parsedPayload: Record<string, unknown>;
+        try {
+          parsedPayload = JSON.parse(operationPayload) as Record<string, unknown>;
+        } catch {
+          throw new Error("External operation payload must be valid JSON.");
+        }
+        payload.external_operation_edit = {
+          note: note || undefined,
+          payload: {
+            payload_type: operationProposal.operation_family,
+            ...parsedPayload,
+          },
+        };
+      } else if (isModify) {
+        throw new Error("This review has no modifiable external proposal.");
       }
 
       await onSubmit(payload);
@@ -130,7 +161,14 @@ export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
           </div>
         ) : null}
 
-        {isModify && draft ? (
+        {isModify && !modificationAllowed ? (
+          <div className="alert alert-warning">
+            Modify is always available as an HITL control, but this review has no
+            editable typed payload.
+          </div>
+        ) : null}
+
+        {isModify && modificationAllowed && draft ? (
           <div className="edit-draft-panel">
             <p className="section-label" style={{ margin: 0 }}>Edit produced text</p>
             <div className="form-field">
@@ -139,6 +177,20 @@ export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
                 style={{ minHeight: 260 }}
                 value={draftBody}
                 onChange={(event) => setDraftBody(event.target.value)}
+              />
+            </div>
+          </div>
+        ) : null}
+
+        {isModify && modificationAllowed && !draft && operationProposal ? (
+          <div className="edit-draft-panel">
+            <p className="section-label" style={{ margin: 0 }}>Edit typed operation payload</p>
+            <div className="form-field">
+              <textarea
+                className="form-textarea form-textarea-mono"
+                style={{ minHeight: 260 }}
+                value={operationPayload}
+                onChange={(event) => setOperationPayload(event.target.value)}
               />
             </div>
           </div>

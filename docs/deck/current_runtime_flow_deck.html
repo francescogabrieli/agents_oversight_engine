@@ -714,7 +714,7 @@
       <header class="slide-header">
         <div>
           <p class="kicker">Punto di Controllo</p>
-          <h2>La governance combina policy e oversight deterministico</h2>
+          <h2>OPA governa pillar attivi e judge semantico</h2>
         </div>
         <div class="slide-no">06 / 11</div>
       </header>
@@ -725,22 +725,22 @@
             <p>Applica decisioni hard come `allow`, `allow_read_only`, `ask_clarification`, `require_human_review` o `deny`.</p>
           </div>
           <div class="card amber">
-            <h3>Oversight deterministico</h3>
-            <p>Valuta evidence quality, operational risk e trajectory health usando configurazione esplicita e stato runtime.</p>
+            <h3>Pillar attivi e shadow</h3>
+            <p>Evidence e trajectory influenzano la decisione; operational risk e behavioral restano telemetria shadow.</p>
           </div>
           <div class="card blue">
-            <h3>Decision combiner</h3>
-            <p>Produce una singola runtime directive come `continue`, `continue_read_only`, `request_more_evidence`, `replan`, `wait_human_review` o `stop`.</p>
+            <h3>Autorita unica OPA</h3>
+            <p>Dopo l'eventuale assessment del judge, OPA produce l'unica runtime directive validata dal PEP LangGraph.</p>
           </div>
         </div>
         <div class="grid cols-2" style="margin-top: 18px;">
           <div class="card soft">
             <h3>Vincolo implementato</h3>
-            <p>L'oversight puo preservare o irrigidire la policy. Non puo rendere una decisione OPA piu permissiva.</p>
+            <p>Static hard deny non viene aggirato; i payload external sono legati a un digest verificato fino a HITL ed esecuzione.</p>
           </div>
           <div class="card red">
-            <h3>Limite esplicito attuale</h3>
-            <p>Il futuro semantic judge non fa parte della baseline corrente. Oggi la governance e OPA piu oversight deterministico, non OPA piu judge.</p>
+            <h3>Judge selettivo attuale</h3>
+            <p>Il judge interviene sui `governed_external` richiesti da OPA e restituisce fatti semantici, mai la direttiva runtime finale.</p>
           </div>
         </div>
       </main>
@@ -798,8 +798,8 @@
             <ul class="tight-list">
               <li>La policy richiede esplicitamente human review.</li>
               <li>E richiesto un chiarimento prima di una continuazione sicura.</li>
-              <li>L'operational risk e troppo alto per una continuazione autonoma.</li>
-              <li>`external_communication` raggiunge una fase gated da review.</li>
+              <li>Il judge richiesto e indisponibile, incerto o segnala una proposta unsafe.</li>
+              <li>Evidence o trajectory soddisfano una condizione esplicita di escalation OPA.</li>
             </ul>
           </div>
           <div class="card blue">

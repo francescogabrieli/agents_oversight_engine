@@ -1,41 +1,20 @@
 package layer2.governance.pillars.risk
 
-facts := input.pillars.risk.raw_facts
-config := data.policy_config
-weights := config.risk_weights
+import rego.v1
 
-base := weights.tool_risk[facts.tool_risk_level]
-multiplier := weights.sensitivity_multiplier[facts.sensitivity_level]
+facts := object.get(input.pillars.risk, "raw_facts", {})
 
-score := min([1, max([0, (((base * multiplier) + additive(facts.external_impact, weights.external_impact_additive)) + additive(facts.write_capability, weights.write_capability_additive)) + additive(facts.tool_requires_human_review, weights.requires_human_review_additive)])])
-
-level := "high" if {
-	score > config.thresholds.max_operational_risk
-}
-
-level := "medium" if {
-	score <= config.thresholds.max_operational_risk
-	score >= 0.3
-}
-
-level := "low" if {
-	score < 0.3
-}
-
+# Operational consequence assessment is deliberately shadow-only in this policy version.
 result := {
-	"score": score,
-	"level": level,
-	"high": level == "high",
+	"mode": "shadow",
+	"decision_influence": false,
+	"applicability": object.get(facts, "applicability", "not_applicable"),
+	"impact_level": object.get(facts, "impact_level", "unknown"),
+	"recoverability": object.get(facts, "recoverability", "unknown"),
 	"raw_facts": facts,
-	"score_components": input.pillars.risk.score_components,
-	"score_formula_version": input.pillars.risk.score_formula_version,
-	"thresholds_version": input.pillars.risk.thresholds_version,
-}
-
-additive(enabled, value) := value if {
-	enabled == true
-}
-
-additive(enabled, _) := 0 if {
-	enabled != true
+	"score": object.get(input.pillars.risk, "diagnostic_score", null),
+	"level": object.get(input.pillars.risk, "diagnostic_level", "not_applicable"),
+	"score_components": object.get(input.pillars.risk, "score_components", {}),
+	"score_formula_version": object.get(input.pillars.risk, "score_formula_version", "operational_consequence_shadow_v1"),
+	"thresholds_version": object.get(input.pillars.risk, "thresholds_version", data.policy_config.thresholds_version),
 }

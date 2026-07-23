@@ -2,57 +2,159 @@ from __future__ import annotations
 
 from typing import Any
 
-from layer2_runtime_governance.actor_contract import CapabilityAccessMode
-from layer2_runtime_governance.governance_components import PolicyEvaluationInput
-from layer2_runtime_governance.tools import (
-    ToolGatewayConfig,
-    build_default_tool_gateway_config,
-    get_default_tool_gateway_config_path,
-    load_tool_gateway_config,
+from layer2_runtime_governance.external_operations.contracts import (
+    DatabaseOperationPayload,
+    ExternalOperationEffect,
+    ExternalOperationProposal,
+    OperationBoundary,
 )
+from layer2_runtime_governance.external_operations.profiles import (
+    load_capability_consequence_profiles,
+)
+from layer2_runtime_governance.governance_components import PolicyEvaluationInput
 
 
-# Build operational-risk facts while leaving risk interpretation to OPA.
+# Build shadow-only consequence facts without weighted decision scoring.
 def build_risk_signal(
     *,
     policy_input: PolicyEvaluationInput,
+    external_operation: ExternalOperationProposal | None,
     thresholds_version: str,
-    tool_gateway_config: ToolGatewayConfig | None = None,
+    tool_gateway_config=None,
 ) -> dict[str, Any]:
-    # Runtime composition supplies the selected registry; fallback supports isolated callers.
-    if tool_gateway_config is not None:
-        tool_config = tool_gateway_config
-    else:
-        try:
-            tool_config = load_tool_gateway_config(config_path=get_default_tool_gateway_config_path())
-        except Exception:
-            tool_config = build_default_tool_gateway_config()
-    tool_name = policy_input.tool_name.value if policy_input.tool_name is not None else None
-    tool_definition = tool_config.tools.get(tool_name) if tool_name else None
-    tool_risk_level = tool_definition.risk_level.value if tool_definition is not None else "none"
+    del tool_gateway_config
+    if (
+        external_operation is None
+        or external_operation.boundary != OperationBoundary.GOVERNED_EXTERNAL
+    ):
+        return {
+            "raw_facts": {
+                "mode": "shadow",
+                "decision_influence": False,
+                "applicability": "not_applicable",
+                "pillar_unavailable": False,
+            },
+            "diagnostic_score": None,
+            "diagnostic_level": "not_applicable",
+            "score_components": {},
+            "reason_facts": [],
+            "summary": "Operational consequence assessment is not applicable outside governed external operations.",
+            "score_formula_version": "operational_consequence_shadow_v1",
+            "thresholds_version": thresholds_version,
+            "mode": "shadow",
+            "decision_influence": False,
+        }
+
+    profiles = load_capability_consequence_profiles()
+    profile = profiles.get(external_operation.capability_profile_id or "")
+    recovery_mechanism = profile.compensation_mechanism if profile else None
+    recoverability = (
+        "compensable"
+        if recovery_mechanism
+        else (
+            "irreversible"
+            if external_operation.normalized_effect
+            in {
+                ExternalOperationEffect.DELETE,
+                ExternalOperationEffect.TRUNCATE,
+                ExternalOperationEffect.SEND,
+                ExternalOperationEffect.PUBLISH,
+            }
+            else "unknown"
+        )
+    )
+    unknown_facts: list[str] = []
+    if profile is None:
+        unknown_facts.append("capability_profile")
+    if recovery_mechanism is None and recoverability == "unknown":
+        unknown_facts.append("concrete_recovery_mechanism")
+    if external_operation.target.destination_class.value == "unknown":
+        unknown_facts.append("destination_class")
+
+    statement_class = (
+        external_operation.payload.statement_class.value
+        if isinstance(external_operation.payload, DatabaseOperationPayload)
+        else None
+    )
+    impact_level = _shadow_impact_level(
+        effect=external_operation.normalized_effect,
+        sensitivity=policy_input.task_sensitivity.value,
+        target_criticality=profile.target_criticality if profile else "unknown",
+    )
     raw_facts = {
-        "tool_risk_level": tool_risk_level,
-        "sensitivity_level": policy_input.task_sensitivity.value,
-        "external_impact": policy_input.external_impact,
-        "write_capability": policy_input.capability_mode == CapabilityAccessMode.WRITE,
-        "tool_requires_human_review": bool(
-            tool_definition and tool_definition.requires_human_review
-        ),
-    }
-    score_components = {
-        "tool_risk_level": tool_risk_level,
-        "sensitivity_level": raw_facts["sensitivity_level"],
-        "external_impact": raw_facts["external_impact"],
-        "write_capability": raw_facts["write_capability"],
-        "tool_requires_human_review": raw_facts["tool_requires_human_review"],
+        "mode": "shadow",
+        "decision_influence": False,
+        "applicability": "applicable",
+        "pillar_unavailable": False,
+        "operation_id": external_operation.operation_id,
+        "operation_digest": external_operation.payload_digest,
+        "recoverability": recoverability,
+        "recovery_mechanism": recovery_mechanism,
+        "blast_radius": profile.scope if profile else "unknown",
+        "sensitivity": policy_input.task_sensitivity.value,
+        "exposure": external_operation.target.destination_class.value,
+        "target_criticality": profile.target_criticality if profile else "unknown",
+        "impact_level": impact_level,
+        "effect": external_operation.normalized_effect.value,
+        "statement_class": statement_class,
+        "dominant_factors": [
+            external_operation.normalized_effect.value,
+            policy_input.task_sensitivity.value,
+            profile.target_criticality if profile else "unknown_target_criticality",
+        ],
+        "unknown_facts": unknown_facts,
+        "fact_provenance": [
+            external_operation.facts_provenance.normalizer_id,
+            external_operation.facts_provenance.normalizer_version,
+            external_operation.capability_profile_id or "profile_unknown",
+        ],
+        "profile_version": profile.profile_version if profile else None,
     }
     return {
         "raw_facts": raw_facts,
         "diagnostic_score": None,
-        "diagnostic_level": "unscored",
-        "score_components": score_components,
-        "reason_facts": [],
-        "summary": "Operational risk facts collected; OPA owns score and threshold interpretation.",
-        "score_formula_version": "operational_risk_v2_raw_facts",
+        "diagnostic_level": impact_level,
+        "score_components": {
+            "effect": raw_facts["effect"],
+            "sensitivity": raw_facts["sensitivity"],
+            "target_criticality": raw_facts["target_criticality"],
+            "recoverability": raw_facts["recoverability"],
+        },
+        "reason_facts": raw_facts["dominant_factors"],
+        "summary": (
+            "Shadow operational consequence assessment: "
+            f"impact={impact_level}, recoverability={recoverability}, "
+            f"scope={raw_facts['blast_radius']}."
+        ),
+        "score_formula_version": "operational_consequence_shadow_v1",
         "thresholds_version": thresholds_version,
+        "mode": "shadow",
+        "decision_influence": False,
     }
+
+
+# Derive a non-authoritative impact label for observability only.
+def _shadow_impact_level(
+    *,
+    effect: ExternalOperationEffect,
+    sensitivity: str,
+    target_criticality: str,
+) -> str:
+    if effect in {ExternalOperationEffect.DELETE, ExternalOperationEffect.TRUNCATE}:
+        return "critical"
+    if sensitivity in {"high", "critical"} or target_criticality == "business_system":
+        return "high"
+    if effect in {
+        ExternalOperationEffect.CREATE,
+        ExternalOperationEffect.UPDATE,
+        ExternalOperationEffect.SEND,
+        ExternalOperationEffect.PUBLISH,
+        ExternalOperationEffect.EXECUTE,
+    }:
+        return "medium"
+    if effect == ExternalOperationEffect.READ:
+        return "low"
+    return "unknown"
+
+
+__all__ = ["build_risk_signal"]

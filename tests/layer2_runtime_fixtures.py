@@ -55,8 +55,13 @@ from layer2_runtime_governance import (
     GovernanceDirective,
     GovernanceReasonCode,
     JudgeAssessment,
+    JudgeAssessmentStatus,
+    JudgeFinding,
+    JudgeFindingCategory,
     JudgePort,
     JudgeRecommendedDirective,
+    JudgeSeverity,
+    JudgeVerdict,
     PlanStep,
     PlanStepKind,
     PlanStepStatus,
@@ -416,17 +421,28 @@ class OverDecomposedSourceSummaryPlanner:
 
 class StubPolicyEngine(PolicyEnginePort):
     policy_engine_name = "stub_policy_engine"
-    policy_bundle_version = "layer2_governance_v2"
+    policy_bundle_version = "layer2_governance_v3"
     policy_config_version = "layer2_governance_thresholds_v1"
 
     # Model OPA's inexpensive first pass so graph tests never contact a live policy engine.
     def evaluate_required_pillars(self, *, base_facts: dict[str, Any]) -> dict[str, bool]:
+        operation = base_facts.get("external_operation", {})
+        hard_deny = bool(
+            base_facts.get("policy", {}).get("read_only_mode")
+            and operation.get("execution_candidate") is True
+            and operation.get("normalized_effect")
+            in {"create", "update", "delete", "truncate", "send", "publish", "execute", "unknown"}
+        )
         return {
             "require_evidence": True,
-            "require_risk": True,
+            "require_risk": False,
             "require_trajectory": True,
-            "require_behavioral": True,
-            "require_judge": False,
+            "require_behavioral": False,
+            "require_judge": (
+                operation.get("execution_candidate") is True
+                and operation.get("boundary") == "governed_external"
+                and not hard_deny
+            ),
         }
 
     # Return a schema-valid OPA decision derived from the deterministic graph fixture.
@@ -438,18 +454,6 @@ class StubPolicyEngine(PolicyEnginePort):
 
     # Apply deterministic governance decisions so the runtime stays testable without OPA.
     def evaluate(self, *, policy_input: PolicyEvaluationInput) -> PolicyEvaluationResult:
-        if (
-            policy_input.external_impact
-            or policy_input.capability_mode == CapabilityAccessMode.WRITE
-        ):
-            return PolicyEvaluationResult(
-                policy_decision=PolicyDecision.DENY,
-                reason_codes=(GovernanceReasonCode.WRITE_CAPABILITY_BLOCKED,),
-                summary="Write-like capability is blocked by the policy stub.",
-                policy_engine_name=self.policy_engine_name,
-                policy_bundle_version=self.policy_bundle_version,
-            )
-
         if policy_input.actor_result_type == ActorResultType.ASK_CLARIFICATION:
             return PolicyEvaluationResult(
                 policy_decision=PolicyDecision.ASK_CLARIFICATION,
@@ -503,35 +507,47 @@ class JudgeRequiredPolicyEngine(StubPolicyEngine):
         requirements = super().evaluate_required_pillars(base_facts=base_facts)
         return {**requirements, "require_judge": True}
 
-    # Let the OPA fixture convert a confident judge flag into evidence recovery.
+    # Let the OPA fixture map semantic assessments without delegating directives to the judge.
     def evaluate_decision(self, *, decision_input: dict[str, Any]) -> dict[str, Any]:
         judge_facts = decision_input["pillars"]["judge"]["raw_facts"]
         if (
-            judge_facts.get("verdict") == "flag"
-            and float(judge_facts.get("confidence") or 0.0) >= 0.7
+            judge_facts.get("pillar_unavailable") is True
+            or judge_facts.get("invoked") is not True
+            or judge_facts.get("digest_matches") is not True
         ):
+            return super().evaluate_decision(decision_input=decision_input)
+        if judge_facts.get("verdict") == "needs_revision":
             return _build_stub_opa_decision(
                 decision_input=decision_input,
                 policy_engine=self,
-                directive="request_more_evidence",
-                reason_code="judge_reject_output",
-                summary="The semantic judge requires a safer evidence-recovery pass.",
+                directive="revise_action",
+                reason_code="judge_needs_revision",
+                summary="The semantic judge requires payload revision.",
+            )
+        if judge_facts.get("verdict") in {"unsafe", "uncertain"}:
+            return _build_stub_opa_decision(
+                decision_input=decision_input,
+                policy_engine=self,
+                directive="wait_human_review",
+                policy_decision="require_human_review",
+                reason_code=f"judge_{judge_facts['verdict']}",
+                summary="The semantic judge requires full human review.",
             )
         return super().evaluate_decision(decision_input=decision_input)
 
 
 class ReviewPolicyEngine(PolicyEnginePort):
     policy_engine_name = "review_policy_engine"
-    policy_bundle_version = "layer2_governance_v2"
+    policy_bundle_version = "layer2_governance_v3"
     policy_config_version = "layer2_governance_thresholds_v1"
 
     # Keep required-pillar selection deterministic for HITL graph tests.
     def evaluate_required_pillars(self, *, base_facts: dict[str, Any]) -> dict[str, bool]:
         return {
             "require_evidence": True,
-            "require_risk": True,
+            "require_risk": False,
             "require_trajectory": True,
-            "require_behavioral": True,
+            "require_behavioral": False,
             "require_judge": False,
         }
 
@@ -585,17 +601,56 @@ def _build_stub_opa_decision(
     base_facts = decision_input["base_facts"]
     actor = base_facts["actor"]
     policy = base_facts["policy"]
-    pillars = decision_input["pillars"]
+    pillars = dict(decision_input["pillars"])
     resolved_directive = directive or "continue"
     resolved_policy_decision = policy_decision or "allow"
     resolved_reason_code = reason_code or "allowed_by_policy"
     resolved_summary = summary or "The fixture permits this runtime turn."
 
-    if actor["capability_mode"] == CapabilityAccessMode.WRITE.value or actor["external_impact"]:
+    operation = base_facts.get("external_operation", {})
+    mutating_effects = {"create", "update", "delete", "truncate", "send", "publish", "execute", "unknown"}
+    hard_deny = bool(
+        policy["read_only_mode"]
+        and operation.get("execution_candidate") is True
+        and operation.get("normalized_effect") in mutating_effects
+    )
+    static_reason_codes = ["read_only_mutation_blocked"] if hard_deny else []
+    pillars["static_policy"] = {
+        "hard_deny": hard_deny,
+        "constraints": ["execution_policy_read_only"] if policy["read_only_mode"] else [],
+        "violations": static_reason_codes,
+        "reason_codes": static_reason_codes,
+        "summary": (
+            "The read-only execution policy forbids the mutating operation."
+            if hard_deny
+            else "No deterministic static violation was found."
+        ),
+        "read_only_required": (
+            policy["read_only_mode"]
+            and base_facts["tool"]["name"] is not None
+            and not hard_deny
+        ),
+        "clarification_signaled": actor["result_type"] == ActorResultType.ASK_CLARIFICATION.value,
+        "mode": "active",
+        "decision_influence": True,
+    }
+
+    judge_facts = pillars.get("judge", {}).get("raw_facts", {})
+    judge_required = decision_input.get("pillar_requirements", {}).get("require_judge") is True
+    if hard_deny:
         resolved_directive = "stop"
         resolved_policy_decision = "deny"
-        resolved_reason_code = "write_capability_blocked"
-        resolved_summary = "Write-like capability is blocked by the policy stub."
+        resolved_reason_code = "read_only_mutation_blocked"
+        resolved_summary = "The read-only execution policy forbids the mutating operation."
+    elif judge_required and (
+        judge_facts.get("pillar_unavailable") is True
+        or judge_facts.get("invoked") is not True
+        or judge_facts.get("digest_matches") is not True
+    ):
+        resolved_directive = "wait_human_review"
+        resolved_policy_decision = "require_human_review"
+        resolved_reason_code = "judge_required_unavailable"
+        resolved_summary = "The mandatory semantic judge is unavailable or invalid."
     elif actor["result_type"] == ActorResultType.ASK_CLARIFICATION.value:
         resolved_directive = "ask_user_clarification"
         resolved_policy_decision = "ask_clarification"
@@ -652,13 +707,7 @@ class StaticJudge(JudgePort):
     def evaluate(
         self,
         *,
-        task_state,
-        policy_input,
-        static_policy_assessment,
-        dynamic_policy_assessment,
-        behavioral_assessment,
-        evaluated_target,
-        invocation_flags,
+        context,
     ) -> JudgeAssessment:
         return JudgeAssessment(
             invoked=self._assessment.invoked,
@@ -666,8 +715,14 @@ class StaticJudge(JudgePort):
             confidence=self._assessment.confidence,
             summary=self._assessment.summary,
             rationale=self._assessment.rationale,
-            flags=invocation_flags or self._assessment.flags,
-            evaluated_target=evaluated_target,
+            flags=self._assessment.flags,
+            evaluated_target=context.external_operation.operation_id,
+            status=self._assessment.status,
+            verdict=self._assessment.verdict,
+            severity=self._assessment.severity,
+            findings=self._assessment.findings,
+            evaluated_operation_digest=context.external_operation.payload_digest,
+            prompt_version=self.prompt_version,
         )
 
 
@@ -1929,6 +1984,17 @@ def _judge_more_evidence_assessment() -> JudgeAssessment:
         rationale="The output overreaches the available evidence.",
         flags=("fragile_completion",),
         evaluated_target="fragile_completion",
+        status=JudgeAssessmentStatus.ACTIVE,
+        verdict=JudgeVerdict.NEEDS_REVISION,
+        severity=JudgeSeverity.MEDIUM,
+        findings=(
+            JudgeFinding(
+                category=JudgeFindingCategory.GOAL_ALIGNMENT,
+                code="payload_overreach",
+                severity=JudgeSeverity.MEDIUM,
+                summary="The payload overreaches the authorized purpose.",
+            ),
+        ),
     )
 
 
@@ -1942,6 +2008,17 @@ def _judge_wait_review_assessment() -> JudgeAssessment:
         rationale="The semantic risk remains high.",
         flags=("semantic_risk_high",),
         evaluated_target="dynamic_escalation",
+        status=JudgeAssessmentStatus.ACTIVE,
+        verdict=JudgeVerdict.UNSAFE,
+        severity=JudgeSeverity.HIGH,
+        findings=(
+            JudgeFinding(
+                category=JudgeFindingCategory.DANGEROUS_AMBIGUITY,
+                code="semantic_risk_high",
+                severity=JudgeSeverity.HIGH,
+                summary="The operation remains semantically unsafe.",
+            ),
+        ),
     )
 
 

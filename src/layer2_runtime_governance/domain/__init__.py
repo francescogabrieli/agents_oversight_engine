@@ -21,6 +21,7 @@ from .review import (
 )
 from .serialization import (
     coerce_external_communication_draft,
+    coerce_external_operation_proposal,
     coerce_human_review_external_edit,
     normalize_task_state_serialization,
 )
@@ -65,6 +66,7 @@ __all__ = [
     "StepValidationDecision",
     "TaskState",
     "coerce_external_communication_draft",
+    "coerce_external_operation_proposal",
     "coerce_human_review_external_edit",
     "normalize_task_state_serialization",
 ]

@@ -226,16 +226,16 @@ class StubToolGateway(ToolGatewayPort):
 
 class StubPolicyEngine(PolicyEnginePort):
     policy_engine_name = "stub_policy_engine"
-    policy_bundle_version = "layer2_governance_v2"
+    policy_bundle_version = "layer2_governance_v3"
     policy_config_version = "layer2_governance_thresholds_v1"
 
     # Select deterministic OPA-first pillars without contacting a policy service.
     def evaluate_required_pillars(self, *, base_facts):
         return {
             "require_evidence": True,
-            "require_risk": True,
+            "require_risk": False,
             "require_trajectory": True,
-            "require_behavioral": True,
+            "require_behavioral": False,
             "require_judge": False,
         }
 
@@ -251,12 +251,7 @@ class StubPolicyEngine(PolicyEnginePort):
         reason_code = "allowed_by_policy"
         summary = "The integration policy permits this runtime turn."
 
-        if actor["capability_mode"] == "write" or actor["external_impact"]:
-            directive = "stop"
-            policy_decision = "deny"
-            reason_code = "write_capability_blocked"
-            summary = "Write-like capability is blocked by the integration policy."
-        elif actor["result_type"] == ActorResultType.ASK_CLARIFICATION.value:
+        if actor["result_type"] == ActorResultType.ASK_CLARIFICATION.value:
             directive = "ask_user_clarification"
             policy_decision = "ask_clarification"
             reason_code = "ask_clarification_required"
@@ -275,12 +270,26 @@ class StubPolicyEngine(PolicyEnginePort):
             reason_code = "read_only_allowed"
             summary = "Read-only capability use is allowed."
 
+        pillar_results = dict(decision_input["pillars"])
+        pillar_results["static_policy"] = {
+            "hard_deny": False,
+            "constraints": [],
+            "violations": [],
+            "reason_codes": [],
+            "summary": "Static deterministic guardrails passed.",
+            "read_only_required": bool(base_facts["policy"]["read_only_mode"]),
+            "clarification_signaled": (
+                actor["result_type"] == ActorResultType.ASK_CLARIFICATION.value
+            ),
+            "mode": "active",
+            "decision_influence": True,
+        }
         return {
             "schema_version": "governance_decision_output.v1",
             "directive": directive,
             "policy_decision": policy_decision,
             "reason_codes": [reason_code],
-            "pillar_results": decision_input["pillars"],
+            "pillar_results": pillar_results,
             "selected_reason": summary,
             "rejected_alternatives": {},
             "safety_invariants_checked": ["integration_fixture_policy"],

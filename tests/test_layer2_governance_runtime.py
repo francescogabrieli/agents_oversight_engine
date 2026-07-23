@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import closing
+from dataclasses import replace
 
 from tests.layer2_runtime_fixtures import *
 
@@ -61,7 +62,7 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
         self.assertEqual(result.reason_codes, (GovernanceReasonCode.READ_ONLY_ALLOWED,))
         self.assertEqual(result.summary, "Read-only capability use is allowed.")
         self.assertEqual(result.policy_engine_name, "opa_http_policy_engine")
-        self.assertEqual(result.policy_bundle_version, "layer2_governance_v2")
+        self.assertEqual(result.policy_bundle_version, "layer2_governance_v3")
 
 
     def test_read_only_tool_request_routes_through_governance(self) -> None:
@@ -97,29 +98,22 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
         )
 
 
-    def test_write_action_is_denied_by_governance(self) -> None:
-        graph = _build_test_graph(actor_service=WriteActionActor())
-        result = graph.invoke(
-            {"intake_result": _build_research_intake_result()},
-            config={"configurable": {"thread_id": "layer2-write-denied"}},
+    def test_write_and_external_compatibility_flags_alone_are_not_denied(self) -> None:
+        task_state = _build_policy_input_task_state(read_only_mode=False)
+        task_state.actor_result = replace(
+            task_state.actor_result,
+            capability_mode=CapabilityAccessMode.WRITE,
+            external_impact=True,
         )
 
-        task_state = result["task_state"]
-        self.assertEqual(task_state.current_state, RuntimeState.ABORTED)
-        self.assertEqual(task_state.tool_call_count, 0)
-        self.assertEqual(task_state.last_governance_decision.policy_decision, PolicyDecision.DENY)
-        self.assertEqual(task_state.last_governance_decision.directive, GovernanceDirective.STOP)
-        self.assertEqual(len(task_state.governance_history), 1)
-        self.assertEqual(task_state.governance_history[0].policy_decision, PolicyDecision.DENY)
-        self.assertEqual(
-            [step.node_name for step in task_state.step_history],
-            [
-                "bootstrap_from_intake",
-                "planner",
-                "actor",
-                "governance",
-                "finalize_bootstrap",
-            ],
+        result = StubPolicyEngine().evaluate(
+            policy_input=build_policy_evaluation_input(task_state=task_state)
+        )
+
+        self.assertEqual(result.policy_decision, PolicyDecision.ALLOW)
+        self.assertNotIn(
+            GovernanceReasonCode.WRITE_CAPABILITY_BLOCKED,
+            result.reason_codes,
         )
 
 
@@ -216,7 +210,6 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
             assessment = behavioral_store.build_behavioral_assessment(
                 thread_id="current-run",
                 task_state=state,
-                dynamic_policy_assessment=dynamic_policy,
             )
 
             self.assertEqual(
@@ -250,7 +243,6 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
             assessment = behavioral_store.build_behavioral_assessment(
                 thread_id="current-run",
                 task_state=state,
-                dynamic_policy_assessment=_strong_dynamic_policy_assessment(),
             )
 
             self.assertEqual(
@@ -356,7 +348,6 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
             assessment = behavioral_store.build_behavioral_assessment(
                 thread_id="current-run",
                 task_state=state,
-                dynamic_policy_assessment=_weak_dynamic_policy_assessment(),
             )
 
             self.assertEqual(
@@ -461,7 +452,6 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
             assessment = behavioral_store.build_behavioral_assessment(
                 thread_id="current-run",
                 task_state=state,
-                dynamic_policy_assessment=_strong_dynamic_policy_assessment(),
             )
 
             self.assertEqual(
@@ -494,7 +484,6 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
             assessment = behavioral_store.build_behavioral_assessment(
                 thread_id="current-run",
                 task_state=state,
-                dynamic_policy_assessment=_review_dynamic_policy_assessment(),
             )
 
             self.assertEqual(
@@ -536,7 +525,7 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
         )
 
 
-    def test_judge_is_invoked_for_fragile_completion(self) -> None:
+    def test_judge_is_not_invoked_for_local_fragile_completion(self) -> None:
         state = _build_actor_ready_state_for_judge()
         state.actor_result = ActorResult(
             plan_step_id="step_1",
@@ -557,16 +546,13 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
 
         result = governance(
             state,
-            policy_engine_service=JudgeRequiredPolicyEngine(),
+            policy_engine_service=StubPolicyEngine(),
             judge_service=StaticJudge(_judge_more_evidence_assessment()),
             thread_id="judge-fragile-completion",
         )
 
-        self.assertTrue(result.last_judge_assessment.invoked)
-        self.assertEqual(
-            result.last_judge_assessment.recommendation,
-            JudgeRecommendedDirective.REQUEST_MORE_EVIDENCE,
-        )
+        self.assertFalse(result.last_judge_assessment.invoked)
+        self.assertEqual(result.last_judge_assessment.status, JudgeAssessmentStatus.NOT_APPLICABLE)
 
 
     def test_governance_keeps_intermediate_recovery_local_when_evidence_contract_is_satisfied(self) -> None:
@@ -618,7 +604,7 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
         )
 
 
-    def test_governance_routes_confident_judge_flag_to_evidence_recovery(self) -> None:
+    def test_required_judge_without_external_proposal_fails_closed(self) -> None:
         state = _build_actor_ready_state_for_judge()
         state.actor_result = ActorResult(
             plan_step_id="step_1",
@@ -646,13 +632,10 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
 
         self.assertEqual(
             result.last_governance_decision.directive,
-            GovernanceDirective.REQUEST_MORE_EVIDENCE,
-        )
-        self.assertTrue(result.last_judge_assessment.invoked)
-        self.assertEqual(
-            result.last_governance_decision.judge_recommended_directive,
             GovernanceDirective.WAIT_HUMAN_REVIEW,
         )
+        self.assertFalse(result.last_judge_assessment.invoked)
+        self.assertEqual(result.last_judge_assessment.status, JudgeAssessmentStatus.UNAVAILABLE)
 
 
     def test_judge_snapshot_is_persisted_in_sqlite(self) -> None:

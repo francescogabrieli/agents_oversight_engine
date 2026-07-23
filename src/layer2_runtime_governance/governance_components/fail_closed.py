@@ -1,7 +1,13 @@
 from typing import Any
 
 from ..behavioral import BehavioralAssessment
-from ..judge import JudgeAssessment, JudgeRecommendedDirective
+from ..judge import (
+    JudgeAssessment,
+    JudgeAssessmentStatus,
+    JudgeRecommendedDirective,
+    JudgeSeverity,
+    JudgeVerdict,
+)
 from ..oversight.contracts import DynamicPolicyAssessment
 from ..domain import TaskState
 
@@ -47,8 +53,18 @@ def _build_fail_closed_governance_result(
     }
     resolved_pillars = pillars or {}
     thresholds_version = policy_config_version
-    for name in ("evidence", "risk", "trajectory", "behavioral", "judge"):
+    for name in ("evidence", "trajectory", "judge"):
         resolved_pillars.setdefault(name, _unavailable_pillar(name, thresholds_version))
+    for name in ("risk", "behavioral"):
+        resolved_pillars.setdefault(
+            name,
+            _unavailable_pillar(
+                name,
+                thresholds_version,
+                mode="shadow",
+                decision_influence=False,
+            ),
+        )
     decision_input = build_governance_decision_input(
         base_facts=base_facts,
         policy_bundle_version=policy_bundle_version,
@@ -67,7 +83,6 @@ def _build_fail_closed_governance_result(
     )
     dynamic = dynamic_assessment or _build_dynamic_assessment_from_signals(
         pillars=resolved_pillars,
-        directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
     )
     behavioral = behavioral_assessment or _unavailable_behavioral_assessment(reason)
     judge = judge_assessment or _not_required_judge_assessment()
@@ -114,16 +129,29 @@ def _build_fail_closed_governance_result(
     )
 
 # Build one deterministic component of the fail-closed governance result.
-def _unavailable_pillar(name: str, thresholds_version: str) -> dict[str, Any]:
+def _unavailable_pillar(
+    name: str,
+    thresholds_version: str,
+    *,
+    mode: str = "active",
+    decision_influence: bool = True,
+) -> dict[str, Any]:
     return {
-        "raw_facts": {"pillar_unavailable": True, "pillar_name": name},
-        "diagnostic_score": 0.0,
-        "diagnostic_level": "weak" if name == "evidence" else "low",
+        "raw_facts": {
+            "pillar_unavailable": True,
+            "pillar_name": name,
+            "mode": mode,
+            "decision_influence": decision_influence,
+        },
+        "diagnostic_score": None,
+        "diagnostic_level": "unavailable",
         "score_components": {},
         "reason_facts": ["pillar_unavailable"],
         "summary": f"{name} pillar unavailable.",
         "score_formula_version": f"{name}_unavailable",
         "thresholds_version": thresholds_version,
+        "mode": mode,
+        "decision_influence": decision_influence,
     }
 
 # Build one deterministic component of the fail-closed governance result.
@@ -134,6 +162,9 @@ def _unavailable_behavioral_assessment(reason: str) -> BehavioralAssessment:
         feature_snapshot_version="behavioral_unavailable",
         summary=f"Behavioral pillar unavailable: {reason}",
         notes=("behavioral_unavailable",),
+        mode="shadow",
+        decision_influence=False,
+        status="unavailable",
     )
 
 # Build one deterministic component of the fail-closed governance result.
@@ -146,6 +177,9 @@ def _not_required_judge_assessment() -> JudgeAssessment:
         rationale="The first OPA pass did not request a semantic judge assessment.",
         flags=(),
         evaluated_target="not_required",
+        status=JudgeAssessmentStatus.NOT_APPLICABLE,
+        verdict=JudgeVerdict.UNCERTAIN,
+        severity=JudgeSeverity.LOW,
     )
 
 # Build one deterministic component of the fail-closed governance result.
@@ -158,6 +192,9 @@ def _unavailable_judge_assessment(reason: str) -> JudgeAssessment:
         rationale="The judge backend failed; the failure is passed to OPA as a fact.",
         flags=("judge_unavailable",),
         evaluated_target="unavailable",
+        status=JudgeAssessmentStatus.UNAVAILABLE,
+        verdict=JudgeVerdict.UNCERTAIN,
+        severity=JudgeSeverity.HIGH,
     )
 
 __all__ = [

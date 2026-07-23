@@ -26,9 +26,13 @@ from layer2_runtime_governance import (
     ToolName,
     ToolRequest,
     build_default_checkpointer,
+    coerce_human_review_decision_payload,
 )
 from layer2_runtime_governance.infrastructure.runtime_artifacts import RuntimeArtifactStore
-from layer2_runtime_governance.domain import TaskState
+from layer2_runtime_governance.domain import (
+    TaskState,
+    coerce_external_operation_proposal,
+)
 from layer2_runtime_governance.infrastructure.checkpointing import close_checkpointer
 from layer2_runtime_governance.composition import (
     Layer2RuntimeDependencies,
@@ -312,6 +316,12 @@ def _parse_human_review_decision(
 
     external_edit = None
     if decision_type == HumanReviewDecisionType.MODIFY_AND_CONTINUE:
+        if isinstance(payload.get("external_operation_edit"), dict):
+            return coerce_human_review_decision_payload(
+                payload,
+                expected_request_id=pending_request.request_id,
+                expected_operation_digest=pending_request.operation_payload_digest,
+            )
         external_edit = _parse_external_communication_edit(
             payload,
             pending_request=pending_request,
@@ -324,6 +334,15 @@ def _parse_human_review_decision(
         clarification_text=clarification_text,
         external_communication_edit=external_edit,
         reviewer_id=_optional_text(payload.get("reviewer_id")),
+        approved_operation_digest=(
+            pending_request.operation_payload_digest
+            if decision_type
+            in {
+                HumanReviewDecisionType.APPROVE_CONTINUE,
+                HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY,
+            }
+            else None
+        ),
     )
 
 
@@ -421,6 +440,18 @@ def _coerce_human_review_request(payload: Any) -> HumanReviewRequest:
         reason_codes=tuple(str(value) for value in payload.get("reason_codes", []) if isinstance(value, str)),
         allowed_decisions=allowed_decision_values,
         review_summary=_optional_text(payload.get("review_summary")),
+        operation_id=_optional_text(payload.get("operation_id")),
+        operation_payload_digest=_optional_text(payload.get("operation_payload_digest")),
+        operation_proposal_summary=_optional_text(payload.get("operation_proposal_summary")),
+        operation_target=_optional_text(payload.get("operation_target")),
+        external_operation_proposal=coerce_external_operation_proposal(
+            payload.get("external_operation_proposal")
+        ),
+        judge_findings=tuple(
+            str(value)
+            for value in payload.get("judge_findings", [])
+            if isinstance(value, str)
+        ),
     )
 
 
@@ -456,7 +487,7 @@ def _coerce_external_communication_draft(payload: Any) -> ExternalCommunicationD
 # Build a compact operator feedback message aligned with the typed decision semantics.
 def _build_operator_feedback_message(decision: HumanReviewDecision) -> str:
     if decision.decision_type == HumanReviewDecisionType.MODIFY_AND_CONTINUE:
-        return "The edited external draft was accepted and the runtime resumed on the governed path."
+        return "The edited external proposal received a new digest and returned to governance."
     if decision.decision_type == HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY:
         return "The runtime resumed under the approved read-only envelope."
     if decision.decision_type == HumanReviewDecisionType.APPROVE_CONTINUE:

@@ -14,7 +14,7 @@ from .actor_contract import ActorPort
 from .behavioral import BehavioralStorePort, build_default_behavioral_store
 from .governance_components import PolicyEnginePort, build_default_policy_engine
 from .infrastructure.checkpointing import build_default_checkpointer
-from .judge import JudgePort
+from .judge import JudgePort, build_default_judge
 from .planning import PlannerPort, build_default_planner
 from .planning.replanning import ReplannerPort, build_default_replanner
 from .runtime.contracts import Layer2GraphInput, Layer2GraphOutput, Layer2GraphState
@@ -61,6 +61,7 @@ def build_runtime_graph(
     resolved_replanner = replanner_service or build_default_replanner()
     resolved_policy_engine = policy_engine_service or build_default_policy_engine()
     resolved_behavioral_store = behavioral_store_service or build_default_behavioral_store()
+    resolved_judge = judge_service or build_default_judge()
 
     builder = StateGraph(
         Layer2GraphState,
@@ -75,7 +76,7 @@ def build_runtime_graph(
         build_governance_node(
             resolved_policy_engine,
             tool_gateway_config=resolved_tool_config,
-            judge_service=judge_service,
+            judge_service=resolved_judge,
             behavioral_store_service=resolved_behavioral_store,
             hitl_event_callback=hitl_event_callback,
         ),
@@ -109,6 +110,7 @@ def build_runtime_graph(
             "actor": "actor",
             "tool_gateway": "tool_gateway",
             "replanner": "replanner",
+            "governance": "governance",
             "finalize_bootstrap": "finalize_bootstrap",
         },
     )

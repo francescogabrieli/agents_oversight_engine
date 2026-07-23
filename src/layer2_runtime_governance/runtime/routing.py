@@ -30,6 +30,7 @@ def route_after_human_review(state: Layer2GraphState) -> str:
         RuntimeState.REPLANNING: "replanner",
         RuntimeState.READY_NEXT_STEP: "actor",
         RuntimeState.ACTING: "actor",
+        RuntimeState.READY_GOVERNANCE: "governance",
     }
     return route_by_state.get(task_state.current_state, "finalize_bootstrap")
 

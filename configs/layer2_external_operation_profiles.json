@@ -1,0 +1,24 @@
+{
+  "profile_version": "layer2_external_operation_profiles.v1",
+  "profiles": {
+    "communication.default": {
+      "family": "communication",
+      "target_criticality": "standard",
+      "scope": "single_destination",
+      "compensation_mechanism": null
+    },
+    "enterprise_db.read_only": {
+      "family": "database",
+      "target_criticality": "business_system",
+      "scope": "query_bounded",
+      "allowed_statement_classes": ["select"],
+      "compensation_mechanism": null
+    },
+    "generic.default": {
+      "family": "generic",
+      "target_criticality": "unknown",
+      "scope": "unknown",
+      "compensation_mechanism": null
+    }
+  }
+}

@@ -24,6 +24,17 @@ export type HumanReviewPendingRequest = {
   review_summary?: string | null;
   allowed_decisions: string[];
   external_communication_draft?: ExternalCommunicationDraft | null;
+  operation_id?: string | null;
+  operation_payload_digest?: string | null;
+  operation_proposal_summary?: string | null;
+  operation_target?: string | null;
+  judge_findings?: string[];
+  external_operation_proposal?: {
+    operation_family: "communication" | "database" | "generic";
+    payload: Record<string, unknown>;
+    payload_digest: string;
+    modifiable: boolean;
+  } | null;
 };
 
 export type ExternalCommunicationDraft = {
@@ -69,5 +80,9 @@ export type HumanReviewDecisionPayload = {
   external_communication_edit?: {
     note?: string;
     draft: ExternalCommunicationDraft;
+  };
+  external_operation_edit?: {
+    note?: string;
+    payload: Record<string, unknown>;
   };
 };
