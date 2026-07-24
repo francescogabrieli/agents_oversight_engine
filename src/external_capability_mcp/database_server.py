@@ -130,7 +130,18 @@ def _execute_statement(
         connection.execute(f"PRAGMA busy_timeout = {int(profile.timeout_seconds * 1000)}")
         connection.execute("BEGIN")
         cursor = connection.execute(statement, parameters)
-        row_count = cursor.rowcount
+        metadata: dict[str, Any] = {"driver": "sqlite"}
+        if isinstance(expression, exp.Select):
+            columns = [desc[0] for desc in cursor.description] if cursor.description else []
+            raw_rows = cursor.fetchall()
+            rows = [dict(zip(columns, row)) for row in raw_rows[:100]]
+            metadata.update({
+                "row_count": len(raw_rows),
+                "columns": columns,
+                "rows": rows,
+            })
+        else:
+            metadata.update({"row_count": cursor.rowcount})
         connection.commit()
         transaction_reference = f"sqlite:{idempotency_key[:16]}"
         response = _response(
@@ -140,7 +151,7 @@ def _execute_statement(
             retryable=False,
             timestamp=started,
             external_reference=transaction_reference,
-            metadata={"row_count": row_count, "driver": "sqlite"},
+            metadata=metadata,
         )
     except sqlite3.OperationalError as exc:
         if connection is not None:

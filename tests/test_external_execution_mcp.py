@@ -421,6 +421,205 @@ class MCPExternalExecutorIntegrationTests(unittest.TestCase):
                 timeout_seconds=0.1,
             )
 
+    # Test full end-to-end runtime graph execution: graph -> governance -> real stdio MCP server -> SQLite SELECT receipt.
+    def test_graph_e2e_real_mcp_database_execution(self) -> None:
+        db_file = self.temp_dir / "test_e2e.db"
+        conn = sqlite3.connect(db_file)
+        conn.execute("CREATE TABLE users (id INT, name TEXT, role TEXT)")
+        conn.execute("INSERT INTO users VALUES (1, 'Alice', 'admin')")
+        conn.commit()
+        conn.close()
+
+        profiles_file = self.temp_dir / "db_profiles.json"
+        profiles_file.write_text(
+            json.dumps(
+                {
+                    "profiles": {
+                        "enterprise_db.read_only": {
+                            "driver": "sqlite",
+                            "dsn_env": "LAYER2_TEST_E2E_DB_DSN",
+                            "read_only": True,
+                            "timeout_seconds": 10,
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        registry = _enabled_registry(
+            self.temp_dir,
+            capability_id="database.statement.execute",
+            extra_environment_keys=("LAYER2_TEST_E2E_DB_DSN",),
+        )
+
+        from layer2_runtime_governance.composition import (
+            Layer2RuntimeDependencies,
+            compose_layer2_runtime,
+        )
+        from layer2_runtime_governance.domain import (
+            ActorResult,
+            ActorResultType,
+            EvidenceSupportLevel,
+            PlanStep,
+            PlanStepKind,
+            PlanStepStatus,
+            PlannerDecision,
+            RuntimeState,
+            TaskState,
+        )
+        from tests.layer2_runtime_fixtures import StubPolicyEngine
+        from layer2_runtime_governance.actor_contract import ActorPort, ActorTask
+        from layer2_runtime_governance.judge import DisabledJudge
+        from layer2_runtime_governance.planning import PlannerPort
+
+        class _FixedPlanner(PlannerPort):
+            planner_name = "fixed_planner"
+            prompt_version = "v1"
+            def plan(self, *, task_state: TaskState) -> PlannerDecision:
+                return PlannerDecision(
+                    plan_steps=[
+                        PlanStep(
+                            step_id="step_1",
+                            objective="Query admin user.",
+                            rationale="Check admin user existence.",
+                            expected_outcome="User data.",
+                            step_kind=PlanStepKind.FINAL_SYNTHESIS,
+                            evidence_requirement=EvidenceSupportLevel.LOCAL_ONLY,
+                            claim_precision_ceiling=EvidenceSupportLevel.LOCAL_ONLY,
+                            status=PlanStepStatus.PENDING,
+                        )
+                    ],
+                    rationale="Query admin user.",
+                    planner_name=self.planner_name,
+                    prompt_version=self.prompt_version,
+                )
+
+        from layer2_runtime_governance.domain import StepValidation, StepValidationDecision
+
+        class _SingleTurnDbActor(ActorPort):
+            actor_name = "db_actor"
+            prompt_version = "v1"
+            def act(self, *, actor_task: ActorTask) -> ActorResult:
+                proposal = normalize_sql_operation(
+                    operation_id="db-op-1",
+                    plan_step_id=actor_task.current_plan_step.step_id,
+                    capability_id="database.statement.execute",
+                    sql="SELECT id, name, role FROM users WHERE role = 'admin'",
+                    database_target="enterprise_db",
+                    database_profile_id="enterprise_db.read_only",
+                )
+                return ActorResult(
+                    plan_step_id=actor_task.current_plan_step.step_id,
+                    result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+                    summary="Query admin user via SQL",
+                    external_operation_proposal=proposal,
+                    external_impact=True,
+                    step_validation=StepValidation(
+                        plan_step_id=actor_task.current_plan_step.step_id,
+                        objective_satisfied=True,
+                        evidence_sufficient=True,
+                        confidence=0.95,
+                        next_action=StepValidationDecision.COMPLETE_STEP,
+                        rationale_summary="Query executed.",
+                    ),
+                )
+
+        from layer2_runtime_governance.judge import (
+            JudgeAssessment,
+            JudgeAssessmentStatus,
+            JudgePort,
+            JudgeRecommendedDirective,
+            JudgeSeverity,
+            JudgeVerdict,
+        )
+
+        class _SafeJudge(JudgePort):
+            judge_name = "safe_judge"
+            prompt_version = "v1"
+            def evaluate(self, *, context):
+                return JudgeAssessment(
+                    invoked=True,
+                    recommendation=JudgeRecommendedDirective.CONTINUE,
+                    confidence=0.95,
+                    summary="Safe DB query.",
+                    rationale="Safe DB query.",
+                    flags=(),
+                    evaluated_target=context.external_operation.operation_id,
+                    status=JudgeAssessmentStatus.ACTIVE,
+                    verdict=JudgeVerdict.SAFE,
+                    severity=JudgeSeverity.LOW,
+                    evaluated_operation_digest=context.external_operation.payload_digest,
+                    prompt_version=self.prompt_version,
+                )
+
+        executor = MCPExternalOperationExecutor(
+            registry=registry,
+            ledger=ExternalExecutionLedger(path=self.temp_dir / "e2e-ledger.sqlite3"),
+        )
+
+        from layer1_intake import (
+            BudgetConfig,
+            ExecutionPolicy,
+            IntakeMetadata,
+            IntakeResult,
+            ParseStatus,
+            StructuredTask,
+            TaskSpec,
+        )
+
+        intake_res = IntakeResult(
+            structured_task=StructuredTask(
+                task_spec=TaskSpec(
+                    goal="Query db",
+                    execution_intent=ExecutionIntent.EXECUTE_AFTER_GOVERNANCE,
+                ),
+                execution_policy=ExecutionPolicy(
+                    read_only_mode=False,
+                    confidence_threshold=0.5,
+                    budget=BudgetConfig(max_steps=5, max_tool_calls=5),
+                ),
+            ),
+            metadata=IntakeMetadata(
+                request_id="e2e-1",
+                parse_status=ParseStatus.COMPLETE,
+            ),
+        )
+
+        env_updates = {
+            "LAYER2_DATABASE_PROFILES_CONFIG_PATH": str(profiles_file),
+            "LAYER2_TEST_E2E_DB_DSN": str(db_file),
+            "PYTHONPATH": str(SRC_ROOT),
+        }
+
+        try:
+            with patch.dict(os.environ, env_updates, clear=False):
+                runtime_graph = compose_layer2_runtime(
+                    Layer2RuntimeDependencies(
+                        planner=_FixedPlanner(),
+                        actor=_SingleTurnDbActor(),
+                        policy_engine=StubPolicyEngine(),
+                        external_capability_registry=registry,
+                        external_operation_executor=executor,
+                        judge=_SafeJudge(),
+                    )
+                )
+                res = runtime_graph.invoke(
+                    {"intake_result": intake_res},
+                    config={"configurable": {"thread_id": "test_e2e_thread"}},
+                )
+                final_state = res["task_state"]
+
+                self.assertEqual(final_state.current_state, RuntimeState.COMPLETED)
+                self.assertTrue(len(final_state.external_execution_history) > 0)
+                receipt = final_state.external_execution_history[-1]
+                self.assertEqual(receipt.status, ExternalExecutionStatus.EXECUTED)
+                meta = {field.name: field.value for field in receipt.connector_metadata}
+                self.assertEqual(meta.get("row_count"), "1")
+                self.assertIn("Alice", meta.get("rows", ""))
+        finally:
+            executor.close()
+
 
 if __name__ == "__main__":
     unittest.main()

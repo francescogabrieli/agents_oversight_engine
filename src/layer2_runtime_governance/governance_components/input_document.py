@@ -180,6 +180,8 @@ def _external_payload_facts(
             "payload_type": "communication",
             "channel": payload.channel,
             "recipient": payload.recipient,
+            "cc": list(payload.cc),
+            "bcc": list(payload.bcc),
             "subject": payload.subject,
             "destination_class": payload.destination_class.value,
         }
@@ -191,6 +193,7 @@ def _external_payload_facts(
             "parse_valid": payload.parse_valid,
             "ambiguous": payload.ambiguous,
             "database_profile_id": payload.database_profile_id,
+            "is_read_only_profile": payload.is_read_only_profile,
         }
     if isinstance(payload, GenericExternalOperationPayload):
         return {

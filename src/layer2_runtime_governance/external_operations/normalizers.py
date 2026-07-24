@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+import os
 import re
 from dataclasses import replace
 from email.utils import getaddresses
+from pathlib import Path
 from typing import TYPE_CHECKING, Iterable
 
 from sqlglot import exp, parse
@@ -56,8 +59,13 @@ def normalize_communication_operation(
         for value in draft.bcc
         for address in _parsed_recipient_addresses(value)
     )
+    all_recipients = tuple(
+        item
+        for item in (recipient, *cc, *bcc)
+        if item
+    )
     destination_class = _classify_destination(
-        recipient=recipient,
+        recipients=all_recipients,
         prohibited_domains=tuple(item.lower().strip() for item in prohibited_domains),
     )
     payload = CommunicationOperationPayload(
@@ -89,6 +97,8 @@ def normalize_communication_operation(
                 part
                 for part in (
                     f"To: {recipient}" if recipient else None,
+                    f"Cc: {', '.join(cc)}" if cc else None,
+                    f"Bcc: {', '.join(bcc)}" if bcc else None,
                     f"Subject: {subject}" if subject else None,
                     body,
                 )
@@ -119,6 +129,7 @@ def normalize_sql_operation(
     capability_profile_version: str = "1",
     dialect: str | None = None,
     parameters=(),
+    is_read_only_profile: bool | None = None,
     execution_candidate: bool = True,
 ) -> ExternalOperationProposal:
     raw_sql = sql.strip()
@@ -146,6 +157,12 @@ def normalize_sql_operation(
         statement_class = SQLStatementClass.UNKNOWN
         normalized_sql = None
 
+    resolved_read_only = (
+        is_read_only_profile
+        if is_read_only_profile is not None
+        else _is_database_profile_read_only(database_profile_id)
+    )
+
     effect = _effect_for_statement_class(statement_class)
     payload = DatabaseOperationPayload(
         sql=raw_sql,
@@ -156,6 +173,7 @@ def normalize_sql_operation(
         ambiguous=ambiguous,
         database_profile_id=database_profile_id,
         parameters=tuple(parameters),
+        is_read_only_profile=resolved_read_only,
     )
     return ExternalOperationProposal(
         operation_id=operation_id,
@@ -317,12 +335,16 @@ def _effect_for_statement_class(statement_class: SQLStatementClass) -> ExternalO
 # Classify only configured destination facts; semantic content stays judge-owned.
 def _classify_destination(
     *,
-    recipient: str | None,
+    recipients: tuple[str, ...],
     prohibited_domains: tuple[str, ...],
 ) -> DestinationClass:
-    if not recipient:
+    if not recipients:
         return DestinationClass.UNKNOWN
-    addresses = _parsed_recipient_addresses(recipient)
+    addresses = tuple(
+        address
+        for raw in recipients
+        for address in _parsed_recipient_addresses(raw)
+    )
     if not addresses:
         return DestinationClass.UNKNOWN
     domains = tuple(
@@ -439,6 +461,24 @@ def _bounded_body(value: str) -> str:
 # Bound previews separately from the canonical payload used by the digest.
 def _bounded_preview(value: str) -> str:
     return value[:4096]
+
+
+# Resolve whether a database profile is configured as read-only from environment config or conventions.
+def _is_database_profile_read_only(profile_id: str) -> bool:
+    config_value = os.getenv("LAYER2_DATABASE_PROFILES_CONFIG_PATH")
+    if config_value and Path(config_value).exists():
+        try:
+            payload = json.loads(Path(config_value).read_text(encoding="utf-8"))
+            profiles = payload.get("profiles", {})
+            if profile_id in profiles:
+                return bool(profiles[profile_id].get("read_only", True))
+        except Exception:
+            pass
+    if "read_only" in profile_id or profile_id.endswith(".read_only"):
+        return True
+    if profile_id.endswith(".write") or "write" in profile_id:
+        return False
+    return True
 
 
 __all__ = [

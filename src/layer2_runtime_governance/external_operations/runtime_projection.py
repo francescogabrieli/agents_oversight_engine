@@ -96,10 +96,7 @@ def _proposal_from_review_ready_communication(
             else f"communication.{external.draft.channel.strip().lower()}.send"
         ),
         draft=external.draft,
-        execution_candidate=(
-            task_state.execution_intent
-            == ExecutionIntent.EXECUTE_AFTER_GOVERNANCE
-        ),
+        execution_candidate=True,
     )
 
 
@@ -194,10 +191,7 @@ def _proposal_from_legacy_external_action(
             if actor_result.capability_mode != CapabilityAccessMode.WRITE
             else ExternalOperationEffect.EXECUTE
         ),
-        execution_candidate=(
-            task_state.execution_intent
-            == ExecutionIntent.EXECUTE_AFTER_GOVERNANCE
-        ),
+        execution_candidate=True,
     )
 
 

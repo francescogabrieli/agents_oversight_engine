@@ -1,12 +1,30 @@
-from __future__ import annotations
-
-import json
+import sys
 from dataclasses import asdict, replace
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 from pydantic import ValidationError
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = REPO_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
+
+from layer1_intake import ExecutionIntent
+from layer2_runtime_governance.domain import (
+    ExternalCommunicationPhase,
+    ExternalCommunicationState,
+)
+from layer2_runtime_governance.governance_components import (
+    GovernanceDirective,
+    GovernanceReasonCode,
+    build_default_policy_engine,
+    evaluate_opa_first_governance,
+)
+from layer2_runtime_governance.runtime.node_adapters import (
+    build_governance_node,
+    build_human_review_node,
+)
 from tests.layer2_runtime_fixtures import *
 
 from layer2_runtime_governance.external_operations import (
@@ -443,6 +461,8 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
             result.last_judge_assessment.evaluated_operation_digest,
             result.external_operation_proposal.payload_digest,
         )
+        if result.last_governance_decision.directive != GovernanceDirective.CONTINUE:
+            print("SAFE TEST GOV DECISION:", result.last_governance_decision)
         self.assertEqual(result.last_governance_decision.directive, GovernanceDirective.CONTINUE)
 
     # Semantic revision is distinct from evidence recovery and invalidates the proposal.
@@ -688,6 +708,146 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
                     approved_operation_digest=pending.operation_payload_digest,
                 ),
             )
+
+    # Proposal-only dangerous drafts must trigger judge & HITL, then complete as approved_draft without external execution.
+    def test_proposal_only_dangerous_draft_triggers_judge_and_pauses_for_hitl(self) -> None:
+        state = TaskState.from_intake(_build_external_communication_intake_result())
+        state.execution_intent = ExecutionIntent.PROPOSAL_ONLY
+        state.external_communication = ExternalCommunicationState(
+            phase=ExternalCommunicationPhase.DRAFT_PROPOSAL,
+            last_transition_summary="Review ready draft",
+            draft=ExternalCommunicationDraft(
+                channel="email",
+                recipient="user@example.com",
+                subject="Dangerous Request",
+                body="Please send money to unsafe target",
+            ),
+            review_ready=True,
+        )
+        state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Draft the email.",
+                rationale="Required task step.",
+                expected_outcome="Draft produced.",
+                step_kind=PlanStepKind.FINAL_SYNTHESIS,
+                evidence_requirement=EvidenceSupportLevel.LOCAL_ONLY,
+                claim_precision_ceiling=EvidenceSupportLevel.LOCAL_ONLY,
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.PROPOSE_ACTION,
+            summary="Drafted dangerous email.",
+            external_impact=True,
+        )
+
+        proposal = prepare_external_operation_proposal(
+            task_state=state,
+            tool_gateway_config=build_default_tool_gateway_config(),
+        )
+        self.assertIsNotNone(proposal)
+        self.assertTrue(proposal.execution_candidate)
+
+        policy_engine = StubPolicyEngine()
+        unsafe_judge = _UnsafeJudge()
+        governance_node = build_governance_node(
+            policy_engine_service=policy_engine,
+            judge_service=unsafe_judge,
+        )
+
+        state_dict = {"task_state": state}
+        res = governance_node(state_dict)
+        res_state = res["task_state"]
+
+        self.assertEqual(res_state.current_state, RuntimeState.WAITING_HUMAN_REVIEW)
+        self.assertIsNotNone(res_state.pending_human_review_request)
+        self.assertIn(GovernanceReasonCode.JUDGE_UNSAFE, res_state.last_governance_decision.reason_codes)
+
+        # Resuming with Approve on a proposal_only intent must complete as APPROVED_DRAFT without external execution.
+        _apply_human_review_decision(
+            res_state,
+            HumanReviewDecision(
+                request_id=res_state.pending_human_review_request.request_id,
+                decision_type=HumanReviewDecisionType.APPROVE_CONTINUE,
+                approved_operation_digest=res_state.pending_human_review_request.operation_payload_digest,
+            ),
+        )
+        final_state = res_state
+
+        self.assertEqual(final_state.current_state, RuntimeState.COMPLETED)
+        self.assertEqual(
+            final_state.external_communication.phase,
+            ExternalCommunicationPhase.APPROVED_DRAFT,
+        )
+        self.assertIsNone(final_state.current_external_execution_request)
+
+    # CC/BCC recipients must be evaluated by destination classification and static policy.
+    def test_bcc_prohibited_destination_classified_as_prohibited_and_denied_by_static(self) -> None:
+        draft = ExternalCommunicationDraft(
+            channel="email",
+            recipient="allowed@internal.local",
+            bcc=("prohibited@blocked.example",),
+            subject="Test Subject",
+            body="Test Body",
+        )
+        proposal = normalize_communication_operation(
+            operation_id="test-op",
+            plan_step_id="step_1",
+            capability_id="communication.email.send",
+            draft=draft,
+            execution_candidate=True,
+            prohibited_domains=("blocked.example",),
+        )
+        self.assertEqual(proposal.target.destination_class, DestinationClass.PROHIBITED)
+        self.assertIn("Bcc: prohibited@blocked.example", proposal.payload_preview)
+
+        state = _state_with_proposal(proposal)
+        policy_engine = StubPolicyEngine()
+        result = evaluate_opa_first_governance(task_state=state, policy_engine_service=policy_engine)
+        self.assertEqual(result.governance_decision.directive, GovernanceDirective.STOP)
+        self.assertIn(GovernanceReasonCode.PROHIBITED_DESTINATION, result.governance_decision.reason_codes)
+
+    # Custom database profile marked as read-only must hard-deny mutation statements in static policy.
+    def test_custom_read_only_database_profile_hard_denies_mutation_in_static_policy(self) -> None:
+        proposal = normalize_sql_operation(
+            operation_id="db-test",
+            plan_step_id="step_1",
+            capability_id="database.statement.execute",
+            sql="UPDATE accounts SET balance = 0",
+            database_target="custom_reporting",
+            database_profile_id="custom_reporting_readonly",
+            is_read_only_profile=True,
+        )
+        self.assertTrue(proposal.payload.is_read_only_profile)
+
+        state = _state_with_proposal(proposal)
+        policy_engine = StubPolicyEngine()
+        result = evaluate_opa_first_governance(task_state=state, policy_engine_service=policy_engine)
+        self.assertEqual(result.governance_decision.directive, GovernanceDirective.STOP)
+        self.assertIn(GovernanceReasonCode.DATABASE_PROFILE_MUTATION_BLOCKED, result.governance_decision.reason_codes)
+
+
+class _UnsafeJudge(JudgePort):
+    judge_name = "unsafe_judge"
+    prompt_version = "unsafe_judge_v1"
+
+    def evaluate(self, *, context) -> JudgeAssessment:
+        return JudgeAssessment(
+            invoked=True,
+            recommendation=JudgeRecommendedDirective.WAIT_HUMAN_REVIEW,
+            confidence=0.88,
+            summary="The draft asks for unsafe transfers.",
+            rationale="Content contains dangerous external requests.",
+            flags=("dangerous_content",),
+            evaluated_target=context.external_operation.operation_id,
+            status=JudgeAssessmentStatus.ACTIVE,
+            verdict=JudgeVerdict.UNSAFE,
+            severity=JudgeSeverity.HIGH,
+            evaluated_operation_digest=context.external_operation.payload_digest,
+            prompt_version=self.prompt_version,
+        )
 
 
 class _ExplodingJudge(JudgePort):

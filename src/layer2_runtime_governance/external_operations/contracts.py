@@ -158,6 +158,7 @@ class DatabaseOperationPayload:
     ambiguous: bool
     database_profile_id: str
     parameters: tuple[DatabaseOperationParameter, ...] = ()
+    is_read_only_profile: bool = True
 
 
 @dataclass(frozen=True)

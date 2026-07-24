@@ -609,19 +609,37 @@ def _build_stub_opa_decision(
 
     operation = base_facts.get("external_operation", {})
     mutating_effects = {"create", "update", "delete", "truncate", "send", "publish", "execute", "unknown"}
-    hard_deny = bool(
+    target = operation.get("target", {})
+    target_class = target.get("destination_class", "")
+    payload = operation.get("payload", {})
+    is_ro_profile = payload.get("is_read_only_profile", False)
+    stmt_class = payload.get("statement_class", "unknown")
+
+    prohibited_deny = target_class == "prohibited"
+    profile_deny = is_ro_profile and stmt_class != "select"
+
+    read_only_deny = bool(
         policy["read_only_mode"]
         and operation.get("execution_candidate") is True
         and operation.get("normalized_effect") in mutating_effects
     )
-    static_reason_codes = ["read_only_mutation_blocked"] if hard_deny else []
+    hard_deny = read_only_deny or prohibited_deny or profile_deny
+
+    static_reason_codes = []
+    if read_only_deny:
+        static_reason_codes.append("read_only_mutation_blocked")
+    if prohibited_deny:
+        static_reason_codes.append("prohibited_destination")
+    if profile_deny:
+        static_reason_codes.append("database_profile_mutation_blocked")
+
     pillars["static_policy"] = {
         "hard_deny": hard_deny,
         "constraints": ["execution_policy_read_only"] if policy["read_only_mode"] else [],
         "violations": static_reason_codes,
         "reason_codes": static_reason_codes,
         "summary": (
-            "The read-only execution policy forbids the mutating operation."
+            "The operation was denied by static policy."
             if hard_deny
             else "No deterministic static violation was found."
         ),
@@ -640,8 +658,8 @@ def _build_stub_opa_decision(
     if hard_deny:
         resolved_directive = "stop"
         resolved_policy_decision = "deny"
-        resolved_reason_code = "read_only_mutation_blocked"
-        resolved_summary = "The read-only execution policy forbids the mutating operation."
+        resolved_reason_code = static_reason_codes[0] if static_reason_codes else "static_deny"
+        resolved_summary = "The static policy forbids the operation."
     elif judge_required and (
         judge_facts.get("pillar_unavailable") is True
         or judge_facts.get("invoked") is not True
@@ -651,6 +669,16 @@ def _build_stub_opa_decision(
         resolved_policy_decision = "require_human_review"
         resolved_reason_code = "judge_required_unavailable"
         resolved_summary = "The mandatory semantic judge is unavailable or invalid."
+    elif judge_required and judge_facts.get("verdict") == "unsafe":
+        resolved_directive = "wait_human_review"
+        resolved_policy_decision = "require_human_review"
+        resolved_reason_code = "judge_unsafe"
+        resolved_summary = "The semantic judge found the governed external operation unsafe."
+    elif judge_required and judge_facts.get("verdict") == "needs_revision":
+        resolved_directive = "revise_action"
+        resolved_policy_decision = "require_human_review"
+        resolved_reason_code = "judge_needs_revision"
+        resolved_summary = "The semantic judge required revision of the operation."
     elif actor["result_type"] == ActorResultType.ASK_CLARIFICATION.value:
         resolved_directive = "ask_user_clarification"
         resolved_policy_decision = "ask_clarification"

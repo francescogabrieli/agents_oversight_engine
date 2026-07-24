@@ -43,21 +43,31 @@ class MCPConnectionPool:
     # One composition-root-owned pool reuses healthy official-SDK client sessions.
     def __init__(self, *, registry: ExternalCapabilityRegistry) -> None:
         self._registry = registry
-        self._loop = asyncio.new_event_loop()
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._sessions: dict[str, _PooledSession] = {}
         self._session_locks: dict[str, asyncio.Lock] = {}
         self._state_lock = Lock()
-        self._ready = Event()
+        self._ready: Event | None = None
         self._closed = False
-        self._thread = Thread(
-            target=self._run_loop,
-            name="layer2-external-mcp-pool",
-            daemon=True,
-        )
-        self._thread.start()
-        if not self._ready.wait(timeout=5):
-            raise RuntimeError("MCP connection pool event loop did not start.")
+        self._thread: Thread | None = None
         atexit.register(self.close)
+
+    def _ensure_started(self) -> None:
+        with self._state_lock:
+            if self._closed:
+                raise MCPPoolClosedError("MCP connection pool is closed.")
+            if self._thread is not None and self._thread.is_alive() and self._loop is not None and self._loop.is_running():
+                return
+            self._loop = asyncio.new_event_loop()
+            self._ready = Event()
+            self._thread = Thread(
+                target=self._run_loop,
+                name="layer2-external-mcp-pool",
+                daemon=True,
+            )
+            self._thread.start()
+            if not self._ready.wait(timeout=5):
+                raise RuntimeError("MCP connection pool event loop did not start.")
 
     # Invoke one registered tool on a reusable session with a bounded timeout.
     def call_tool(
@@ -68,9 +78,7 @@ class MCPConnectionPool:
         arguments: dict[str, object],
         timeout_seconds: float,
     ) -> CallToolResult:
-        with self._state_lock:
-            if self._closed:
-                raise MCPPoolClosedError("MCP connection pool is closed.")
+        self._ensure_started()
         server = self._registry.mcp_servers.get(server_id)
         if server is None or not server.enabled:
             raise MCPCallError(
@@ -107,14 +115,14 @@ class MCPConnectionPool:
             if self._closed:
                 return
             self._closed = True
-        if self._loop.is_running():
+        if self._loop is not None and self._loop.is_running():
             future = asyncio.run_coroutine_threadsafe(self._close_all(), self._loop)
             try:
                 future.result(timeout=10)
             except Exception:
                 pass
             self._loop.call_soon_threadsafe(self._loop.stop)
-        if self._thread.is_alive():
+        if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=10)
 
     # Create or reuse one healthy session and serialize calls per stdio process.
@@ -225,7 +233,7 @@ class MCPConnectionPool:
 
     # Schedule best-effort cleanup after a synchronous timeout.
     def _schedule_drop(self, server_id: str) -> None:
-        if self._loop.is_running():
+        if self._loop is not None and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(self._drop_session(server_id), self._loop)
 
     # Close every active server process before the pool loop stops.

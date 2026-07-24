@@ -20,13 +20,21 @@ hard_deny if {
 	object.get(operation, "execution_candidate", false) == true
 }
 
-hard_deny if {
+is_read_only_profile if {
 	profile_id == "enterprise_db.read_only"
+}
+
+is_read_only_profile if {
+	object.get(payload, "is_read_only_profile", false) == true
+}
+
+hard_deny if {
+	is_read_only_profile
 	object.get(payload, "statement_class", "unknown") != "select"
 }
 
 hard_deny if {
-	profile_id == "enterprise_db.read_only"
+	is_read_only_profile
 	object.get(payload, "ambiguous", false) == true
 }
 
@@ -71,7 +79,7 @@ constraints contains "execution_policy_read_only" if {
 }
 
 constraints contains "database_profile_select_only" if {
-	profile_id == "enterprise_db.read_only"
+	is_read_only_profile
 }
 
 violations contains "read_only_mode_mutating_effect" if {
@@ -81,12 +89,12 @@ violations contains "read_only_mode_mutating_effect" if {
 }
 
 violations contains "database_profile_mutation" if {
-	profile_id == "enterprise_db.read_only"
+	is_read_only_profile
 	object.get(payload, "statement_class", "unknown") != "select"
 }
 
 violations contains "sql_ambiguous_or_multiple" if {
-	profile_id == "enterprise_db.read_only"
+	is_read_only_profile
 	object.get(payload, "ambiguous", false) == true
 }
 
@@ -141,6 +149,16 @@ reason_codes contains "ask_clarification_required" if {
 normalized_recipients contains lower(trim_space(item)) if {
 	recipient := object.get(payload, "recipient", "")
 	item := split(recipient, ",")[_]
+	trim_space(item) != ""
+}
+
+normalized_recipients contains lower(trim_space(item)) if {
+	some item in object.get(payload, "cc", [])
+	trim_space(item) != ""
+}
+
+normalized_recipients contains lower(trim_space(item)) if {
+	some item in object.get(payload, "bcc", [])
 	trim_space(item) != ""
 }
 
