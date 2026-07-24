@@ -35,6 +35,13 @@ class ParseStatus(str, Enum):
     NEEDS_CLARIFICATION = "needs_clarification"
     FAILED = "failed"
 
+
+# ExecutionIntent records whether the user asked for a proposal or a governed side effect.
+class ExecutionIntent(str, Enum):
+    PROPOSAL_ONLY = "proposal_only"
+    EXECUTE_AFTER_GOVERNANCE = "execute_after_governance"
+
+
 # Keep domain validation failures separate from generic Python exceptions.
 class IntakeDomainError(Exception):
     """Base exception for layer 1 domain errors."""
@@ -108,6 +115,12 @@ class TaskSpec(BaseModel):
     )
     sensitivity: SensitivityLevel = Field(default=SensitivityLevel.MEDIUM)
     success_criteria: list[str] = Field(default_factory=list)
+    execution_intent: ExecutionIntent = Field(
+        default=ExecutionIntent.PROPOSAL_ONLY,
+        description=(
+            "User-requested execution intent; this records intent and never grants authority."
+        ),
+    )
 
     @field_validator("goal", "context", "domain_label", mode="before")
     @classmethod
@@ -278,6 +291,7 @@ class IntakeResult(BaseModel):
 __all__ = [
     "BudgetConfig",
     "DomainType",
+    "ExecutionIntent",
     "ExecutionPolicy",
     "IntakeDomainError",
     "IntakeMetadata",

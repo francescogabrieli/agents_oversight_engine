@@ -1,7 +1,14 @@
 from .contracts import (
     CommunicationOperationPayload,
     DatabaseOperationPayload,
+    DatabaseOperationParameter,
+    DatabaseStatementDraft,
     DestinationClass,
+    ExternalExecutionAuthorizationSource,
+    ExternalExecutionErrorCode,
+    ExternalExecutionReceipt,
+    ExternalExecutionRequest,
+    ExternalExecutionStatus,
     ExternalOperationEffect,
     ExternalOperationExecutionResult,
     ExternalOperationFamily,
@@ -18,6 +25,21 @@ from .contracts import (
     compute_payload_digest,
 )
 from .execution import DeferredExternalOperationExecutor, ExternalOperationExecutorPort
+from .factory import build_default_external_operation_executor
+from .authorization import (
+    build_external_execution_idempotency_key,
+    build_external_execution_request,
+)
+from .idempotency import ExternalExecutionLedger
+from .registry import (
+    ExternalCapabilityDefinition,
+    ExternalCapabilityRegistry,
+    ExternalConnectorKind,
+    ExternalMCPServerDefinition,
+    IdempotencySupport,
+    MCPTransportKind,
+    load_external_capability_registry,
+)
 from .normalizers import (
     normalize_communication_operation,
     normalize_generic_external_operation,
@@ -30,8 +52,20 @@ __all__ = [
     "CommunicationOperationPayload",
     "CapabilityConsequenceProfile",
     "DatabaseOperationPayload",
+    "DatabaseOperationParameter",
+    "DatabaseStatementDraft",
     "DeferredExternalOperationExecutor",
     "DestinationClass",
+    "ExternalCapabilityDefinition",
+    "ExternalCapabilityRegistry",
+    "ExternalConnectorKind",
+    "ExternalExecutionAuthorizationSource",
+    "ExternalExecutionErrorCode",
+    "ExternalExecutionLedger",
+    "ExternalExecutionReceipt",
+    "ExternalExecutionRequest",
+    "ExternalExecutionStatus",
+    "ExternalMCPServerDefinition",
     "ExternalOperationEffect",
     "ExternalOperationExecutionResult",
     "ExternalOperationExecutorPort",
@@ -43,13 +77,19 @@ __all__ = [
     "GenericExternalOperationPayload",
     "GenericPayloadField",
     "GovernanceActionFeedback",
+    "IdempotencySupport",
+    "MCPTransportKind",
     "OperationBoundary",
     "OperationFactsProvenance",
     "SQLStatementClass",
     "compute_payload_digest",
+    "build_external_execution_idempotency_key",
+    "build_external_execution_request",
+    "build_default_external_operation_executor",
     "normalize_communication_operation",
     "normalize_generic_external_operation",
     "normalize_sql_operation",
     "replace_external_operation_payload",
     "load_capability_consequence_profiles",
+    "load_external_capability_registry",
 ]

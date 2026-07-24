@@ -99,7 +99,11 @@ Se vuoi capire la run al 100%, devi sapere anche dove vive ogni responsabilità.
 - `src/layer2_runtime_governance/external_operations/`
   - definisce la proposta external canonica e immutable
   - normalizza communication, SQL tramite AST e generic external
-  - espone un executor production deferred che non produce side effect
+  - espone porta, registry external, ledger idempotente e adapter MCP
+
+- `src/external_capability_mcp/`
+  - espone soltanto `send_email` ed `execute_statement` tipizzati
+  - possiede SMTP/database lifecycle e credenziali infrastrutturali
 
 - `src/layer2_runtime_governance/actor_contract.py`
   - definisce ciò che l’actor riceve
@@ -2152,6 +2156,14 @@ Task utente
   -> observe_tool_result trasforma il risultato in ObservedEvidence
   -> actor riparte con nuova evidenza
   -> eventuale replan o HITL
+  -> proposal_only: approved_draft e completamento locale
+  -> execute_after_governance + digest autorizzato:
+       READY_EXTERNAL_EXECUTION
+       -> capability registry dedicato
+       -> MCP server/tool allowlisted
+       -> sistema esterno
+       -> ExternalExecutionReceipt
+  -> indeterminate: HITL di riconciliazione senza retry automatico
   -> finalizzazione
   -> trace export + artifact runtime + behavioral snapshot
 ```
@@ -2169,3 +2181,20 @@ cinque livelli:
 
 La memoria behavioral e l'operational risk restano disponibili per analisi ed
 evaluation, ma non partecipano alla decisione live.
+
+## 45. Proposal-Only Non È Autorità Di Esecuzione
+
+`ExecutionIntent` viene risolto in Layer 1: “prepara una bozza/query” è
+`proposal_only`; “invia/esegui” è `execute_after_governance`. Il default legacy è
+sempre `proposal_only`. `capability_mode=write` ed external impact non cambiano
+l’intent; allo stesso modo, l’intent executable non sostituisce OPA o HITL.
+
+## 46. Stati Di Esecuzione E Idempotenza
+
+Il runtime aggiunge soltanto `READY_EXTERNAL_EXECUTION`. `executed`, `failed`,
+`rejected_before_execution` e `indeterminate` appartengono alla ricevuta.
+
+La chiave deriva da `operation_id + payload_digest + attempt_scope`. I ledger client
+e server forniscono at-most-once per chiave e retry idempotente dove supportato, non
+exactly-once universale. Un timeout con effetto sconosciuto è `indeterminate` e
+richiede verifica manuale del sistema esterno.

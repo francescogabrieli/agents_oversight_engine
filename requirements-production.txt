@@ -4,6 +4,7 @@ openai>=2.30,<3
 boto3>=1.43,<2
 pypdf>=6.14,<7
 sqlglot>=27,<30
+mcp>=1.27,<2
 
 # LangGraph runtime plus durable local checkpointing.
 langgraph>=1.1,<2

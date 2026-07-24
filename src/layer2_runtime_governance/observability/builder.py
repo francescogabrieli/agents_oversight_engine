@@ -32,6 +32,7 @@ from ..domain import (
 )
 from ..domain import HumanReviewDecision, HumanReviewRequest
 from ..tool_contract import ObservedEvidence, ToolExecutionResult, ToolRequest, ToolSource
+from ..external_operations import ExternalExecutionReceipt
 
 
 from .models import (
@@ -41,6 +42,8 @@ from .models import (
     TraceExecutionSummary,
     TraceExternalCommunicationDraft,
     TraceExternalCommunicationSummary,
+    TraceExternalExecutionReceipt,
+    TraceExternalExecutionSummary,
     TraceGovernancePass,
     TraceHumanReviewDecision,
     TraceHumanReviewExternalEdit,
@@ -94,6 +97,7 @@ def build_layer2_runtime_trace(
         external_communication=_build_external_communication_summary(
             task_state.external_communication
         ),
+        external_execution=_build_external_execution_summary(task_state=task_state),
     )
 
 
@@ -131,6 +135,7 @@ def _build_intake_summary(*, intake_result: IntakeResult) -> TraceIntakeSummary:
         max_steps=execution_policy.budget.max_steps,
         max_tool_calls=execution_policy.budget.max_tool_calls,
         read_only_mode=execution_policy.read_only_mode,
+        execution_intent=task_spec.execution_intent.value,
     )
 
 
@@ -302,6 +307,7 @@ def _build_governance_pass(
             if decision.evaluated_tool_name is not None
             else None
         ),
+        evaluated_operation_digest=decision.evaluated_operation_digest,
         governance_input_schema_version=decision.governance_input_schema_version,
         policy_bundle_version=decision.policy_bundle_version,
         policy_config_version=decision.policy_config_version,
@@ -530,7 +536,67 @@ def _build_external_communication_draft(
         recipient=draft.recipient,
         subject=draft.subject,
         body=draft.body,
+        cc=tuple(draft.cc),
+        bcc=tuple(draft.bcc),
         metadata=dict(draft.metadata),
+    )
+
+
+# Build the typed external execution projection without exposing connector secrets.
+def _build_external_execution_summary(
+    *,
+    task_state: TaskState,
+) -> TraceExternalExecutionSummary:
+    proposal = task_state.external_operation_proposal
+    return TraceExternalExecutionSummary(
+        execution_intent=task_state.execution_intent.value,
+        capability_id=proposal.capability_id if proposal is not None else None,
+        current_payload_digest=proposal.payload_digest if proposal is not None else None,
+        current_request=(
+            to_jsonable(task_state.current_external_execution_request)
+            if task_state.current_external_execution_request is not None
+            else None
+        ),
+        last_receipt=(
+            _build_external_execution_receipt(
+                task_state.last_external_execution_receipt
+            )
+            if task_state.last_external_execution_receipt is not None
+            else None
+        ),
+        receipt_history=tuple(
+            _build_external_execution_receipt(receipt)
+            for receipt in task_state.external_execution_history
+        ),
+        attempt_count=task_state.external_execution_attempt_count,
+    )
+
+
+# Convert one canonical receipt into its closed trace model.
+def _build_external_execution_receipt(
+    receipt: ExternalExecutionReceipt,
+) -> TraceExternalExecutionReceipt:
+    return TraceExternalExecutionReceipt(
+        operation_id=receipt.operation_id,
+        capability_id=receipt.capability_id,
+        payload_digest=receipt.payload_digest,
+        status=receipt.status.value,
+        idempotency_key=receipt.idempotency_key,
+        started_at=receipt.started_at.isoformat(),
+        completed_at=receipt.completed_at.isoformat(),
+        external_reference=receipt.external_reference,
+        summary=receipt.summary,
+        error_code=receipt.error_code.value,
+        retryable=receipt.retryable,
+        connector_kind=receipt.connector_kind,
+        connector_id=receipt.connector_id,
+        server_id=receipt.server_id,
+        tool_name=receipt.tool_name,
+        connector_metadata=tuple(
+            {"name": item.name, "value": item.value}
+            for item in receipt.connector_metadata
+        ),
+        attempt_number=receipt.attempt_number,
     )
 
 
@@ -652,6 +718,8 @@ __all__ = [
     "_build_human_review_decision",
     "_build_external_communication_summary",
     "_build_external_communication_draft",
+    "_build_external_execution_summary",
+    "_build_external_execution_receipt",
     "_build_human_review_external_edit",
     "_build_oversight_signal",
     "_build_step_record",

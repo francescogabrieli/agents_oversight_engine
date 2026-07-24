@@ -3,11 +3,17 @@ from __future__ import annotations
 import json
 import re
 
-from layer1_intake import DomainType
+from layer1_intake import DomainType, ExecutionIntent
 
 from ..actor_contract import ActorResult, ActorResultType, ActorTask, CapabilityAccessMode
 from ..domain import ScratchpadEntry, ScratchpadEntryType, StepValidation, StepValidationDecision
 from ..domain import ExternalCommunicationDraft
+from ..external_operations import (
+    DatabaseOperationParameter,
+    DatabaseStatementDraft,
+    ExternalOperationEffect,
+    normalize_sql_operation,
+)
 from ..tool_contract import ToolName, ToolRequest
 from .errors import ActorExecutionError
 from .evidence_guard import (
@@ -297,11 +303,96 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
                 recipient=str(arguments["recipient"]).strip(),
                 subject=str(arguments["subject"]).strip(),
                 body=completion_arguments["output_text"],
+                cc=tuple(str(item).strip() for item in arguments.get("cc", [])),
+                bcc=tuple(str(item).strip() for item in arguments.get("bcc", [])),
                 metadata={
                     "source": "actor_typed_draft",
                     "content_format": "plain_text",
                 },
             ),
+            scratchpad_entry=_build_scratchpad_entry(
+                actor_task=actor_task,
+                entry_type=ScratchpadEntryType.COMPLETION_RATIONALE,
+                summary=completion_arguments["completion_rationale"],
+            ),
+            step_validation=_build_step_validation(
+                actor_task=actor_task,
+                arguments=completion_arguments,
+                next_action=next_action,
+                rationale_key="completion_rationale",
+            ),
+        )
+
+    if tool_name == "emit_database_statement":
+        _require_arguments(
+            arguments,
+            "summary",
+            "database_profile_id",
+            "statement",
+            "parameters",
+            "completion_rationale",
+        )
+        if not isinstance(arguments["parameters"], dict):
+            raise ActorExecutionError("Database parameters must be a JSON object.")
+        completion_arguments = _ensure_completion_arguments(
+            arguments={
+                **arguments,
+                "output_text": arguments["statement"],
+            }
+        )
+        for key in ("summary", "output_text", "completion_rationale"):
+            completion_arguments[key] = _sanitize_completion_text(
+                str(completion_arguments.get(key, ""))
+            )
+        completion_arguments = _guard_completion_against_unsupported_precision(
+            actor_task=actor_task,
+            arguments=completion_arguments,
+        )
+        next_action = _resolve_completion_next_action(arguments=completion_arguments)
+        parameters = tuple(
+            DatabaseOperationParameter(name=str(name), value=value)
+            for name, value in arguments["parameters"].items()
+        )
+        statement_draft = DatabaseStatementDraft(
+            database_profile_id=str(arguments["database_profile_id"]).strip(),
+            statement=str(arguments["statement"]).strip(),
+            parameters=parameters,
+        )
+        proposal = normalize_sql_operation(
+            operation_id=(
+                f"{actor_task.intake_metadata.request_id}:{plan_step_id}:database"
+            ),
+            plan_step_id=plan_step_id,
+            capability_id="database.statement.execute",
+            sql=statement_draft.statement,
+            database_target=statement_draft.database_profile_id,
+            database_profile_id=statement_draft.database_profile_id,
+            parameters=statement_draft.parameters,
+            execution_candidate=(
+                actor_task.task_spec.execution_intent
+                == ExecutionIntent.EXECUTE_AFTER_GOVERNANCE
+            ),
+        )
+        is_final_step = (
+            actor_task.current_plan_step_index == len(actor_task.plan_steps) - 1
+        )
+        return ActorResult(
+            plan_step_id=plan_step_id,
+            result_type=(
+                ActorResultType.FINAL_OUTPUT
+                if is_final_step
+                else ActorResultType.INTERMEDIATE_OUTPUT
+            ),
+            summary=completion_arguments["summary"],
+            capability_mode=(
+                CapabilityAccessMode.READ_ONLY
+                if proposal.normalized_effect == ExternalOperationEffect.READ
+                else CapabilityAccessMode.WRITE
+            ),
+            external_impact=True,
+            output_text=completion_arguments["output_text"],
+            database_statement_draft=statement_draft,
+            external_operation_proposal=proposal,
             scratchpad_entry=_build_scratchpad_entry(
                 actor_task=actor_task,
                 entry_type=ScratchpadEntryType.COMPLETION_RATIONALE,

@@ -483,7 +483,9 @@ def _load_intake_result_from_final_result(final_result: dict[str, Any]) -> Intak
 def parse_cli_args() -> argparse.Namespace:
     # Parse CLI arguments for the current Layer 2 runtime slice.
     parser = argparse.ArgumentParser(
-        description="Run the current Layer 2 bootstrap, planner, actor, and tool loop."
+        description=(
+            "Run the Layer 2 planner/actor/governance/tool/HITL/external-execution loop."
+        )
     )
     parser.add_argument(
         "--task",

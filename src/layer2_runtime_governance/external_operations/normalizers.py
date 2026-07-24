@@ -46,6 +46,16 @@ def normalize_communication_operation(
     recipient = _normalize_recipient(draft.recipient)
     subject = _optional_single_line(draft.subject)
     body = _bounded_body(draft.body or "")
+    cc = tuple(
+        address
+        for value in draft.cc
+        for address in _parsed_recipient_addresses(value)
+    )
+    bcc = tuple(
+        address
+        for value in draft.bcc
+        for address in _parsed_recipient_addresses(value)
+    )
     destination_class = _classify_destination(
         recipient=recipient,
         prohibited_domains=tuple(item.lower().strip() for item in prohibited_domains),
@@ -56,6 +66,8 @@ def normalize_communication_operation(
         subject=subject,
         body=body,
         destination_class=destination_class,
+        cc=cc,
+        bcc=bcc,
     )
     target_value = recipient or channel
     return ExternalOperationProposal(
@@ -106,6 +118,8 @@ def normalize_sql_operation(
     database_profile_id: str = "enterprise_db.read_only",
     capability_profile_version: str = "1",
     dialect: str | None = None,
+    parameters=(),
+    execution_candidate: bool = True,
 ) -> ExternalOperationProposal:
     raw_sql = sql.strip()
     expressions: list[exp.Expression] = []
@@ -141,6 +155,7 @@ def normalize_sql_operation(
         parse_valid=parse_valid,
         ambiguous=ambiguous,
         database_profile_id=database_profile_id,
+        parameters=tuple(parameters),
     )
     return ExternalOperationProposal(
         operation_id=operation_id,
@@ -149,7 +164,7 @@ def normalize_sql_operation(
         boundary=OperationBoundary.GOVERNED_EXTERNAL,
         operation_family=ExternalOperationFamily.DATABASE,
         normalized_effect=effect,
-        execution_candidate=True,
+        execution_candidate=execution_candidate,
         target=ExternalOperationTarget(
             kind="database",
             value=_single_line(database_target) or "unknown_database",

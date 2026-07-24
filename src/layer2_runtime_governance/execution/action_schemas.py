@@ -82,6 +82,7 @@ def build_actor_runtime_tools(
             "Emit the final answer after typed self-validation.",
         ),
         _external_communication_draft_action(),
+        _database_statement_action(),
         _blocking_action(
             "emit_ask_clarification",
             "Ask for clarification when missing information blocks safe progress.",
@@ -111,6 +112,8 @@ def select_actor_runtime_tools_for_turn(
         excluded = {"emit_step_completed", "emit_final_output"}
     else:
         excluded = {"emit_external_communication_draft"}
+    if domain_type == DomainType.EXTERNAL_COMMUNICATION:
+        excluded.add("emit_database_statement")
     return [
         tool
         for tool in runtime_tools
@@ -215,6 +218,8 @@ def _external_communication_draft_action() -> dict[str, object]:
             "recipient": _string(),
             "subject": _string(),
             "body": _string(),
+            "cc": {"type": "array", "items": _string(), "maxItems": 20},
+            "bcc": {"type": "array", "items": _string(), "maxItems": 20},
             "completion_rationale": _string(),
             "objective_satisfied": {"type": "boolean"},
             "evidence_sufficient": {"type": "boolean"},
@@ -227,6 +232,43 @@ def _external_communication_draft_action() -> dict[str, object]:
             "recipient",
             "subject",
             "body",
+            "completion_rationale",
+            "objective_satisfied",
+            "evidence_sufficient",
+            "confidence",
+        ),
+    )
+
+
+# Expose a profile-bound SQL proposal without granting connector or DSN authority.
+def _database_statement_action() -> dict[str, object]:
+    return _action(
+        "emit_database_statement",
+        (
+            "Emit one SQL statement proposal against a registered database profile. "
+            "Keep values in the separate parameters object; never concatenate them into SQL."
+        ),
+        {
+            "summary": _string(),
+            "database_profile_id": _string(),
+            "statement": _string(),
+            "parameters": {
+                "type": "object",
+                "additionalProperties": {
+                    "type": ["string", "number", "integer", "boolean", "null"]
+                },
+            },
+            "completion_rationale": _string(),
+            "objective_satisfied": {"type": "boolean"},
+            "evidence_sufficient": {"type": "boolean"},
+            "confidence": _confidence(),
+            "residual_uncertainty": _string(),
+        },
+        (
+            "summary",
+            "database_profile_id",
+            "statement",
+            "parameters",
             "completion_rationale",
             "objective_satisfied",
             "evidence_sufficient",

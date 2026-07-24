@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from layer1_intake import (
     DomainType,
+    ExecutionIntent,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeResult,
@@ -26,6 +27,8 @@ if TYPE_CHECKING:
     from ..judge import JudgeAssessment
     from ..oversight import DynamicPolicyAssessment
     from ..external_operations.contracts import (
+        ExternalExecutionReceipt,
+        ExternalExecutionRequest,
         ExternalOperationProposal,
         GovernanceActionFeedback,
     )
@@ -59,6 +62,7 @@ class TaskState:
     bootstrap_completed: bool = False
     human_review_resume_state: RuntimeState | None = None
     external_communication: ExternalCommunicationState | None = None
+    execution_intent: ExecutionIntent = ExecutionIntent.PROPOSAL_ONLY
 
     # Planner snapshot.
     plan_steps: list[PlanStep] = field(default_factory=list)
@@ -92,6 +96,10 @@ class TaskState:
     approved_external_operation_digest: str | None = None
     governance_action_feedback: list[GovernanceActionFeedback] = field(default_factory=list)
     external_operation_revision_count: int = 0
+    current_external_execution_request: ExternalExecutionRequest | None = None
+    last_external_execution_receipt: ExternalExecutionReceipt | None = None
+    external_execution_history: list[ExternalExecutionReceipt] = field(default_factory=list)
+    external_execution_attempt_count: int = 0
 
     # Governance snapshot.
     static_policy_history: list[StaticPolicyAssessment] = field(default_factory=list)
@@ -246,6 +254,14 @@ class TaskState:
             intake_payload=intake_result,
             current_state=current_state,
             runtime_flags=runtime_flags,
+            execution_intent=(
+                getattr(
+                    intake_result.structured_task.task_spec,
+                    "execution_intent",
+                    ExecutionIntent.PROPOSAL_ONLY,
+                )
+                or ExecutionIntent.PROPOSAL_ONLY
+            ),
             human_review_resume_state=(
                 RuntimeState.PLANNING
                 if current_state == RuntimeState.WAITING_HUMAN_REVIEW

@@ -2,13 +2,22 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import replace
+from datetime import datetime
 from enum import Enum
 from typing import Any
+
+from layer1_intake import ExecutionIntent
 
 from ..external_operations.contracts import (
     CommunicationOperationPayload,
     DatabaseOperationPayload,
+    DatabaseOperationParameter,
     DestinationClass,
+    ExternalExecutionAuthorizationSource,
+    ExternalExecutionErrorCode,
+    ExternalExecutionReceipt,
+    ExternalExecutionRequest,
+    ExternalExecutionStatus,
     ExternalOperationEffect,
     ExternalOperationFamily,
     ExternalOperationPayloadEdit,
@@ -46,6 +55,8 @@ def coerce_external_communication_draft(
         recipient=_coerce_optional_string(payload.get("recipient")),
         subject=_coerce_optional_string(payload.get("subject")),
         body=_coerce_optional_string(payload.get("body")),
+        cc=tuple(str(item) for item in payload.get("cc", [])),
+        bcc=tuple(str(item) for item in payload.get("bcc", [])),
         metadata=_coerce_metadata_dict(payload.get("metadata")),
     )
 
@@ -71,6 +82,35 @@ def coerce_human_review_external_edit(
 # Return a normalized copy so trace and dashboard builders never mutate canonical state.
 def normalize_task_state_serialization(task_state: TaskState) -> TaskState:
     normalized = deepcopy(task_state)
+    normalized.execution_intent = _coerce_enum(
+        ExecutionIntent,
+        getattr(
+            normalized,
+            "execution_intent",
+            getattr(
+                normalized.task_spec,
+                "execution_intent",
+                ExecutionIntent.PROPOSAL_ONLY,
+            ),
+        ),
+    )
+    normalized.current_external_execution_request = _coerce_external_execution_request(
+        getattr(normalized, "current_external_execution_request", None)
+    )
+    normalized.last_external_execution_receipt = _coerce_external_execution_receipt(
+        getattr(normalized, "last_external_execution_receipt", None)
+    )
+    normalized.external_execution_history = [
+        receipt
+        for receipt in (
+            _coerce_external_execution_receipt(item)
+            for item in getattr(normalized, "external_execution_history", [])
+        )
+        if receipt is not None
+    ]
+    normalized.external_execution_attempt_count = int(
+        getattr(normalized, "external_execution_attempt_count", 0)
+    )
     normalized.external_communication = _coerce_external_communication_state(
         normalized.external_communication
     )
@@ -356,6 +396,8 @@ def _coerce_external_operation_payload(
                 DestinationClass,
                 payload.get("destination_class", DestinationClass.UNKNOWN.value),
             ),
+            cc=tuple(str(item) for item in payload.get("cc", [])),
+            bcc=tuple(str(item) for item in payload.get("bcc", [])),
         )
     if resolved_family == ExternalOperationFamily.DATABASE:
         return DatabaseOperationPayload(
@@ -370,6 +412,14 @@ def _coerce_external_operation_payload(
             ambiguous=bool(payload.get("ambiguous", True)),
             database_profile_id=_required_text(
                 payload.get("database_profile_id"), "payload.database_profile_id"
+            ),
+            parameters=tuple(
+                DatabaseOperationParameter(
+                    name=_required_text(item.get("name"), "payload.parameters.name"),
+                    value=item.get("value"),
+                )
+                for item in payload.get("parameters", [])
+                if isinstance(item, dict)
             ),
         )
     fields = payload.get("fields", [])
@@ -399,6 +449,87 @@ def _coerce_external_operation_edit(
     return ExternalOperationPayloadEdit(
         payload=_coerce_external_operation_payload(operation_payload),
         note=_coerce_optional_string(payload.get("note")),
+    )
+
+
+# Recover one digest-bound execution request from checkpoint dictionaries.
+def _coerce_external_execution_request(
+    payload: ExternalExecutionRequest | dict[str, Any] | None,
+) -> ExternalExecutionRequest | None:
+    if payload is None or isinstance(payload, ExternalExecutionRequest):
+        return payload
+    if not isinstance(payload, dict):
+        raise ValueError("External execution request must be a dict or dataclass.")
+    proposal = coerce_external_operation_proposal(payload.get("proposal"))
+    if proposal is None:
+        raise ValueError("External execution request requires a proposal.")
+    return ExternalExecutionRequest(
+        operation_id=_required_text(payload.get("operation_id"), "execution.operation_id"),
+        capability_id=_required_text(payload.get("capability_id"), "execution.capability_id"),
+        proposal=proposal,
+        current_payload_digest=_required_text(
+            payload.get("current_payload_digest"), "execution.current_payload_digest"
+        ),
+        authorized_payload_digest=_required_text(
+            payload.get("authorized_payload_digest"), "execution.authorized_payload_digest"
+        ),
+        execution_intent=_coerce_enum(
+            ExecutionIntent,
+            payload.get("execution_intent", ExecutionIntent.PROPOSAL_ONLY.value),
+        ),
+        idempotency_key=_required_text(
+            payload.get("idempotency_key"), "execution.idempotency_key"
+        ),
+        authorization_source=_coerce_enum(
+            ExternalExecutionAuthorizationSource,
+            payload.get("authorization_source"),
+        ),
+        reviewer_id=_coerce_optional_string(payload.get("reviewer_id")),
+        governance_decision_reference=_coerce_optional_string(
+            payload.get("governance_decision_reference")
+        ),
+        attempt_scope=str(payload.get("attempt_scope") or "initial"),
+    )
+
+
+# Recover one audit-safe execution receipt from checkpoint dictionaries.
+def _coerce_external_execution_receipt(
+    payload: ExternalExecutionReceipt | dict[str, Any] | None,
+) -> ExternalExecutionReceipt | None:
+    if payload is None or isinstance(payload, ExternalExecutionReceipt):
+        return payload
+    if not isinstance(payload, dict):
+        raise ValueError("External execution receipt must be a dict or dataclass.")
+    return ExternalExecutionReceipt(
+        operation_id=_required_text(payload.get("operation_id"), "receipt.operation_id"),
+        capability_id=_required_text(payload.get("capability_id"), "receipt.capability_id"),
+        payload_digest=_required_text(payload.get("payload_digest"), "receipt.payload_digest"),
+        status=_coerce_enum(ExternalExecutionStatus, payload.get("status")),
+        idempotency_key=_required_text(
+            payload.get("idempotency_key"), "receipt.idempotency_key"
+        ),
+        started_at=_coerce_datetime(payload.get("started_at"), "receipt.started_at"),
+        completed_at=_coerce_datetime(payload.get("completed_at"), "receipt.completed_at"),
+        external_reference=_coerce_optional_string(payload.get("external_reference")),
+        summary=str(payload.get("summary") or ""),
+        error_code=_coerce_enum(
+            ExternalExecutionErrorCode,
+            payload.get("error_code", ExternalExecutionErrorCode.NONE.value),
+        ),
+        retryable=bool(payload.get("retryable", False)),
+        connector_kind=_coerce_optional_string(payload.get("connector_kind")),
+        connector_id=_coerce_optional_string(payload.get("connector_id")),
+        server_id=_coerce_optional_string(payload.get("server_id")),
+        tool_name=_coerce_optional_string(payload.get("tool_name")),
+        connector_metadata=tuple(
+            GenericPayloadField(
+                name=_required_text(item.get("name"), "receipt.metadata.name"),
+                value=str(item.get("value") or ""),
+            )
+            for item in payload.get("connector_metadata", [])
+            if isinstance(item, dict)
+        ),
+        attempt_number=int(payload.get("attempt_number", 1)),
     )
 
 
@@ -485,6 +616,14 @@ def _coerce_metadata_dict(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("External communication metadata must be a dict.")
     return {str(key): item for key, item in value.items()}
+
+
+# Parse a persisted ISO timestamp without accepting ambiguous values.
+def _coerce_datetime(value: Any, field_name: str) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    text = _required_text(value, field_name)
+    return datetime.fromisoformat(text)
 
 
 __all__ = [

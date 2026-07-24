@@ -251,9 +251,11 @@ class Layer2ArchitectureTests(unittest.TestCase):
     def test_domain_package_has_no_framework_or_infrastructure_imports(self) -> None:
         forbidden_roots = {
             "boto3",
+            "mcp",
             "langchain_core",
             "langgraph",
             "openai",
+            "smtplib",
             "sqlite3",
             "subprocess",
             "urllib",
@@ -268,6 +270,41 @@ class Layer2ArchitectureTests(unittest.TestCase):
                 f"{path} imports forbidden domain dependency: "
                 f"{sorted(forbidden_roots.intersection(imported_roots))}",
             )
+
+    # Actor providers cannot import mutating MCP adapters or capability servers.
+    def test_actor_cannot_reach_external_mutating_connectors(self) -> None:
+        forbidden_prefixes = {
+            "external_capability_mcp",
+            "layer2_runtime_governance.external_operations.mcp",
+        }
+        for path in (LAYER2_ROOT / "execution").rglob("*.py"):
+            imported_modules = _absolute_imports(path)
+            violations = {
+                module
+                for module in imported_modules
+                if any(
+                    module == prefix or module.startswith(f"{prefix}.")
+                    for prefix in forbidden_prefixes
+                )
+            }
+            self.assertFalse(
+                violations,
+                f"{path} imports mutating connector infrastructure: {sorted(violations)}",
+            )
+
+    # MCP/database/email dependencies stay below the external-operations adapter boundary.
+    def test_external_connector_dependencies_stay_out_of_runtime_and_domain(self) -> None:
+        forbidden_roots = {"mcp", "smtplib", "sqlite3", "subprocess"}
+        for package in ("domain", "runtime"):
+            for path in (LAYER2_ROOT / package).rglob("*.py"):
+                imported_roots = {
+                    module.split(".", 1)[0]
+                    for module in _absolute_imports(path)
+                }
+                self.assertTrue(
+                    forbidden_roots.isdisjoint(imported_roots),
+                    f"{path} imports connector infrastructure directly.",
+                )
 
 
 # Resolve absolute imports, including relative imports inside the Layer 2 package.

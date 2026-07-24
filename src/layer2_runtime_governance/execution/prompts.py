@@ -28,6 +28,9 @@ Rules:
 - For a complete external communication draft, use emit_external_communication_draft
   and populate channel, recipient, subject, and body separately. Never hide routing
   fields only inside output_text.
+- For a database statement proposal, use emit_database_statement with one registered
+  database_profile_id, one SQL statement, and separate named parameters. Never emit a
+  DSN, credential, shell command, or MCP tool name.
 - Treat the current plan step as the only active objective. Do not gather evidence for future steps.
 - If the current step can be completed from existing evidence, complete it even if later steps may still have open evidence gaps.
 - After a replan, the replacement step objective overrides the older blocked path; do not keep pursuing the pre-replan objective unless the new step explicitly says to do so.

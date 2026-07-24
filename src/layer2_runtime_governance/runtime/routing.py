@@ -7,6 +7,8 @@ from .contracts import Layer2GraphState
 # Route a governed actor outcome to the next internal capability.
 def route_after_governance(state: Layer2GraphState) -> str:
     task_state = state["task_state"]
+    if task_state.current_state == RuntimeState.READY_EXTERNAL_EXECUTION:
+        return "external_execution"
     if task_state.current_state == RuntimeState.READY_TOOL_EXECUTION:
         return "tool_gateway"
     if task_state.current_state == RuntimeState.REPLANNING:
@@ -31,8 +33,26 @@ def route_after_human_review(state: Layer2GraphState) -> str:
         RuntimeState.READY_NEXT_STEP: "actor",
         RuntimeState.ACTING: "actor",
         RuntimeState.READY_GOVERNANCE: "governance",
+        RuntimeState.READY_EXTERNAL_EXECUTION: "external_execution",
     }
     return route_by_state.get(task_state.current_state, "finalize_bootstrap")
 
 
-__all__ = ["route_after_governance", "route_after_human_review"]
+# Route connector outcomes to a bounded retry, reconciliation review, or finalization.
+def route_after_external_execution(state: Layer2GraphState) -> str:
+    task_state = state["task_state"]
+    if task_state.current_state == RuntimeState.READY_EXTERNAL_EXECUTION:
+        return "external_execution"
+    if (
+        task_state.current_state == RuntimeState.WAITING_HUMAN_REVIEW
+        and task_state.pending_human_review_request is not None
+    ):
+        return "human_review"
+    return "finalize_bootstrap"
+
+
+__all__ = [
+    "route_after_external_execution",
+    "route_after_governance",
+    "route_after_human_review",
+]

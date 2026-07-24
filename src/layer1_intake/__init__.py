@@ -10,6 +10,7 @@ from .infrastructure import (
 from .models import (
     BudgetConfig,
     DomainType,
+    ExecutionIntent,
     ExecutionPolicy,
     IntakeDomainError,
     IntakeMetadata,
@@ -42,6 +43,7 @@ __all__ = [
     "BudgetConfig",
     "ClockPort",
     "DomainType",
+    "ExecutionIntent",
     "ExecutionPolicy",
     "ExecutionPolicyRepositoryPort",
     "InputFingerprintPort",

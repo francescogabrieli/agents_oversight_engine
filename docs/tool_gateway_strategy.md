@@ -50,6 +50,31 @@ Tool Gateway
 This keeps the current PoC useful without pretending that local allowlists are a complete enterprise security model.
 The current baseline still provides a meaningful safety floor through configuration, read-only capability constraints, parameter validation, and evidence normalization.
 
+## Separate external execution registry
+
+The Tool Gateway registry remains actor-facing and read-only. Mutating operations use
+`configs/layer2_external_capabilities.json`, consumed only after OPA/HITL authorization:
+
+```text
+actor -> ToolRequest -> read-only Tool Gateway registry -> evidence
+
+authorized ExternalExecutionRequest
+  -> external capability registry
+  -> exact MCP server + exact allowlisted tool
+  -> external system
+  -> ExternalExecutionReceipt
+```
+
+The external registry records connector, server, tool, input schema/version,
+consequence profile, timeout, idempotency support, bounded retry, and defensive
+constraints. Server commands and environment-key allowlists are administrator
+configuration, never actor text.
+
+Current adapters are SMTP email and profile-bound SQLite statements, disabled by
+default. Database input is a registered profile id, one AST-validated statement,
+separate parameters, and an idempotency key; it never contains an actor-provided DSN.
+Email credentials and sender identity also remain adapter environment configuration.
+
 ## Thesis Framing
 
 Modern agent systems may use built-in tools, function calling, native APIs, or MCP servers.

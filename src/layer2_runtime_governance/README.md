@@ -72,13 +72,38 @@ The judge returns typed semantic verdicts and findings, never runtime directives
 `needs_revision` maps in OPA to `revise_action`; the runtime invalidates that payload
 and returns audit-safe feedback to the actor. HITL approvals are bound to the exact
 payload digest, and every modification returns to governance with a new digest.
-Email/database side-effect backends remain intentionally deferred.
+The only productive side-effect path is the capability-bound MCP external executor.
+Email and database execution are disabled by default and require explicit connector
+configuration.
 
 External communication synthesis uses a dedicated actor action carrying `channel`,
 `recipient`, `subject`, and `body`; generic completion actions are not exposed on
 that turn. The runtime derives policy facts and the immutable operation digest from
 this typed draft. External communication plans are normalized to one draft step,
 preceded by at most one genuine evidence step when stronger evidence is required.
+
+## Governed external execution
+
+The graph now includes:
+
+```text
+governance -> external_execution -> {external_execution | human_review | finalize}
+human_review -> external_execution
+```
+
+The self-edge is only a bounded retry of deterministic `failed + retryable`; registry
+configuration caps attempts at two. `indeterminate` opens typed reconciliation and
+cannot use that edge.
+
+Layer 1 owns `ExecutionIntent` (`proposal_only` or
+`execute_after_governance`). Proposal-only approval ends as `approved_draft`, never
+`approved_for_execution`. Executable intent still needs the exact OPA/HITL digest,
+an enabled capability, allowlisted MCP server/tool, the read-only envelope, and a
+stable idempotency key.
+
+The external registry is separate from the actor-visible Tool Gateway registry. This
+keeps mutating MCP tools out of actor tool binding; the external executor may invoke
+only the one exact MCP tool mapped to the canonical capability.
 
 - Local development defaults to the official `SqliteSaver` at
   `artifacts/runtime/checkpoints/layer2_checkpoints.sqlite3`.
@@ -115,6 +140,10 @@ external migration window and must not be recreated at the root.
 - `test_layer2_governance_runtime.py`: OPA-first enforcement and policy signals.
 - `test_layer2_external_operations.py`: external proposal normalization, AST SQL,
   judge preflight, shadow isolation, revision, and digest integrity.
+- `test_layer2_external_execution.py`: intent, preflight, receipts, graph routing,
+  HITL, modification, deny, bounded retry, and duplicate suppression.
+- `test_external_execution_mcp.py`: SDK response validation, timeout, allowlist,
+  lifecycle, local SMTP capture, and temporary SQLite integration.
 - `test_layer2_hitl_runtime.py`: interrupt, review, edit, and resume behavior.
 - `test_layer2_checkpointing.py`: official saver selection and fail-safe retention.
 - `test_layer2_architecture.py`: dependency direction and retired-surface checks.

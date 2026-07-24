@@ -40,7 +40,7 @@ def normalize_trace_json(trace_payload: dict[str, Any]) -> dict[str, Any]:
 def normalize_legacy_trace_to_v3(trace_payload: dict[str, Any]) -> dict[str, Any]:
     source = deepcopy(trace_payload)
     if source.get("trace_version") == "layer2_trace.v3":
-        return source
+        return _add_current_v3_compatibility_defaults(source)
 
     runtime = _dict_or_empty(source.get("runtime"))
     intake = _dict_or_empty(source.get("intake"))
@@ -88,6 +88,7 @@ def normalize_legacy_trace_to_v3(trace_payload: dict[str, Any]) -> dict[str, Any
             "max_steps": _optional_integer(intake.get("max_steps")),
             "max_tool_calls": _optional_integer(intake.get("max_tool_calls")),
             "read_only_mode": bool(intake.get("read_only_mode", False)),
+            "execution_intent": "proposal_only",
         },
         "planner_name": _optional_text(source.get("planner_name")),
         "planner_prompt_version": _optional_text(source.get("planner_prompt_version")),
@@ -139,6 +140,7 @@ def normalize_legacy_trace_to_v3(trace_payload: dict[str, Any]) -> dict[str, Any
         ],
         "human_review": _normalize_legacy_human_review(source.get("human_review")),
         "external_communication": None,
+        "external_execution": _empty_external_execution(),
     }
 
 
@@ -218,6 +220,9 @@ def _normalize_legacy_governance_pass(
             _text_or(actor.get("result_type"), "blocked"),
         ),
         "evaluated_tool_name": _optional_text(item.get("evaluated_tool_name")),
+        "evaluated_operation_digest": _optional_text(
+            item.get("evaluated_operation_digest")
+        ),
         "governance_input_schema_version": _optional_text(
             item.get("governance_input_schema_version")
         ),
@@ -235,6 +240,54 @@ def _normalize_legacy_governance_pass(
         "selected_reason": _text_or(item.get("selected_reason"), ""),
         "rejected_alternatives": _string_dict(item.get("rejected_alternatives")),
         "safety_invariants": _string_list(item.get("safety_invariants")),
+    }
+
+
+# Add conservative defaults when reading traces produced before the v3 extension.
+def _add_current_v3_compatibility_defaults(
+    source: dict[str, Any],
+) -> dict[str, Any]:
+    intake = _dict_or_empty(source.get("intake"))
+    intake.setdefault("execution_intent", "proposal_only")
+    source["intake"] = intake
+    source.setdefault("external_execution", _empty_external_execution())
+    for governance_pass in _dict_list(source.get("governance_passes")):
+        governance_pass.setdefault("evaluated_operation_digest", None)
+    communication = source.get("external_communication")
+    if isinstance(communication, dict):
+        _add_draft_recipient_defaults(communication.get("draft"))
+        last_edit = communication.get("last_applied_edit")
+        if isinstance(last_edit, dict):
+            _add_draft_recipient_defaults(last_edit.get("draft"))
+        for edit in _dict_list(communication.get("edit_history")):
+            _add_draft_recipient_defaults(edit.get("draft"))
+    human_review = _dict_or_empty(source.get("human_review"))
+    for request_key in ("pending_request", "last_request"):
+        request = human_review.get(request_key)
+        if isinstance(request, dict):
+            _add_draft_recipient_defaults(
+                request.get("external_communication_draft")
+            )
+    return source
+
+
+# Add empty CC/BCC arrays to legacy communication drafts.
+def _add_draft_recipient_defaults(payload: Any) -> None:
+    if isinstance(payload, dict):
+        payload.setdefault("cc", [])
+        payload.setdefault("bcc", [])
+
+
+# Build the conservative non-executable projection for older traces.
+def _empty_external_execution() -> dict[str, Any]:
+    return {
+        "execution_intent": "proposal_only",
+        "capability_id": None,
+        "current_payload_digest": None,
+        "current_request": None,
+        "last_receipt": None,
+        "receipt_history": [],
+        "attempt_count": 0,
     }
 
 

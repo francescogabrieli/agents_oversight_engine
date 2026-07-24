@@ -1,0 +1,103 @@
+{
+  "registry_version": "external_capabilities.v1",
+  "capabilities": [
+    {
+      "capability_id": "communication.email.send",
+      "operation_family": "communication",
+      "normalized_effect": "send",
+      "operation_boundary": "governed_external",
+      "enabled": true,
+      "connector_kind": "mcp",
+      "mcp_server_id": "communication",
+      "mcp_tool_name": "send_email",
+      "input_schema_version": "communication.email.send.input.v1",
+      "input_schema": {
+        "required": ["recipient", "subject", "body", "idempotency_key"],
+        "optional": ["cc", "bcc"],
+        "properties": {
+          "recipient": {"type": "string", "min_length": 3, "max_length": 320},
+          "subject": {"type": "string", "min_length": 1, "max_length": 998},
+          "body": {"type": "string", "min_length": 1, "max_length": 12000},
+          "cc": {"type": "array", "max_items": 19, "item_type": "string"},
+          "bcc": {"type": "array", "max_items": 19, "item_type": "string"},
+          "idempotency_key": {"type": "string", "min_length": 1, "max_length": 256}
+        }
+      },
+      "output_schema_version": "external_execution.tool_response.v1",
+      "consequence_profile": "communication.default",
+      "timeout_seconds": 20,
+      "idempotency_support": "client_key",
+      "max_attempts": 1,
+      "defensive_constraints": {
+        "max_recipients": "20",
+        "max_body_chars": "12000"
+      }
+    },
+    {
+      "capability_id": "database.statement.execute",
+      "operation_family": "database",
+      "normalized_effect": "execute",
+      "allowed_normalized_effects": ["read", "create", "update", "delete", "truncate"],
+      "operation_boundary": "governed_external",
+      "enabled": true,
+      "connector_kind": "mcp",
+      "mcp_server_id": "database",
+      "mcp_tool_name": "execute_statement",
+      "input_schema_version": "database.statement.execute.input.v1",
+      "input_schema": {
+        "required": ["database_profile_id", "statement", "parameters", "idempotency_key"],
+        "optional": [],
+        "properties": {
+          "database_profile_id": {"type": "string", "min_length": 1, "max_length": 128},
+          "statement": {"type": "string", "min_length": 1, "max_length": 50000},
+          "parameters": {"type": "object", "max_properties": 200},
+          "idempotency_key": {"type": "string", "min_length": 1, "max_length": 256}
+        }
+      },
+      "output_schema_version": "external_execution.tool_response.v1",
+      "consequence_profile": "enterprise_db.controlled_write",
+      "timeout_seconds": 20,
+      "idempotency_support": "client_key",
+      "max_attempts": 1,
+      "defensive_constraints": {
+        "single_statement": "true",
+        "profile_allowlist": "required"
+      }
+    }
+  ],
+  "mcp_servers": {
+    "communication": {
+      "enabled": true,
+      "transport": "stdio",
+      "command": "{python}",
+      "args": ["-m", "external_capability_mcp", "communication"],
+      "allowed_tools": ["send_email"],
+      "timeout_seconds": 20,
+      "environment_keys": [
+        "LAYER2_SMTP_HOST",
+        "LAYER2_SMTP_PORT",
+        "LAYER2_SMTP_USERNAME",
+        "LAYER2_SMTP_PASSWORD",
+        "LAYER2_SMTP_SENDER",
+        "LAYER2_SMTP_USE_TLS",
+        "LAYER2_SMTP_USE_SSL",
+        "LAYER2_SMTP_TIMEOUT_SECONDS",
+        "LAYER2_EXTERNAL_SERVER_LEDGER_PATH"
+      ]
+    },
+    "database": {
+      "enabled": true,
+      "transport": "stdio",
+      "command": "{python}",
+      "args": ["-m", "external_capability_mcp", "database"],
+      "allowed_tools": ["execute_statement"],
+      "timeout_seconds": 20,
+      "environment_keys": [
+        "LAYER2_DATABASE_PROFILES_CONFIG_PATH",
+        "LAYER2_DATABASE_DEDICATED_TEST_DSN",
+        "LAYER2_DATABASE_REPORTING_DSN",
+        "LAYER2_EXTERNAL_SERVER_LEDGER_PATH"
+      ]
+    }
+  }
+}

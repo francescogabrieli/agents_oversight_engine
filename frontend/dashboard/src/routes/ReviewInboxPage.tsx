@@ -70,6 +70,12 @@ function InboxRow({ item }: { item: ReviewInboxEntry }) {
             {item.external_communication_phase ? (
               <span className="badge badge-neutral">{item.external_communication_phase}</span>
             ) : null}
+            {item.execution_intent ? (
+              <span className="badge badge-neutral">{item.execution_intent}</span>
+            ) : null}
+            {item.external_execution_status ? (
+              <span className="badge badge-info">{item.external_execution_status}</span>
+            ) : null}
             <p className="inbox-row-title">{item.task_goal ?? "Untitled task"}</p>
           </div>
           <div className="inbox-row-meta">

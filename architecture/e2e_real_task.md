@@ -139,3 +139,123 @@ A fine run:
 Questo chiude il ciclo e2e reale:
 
 `task libero -> intake canonico -> runtime governato -> evidenze tipizzate -> eventuale HITL -> trace esportabile -> evaluation offline`
+
+## 9. E2E Governed External Execution
+
+Il flusso reale aggiunge:
+
+```text
+TaskSpec.execution_intent
+  -> ExternalOperationProposal immutabile
+  -> OPA + judge
+  -> eventuale interrupt/HITL sul digest
+  -> READY_EXTERNAL_EXECUTION
+  -> external_execution
+  -> registry external dedicato
+  -> MCP server/tool esatto
+  -> ExternalExecutionReceipt
+  -> trace/dashboard/finalize
+```
+
+`proposal_only` termina come `approved_draft` e non crea una request. Solo
+`execute_after_governance` può entrare nello seam, e soltanto se il digest autorizzato
+coincide con quello corrente.
+
+## 10. Configurazione Opt-In
+
+La configurazione di default ha entrambe le capability disabilitate. Per un test reale
+controllato, usare esplicitamente l’esempio:
+
+```powershell
+$env:PYTHONPATH = "src"
+$env:LAYER2_EXTERNAL_CAPABILITY_CONFIG_PATH = (
+  Resolve-Path "configs/layer2_external_capabilities.example.json"
+)
+```
+
+Non inserire segreti nel JSON. Il pool avvia automaticamente il server necessario.
+Per avviarli manualmente e verificarne il bootstrap:
+
+```powershell
+python -m external_capability_mcp communication
+python -m external_capability_mcp database
+```
+
+In esecuzione normale non avviarli separatamente: il pool MCP composition-owned gestisce
+processo, sessione, timeout e chiusura.
+
+## 11. Test Manuale Email Reale Controllato
+
+Usare esclusivamente una mailbox posseduta e autorizzata. Prima di lanciare la run,
+verificare a vista destinatario, sender e provider, poi confermare intenzionalmente
+l’operazione.
+
+```powershell
+$env:LAYER2_SMTP_HOST = "smtp.provider.example"
+$env:LAYER2_SMTP_PORT = "587"
+$env:LAYER2_SMTP_USERNAME = "<injected-user>"
+$env:LAYER2_SMTP_PASSWORD = "<injected-secret>"
+$env:LAYER2_SMTP_SENDER = "controlled-sender@example.org"
+$env:LAYER2_SMTP_USE_TLS = "true"
+$env:LAYER2_SMTP_USE_SSL = "false"
+$env:LAYER2_SMTP_TIMEOUT_SECONDS = "15"
+$env:LAYER2_EXTERNAL_SERVER_LEDGER_PATH = (
+  Join-Path (Resolve-Path "artifacts/runtime").Path "external/email-server.sqlite3"
+)
+```
+
+Avviare dashboard e runtime in due terminali:
+
+```powershell
+python src/main_layer2_dashboard.py --host 127.0.0.1 --port 8000
+
+python src/main_layer2.py `
+  --thread-id "manual-controlled-email-001" `
+  --task "Invia una email alla mia casella controllata controlled-recipient@example.org con oggetto 'Layer 2 controlled E2E' e corpo 'Test autorizzato della capability MCP governata'. Esegui l'invio dopo governance; non cambiare destinatario o contenuto." `
+  --full-trace
+```
+
+Se compare HITL, controllare recipient, subject, body e digest nella dashboard prima di
+`approve_continue`. Il test è riuscito soltanto se:
+
+- `external_execution.status` è `executed`;
+- esiste `external_reference`/Message-ID;
+- la mailbox controllata conferma il messaggio;
+- trace e runtime summary dello stesso thread conservano la ricevuta.
+
+Un timeout o una disconnessione SMTP è `indeterminate`: verificare la mailbox e non
+rilanciare automaticamente.
+
+## 12. Test Manuale Database Dedicato
+
+Il server produttivo corrente supporta profili SQLite. Creare un database dedicato,
+mai un database applicativo condiviso:
+
+```powershell
+$env:LAYER2_DATABASE_PROFILES_CONFIG_PATH = (
+  Resolve-Path "configs/layer2_database_profiles.example.json"
+)
+$env:LAYER2_DATABASE_DEDICATED_TEST_DSN = (
+  Join-Path (Resolve-Path "artifacts/runtime").Path "external/dedicated-e2e.sqlite3"
+)
+
+python -c "import os,sqlite3,pathlib; p=pathlib.Path(os.environ['LAYER2_DATABASE_DEDICATED_TEST_DSN']); p.parent.mkdir(parents=True,exist_ok=True); c=sqlite3.connect(p); c.execute('CREATE TABLE IF NOT EXISTS governed_events(id INTEGER PRIMARY KEY, label TEXT NOT NULL)'); c.commit(); c.close()"
+```
+
+Ispezionare e confermare esplicitamente il path, quindi:
+
+```powershell
+python src/main_layer2.py `
+  --thread-id "manual-controlled-database-001" `
+  --task "Esegui sul profilo database registrato dedicated_test_write la singola statement parametrizzata INSERT INTO governed_events(label) VALUES (:label), con parametro label='controlled-e2e'. Esegui dopo governance e restituisci la ricevuta; non usare altri profili." `
+  --full-trace
+```
+
+Verifica locale:
+
+```powershell
+python -c "import os,sqlite3; c=sqlite3.connect(os.environ['LAYER2_DATABASE_DEDICATED_TEST_DSN']); print(c.execute('SELECT id,label FROM governed_events ORDER BY id DESC LIMIT 5').fetchall()); c.close()"
+```
+
+Il test è riuscito soltanto con receipt `executed`, transaction reference e riga presente.
+Il tool non restituisce righe del database nella receipt e non accetta DSN nel payload.

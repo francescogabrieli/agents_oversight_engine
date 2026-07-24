@@ -32,6 +32,7 @@ def build_compact_trace_from_runtime_trace(trace: Layer2RuntimeTrace) -> dict[st
             "sensitivity": trace.intake.sensitivity,
             "parse_status": trace.intake.parse_status,
             "read_only_mode": trace.intake.read_only_mode,
+            "execution_intent": trace.intake.execution_intent,
         },
         "planning_snapshot": {
             "plan_step_count": len(trace.plan_steps),
@@ -56,6 +57,7 @@ def build_compact_trace_from_runtime_trace(trace: Layer2RuntimeTrace) -> dict[st
             if trace.external_communication is not None
             else None
         ),
+        "external_execution_snapshot": asdict(trace.external_execution),
         "bootstrap_state": {
             "current_state": trace.runtime.current_state,
             "step_count": len(trace.runtime.step_history),

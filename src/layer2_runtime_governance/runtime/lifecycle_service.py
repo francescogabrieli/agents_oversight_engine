@@ -52,7 +52,20 @@ def finalize_bootstrap(state: TaskState) -> TaskState:
 # Maintain explicit lifecycle state and audit records.
 def _build_finalize_summary(state: TaskState) -> str:
     if state.actor_result is None:
+        if state.actor_turn_count > 0 or state.executed_steps:
+            return (
+                "Layer 2 reached a stable stop after actor execution; "
+                "the latest actor projection was unavailable during recovery."
+            )
         return "Layer 2 stopped before actor execution because no operational outcome was available."
+
+    if state.last_external_execution_receipt is not None:
+        receipt = state.last_external_execution_receipt
+        return (
+            "Layer 2 finalized the governed external-operation path with "
+            f"execution status '{receipt.status.value}', capability "
+            f"'{receipt.capability_id}', and runtime state '{state.current_state.value}'."
+        )
 
     if state.current_state == RuntimeState.ABORTED:
         return (

@@ -7,7 +7,7 @@
     "trace_version", "runtime", "intake", "planner_name", "planner_prompt_version",
     "planner_rationale", "planning_source", "plan_steps", "current_plan_step_index",
     "current_plan_step_id", "actor", "execution", "tool_calls", "observed_evidence",
-    "governance_passes", "human_review", "external_communication"
+    "governance_passes", "human_review", "external_communication", "external_execution"
   ],
   "properties": {
     "trace_version": { "const": "layer2_trace.v3" },
@@ -28,14 +28,15 @@
     "human_review": { "$ref": "#/$defs/humanReview" },
     "external_communication": {
       "oneOf": [{ "$ref": "#/$defs/externalCommunication" }, { "type": "null" }]
-    }
+    },
+    "external_execution": { "$ref": "#/$defs/externalExecution" }
   },
   "$defs": {
     "nullableString": { "type": ["string", "null"] },
     "nonEmptyString": { "type": "string", "minLength": 1 },
     "stringArray": { "type": "array", "items": { "type": "string" }, "maxItems": 1000000 },
     "runtimeState": {
-      "enum": ["planning", "acting", "ready_next_step", "ready_tool_execution", "ready_governance", "replanning", "waiting_human_review", "completed", "aborted"]
+      "enum": ["planning", "acting", "ready_next_step", "ready_tool_execution", "ready_governance", "ready_external_execution", "replanning", "waiting_human_review", "completed", "aborted"]
     },
     "actorResultType": {
       "enum": ["propose_action", "intermediate_output", "final_output", "ask_clarification", "blocked", "needs_replan"]
@@ -75,9 +76,9 @@
         "bootstrap_completed": { "type": "boolean" },
         "runtime_flags": {
           "type": "array",
-          "items": { "enum": ["clarification_required", "incomplete_intake", "read_only_execution", "high_sensitivity", "extractability_limited"] },
+          "items": { "enum": ["clarification_required", "incomplete_intake", "read_only_execution", "high_sensitivity", "extractability_limited", "external_execution_reconciliation_required"] },
           "uniqueItems": true,
-          "maxItems": 5
+          "maxItems": 6
         },
         "step_history": { "type": "array", "items": { "$ref": "#/$defs/stepRecord" }, "maxItems": 1000000 },
         "actor_turn_count": { "type": "integer", "minimum": 0, "maximum": 1000000 },
@@ -98,7 +99,7 @@
     },
     "intake": {
       "type": "object",
-      "required": ["goal", "context", "domain_type", "domain_label", "sensitivity", "success_criteria", "constraints", "parse_status", "parser_name", "prompt_version", "schema_version", "policy_profile_name", "confidence_threshold", "max_steps", "max_tool_calls", "read_only_mode"],
+      "required": ["goal", "context", "domain_type", "domain_label", "sensitivity", "success_criteria", "constraints", "parse_status", "parser_name", "prompt_version", "schema_version", "policy_profile_name", "confidence_threshold", "max_steps", "max_tool_calls", "read_only_mode", "execution_intent"],
       "properties": {
         "goal": { "$ref": "#/$defs/nonEmptyString" },
         "context": { "type": "string" },
@@ -115,7 +116,8 @@
         "confidence_threshold": { "type": "number", "minimum": 0, "maximum": 1 },
         "max_steps": { "type": ["integer", "null"], "minimum": 1, "maximum": 1000000 },
         "max_tool_calls": { "type": ["integer", "null"], "minimum": 1, "maximum": 1000000 },
-        "read_only_mode": { "type": "boolean" }
+        "read_only_mode": { "type": "boolean" },
+        "execution_intent": { "enum": ["proposal_only", "execute_after_governance"] }
       },
       "additionalProperties": false
     },
@@ -271,12 +273,13 @@
     },
     "governancePass": {
       "type": "object",
-      "required": ["pass_index", "evaluated_plan_step_id", "evaluated_actor_result_type", "evaluated_tool_name", "governance_input_schema_version", "policy_bundle_version", "policy_config_version", "pillar_requirements", "pillar_results", "pillar_errors", "directive", "policy_decision", "requires_human_review", "reason_codes", "selected_reason", "rejected_alternatives", "safety_invariants"],
+      "required": ["pass_index", "evaluated_plan_step_id", "evaluated_actor_result_type", "evaluated_tool_name", "evaluated_operation_digest", "governance_input_schema_version", "policy_bundle_version", "policy_config_version", "pillar_requirements", "pillar_results", "pillar_errors", "directive", "policy_decision", "requires_human_review", "reason_codes", "selected_reason", "rejected_alternatives", "safety_invariants"],
       "properties": {
         "pass_index": { "type": "integer", "minimum": 1, "maximum": 1000000 },
         "evaluated_plan_step_id": { "$ref": "#/$defs/nullableString" },
         "evaluated_actor_result_type": { "$ref": "#/$defs/actorResultType" },
         "evaluated_tool_name": { "$ref": "#/$defs/nullableString" },
+        "evaluated_operation_digest": { "$ref": "#/$defs/nullableString" },
         "governance_input_schema_version": { "$ref": "#/$defs/nullableString" },
         "policy_bundle_version": { "$ref": "#/$defs/nonEmptyString" },
         "policy_config_version": { "$ref": "#/$defs/nullableString" },
@@ -295,12 +298,14 @@
     },
     "externalCommunicationDraft": {
       "type": "object",
-      "required": ["channel", "recipient", "subject", "body", "metadata"],
+      "required": ["channel", "recipient", "subject", "body", "cc", "bcc", "metadata"],
       "properties": {
         "channel": { "$ref": "#/$defs/nonEmptyString" },
         "recipient": { "$ref": "#/$defs/nullableString" },
         "subject": { "$ref": "#/$defs/nullableString" },
         "body": { "$ref": "#/$defs/nullableString" },
+        "cc": { "$ref": "#/$defs/stringArray" },
+        "bcc": { "$ref": "#/$defs/stringArray" },
         "metadata": { "type": "object" }
       },
       "additionalProperties": false
@@ -409,11 +414,109 @@
       "type": "object",
       "required": ["phase", "draft", "last_applied_edit", "edit_history", "last_transition_summary"],
       "properties": {
-        "phase": { "enum": ["evidence_collection", "draft_in_progress", "draft_proposal", "human_review_required", "approved_for_execution", "blocked"] },
+        "phase": { "enum": ["evidence_collection", "draft_in_progress", "draft_proposal", "human_review_required", "approved_draft", "approved_for_execution", "executed", "execution_failed", "indeterminate", "blocked"] },
         "draft": { "oneOf": [{ "$ref": "#/$defs/externalCommunicationDraft" }, { "type": "null" }] },
         "last_applied_edit": { "oneOf": [{ "$ref": "#/$defs/humanReviewExternalEdit" }, { "type": "null" }] },
         "edit_history": { "type": "array", "items": { "$ref": "#/$defs/humanReviewExternalEdit" }, "maxItems": 1000000 },
         "last_transition_summary": { "$ref": "#/$defs/nullableString" }
+      },
+      "additionalProperties": false
+    },
+    "externalExecutionRequest": {
+      "type": "object",
+      "required": [
+        "operation_id", "capability_id", "proposal", "current_payload_digest",
+        "authorized_payload_digest", "execution_intent", "idempotency_key",
+        "authorization_source", "reviewer_id", "governance_decision_reference",
+        "attempt_scope"
+      ],
+      "properties": {
+        "operation_id": { "$ref": "#/$defs/nonEmptyString" },
+        "capability_id": { "$ref": "#/$defs/nonEmptyString" },
+        "proposal": { "$ref": "#/$defs/externalOperationProposal" },
+        "current_payload_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "authorized_payload_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "execution_intent": { "const": "execute_after_governance" },
+        "idempotency_key": { "$ref": "#/$defs/nonEmptyString" },
+        "authorization_source": { "enum": ["opa", "human_review"] },
+        "reviewer_id": { "$ref": "#/$defs/nullableString" },
+        "governance_decision_reference": { "$ref": "#/$defs/nullableString" },
+        "attempt_scope": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "externalExecutionReceipt": {
+      "type": "object",
+      "required": [
+        "operation_id", "capability_id", "payload_digest", "status",
+        "idempotency_key", "started_at", "completed_at", "external_reference",
+        "summary", "error_code", "retryable", "connector_kind", "connector_id",
+        "server_id", "tool_name", "connector_metadata", "attempt_number"
+      ],
+      "properties": {
+        "operation_id": { "$ref": "#/$defs/nonEmptyString" },
+        "capability_id": { "$ref": "#/$defs/nonEmptyString" },
+        "payload_digest": { "type": "string" },
+        "status": { "enum": ["executed", "rejected_before_execution", "failed", "indeterminate"] },
+        "idempotency_key": { "type": "string" },
+        "started_at": { "type": "string", "format": "date-time" },
+        "completed_at": { "type": "string", "format": "date-time" },
+        "external_reference": { "$ref": "#/$defs/nullableString" },
+        "summary": { "type": "string" },
+        "error_code": {
+          "enum": [
+            "none", "missing_proposal", "invalid_execution_intent",
+            "not_execution_candidate", "authorization_missing", "digest_mismatch",
+            "capability_unknown", "capability_disabled", "connector_unsupported",
+            "read_only_violation", "idempotency_key_missing", "duplicate_execution",
+            "input_schema_invalid", "tool_not_allowlisted", "connector_timeout",
+            "connector_failure", "connector_response_invalid",
+            "outcome_indeterminate", "retry_limit_exceeded"
+          ]
+        },
+        "retryable": { "type": "boolean" },
+        "connector_kind": { "$ref": "#/$defs/nullableString" },
+        "connector_id": { "$ref": "#/$defs/nullableString" },
+        "server_id": { "$ref": "#/$defs/nullableString" },
+        "tool_name": { "$ref": "#/$defs/nullableString" },
+        "connector_metadata": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "value"],
+            "properties": {
+              "name": { "type": "string" },
+              "value": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "attempt_number": { "type": "integer", "minimum": 1, "maximum": 2 }
+      },
+      "additionalProperties": false
+    },
+    "externalExecution": {
+      "type": "object",
+      "required": [
+        "execution_intent", "capability_id", "current_payload_digest",
+        "current_request", "last_receipt", "receipt_history", "attempt_count"
+      ],
+      "properties": {
+        "execution_intent": { "enum": ["proposal_only", "execute_after_governance"] },
+        "capability_id": { "$ref": "#/$defs/nullableString" },
+        "current_payload_digest": { "$ref": "#/$defs/nullableString" },
+        "current_request": {
+          "oneOf": [{ "$ref": "#/$defs/externalExecutionRequest" }, { "type": "null" }]
+        },
+        "last_receipt": {
+          "oneOf": [{ "$ref": "#/$defs/externalExecutionReceipt" }, { "type": "null" }]
+        },
+        "receipt_history": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/externalExecutionReceipt" },
+          "maxItems": 100
+        },
+        "attempt_count": { "type": "integer", "minimum": 0, "maximum": 100 }
       },
       "additionalProperties": false
     }

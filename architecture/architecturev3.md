@@ -377,7 +377,13 @@ Il nodo `human_review` chiama `interrupt()` con un payload tipizzato e JSON-safe
 
 Azioni umane canoniche, sempre disponibili in ogni HITL: `approve_continue`, `approve_continue_read_only`, `modify_and_continue`, `request_more_evidence`, `replan`, `ask_clarification` e `abort`. `modify_and_continue` richiede comunque un edit tipizzato valido al submit e non può aggirare il contratto della proposta. Approval e judge assessment sono legati al digest esatto; una modifica crea un nuovo digest, invalida approval e assessment precedenti e passa da `READY_GOVERNANCE` prima di qualunque seam esecutivo. `approve_continue_read_only` non può autorizzare una proposta mutating invariata.
 
-Il package `external_operations/` normalizza communication, SQL e generic external. SQL usa AST `sqlglot` e accetta una sola statement; email normalizza campi e destinazione senza giudicare il tono. I backend reali email/database e ogni side effect external restano differiti: il seam production restituisce un risultato `executed=false`.
+Il package `external_operations/` normalizza communication, SQL e generic external. SQL usa AST `sqlglot` e accetta una sola statement; email normalizza campi e destinazione senza giudicare il tono. `ExecutionIntent` distingue `proposal_only` da `execute_after_governance` e recupera checkpoint e payload precedenti conservativamente come `proposal_only`.
+
+Il nodo applicativo `external_execution` riceve soltanto una `ExternalExecutionRequest` già autorizzata sul digest esatto. Verifica proposta, intent, execution candidate, authorization source, digest, capability registry, server/tool allowlist, read-only envelope, idempotency key e ricevute precedenti. Non interpreta testo libero, non modifica payload, non sceglie policy e non espone shell o codice. Il port è implementato da `MCPExternalOperationExecutor`; il fallback deferred resta fail-closed soltanto quando nessuna capability reale è abilitata.
+
+Il registry external è distinto dal Tool Gateway actor-facing. Le prime capability reali, disabilitate di default, sono `communication.email.send` verso SMTP configurato e `database.statement.execute` verso SQLite selezionato esclusivamente tramite profile id registrato. Server, sessioni, rete, processi, DSN e credenziali restano infrastruttura.
+
+Le ricevute distinguono `executed`, `rejected_before_execution`, `failed` e `indeterminate`. Il retry è limitato a failure deterministiche retryable e usa una nuova attempt scope stabile; `indeterminate` non viene mai ripetuto automaticamente e apre riconciliazione HITL. I ledger persistenti client/server offrono at-most-once per chiave, non exactly-once universale.
 
 Gli artifact per thread (`full-trace-2.json`, snapshot dashboard e payload pending) sono materiale di osservabilità. In locale il checkpoint autoritativo è `artifacts/runtime/checkpoints/layer2_checkpoints.sqlite3`; in produzione può risiedere nel backend PostgreSQL configurato. I checkpoint terminali hanno retention limitata, mentre interrupt pendenti e thread non terminali vengono preservati.
 
@@ -401,7 +407,8 @@ Output operativi del blocco:
 
 ### 2.4 Framework / Librerie
 
-LangGraph Graph API, OPA HTTP con bundle Rego versionato, Pydantic, SQLite e LLM opzionale per il judge.
+LangGraph Graph API, OPA HTTP con bundle Rego versionato, Pydantic, SQLite,
+SDK Python MCP ufficiale 1.x e LLM opzionale per il judge.
 
 ---
 
@@ -442,6 +449,11 @@ Il paniere MCP locale attuale include tool read-only per:
 Autenticazione e autorizzazione per utente, team o organizzazione non sono ancora implementate.
 Il punto di inserimento previsto è sopra il backend MCP, dentro il `Tool Gateway` o in un futuro control layer collegato al gateway.
 Anche prima dell'auth completa, il gateway non opera come client MCP aperto: usa solo server configurati, tool allowlisted e parametri costruiti dal contratto tipizzato del runtime.
+
+Le capability mutating non appartengono a questo registry. Dopo governance/HITL,
+`external_execution` usa un registry dedicato non visibile all'actor e un pool MCP
+composition-owned, thread-safe e riutilizzabile. MCP è un adapter di trasporto: OPA
+resta PDP, LangGraph resta PEP e il connettore non può ampliare l'autorità ricevuta.
 
 Metadati minimi utili:
 - `side_effects`

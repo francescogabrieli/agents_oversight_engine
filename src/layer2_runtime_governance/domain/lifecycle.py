@@ -11,6 +11,7 @@ class RuntimeState(str, Enum):
     READY_NEXT_STEP = "ready_next_step"
     READY_TOOL_EXECUTION = "ready_tool_execution"
     READY_GOVERNANCE = "ready_governance"
+    READY_EXTERNAL_EXECUTION = "ready_external_execution"
     REPLANNING = "replanning"
     WAITING_HUMAN_REVIEW = "waiting_human_review"
     COMPLETED = "completed"
@@ -24,6 +25,9 @@ class RuntimeFlag(str, Enum):
     READ_ONLY_EXECUTION = "read_only_execution"
     HIGH_SENSITIVITY = "high_sensitivity"
     EXTRACTABILITY_LIMITED = "extractability_limited"
+    EXTERNAL_EXECUTION_RECONCILIATION_REQUIRED = (
+        "external_execution_reconciliation_required"
+    )
 
 
 # Canonical domain contract extracted from the legacy state facade.

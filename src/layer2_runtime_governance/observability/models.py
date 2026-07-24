@@ -38,6 +38,7 @@ class TraceIntakeSummary:
     max_steps: int | None
     max_tool_calls: int | None
     read_only_mode: bool
+    execution_intent: str
 
 
 # Read-only observability component extracted from the trace facade.
@@ -119,6 +120,7 @@ class TraceGovernancePass:
     evaluated_plan_step_id: str | None
     evaluated_actor_result_type: str
     evaluated_tool_name: str | None
+    evaluated_operation_digest: str | None
     governance_input_schema_version: str | None
     policy_bundle_version: str
     policy_config_version: str | None
@@ -225,6 +227,8 @@ class TraceExternalCommunicationDraft:
     recipient: str | None
     subject: str | None
     body: str | None
+    cc: tuple[str, ...]
+    bcc: tuple[str, ...]
     metadata: dict[str, Any]
 
 
@@ -313,6 +317,40 @@ class TraceExternalCommunicationSummary:
     last_transition_summary: str | None
 
 
+# Read-only observability component extracted from the external execution receipt.
+@dataclass(frozen=True)
+class TraceExternalExecutionReceipt:
+    operation_id: str
+    capability_id: str
+    payload_digest: str
+    status: str
+    idempotency_key: str
+    started_at: str
+    completed_at: str
+    external_reference: str | None
+    summary: str
+    error_code: str
+    retryable: bool
+    connector_kind: str | None
+    connector_id: str | None
+    server_id: str | None
+    tool_name: str | None
+    connector_metadata: tuple[dict[str, str], ...]
+    attempt_number: int
+
+
+# Read-only observability component for intent, request, receipt, and replay history.
+@dataclass(frozen=True)
+class TraceExternalExecutionSummary:
+    execution_intent: str
+    capability_id: str | None
+    current_payload_digest: str | None
+    current_request: dict[str, Any] | None
+    last_receipt: TraceExternalExecutionReceipt | None
+    receipt_history: tuple[TraceExternalExecutionReceipt, ...]
+    attempt_count: int
+
+
 # Read-only observability component extracted from the trace facade.
 @dataclass(frozen=True)
 class Layer2RuntimeTrace:
@@ -334,6 +372,7 @@ class Layer2RuntimeTrace:
     governance_passes: tuple[TraceGovernancePass, ...]
     human_review: TraceHumanReviewSummary
     external_communication: TraceExternalCommunicationSummary | None
+    external_execution: TraceExternalExecutionSummary
 
 
 __all__ = [
@@ -356,5 +395,7 @@ __all__ = [
     "TraceHumanReviewSummary",
     "TraceExecutionSummary",
     "TraceExternalCommunicationSummary",
+    "TraceExternalExecutionReceipt",
+    "TraceExternalExecutionSummary",
     "Layer2RuntimeTrace"
 ]

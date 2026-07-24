@@ -144,6 +144,25 @@ class DashboardExternalCommunicationPanel:
     last_transition_summary: str | None
 
 
+# DashboardExternalExecutionPanel distinguishes authorization from actual execution.
+@dataclass(frozen=True)
+class DashboardExternalExecutionPanel:
+    execution_intent: str
+    capability_id: str | None
+    status: str | None
+    payload_digest: str | None
+    connector_kind: str | None
+    connector_id: str | None
+    server_id: str | None
+    tool_name: str | None
+    external_reference: str | None
+    summary: str | None
+    error_code: str | None
+    retryable: bool
+    attempt_count: int
+    receipt_count: int
+
+
 # GovernanceHitlDashboardSnapshot is the UI-facing contract derived from TaskState.
 @dataclass(frozen=True)
 class GovernanceHitlDashboardSnapshot:
@@ -162,6 +181,7 @@ class GovernanceHitlDashboardSnapshot:
     has_pending_review: bool
     is_terminal: bool
     external_communication: DashboardExternalCommunicationPanel | None
+    external_execution: DashboardExternalExecutionPanel
 
 
 # Build the dashboard snapshot from the canonical TaskState.
@@ -201,6 +221,7 @@ def build_governance_hitl_dashboard_snapshot(
         has_pending_review=task_state.pending_human_review_request is not None,
         is_terminal=current_state in {RuntimeState.COMPLETED, RuntimeState.ABORTED},
         external_communication=_build_external_communication_panel(task_state=task_state),
+        external_execution=_build_external_execution_panel(task_state=task_state),
     )
 
 
@@ -271,6 +292,39 @@ def _build_governance_panel(
         selected_reason=governance_decision.combiner_selected_reason,
         rejected_alternatives=governance_decision.combiner_rejected_alternatives,
         safety_invariants_checked=governance_decision.combiner_safety_invariants_checked,
+    )
+
+
+# Build the external execution panel from canonical intent, proposal, and receipt state.
+def _build_external_execution_panel(
+    *,
+    task_state: TaskState,
+) -> DashboardExternalExecutionPanel:
+    proposal = task_state.external_operation_proposal
+    receipt = task_state.last_external_execution_receipt
+    return DashboardExternalExecutionPanel(
+        execution_intent=task_state.execution_intent.value,
+        capability_id=proposal.capability_id if proposal is not None else None,
+        status=receipt.status.value if receipt is not None else None,
+        payload_digest=(
+            receipt.payload_digest
+            if receipt is not None
+            else proposal.payload_digest
+            if proposal is not None
+            else None
+        ),
+        connector_kind=receipt.connector_kind if receipt is not None else None,
+        connector_id=receipt.connector_id if receipt is not None else None,
+        server_id=receipt.server_id if receipt is not None else None,
+        tool_name=receipt.tool_name if receipt is not None else None,
+        external_reference=(
+            receipt.external_reference if receipt is not None else None
+        ),
+        summary=receipt.summary if receipt is not None else None,
+        error_code=receipt.error_code.value if receipt is not None else None,
+        retryable=receipt.retryable if receipt is not None else False,
+        attempt_count=task_state.external_execution_attempt_count,
+        receipt_count=len(task_state.external_execution_history),
     )
 
 

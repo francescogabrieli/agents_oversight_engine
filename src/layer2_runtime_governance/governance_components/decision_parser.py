@@ -70,6 +70,18 @@ def _build_governance_trace_from_opa_output(
         ),
         requires_human_review=raw_output["requires_human_review"],
         evaluated_plan_step_id=policy_input.current_plan_step_id,
+        evaluated_operation_digest=(
+            str(
+                decision_input.get("base_facts", {})
+                .get("external_operation", {})
+                .get("payload_digest")
+            )
+            if isinstance(decision_input, dict)
+            and decision_input.get("base_facts", {})
+            .get("external_operation", {})
+            .get("payload_digest")
+            else None
+        ),
         behavioral_recommended_directive=map_behavioral_directive(
             behavioral_assessment.behavioral_recommended_directive
         ),

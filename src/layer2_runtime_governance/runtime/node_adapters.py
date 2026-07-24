@@ -8,6 +8,7 @@ from ..governance_components import PolicyEnginePort
 from ..judge import JudgePort
 from ..hitl import human_review
 from .actor_service import actor
+from .external_execution_service import external_execution
 from .governance_service import governance
 from .lifecycle_service import bootstrap_from_intake, finalize_bootstrap
 from .planning_service import planner
@@ -16,6 +17,10 @@ from .tool_service import observe_tool_result, tool_gateway
 from ..planning import PlannerPort
 from ..planning.replanning import ReplannerPort
 from ..domain import TaskState
+from ..external_operations import (
+    ExternalCapabilityRegistry,
+    ExternalOperationExecutorPort,
+)
 from ..tool_contract import ToolGatewayPort
 from ..tools import ToolGatewayConfig
 from .context import copy_task_state, extract_bootstrap_thread_id, extract_thread_id
@@ -106,6 +111,31 @@ def build_human_review_node():
     return human_review_node
 
 
+# Build a thin external execution node around injected registry and executor ports.
+def build_external_execution_node(
+    executor_service: ExternalOperationExecutorPort,
+    *,
+    capability_registry: ExternalCapabilityRegistry,
+    hitl_event_callback: Callable[[TaskState], None] | None = None,
+):
+    # Resolve thread context and delegate all preflight and outcome rules.
+    def external_execution_node(
+        state: Layer2GraphState,
+        config: RunnableConfig | None = None,
+    ) -> dict[str, TaskState]:
+        return {
+            "task_state": external_execution(
+                copy_task_state(state["task_state"]),
+                executor_service=executor_service,
+                capability_registry=capability_registry,
+                thread_id=extract_thread_id(state, config=config),
+                hitl_event_callback=hitl_event_callback,
+            )
+        }
+
+    return external_execution_node
+
+
 # Build a thin Tool Gateway node around an injected gateway port.
 def build_tool_gateway_node(tool_gateway_service: ToolGatewayPort):
     # Delegate governed execution without embedding adapter logic in LangGraph.
@@ -148,6 +178,7 @@ __all__ = [
     "bootstrap_node",
     "build_actor_node",
     "build_governance_node",
+    "build_external_execution_node",
     "build_human_review_node",
     "build_planner_node",
     "build_replanner_node",

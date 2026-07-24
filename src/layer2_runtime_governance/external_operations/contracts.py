@@ -3,8 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from enum import Enum
-from typing import TypeAlias
+from typing import Protocol, TypeAlias
+
+from layer1_intake import ExecutionIntent
 
 
 class OperationBoundary(str, Enum):
@@ -58,6 +61,43 @@ class SQLStatementClass(str, Enum):
     UNKNOWN = "unknown"
 
 
+class ExternalExecutionStatus(str, Enum):
+    # Execution outcomes distinguish deterministic failure from unknown external effect.
+    EXECUTED = "executed"
+    REJECTED_BEFORE_EXECUTION = "rejected_before_execution"
+    FAILED = "failed"
+    INDETERMINATE = "indeterminate"
+
+
+class ExternalExecutionAuthorizationSource(str, Enum):
+    # Authorization records which digest-bound runtime authority enabled the request.
+    OPA = "opa"
+    HUMAN_REVIEW = "human_review"
+
+
+class ExternalExecutionErrorCode(str, Enum):
+    # Closed error codes keep receipts machine-readable without leaking connector detail.
+    NONE = "none"
+    MISSING_PROPOSAL = "missing_proposal"
+    INVALID_EXECUTION_INTENT = "invalid_execution_intent"
+    NOT_EXECUTION_CANDIDATE = "not_execution_candidate"
+    AUTHORIZATION_MISSING = "authorization_missing"
+    DIGEST_MISMATCH = "digest_mismatch"
+    CAPABILITY_UNKNOWN = "capability_unknown"
+    CAPABILITY_DISABLED = "capability_disabled"
+    CONNECTOR_UNSUPPORTED = "connector_unsupported"
+    READ_ONLY_VIOLATION = "read_only_violation"
+    IDEMPOTENCY_KEY_MISSING = "idempotency_key_missing"
+    DUPLICATE_EXECUTION = "duplicate_execution"
+    INPUT_SCHEMA_INVALID = "input_schema_invalid"
+    TOOL_NOT_ALLOWLISTED = "tool_not_allowlisted"
+    CONNECTOR_TIMEOUT = "connector_timeout"
+    CONNECTOR_FAILURE = "connector_failure"
+    CONNECTOR_RESPONSE_INVALID = "connector_response_invalid"
+    OUTCOME_INDETERMINATE = "outcome_indeterminate"
+    RETRY_LIMIT_EXCEEDED = "retry_limit_exceeded"
+
+
 @dataclass(frozen=True)
 class ExternalOperationTarget:
     # Target keeps the destination fact explicit and bounded for judge and HITL.
@@ -85,6 +125,26 @@ class CommunicationOperationPayload:
     subject: str | None
     body: str
     destination_class: DestinationClass
+    cc: tuple[str, ...] = ()
+    bcc: tuple[str, ...] = ()
+
+
+DatabaseParameterValue: TypeAlias = str | int | float | bool | None
+
+
+@dataclass(frozen=True)
+class DatabaseOperationParameter:
+    # Parameters remain separate from SQL so adapters never concatenate actor values.
+    name: str
+    value: DatabaseParameterValue
+
+
+@dataclass(frozen=True)
+class DatabaseStatementDraft:
+    # Actor providers may propose only a profile id, SQL text, and separate parameters.
+    database_profile_id: str
+    statement: str
+    parameters: tuple[DatabaseOperationParameter, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -97,6 +157,7 @@ class DatabaseOperationPayload:
     parse_valid: bool
     ambiguous: bool
     database_profile_id: str
+    parameters: tuple[DatabaseOperationParameter, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -174,13 +235,64 @@ class ExternalOperationPayloadEdit:
 
 
 @dataclass(frozen=True)
-class ExternalOperationExecutionResult:
-    # The execution seam is explicit even though production side effects remain deferred.
+class ExternalExecutionRequest:
+    # The request is created only after governance and never grants itself authority.
     operation_id: str
+    capability_id: str
+    proposal: ExternalOperationProposal
+    current_payload_digest: str
+    authorized_payload_digest: str
+    execution_intent: ExecutionIntent
+    idempotency_key: str
+    authorization_source: ExternalExecutionAuthorizationSource
+    reviewer_id: str | None = None
+    governance_decision_reference: str | None = None
+    attempt_scope: str = "initial"
+
+    # Reject request drift before an infrastructure adapter can observe it.
+    def __post_init__(self) -> None:
+        if self.operation_id != self.proposal.operation_id:
+            raise ValueError("External execution request operation_id does not match proposal.")
+        if self.capability_id != self.proposal.capability_id:
+            raise ValueError("External execution request capability_id does not match proposal.")
+        if self.current_payload_digest != self.proposal.payload_digest:
+            raise ValueError("External execution current digest does not match proposal.")
+
+
+@dataclass(frozen=True)
+class ExternalExecutionReceipt:
+    # Receipts are audit-safe and contain no full outbound payload or credentials.
+    operation_id: str
+    capability_id: str
     payload_digest: str
-    executed: bool
-    summary: str
+    status: ExternalExecutionStatus
+    idempotency_key: str
+    started_at: datetime
+    completed_at: datetime
     external_reference: str | None = None
+    summary: str = ""
+    error_code: ExternalExecutionErrorCode = ExternalExecutionErrorCode.NONE
+    retryable: bool = False
+    connector_kind: str | None = None
+    connector_id: str | None = None
+    server_id: str | None = None
+    tool_name: str | None = None
+    connector_metadata: tuple[GenericPayloadField, ...] = ()
+    attempt_number: int = 1
+
+    # Preserve the former boolean projection without collapsing richer outcomes.
+    @property
+    def executed(self) -> bool:
+        return self.status == ExternalExecutionStatus.EXECUTED
+
+
+class ExternalOperationExecutorPort(Protocol):
+    # Executors invoke only a pre-authorized typed request and never decide governance.
+    def execute(self, request: ExternalExecutionRequest) -> ExternalExecutionReceipt: ...
+
+
+# Preserve the former public name while callers migrate to the receipt contract.
+ExternalOperationExecutionResult = ExternalExecutionReceipt
 
 
 # Compute a deterministic digest over the typed normalized payload only.
@@ -223,9 +335,18 @@ def _jsonable_payload(payload: ExternalOperationPayload) -> dict[str, object]:
 __all__ = [
     "CommunicationOperationPayload",
     "DatabaseOperationPayload",
+    "DatabaseOperationParameter",
+    "DatabaseStatementDraft",
+    "DatabaseParameterValue",
     "DestinationClass",
+    "ExternalExecutionAuthorizationSource",
+    "ExternalExecutionErrorCode",
+    "ExternalExecutionReceipt",
+    "ExternalExecutionRequest",
+    "ExternalExecutionStatus",
     "ExternalOperationEffect",
     "ExternalOperationExecutionResult",
+    "ExternalOperationExecutorPort",
     "ExternalOperationFamily",
     "ExternalOperationPayload",
     "ExternalOperationPayloadEdit",

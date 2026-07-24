@@ -6,6 +6,7 @@ from typing import Any
 
 from langgraph.types import interrupt
 from json_serialization import to_jsonable as _to_jsonable
+from layer1_intake import ExecutionIntent
 
 from ..actor_contract import ActorResultType
 from ..behavioral import BehavioralAssessment
@@ -27,9 +28,13 @@ from ..domain.step_recovery import restore_actor_step_for_more_evidence
 from ..external_operations import (
     CommunicationOperationPayload,
     DatabaseOperationPayload,
+    DatabaseOperationParameter,
     DestinationClass,
     ExternalOperationEffect,
     ExternalOperationPayloadEdit,
+    ExternalExecutionAuthorizationSource,
+    ExternalExecutionRequest,
+    ExternalExecutionStatus,
     GenericExternalOperationPayload,
     GenericPayloadField,
     OperationBoundary,
@@ -37,6 +42,7 @@ from ..external_operations import (
     normalize_communication_operation,
     normalize_sql_operation,
     replace_external_operation_payload,
+    build_external_execution_request,
 )
 
 
@@ -266,16 +272,45 @@ def _apply_human_review_decision(
             decision=human_review_decision,
             pending_request=pending_request,
         )
+        if _is_indeterminate_reconciliation(state):
+            state.current_external_execution_request = None
+            state.current_state = RuntimeState.COMPLETED
+            return
+        if _is_governed_external_proposal(state) and (
+            state.execution_intent == ExecutionIntent.PROPOSAL_ONLY
+        ):
+            _set_external_communication_phase(
+                state,
+                phase=ExternalCommunicationPhase.APPROVED_DRAFT,
+                summary=(
+                    "Human review approved the draft as a terminal local artifact; "
+                    "no external execution was requested."
+                ),
+                review_ready=False,
+            )
+            state.approved_external_operation_digest = (
+                human_review_decision.approved_operation_digest
+            )
+            state.current_external_execution_request = None
+            state.current_state = RuntimeState.COMPLETED
+            return
+        if not _is_governed_external_proposal(state):
+            state.current_state = pending_request.resume_state
+            return
         _set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.APPROVED_FOR_EXECUTION,
-            summary="Human review approved the external communication draft for the next governed step.",
+            summary="Human review authorized the exact proposal digest for external execution.",
             review_ready=True,
         )
         state.approved_external_operation_digest = (
             human_review_decision.approved_operation_digest
         )
-        state.current_state = pending_request.resume_state
+        state.current_external_execution_request = _build_human_authorized_request(
+            state=state,
+            decision=human_review_decision,
+        )
+        state.current_state = RuntimeState.READY_EXTERNAL_EXECUTION
         return
 
     if human_review_decision.decision_type == HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY:
@@ -295,16 +330,38 @@ def _apply_human_review_decision(
             )
         if RuntimeFlag.READ_ONLY_EXECUTION not in state.runtime_flags:
             state.runtime_flags.append(RuntimeFlag.READ_ONLY_EXECUTION)
+        if _is_governed_external_proposal(state) and (
+            state.execution_intent == ExecutionIntent.PROPOSAL_ONLY
+        ):
+            _set_external_communication_phase(
+                state,
+                phase=ExternalCommunicationPhase.APPROVED_DRAFT,
+                summary="Human review approved a terminal draft under a read-only envelope.",
+                review_ready=False,
+            )
+            state.approved_external_operation_digest = (
+                human_review_decision.approved_operation_digest
+            )
+            state.current_external_execution_request = None
+            state.current_state = RuntimeState.COMPLETED
+            return
+        if not _is_governed_external_proposal(state):
+            state.current_state = pending_request.resume_state
+            return
         _set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.APPROVED_FOR_EXECUTION,
-            summary="Human review approved the external communication draft under a read-only runtime envelope.",
+            summary="Human review authorized the exact read-only proposal digest.",
             review_ready=True,
         )
         state.approved_external_operation_digest = (
             human_review_decision.approved_operation_digest
         )
-        state.current_state = pending_request.resume_state
+        state.current_external_execution_request = _build_human_authorized_request(
+            state=state,
+            decision=human_review_decision,
+        )
+        state.current_state = RuntimeState.READY_EXTERNAL_EXECUTION
         return
 
     if human_review_decision.decision_type == HumanReviewDecisionType.MODIFY_AND_CONTINUE:
@@ -317,6 +374,7 @@ def _apply_human_review_decision(
         else:
             raise ValueError("modify_and_continue requires a typed external operation edit.")
         state.approved_external_operation_digest = None
+        state.current_external_execution_request = None
         state.current_tool_request = None
         # Every modified digest returns directly to governance before any execution seam.
         state.current_state = RuntimeState.READY_GOVERNANCE
@@ -371,6 +429,44 @@ def _apply_human_review_decision(
         return
 
     raise ValueError(f"Unsupported human review decision: {human_review_decision.decision_type}")
+
+
+# Build a request whose authority is the reviewer decision bound to the pending digest.
+def _build_human_authorized_request(
+    *,
+    state: TaskState,
+    decision: HumanReviewDecision,
+) -> ExternalExecutionRequest:
+    proposal = state.external_operation_proposal
+    approved_digest = decision.approved_operation_digest
+    if proposal is None or approved_digest is None:
+        raise ValueError("Human authorization requires a current proposal and exact digest.")
+    return build_external_execution_request(
+        proposal=proposal,
+        authorized_payload_digest=approved_digest,
+        execution_intent=state.execution_intent,
+        authorization_source=ExternalExecutionAuthorizationSource.HUMAN_REVIEW,
+        reviewer_id=decision.reviewer_id,
+    )
+
+
+# Treat approval after an indeterminate receipt as reconciliation, never as retry authority.
+def _is_indeterminate_reconciliation(state: TaskState) -> bool:
+    return (
+        RuntimeFlag.EXTERNAL_EXECUTION_RECONCILIATION_REQUIRED in state.runtime_flags
+        and state.last_external_execution_receipt is not None
+        and state.last_external_execution_receipt.status
+        == ExternalExecutionStatus.INDETERMINATE
+    )
+
+
+# Identify the only proposal boundary that may enter the external execution seam.
+def _is_governed_external_proposal(state: TaskState) -> bool:
+    return bool(
+        state.external_operation_proposal is not None
+        and state.external_operation_proposal.boundary
+        == OperationBoundary.GOVERNED_EXTERNAL
+    )
 
 
 # Build a stable request id so replay and resume stay aligned across checkpoints.
@@ -535,6 +631,22 @@ def _optional_text(value: Any) -> str | None:
     return cleaned or None
 
 
+# Normalize bounded recipient lists used by typed communication edits.
+def _text_tuple(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("Communication cc/bcc fields must be arrays of strings.")
+    normalized = tuple(
+        item
+        for raw in value
+        if (item := _optional_text(raw)) is not None
+    )
+    if len(normalized) > 20:
+        raise ValueError("Communication cc/bcc fields exceed the recipient bound.")
+    return normalized
+
+
 # Parse a fully typed external draft from a review payload.
 def _coerce_external_communication_draft(payload: Any) -> ExternalCommunicationDraft:
     if isinstance(payload, ExternalCommunicationDraft):
@@ -563,6 +675,8 @@ def _coerce_external_communication_draft(payload: Any) -> ExternalCommunicationD
         recipient=_optional_text(payload.get("recipient")),
         subject=_optional_text(payload.get("subject")),
         body=body,
+        cc=_text_tuple(payload.get("cc")),
+        bcc=_text_tuple(payload.get("bcc")),
         metadata=metadata_dict,
     )
 
@@ -616,6 +730,8 @@ def _optional_external_operation_edit(
             destination_class=DestinationClass(
                 typed_payload.get("destination_class", DestinationClass.UNKNOWN.value)
             ),
+            cc=_text_tuple(typed_payload.get("cc")),
+            bcc=_text_tuple(typed_payload.get("bcc")),
         )
     elif payload_type == "database":
         operation_payload = DatabaseOperationPayload(
@@ -629,6 +745,14 @@ def _optional_external_operation_edit(
             ambiguous=bool(typed_payload.get("ambiguous", True)),
             database_profile_id=str(
                 typed_payload.get("database_profile_id") or "enterprise_db.read_only"
+            ),
+            parameters=tuple(
+                DatabaseOperationParameter(
+                    name=str(item.get("name") or "").strip(),
+                    value=item.get("value"),
+                )
+                for item in typed_payload.get("parameters", [])
+                if isinstance(item, dict) and str(item.get("name") or "").strip()
             ),
         )
     elif payload_type == "generic":
@@ -724,6 +848,8 @@ def _apply_external_operation_edit(
             capability_profile_version=(
                 proposal.capability_profile_version or "1"
             ),
+            parameters=operation_edit.payload.parameters,
+            execution_candidate=proposal.execution_candidate,
         )
         edited_proposal = _mark_human_review_normalization(edited_proposal)
     elif isinstance(operation_edit.payload, CommunicationOperationPayload):
@@ -736,6 +862,8 @@ def _apply_external_operation_edit(
                 recipient=operation_edit.payload.recipient,
                 subject=operation_edit.payload.subject,
                 body=operation_edit.payload.body,
+                cc=operation_edit.payload.cc,
+                bcc=operation_edit.payload.bcc,
             ),
             execution_candidate=proposal.execution_candidate,
             capability_profile_id=(

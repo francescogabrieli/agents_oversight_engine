@@ -7,6 +7,8 @@ export type ReviewInboxEntry = {
   allowed_decisions: string[];
   request_id: string | null;
   external_communication_phase: string | null;
+  execution_intent?: string | null;
+  external_execution_status?: string | null;
 };
 
 export type DashboardPlanStep = {
@@ -42,7 +44,26 @@ export type ExternalCommunicationDraft = {
   recipient?: string | null;
   subject?: string | null;
   body: string;
+  cc?: string[];
+  bcc?: string[];
   metadata: Record<string, unknown>;
+};
+
+export type ExternalExecutionPanel = {
+  execution_intent: "proposal_only" | "execute_after_governance";
+  capability_id?: string | null;
+  status?: "executed" | "rejected_before_execution" | "failed" | "indeterminate" | null;
+  payload_digest?: string | null;
+  connector_kind?: string | null;
+  connector_id?: string | null;
+  server_id?: string | null;
+  tool_name?: string | null;
+  external_reference?: string | null;
+  summary?: string | null;
+  error_code?: string | null;
+  retryable: boolean;
+  attempt_count: number;
+  receipt_count: number;
 };
 
 export type DashboardSnapshot = {
@@ -56,6 +77,7 @@ export type DashboardSnapshot = {
   oversight?: DashboardPanel | null;
   behavioral?: DashboardPanel | null;
   external_communication?: DashboardPanel | null;
+  external_execution: ExternalExecutionPanel;
   human_review?: {
     pending_request?: HumanReviewPendingRequest | null;
     allowed_decisions?: string[];

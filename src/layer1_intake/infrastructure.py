@@ -16,6 +16,7 @@ from llm_retry import llm_retry
 
 from .models import (
     DomainType,
+    ExecutionIntent,
     InvalidTaskSpecError,
     SensitivityLevel,
     TaskSpec,
@@ -115,6 +116,7 @@ Return a structured object with these fields:
 - domain_label
 - sensitivity
 - success_criteria
+- execution_intent
 
 Rules:
 - Be concise and literal.
@@ -128,6 +130,11 @@ Rules:
 - Use "summarization" only when the main task is compressing already available content.
 - Use "data_extraction" only when the main task is extracting fields or structured data.
 - Use "external_communication" when the task drafts or sends messages to external recipients.
+- Set execution_intent to "proposal_only" when the user asks to draft, prepare, preview,
+  or generate an operation without carrying it out.
+- Set execution_intent to "execute_after_governance" only when the user explicitly asks
+  to send, execute, publish, create, update, delete, or otherwise carry out an external
+  operation. This field records requested intent and does not grant authority.
 - If no category fits well, use domain_type = "other".
 - domain_label can be more specific and free-form.
 - Use one sensitivity from this exact list: {allowed_sensitivity}.
@@ -168,6 +175,7 @@ class TaskSpecExtractionPayload(BaseModel):
     domain_label: str = "other"
     sensitivity: SensitivityLevel = SensitivityLevel.MEDIUM
     success_criteria: list[str] = Field(default_factory=list)
+    execution_intent: ExecutionIntent = ExecutionIntent.PROPOSAL_ONLY
 
 
 class OpenAITaskSpecParser(TaskSpecParserPort):

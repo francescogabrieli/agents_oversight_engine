@@ -114,6 +114,22 @@ class RuntimeArtifactStore:
                         if task_state.external_communication is not None
                         else None
                     ),
+                    "execution_intent": task_state.execution_intent.value,
+                    "external_capability_id": (
+                        task_state.external_operation_proposal.capability_id
+                        if task_state.external_operation_proposal is not None
+                        else None
+                    ),
+                    "external_execution_status": (
+                        task_state.last_external_execution_receipt.status.value
+                        if task_state.last_external_execution_receipt is not None
+                        else None
+                    ),
+                    "external_execution_reference": (
+                        task_state.last_external_execution_receipt.external_reference
+                        if task_state.last_external_execution_receipt is not None
+                        else None
+                    ),
                     "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 },
                 indent=2,

@@ -11,6 +11,12 @@ from .judge import JudgePort
 from .planning import PlannerPort
 from .planning.replanning import ReplannerPort
 from .domain import TaskState
+from .external_operations import (
+    ExternalCapabilityRegistry,
+    ExternalOperationExecutorPort,
+    build_default_external_operation_executor,
+    load_external_capability_registry,
+)
 from .tool_contract import ToolGatewayPort
 from .execution import build_default_actor
 from .tools import (
@@ -31,6 +37,8 @@ class Layer2RuntimeDependencies:
     policy_engine: PolicyEnginePort | None = None
     judge: JudgePort | None = None
     behavioral_store: BehavioralStorePort | None = None
+    external_operation_executor: ExternalOperationExecutorPort | None = None
+    external_capability_registry: ExternalCapabilityRegistry | None = None
     checkpointer: Any | None = None
     hitl_event_callback: Callable[[TaskState], None] | None = None
 
@@ -46,6 +54,14 @@ def compose_layer2_runtime(
     tool_gateway = resolved.tool_gateway or build_default_tool_gateway(
         config=tool_gateway_config
     )
+    external_registry = (
+        resolved.external_capability_registry
+        or load_external_capability_registry()
+    )
+    external_executor = (
+        resolved.external_operation_executor
+        or build_default_external_operation_executor(registry=external_registry)
+    )
     return build_runtime_graph(
         checkpointer=resolved.checkpointer,
         planner_service=resolved.planner,
@@ -56,6 +72,8 @@ def compose_layer2_runtime(
         policy_engine_service=resolved.policy_engine,
         judge_service=resolved.judge,
         behavioral_store_service=resolved.behavioral_store,
+        external_operation_executor_service=external_executor,
+        external_capability_registry=external_registry,
         hitl_event_callback=resolved.hitl_event_callback,
     )
 

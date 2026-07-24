@@ -205,7 +205,8 @@ Current design:
 - `judge/` defines the generic governed-external semantic assessor; OPA owns invocation and directive mapping
 - `oversight/contracts.py` retains typed assessment/checkpoint contracts; `signal_services/` produces raw facts and OPA owns scoring, thresholds, judge requirements, and directives
 - `oversight/` preserves compatibility contracts; evidence and trajectory are active, while `operational_risk` exports shadow consequence facts and is not applicable outside governed external operations
-- `external_operations/` owns immutable typed proposals, runtime/registry boundary projection, SQL AST and communication/generic normalizers, versioned capability profiles, and a no-side-effect production execution seam
+- `external_operations/` owns immutable typed proposals, execution intent projection, SQL AST and communication/generic normalizers, a dedicated capability registry, durable idempotency records, the external executor port, and the capability-bound MCP adapter
+- `src/external_capability_mcp/` owns the productive typed MCP tools for SMTP email and profile-bound database statements; both are disabled by default and credentials remain infrastructure configuration
 - `execution/providers/bedrock_runtime.py` defines the Amazon Bedrock Converse adapter used by the Layer 2 actor with the approved Nova 2 Lite EU inference profile; `bedrock_client.py` is import-compatible
 - `runtime/governance_service.py` applies the OPA-first governance result and persists static, dynamic, behavioral, and judge records before routing
 - `infrastructure/runtime_artifacts.py` configures the local official LangGraph SQLite saver plus the per-thread runtime artifact store; `persistence.py` is import-compatible and `infrastructure/checkpointing.py` can select the official PostgreSQL saver for deployed environments
@@ -220,9 +221,10 @@ Current design:
 - `frontend/dashboard` contains the standalone React + TypeScript + Tailwind + daisyUI dashboard frontend that is built into static assets and served by `main_layer2_dashboard.py`
 - `configs/opa/layer2_governance/data.json` is the sole source for active evidence/trajectory thresholds, static organizational constraints, and revision/provider-loop limits consumed by OPA
 - `infrastructure/runtime_warnings.py` centralizes warning suppression needed before importing selected LangGraph/LangChain dependencies
-- `graph.py` contains the current LangGraph wiring for the planner/actor/governance/tool/replanner/human-review loop:
-  `START -> bootstrap_from_intake -> planner -> actor -> governance -> { tool_gateway | replanner | human_review | finalize_bootstrap }`
-  `human_review -> { planner | actor | tool_gateway | replanner | finalize_bootstrap }`
+- `graph.py` contains the current LangGraph wiring for the planner/actor/governance/tool/replanner/human-review/external-execution loop:
+  `START -> bootstrap_from_intake -> planner -> actor -> governance -> { tool_gateway | replanner | human_review | external_execution | finalize_bootstrap }`
+  `human_review -> { planner | actor | tool_gateway | replanner | governance | external_execution | finalize_bootstrap }`
+  `external_execution -> { external_execution | human_review | finalize_bootstrap }`
   `tool_gateway -> observe_tool_result -> actor`
   `replanner -> actor`
   `finalize_bootstrap -> END`

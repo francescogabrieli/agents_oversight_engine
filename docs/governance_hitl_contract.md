@@ -158,19 +158,37 @@ LangGraph `interrupt()` and `Command(resume=...)` remain the only pause/resume
 mechanism. Official LangGraph checkpoints are authoritative; trace, dashboard
 artifacts, and behavioral SQLite are read models.
 
-## Execution status and deferred backends
+## Execution intent and external execution
 
-This refactor provides typed normalization and an
-`ExternalOperationExecutorPort`. The production
-`DeferredExternalOperationExecutor` verifies the approval digest and always
-returns `executed=false`. It does not send email, connect to enterprise
-databases, execute SQL, mutate external systems, add credentials, or perform any
-side effect. Test scenarios use deterministic fake proposals only.
+`ExecutionIntent` is canonical in `TaskSpec` and projected into `TaskState`. Its
+values are `proposal_only` and `execute_after_governance`; old payloads and
+checkpoints recover as `proposal_only`. Intent records the requested outcome but
+never grants authority.
+
+For `proposal_only`, approval is terminal: the phase is `approved_draft`, no
+execution request is created, and the UI must not say `approved_for_execution`.
+For `execute_after_governance`, exact OPA continue or HITL approval creates
+`ExternalExecutionRequest` and enters `READY_EXTERNAL_EXECUTION`.
+
+The `external_execution` service checks proposal, execution candidate,
+authorization source, exact digest, registry entry, server/tool allowlist,
+read-only envelope, idempotency key, and prior receipt before calling
+`ExternalOperationExecutorPort`. It cannot change the payload or decide policy.
+
+Receipts distinguish `executed`, `rejected_before_execution`, `failed`, and
+`indeterminate`. Only deterministic retryable failure may receive one configured
+retry with a new stable attempt scope. `indeterminate` prohibits automatic retry
+and opens HITL reconciliation.
+
+`MCPExternalOperationExecutor` is selected whenever configuration enables a real
+capability. `DeferredExternalOperationExecutor` remains fail-closed only. MCP is
+a transport adapter, never policy or authorization.
 
 ## Observability
 
-`layer2_trace.v3` keeps its top-level shape. Additive actor/HITL fields expose
-the current proposal and digest; governance pillar results expose `active`,
+`layer2_trace.v3` has a closed `external_execution` section with intent, request,
+receipt history, digest, connector metadata, external reference, and attempt count.
+Actor/HITL fields expose the current proposal and digest; governance pillar results expose `active`,
 `shadow`, `not_applicable`, `unavailable`, and `decision_influence`. Legacy v1/v2
 normalization and checkpoint compatibility fields remain supported.
 

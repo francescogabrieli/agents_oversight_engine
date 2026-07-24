@@ -19,6 +19,7 @@ from .domain import (
 from .tool_contract import ObservedEvidence, ToolExecutionResult, ToolRequest
 from .tool_contract import EvidenceSupportLevel
 from .external_operations.contracts import (
+    DatabaseStatementDraft,
     ExternalOperationProposal,
     GovernanceActionFeedback,
 )
@@ -111,6 +112,8 @@ class ActorResult:
     step_validation: StepValidation | None = None
     # Providers may propose communication content; runtime still owns normalization and authority.
     external_communication_draft: ExternalCommunicationDraft | None = None
+    # Database proposals carry no DSN, credentials, or connector-selected tool name.
+    database_statement_draft: DatabaseStatementDraft | None = None
     # Runtime normalizers populate this field; provider-supplied boundary flags are not authoritative.
     external_operation_proposal: ExternalOperationProposal | None = None
 

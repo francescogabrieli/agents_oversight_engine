@@ -4,10 +4,15 @@ from .contracts import Layer2GraphInput, Layer2GraphOutput, Layer2GraphState
 from ..hitl import human_review
 from .actor_service import actor
 from .governance_service import governance
+from .external_execution_service import external_execution
 from .lifecycle_service import bootstrap_from_intake, finalize_bootstrap
 from .planning_service import planner
 from .replanning_service import replanner
-from .routing import route_after_governance, route_after_human_review
+from .routing import (
+    route_after_external_execution,
+    route_after_governance,
+    route_after_human_review,
+)
 from .tool_service import observe_tool_result, tool_gateway
 
 __all__ = [
@@ -17,6 +22,7 @@ __all__ = [
     "actor",
     "bootstrap_from_intake",
     "finalize_bootstrap",
+    "external_execution",
     "governance",
     "human_review",
     "observe_tool_result",
@@ -24,5 +30,6 @@ __all__ = [
     "replanner",
     "route_after_governance",
     "route_after_human_review",
+    "route_after_external_execution",
     "tool_gateway",
 ]

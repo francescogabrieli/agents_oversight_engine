@@ -2,6 +2,8 @@ from copy import deepcopy
 from dataclasses import replace
 from typing import Callable
 
+from layer1_intake import ExecutionIntent
+
 from ..behavioral import (
     BehavioralStorePort,
     persist_behavioral_runtime_snapshot,
@@ -29,7 +31,12 @@ from ..tools import ToolGatewayConfig
 from .actor_service import _set_external_communication_phase
 from .lifecycle_service import _append_step_record
 from ..domain.step_recovery import restore_actor_step_for_more_evidence
-from ..external_operations.contracts import GovernanceActionFeedback
+from ..external_operations import (
+    ExternalExecutionAuthorizationSource,
+    GovernanceActionFeedback,
+    OperationBoundary,
+    build_external_execution_request,
+)
 
 # Apply a validated policy outcome to canonical runtime state.
 def governance(
@@ -231,6 +238,12 @@ def _apply_governance_decision(
         state.current_tool_request = None
         return
 
+    if _route_authorized_external_operation(
+        state=state,
+        governance_decision=governance_decision,
+    ):
+        return
+
     if policy_input.actor_result_type == ActorResultType.PROPOSE_ACTION:
         state.current_state = RuntimeState.READY_TOOL_EXECUTION
         return
@@ -264,6 +277,68 @@ def _apply_governance_decision(
         return
 
     state.current_state = RuntimeState.ACTING
+
+
+# Route a governed proposal according to canonical intent without recomputing policy.
+def _route_authorized_external_operation(
+    *,
+    state: TaskState,
+    governance_decision: GovernanceDecision,
+) -> bool:
+    proposal = state.external_operation_proposal
+    if (
+        proposal is None
+        or state.current_tool_request is not None
+        or proposal.boundary != OperationBoundary.GOVERNED_EXTERNAL
+        or governance_decision.directive
+        not in {GovernanceDirective.CONTINUE, GovernanceDirective.CONTINUE_READ_ONLY}
+    ):
+        return False
+    if state.execution_intent == ExecutionIntent.PROPOSAL_ONLY:
+        state.current_external_execution_request = None
+        state.current_state = RuntimeState.COMPLETED
+        _set_external_communication_phase(
+            state,
+            phase=ExternalCommunicationPhase.APPROVED_DRAFT,
+            summary=(
+                "Governance accepted the proposal as a terminal draft; "
+                "the user did not request external execution."
+            ),
+            review_ready=False,
+        )
+        return True
+    if not proposal.execution_candidate:
+        state.current_state = RuntimeState.ABORTED
+        return True
+    evaluated_digest = governance_decision.evaluated_operation_digest
+    if evaluated_digest != proposal.payload_digest:
+        state.current_external_execution_request = None
+        state.current_state = RuntimeState.ABORTED
+        return True
+    state.approved_external_operation_digest = evaluated_digest
+    state.current_external_execution_request = build_external_execution_request(
+        proposal=proposal,
+        authorized_payload_digest=evaluated_digest,
+        execution_intent=state.execution_intent,
+        authorization_source=ExternalExecutionAuthorizationSource.OPA,
+        governance_decision_reference=_governance_decision_reference(
+            governance_decision
+        ),
+    )
+    state.current_state = RuntimeState.READY_EXTERNAL_EXECUTION
+    return True
+
+
+# Build a stable audit reference from the exact OPA record already stored in state.
+def _governance_decision_reference(
+    governance_decision: GovernanceDecision,
+) -> str:
+    return (
+        f"{governance_decision.policy_engine_name}:"
+        f"{governance_decision.policy_bundle_version}:"
+        f"{governance_decision.evaluated_plan_step_id or 'no-step'}:"
+        f"{governance_decision.evaluated_operation_digest or 'no-digest'}"
+    )
 
 
 # Invalidate one semantic payload and return audit-safe findings to the actor.
@@ -300,6 +375,7 @@ def _apply_action_revision(
     )
     state.approved_external_operation_digest = None
     state.external_operation_proposal = None
+    state.current_external_execution_request = None
     if state.actor_result is not None:
         state.actor_result = replace(
             state.actor_result,
@@ -334,7 +410,11 @@ def _infer_human_review_resume_state(
         return RuntimeState.ACTING
 
     if policy_input.actor_result_type == ActorResultType.PROPOSE_ACTION:
-        return RuntimeState.READY_TOOL_EXECUTION
+        return (
+            RuntimeState.READY_TOOL_EXECUTION
+            if state.current_tool_request is not None
+            else RuntimeState.ACTING
+        )
 
     if state.current_plan_step_index is None:
         return RuntimeState.COMPLETED if state.executed_steps else RuntimeState.PLANNING
@@ -347,5 +427,6 @@ def _infer_human_review_resume_state(
 __all__ = [
     "governance",
     "_apply_governance_decision",
-    "_infer_human_review_resume_state"
+    "_infer_human_review_resume_state",
+    "_route_authorized_external_operation",
 ]

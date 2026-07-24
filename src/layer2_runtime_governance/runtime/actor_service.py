@@ -36,8 +36,9 @@ def actor(state: TaskState, *, actor_service: ActorPort) -> TaskState:
 
     # A successful actor turn creates a new action candidate. The previous immutable
     # proposal remains in audit history but cannot govern or authorize the new result.
-    state.external_operation_proposal = None
+    state.external_operation_proposal = actor_result.external_operation_proposal
     state.approved_external_operation_digest = None
+    state.current_external_execution_request = None
     state.actor_result = actor_result
     state.actor_name = actor_service.actor_name
     state.actor_prompt_version = actor_service.prompt_version
@@ -326,6 +327,20 @@ def _merge_external_communication_draft(
         body=_build_external_communication_draft_body(
             state,
             current_output_text=output_text,
+        ),
+        cc=(
+            typed_draft.cc
+            if typed_draft is not None
+            else current_draft.cc
+            if current_draft is not None
+            else ()
+        ),
+        bcc=(
+            typed_draft.bcc
+            if typed_draft is not None
+            else current_draft.bcc
+            if current_draft is not None
+            else ()
         ),
         metadata=metadata,
     )

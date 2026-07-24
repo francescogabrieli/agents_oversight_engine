@@ -577,6 +577,25 @@ def _build_review_inbox_entry(
         external_communication = dashboard_snapshot.get("external_communication")
         if isinstance(external_communication, dict):
             external_communication_phase = external_communication.get("phase")
+    execution_intent = (
+        runtime_summary.get("execution_intent")
+        if isinstance(runtime_summary, dict)
+        else None
+    )
+    external_execution_status = (
+        runtime_summary.get("external_execution_status")
+        if isinstance(runtime_summary, dict)
+        else None
+    )
+    if isinstance(dashboard_snapshot, dict):
+        external_execution = dashboard_snapshot.get("external_execution")
+        if isinstance(external_execution, dict):
+            execution_intent = execution_intent or external_execution.get(
+                "execution_intent"
+            )
+            external_execution_status = (
+                external_execution_status or external_execution.get("status")
+            )
 
     return {
         "thread_id": thread_id,
@@ -605,6 +624,8 @@ def _build_review_inbox_entry(
             else None
         ),
         "external_communication_phase": external_communication_phase,
+        "execution_intent": execution_intent,
+        "external_execution_status": external_execution_status,
     }
 
 

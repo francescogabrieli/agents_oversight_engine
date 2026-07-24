@@ -35,7 +35,11 @@ class ExternalCommunicationPhase(str, Enum):
     DRAFT_IN_PROGRESS = "draft_in_progress"
     DRAFT_PROPOSAL = "draft_proposal"
     HUMAN_REVIEW_REQUIRED = "human_review_required"
+    APPROVED_DRAFT = "approved_draft"
     APPROVED_FOR_EXECUTION = "approved_for_execution"
+    EXECUTED = "executed"
+    EXECUTION_FAILED = "execution_failed"
+    INDETERMINATE = "indeterminate"
     BLOCKED = "blocked"
 
 
@@ -47,6 +51,8 @@ class ExternalCommunicationDraft:
     recipient: str | None = None
     subject: str | None = None
     body: str | None = None
+    cc: tuple[str, ...] = ()
+    bcc: tuple[str, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

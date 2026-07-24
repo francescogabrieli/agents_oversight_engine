@@ -37,6 +37,7 @@ export function ReviewThreadPage() {
   const taskGoal = valueToString(detail?.runtime_summary?.task_goal);
   const governance = snapshot?.governance as Record<string, unknown> | null | undefined;
   const oversight = snapshot?.oversight as Record<string, unknown> | null | undefined;
+  const externalExecution = snapshot?.external_execution;
 
   return (
     <div className="review-workspace">
@@ -100,6 +101,42 @@ export function ReviewThreadPage() {
             </section>
           )}
 
+          {externalExecution ? (
+            <section className="card">
+              <div className="card-header">
+                <h2 className="card-title">External operation</h2>
+                <span className={stateClass(externalExecution.status ?? snapshot.runtime_state)}>
+                  {externalExecution.status ??
+                    (externalExecution.execution_intent === "proposal_only"
+                      ? "draft only"
+                      : "not executed")}
+                </span>
+              </div>
+              <div className="card-body-sm">
+                <KeyValueGrid
+                  title={
+                    externalExecution.execution_intent === "proposal_only"
+                      ? "Approved artifact — no external action"
+                      : "Governed execution receipt"
+                  }
+                  values={[
+                    { label: "Intent", value: externalExecution.execution_intent },
+                    { label: "Capability", value: externalExecution.capability_id ?? null },
+                    { label: "Status", value: externalExecution.status ?? null },
+                    { label: "Digest", value: externalExecution.payload_digest ?? null },
+                    { label: "Connector", value: externalExecution.connector_id ?? null },
+                    {
+                      label: "External reference",
+                      value: externalExecution.external_reference ?? null,
+                    },
+                    { label: "Error", value: externalExecution.error_code ?? null },
+                    { label: "Summary", value: externalExecution.summary ?? null },
+                  ]}
+                />
+              </div>
+            </section>
+          ) : null}
+
           <details className="technical-details">
             <summary className="technical-details-summary">Technical details</summary>
             <div className="technical-details-body">
@@ -155,6 +192,12 @@ export function ReviewThreadPage() {
                 title="External communication"
                 values={Object.entries(
                   (snapshot.external_communication ?? {}) as Record<string, unknown>,
+                ).map(([label, value]) => ({ label, value: valueToString(value) }))}
+              />
+              <KeyValueGrid
+                title="External execution"
+                values={Object.entries(
+                  (snapshot.external_execution ?? {}) as Record<string, unknown>,
                 ).map(([label, value]) => ({ label, value: valueToString(value) }))}
               />
               <section className="card">

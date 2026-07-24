@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from layer1_intake import ExecutionIntent
+
 from ..actor_contract import ActorResult, CapabilityAccessMode
 from ..domain import TaskState
 from ..tools import ToolGatewayConfig, build_default_tool_gateway_config
@@ -88,9 +90,16 @@ def _proposal_from_review_ready_communication(
     return normalize_communication_operation(
         operation_id=_operation_id(task_state=task_state, suffix="communication"),
         plan_step_id=actor_result.plan_step_id,
-        capability_id=f"communication.{external.draft.channel}",
+        capability_id=(
+            "communication.email.send"
+            if external.draft.channel.strip().lower() == "email"
+            else f"communication.{external.draft.channel.strip().lower()}.send"
+        ),
         draft=external.draft,
-        execution_candidate=True,
+        execution_candidate=(
+            task_state.execution_intent
+            == ExecutionIntent.EXECUTE_AFTER_GOVERNANCE
+        ),
     )
 
 
@@ -185,7 +194,10 @@ def _proposal_from_legacy_external_action(
             if actor_result.capability_mode != CapabilityAccessMode.WRITE
             else ExternalOperationEffect.EXECUTE
         ),
-        execution_candidate=True,
+        execution_candidate=(
+            task_state.execution_intent
+            == ExecutionIntent.EXECUTE_AFTER_GOVERNANCE
+        ),
     )
 
 

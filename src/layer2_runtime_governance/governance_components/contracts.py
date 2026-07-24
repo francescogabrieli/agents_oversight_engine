@@ -148,6 +148,7 @@ class GovernanceDecisionTrace:
     # None is accepted only while decoding legacy checkpoints and normalized immediately.
     requires_human_review: bool = field(default=None)  # type: ignore[assignment]
     evaluated_plan_step_id: str | None = None
+    evaluated_operation_digest: str | None = None
     behavioral_recommended_directive: GovernanceDirective = GovernanceDirective.CONTINUE
     judge_recommended_directive: GovernanceDirective = GovernanceDirective.CONTINUE
     judge_invoked: bool = False
