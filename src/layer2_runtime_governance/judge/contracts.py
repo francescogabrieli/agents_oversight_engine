@@ -5,7 +5,13 @@ from enum import Enum
 from typing import Protocol
 
 from ..external_operations.contracts import ExternalOperationProposal
-from ..tool_contract import EvidenceSupportLevel
+from ..tool_contract import (
+    CitationAlignment,
+    DocumentType,
+    EvidenceContentState,
+    Extractability,
+    SourceAuthority,
+)
 
 
 class JudgeRecommendedDirective(str, Enum):
@@ -35,6 +41,12 @@ class JudgeSeverity(str, Enum):
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
+
+
+class JudgeOperationStage(str, Enum):
+    # Distinguish a reviewable communication draft from an operation ready to execute.
+    COMMUNICATION_DRAFT_REVIEW = "communication_draft_review"
+    EXECUTION_CANDIDATE = "execution_candidate"
 
 
 class JudgeFindingCategory(str, Enum):
@@ -70,12 +82,16 @@ class JudgePlanStepContext:
 
 @dataclass(frozen=True)
 class JudgeEvidenceContext:
-    # Judge evidence contains only audit-safe excerpts and support metadata.
+    # Judge evidence contains concrete, audit-safe provenance observations.
     evidence_id: str
     title: str
     locator: str
     excerpt: str
-    support_level: EvidenceSupportLevel
+    content_state: EvidenceContentState
+    source_authority: SourceAuthority
+    document_type: DocumentType
+    extractability: Extractability
+    citation_alignment: CitationAlignment
 
 
 @dataclass(frozen=True)
@@ -86,9 +102,11 @@ class JudgeContext:
     authorized_context: str
     current_plan_step: JudgePlanStepContext
     external_operation: ExternalOperationProposal
+    operation_stage: JudgeOperationStage
+    selected_evidence_refs: tuple[str, ...]
     observed_evidence: tuple[JudgeEvidenceContext, ...]
-    available_evidence_support_level: EvidenceSupportLevel
-    required_evidence_support_level: EvidenceSupportLevel
+    actor_self_confidence: float | None
+    residual_uncertainty: str | None
     destination_facts: tuple[str, ...]
     invocation_reason: str
 
@@ -156,6 +174,7 @@ __all__ = [
     "JudgeFinding",
     "JudgeFindingCategory",
     "JudgeModelMetadata",
+    "JudgeOperationStage",
     "JudgePlanStepContext",
     "JudgePort",
     "JudgeRecommendedDirective",

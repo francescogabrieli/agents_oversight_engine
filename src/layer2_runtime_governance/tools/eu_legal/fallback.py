@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import Callable
 
-from ...tool_contract import EvidenceSupportLevel, ToolExecutionResult, ToolRequest, ToolSource
+from ...tool_contract import DocumentType, EvidenceContentState, Extractability, SourceAuthority, ToolExecutionResult, ToolRequest, ToolSource
 from ..models import ToolDefinition
 from ..text import is_meaningful_extracted_text, truncate_text
 from ..extractors import extract_visible_text
 from .source import build_cellar_fallback_url, celex_identifier, is_bot_challenge
 
-FetchDocument = Callable[..., tuple[bytes, str, str] | str]
+FetchDocument = Callable[..., object]
 PdfExtractor = Callable[[bytes], str]
 
 
@@ -36,9 +36,11 @@ def try_fetch_specialized_legal_document(
         accept="application/pdf",
         accept_language="eng",
     )
-    if isinstance(fallback_result, str):
+    if not isinstance(fallback_result, tuple) or len(fallback_result) != 4:
         return None
-    body, charset, content_type = fallback_result
+    body, charset, content_type, truncated = fallback_result
+    if not isinstance(body, bytes) or truncated:
+        return None
     fallback_text = (
         pdf_extractor(body)
         if content_type == "application/pdf"
@@ -57,7 +59,10 @@ def try_fetch_specialized_legal_document(
                 title=f"Official EU legal text ({celex_identifier(tool_request.url)})",
                 locator=fallback_url,
                 snippet=truncate_text(content, 500),
-                support_level_hint=EvidenceSupportLevel.PRIMARY_LEGAL,
+                content_state=EvidenceContentState.EXTRACTED_FULL,
+                source_authority=SourceAuthority.OFFICIAL_PRIMARY,
+                document_type=DocumentType.LEGAL_TEXT,
+                extractability=Extractability.COMPLETE,
             ),
         ),
     )

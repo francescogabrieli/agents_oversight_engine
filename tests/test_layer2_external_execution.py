@@ -31,7 +31,6 @@ from tests.layer2_runtime_fixtures import (
     SensitivityLevel,
     StaticJudge,
     StepValidation,
-    StepValidationDecision,
     StructuredTask,
     StubPolicyEngine,
     TaskSpec,
@@ -39,7 +38,11 @@ from tests.layer2_runtime_fixtures import (
     build_runtime_serializer,
     _build_stub_opa_decision,
 )
-from layer1_intake import ExecutionIntent
+from layer1_intake import (
+    ExecutionIntent,
+    RequestedOperation,
+    RequestedOperationType,
+)
 from layer2_runtime_governance.domain import (
     ExternalCommunicationDraft,
     ExternalCommunicationPhase,
@@ -170,10 +173,10 @@ class ExternalEmailActor(ActorPort):
             external_operation_proposal=proposal,
             step_validation=StepValidation(
                 plan_step_id=step_id,
-                objective_satisfied=True,
-                evidence_sufficient=True,
-                confidence=0.99,
-                next_action=StepValidationDecision.COMPLETE_STEP,
+                actor_self_confidence=0.99,
+                evidence_refs=tuple(
+                    evidence.evidence_id for evidence in actor_task.observed_evidence
+                ),
                 rationale_summary="The typed proposal is complete.",
             ),
         )
@@ -214,6 +217,13 @@ def _intake(
                 sensitivity=SensitivityLevel.LOW,
                 success_criteria=["Return a typed receipt."],
                 execution_intent=intent,
+                requested_operations=[
+                    RequestedOperation(
+                        operation_type=RequestedOperationType.EXTERNAL_COMMUNICATION,
+                        channel="email",
+                        recipient="capture@example.test",
+                    )
+                ],
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.7,

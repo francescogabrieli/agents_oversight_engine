@@ -100,9 +100,6 @@ class ExternalOperationNormalizerTests(unittest.TestCase):
                 objective="Produce the requested complete email draft.",
                 rationale="The intake already contains the necessary facts.",
                 expected_outcome="A typed external email draft.",
-                step_kind=PlanStepKind.FINAL_SYNTHESIS,
-                evidence_requirement=EvidenceSupportLevel.LOCAL_ONLY,
-                claim_precision_ceiling=EvidenceSupportLevel.LOCAL_ONLY,
                 status=PlanStepStatus.IN_PROGRESS,
             )
         ]
@@ -120,9 +117,8 @@ class ExternalOperationNormalizerTests(unittest.TestCase):
                         "subject": "Service issue",
                         "body": "Please address the service issue.",
                         "completion_rationale": "The local drafting objective is complete.",
-                        "objective_satisfied": True,
-                        "evidence_sufficient": True,
-                        "confidence": 0.95,
+                        "actor_self_confidence": 0.95,
+                        "evidence_refs": [],
                         "residual_uncertainty": "",
                     }
                 ),
@@ -413,11 +409,8 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
             "allowed_by_policy",
             "read_only_allowed",
             "ask_clarification_required",
-            "evidence_support_below_step_need",
-            "precision_mismatch",
             "trajectory_degraded",
             "evidence_gap_and_trajectory_degraded",
-            "replan_limit_exceeded",
             "provider_failures_repeated",
             "repeated_recovery",
             "policy_version_mismatch",
@@ -432,7 +425,12 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
             "judge_unsafe",
             "judge_uncertain",
             "provider_runtime_action_missing",
-            "repeated_action_revision",
+            "invalid_or_missing_selected_evidence",
+            "two_no_progress_turns",
+            "low_confidence_no_progress",
+            "recovery_exhausted",
+            "external_low_actor_self_confidence",
+            "provider_protocol_recovery",
         }
         python_codes = {code.value for code in GovernanceReasonCode}
         schema = json.loads(
@@ -619,9 +617,11 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
 
     # Shadow risk failure remains observable without changing the active directive.
     def test_shadow_risk_failure_does_not_change_directive(self) -> None:
+        baseline_state = _state_with_proposal(_generic_proposal())
         baseline = governance(
-            _build_actor_ready_state_for_judge(),
+            baseline_state,
             policy_engine_service=StubPolicyEngine(),
+            judge_service=StaticJudge(_safe_judge_assessment()),
             thread_id="risk-shadow-baseline",
         )
 
@@ -629,9 +629,11 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
             "layer2_runtime_governance.signal_services.build_risk_signal",
             side_effect=RuntimeError("shadow risk unavailable"),
         ):
+            failed_state = _state_with_proposal(_generic_proposal())
             result = governance(
-                _build_actor_ready_state_for_judge(),
+                failed_state,
                 policy_engine_service=StubPolicyEngine(),
+                judge_service=StaticJudge(_safe_judge_assessment()),
                 thread_id="risk-shadow-failure",
             )
 
@@ -730,9 +732,6 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
                 objective="Draft the email.",
                 rationale="Required task step.",
                 expected_outcome="Draft produced.",
-                step_kind=PlanStepKind.FINAL_SYNTHESIS,
-                evidence_requirement=EvidenceSupportLevel.LOCAL_ONLY,
-                claim_precision_ceiling=EvidenceSupportLevel.LOCAL_ONLY,
                 status=PlanStepStatus.IN_PROGRESS,
             )
         ]

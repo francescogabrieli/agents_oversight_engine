@@ -45,12 +45,9 @@ class GovernanceReasonCode(str, Enum):
     NO_TOOL_REQUEST = "no_tool_request"
     EXTERNAL_CAPABILITY_REQUESTED = "external_capability_requested"
     EXTERNAL_COMMUNICATION_REVIEW_REQUIRED = "external_communication_review_required"
-    EVIDENCE_SUPPORT_BELOW_STEP_NEED = "evidence_support_below_step_need"
-    PRECISION_MISMATCH = "precision_mismatch"
     TRAJECTORY_DEGRADED = "trajectory_degraded"
     EVIDENCE_GAP_AND_TRAJECTORY_DEGRADED = "evidence_gap_and_trajectory_degraded"
     HIGH_OPERATIONAL_RISK_EXTERNAL = "high_operational_risk_external"
-    REPLAN_LIMIT_EXCEEDED = "replan_limit_exceeded"
     PROVIDER_FAILURES_REPEATED = "provider_failures_repeated"
     REPEATED_RECOVERY = "repeated_recovery"
     BEHAVIORAL_ANOMALY_NEEDS_CORROBORATION = "behavioral_anomaly_needs_corroboration"
@@ -71,8 +68,56 @@ class GovernanceReasonCode(str, Enum):
     JUDGE_UNSAFE = "judge_unsafe"
     JUDGE_UNCERTAIN = "judge_uncertain"
     PROVIDER_RUNTIME_ACTION_MISSING = "provider_runtime_action_missing"
-    PRECISION_MISMATCH_EXTERNAL_OR_SENSITIVE = "precision_mismatch_external_or_sensitive"
-    REPEATED_ACTION_REVISION = "repeated_action_revision"
+    INVALID_OR_MISSING_SELECTED_EVIDENCE = "invalid_or_missing_selected_evidence"
+    TWO_NO_PROGRESS_TURNS = "two_no_progress_turns"
+    LOW_CONFIDENCE_NO_PROGRESS = "low_confidence_no_progress"
+    RECOVERY_EXHAUSTED = "recovery_exhausted"
+    EXTERNAL_LOW_ACTOR_SELF_CONFIDENCE = "external_low_actor_self_confidence"
+    PROVIDER_PROTOCOL_RECOVERY = "provider_protocol_recovery"
+    ACTION_REVISION_LIMIT_REACHED = "action_revision_limit_reached"
+
+
+# Recover stable audit codes from checkpoints whose newly added enum member decoded as None.
+def governance_reason_code_values(
+    decision: "GovernanceDecisionTrace",
+) -> tuple[str, ...]:
+    values: list[str] = []
+    for code in decision.reason_codes:
+        if isinstance(code, GovernanceReasonCode):
+            values.append(code.value)
+        elif isinstance(code, str):
+            try:
+                values.append(GovernanceReasonCode(code).value)
+            except ValueError:
+                continue
+    if values:
+        return tuple(values)
+
+    trajectory = (decision.pillar_results or {}).get("trajectory", {})
+    if (
+        decision.directive == GovernanceDirective.WAIT_HUMAN_REVIEW
+        and isinstance(trajectory, dict)
+        and trajectory.get("action_revision_limit_reached") is True
+    ):
+        return (GovernanceReasonCode.ACTION_REVISION_LIMIT_REACHED.value,)
+
+    fallback_by_directive = {
+        GovernanceDirective.CONTINUE: GovernanceReasonCode.ALLOWED_BY_POLICY,
+        GovernanceDirective.CONTINUE_READ_ONLY: GovernanceReasonCode.READ_ONLY_ALLOWED,
+        GovernanceDirective.REQUEST_MORE_EVIDENCE: (
+            GovernanceReasonCode.INVALID_OR_MISSING_SELECTED_EVIDENCE
+        ),
+        GovernanceDirective.REVISE_ACTION: GovernanceReasonCode.JUDGE_NEEDS_REVISION,
+        GovernanceDirective.REPLAN: GovernanceReasonCode.REPLAN_ALLOWED,
+        GovernanceDirective.ASK_USER_CLARIFICATION: (
+            GovernanceReasonCode.ASK_CLARIFICATION_REQUIRED
+        ),
+        GovernanceDirective.WAIT_HUMAN_REVIEW: (
+            GovernanceReasonCode.HUMAN_REVIEW_REQUIRED
+        ),
+        GovernanceDirective.STOP: GovernanceReasonCode.DENIED_BY_POLICY,
+    }
+    return (fallback_by_directive[decision.directive].value,)
 
 # Define the stable typed vocabulary shared by runtime and policy adapters.
 @dataclass(frozen=True)

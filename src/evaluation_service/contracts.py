@@ -142,16 +142,16 @@ class NormalizedToolCall:
 @dataclass(frozen=True)
 class NormalizedObservedEvidence:
     source_kind: str | None
-    support_level: str
+    content_state: str
+    extractability: str
 
 
 @dataclass(frozen=True)
 class NormalizedPlanStep:
     step_id: str
-    evidence_requirement: str | None
-    claim_precision_ceiling: str | None
-    resolved_required_evidence_support_level: str | None
-    resolved_required_evidence_support_source: str | None
+    # Legacy requirement metadata is retained only inside evaluation normalization.
+    legacy_requirement_source: str | None = None
+    legacy_required_support: str | None = None
 
 
 @dataclass(frozen=True)

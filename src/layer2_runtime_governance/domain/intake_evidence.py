@@ -5,9 +5,13 @@ import re
 from layer1_intake import TaskSpec
 
 from ..tool_contract import (
+    CitationAlignment,
+    DocumentType,
+    EvidenceContentState,
     EvidenceSourceKind,
-    EvidenceSupportLevel,
+    Extractability,
     ObservedEvidence,
+    SourceAuthority,
 )
 
 
@@ -67,7 +71,11 @@ def _append_item(
             excerpt=normalized_excerpt[:1000],
             source_kind=EvidenceSourceKind.INTAKE_PROVIDED,
             source_tool=None,
-            support_level=EvidenceSupportLevel.LOCAL_ONLY,
+            content_state=EvidenceContentState.EXTRACTED_FULL,
+            source_authority=SourceAuthority.PRIMARY,
+            document_type=DocumentType.UNKNOWN,
+            extractability=Extractability.COMPLETE,
+            citation_alignment=CitationAlignment.EXACT,
         )
     )
 

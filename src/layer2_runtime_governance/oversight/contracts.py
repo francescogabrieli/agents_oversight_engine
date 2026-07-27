@@ -122,60 +122,14 @@ class DynamicPolicyAssessment:
 OversightAssessment = DynamicPolicyAssessment
 
 
-# Legacy configuration shapes remain importable only for old checkpoint deserialization.
-@dataclass(frozen=True)
-class EvidenceQualityWeights:
-    evidence_sufficient: float
-    objective_satisfied: float
-    actor_confidence: float
-    observed_evidence_present: float
-    source_locator_present: float
-    last_tool_success: float
-
-
-@dataclass(frozen=True)
-class RiskScores:
-    tool_risk: dict[str, float]
-    sensitivity_multiplier: dict[str, float]
-    external_impact_additive: float
-    write_capability_additive: float
-    requires_human_review_additive: float
-
-
-@dataclass(frozen=True)
-class TrajectoryPenalties:
-    max_actor_turns_per_step: int
-    max_replans: int
-    actor_turn_overage_penalty: float
-    completion_attempt_turn_overage_scale: float
-    failed_tool_result_penalty: float
-    needs_replan_penalty: float
-    low_confidence_uncertainty_penalty: float
-
-
-@dataclass(frozen=True)
-class OversightPolicyConfig:
-    min_actor_confidence: float
-    min_evidence_quality: float
-    max_operational_risk: float
-    min_trajectory_health: float
-    evidence_quality_weights: EvidenceQualityWeights
-    risk_scores: RiskScores
-    trajectory_penalties: TrajectoryPenalties
-
-
 __all__ = [
     "DynamicPolicyAssessment",
     "DynamicPolicyRecommendedDirective",
     "EvidenceQualityAssessment",
-    "EvidenceQualityWeights",
     "OperationalRiskAssessment",
     "OversightAssessment",
-    "OversightPolicyConfig",
     "OversightReasonCode",
     "OversightRecommendedDirective",
     "OversightSignalLevel",
-    "RiskScores",
     "TrajectoryHealthAssessment",
-    "TrajectoryPenalties",
 ]

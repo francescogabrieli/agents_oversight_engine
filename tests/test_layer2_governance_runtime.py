@@ -313,7 +313,9 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
                 locator=state.observed_evidence[0].locator,
                 excerpt=state.observed_evidence[0].excerpt,
                 source_tool=state.observed_evidence[0].source_tool,
-                support_level=EvidenceSupportLevel.SOURCE_DISCOVERY,
+                content_state=EvidenceContentState.METADATA_ONLY,
+                extractability=Extractability.UNAVAILABLE,
+                citation_alignment=CitationAlignment.PROVIDER_ATTRIBUTED,
             )
             state.actor_result = ActorResult(
                 plan_step_id="step_3",
@@ -323,10 +325,8 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
                 output_text="A detailed final output from limited support.",
                 step_validation=StepValidation(
                     plan_step_id="step_3",
-                    objective_satisfied=True,
-                    evidence_sufficient=False,
-                    confidence=0.44,
-                    next_action=StepValidationDecision.REQUEST_MORE_EVIDENCE,
+                    actor_self_confidence=0.44,
+                    evidence_refs=(),
                     rationale_summary="The output is still weakly supported.",
                 ),
             )
@@ -340,7 +340,6 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
                     "step_count": 2,
                     "actor_turn_count": 1,
                     "tool_call_count": 0,
-                    "max_evidence_support_level": EvidenceSupportLevel.SOURCE_DISCOVERY.value,
                     "tool_name": ToolName.MCP_LOCAL_TEST_ECHO.value,
                 },
             )
@@ -535,10 +534,8 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
             output_text="A precise output from limited evidence.",
             step_validation=StepValidation(
                 plan_step_id="step_1",
-                objective_satisfied=True,
-                evidence_sufficient=False,
-                confidence=0.40,
-                next_action=StepValidationDecision.REQUEST_MORE_EVIDENCE,
+                actor_self_confidence=0.40,
+                evidence_refs=(),
                 rationale_summary="Still not sufficiently grounded.",
             ),
         )
@@ -576,10 +573,8 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
             output_text="We are preparing an incident update based on the currently provided facts.",
             step_validation=StepValidation(
                 plan_step_id="step_1",
-                objective_satisfied=False,
-                evidence_sufficient=False,
-                confidence=0.42,
-                next_action=StepValidationDecision.REQUEST_MORE_EVIDENCE,
+                actor_self_confidence=0.42,
+                evidence_refs=(),
                 rationale_summary="More evidence is required before this draft can be finalized.",
                 residual_uncertainty="The runtime should continue locally instead of opening HITL.",
             ),
@@ -614,10 +609,8 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
             output_text="Possibly unsupported completion.",
             step_validation=StepValidation(
                 plan_step_id="step_1",
-                objective_satisfied=True,
-                evidence_sufficient=False,
-                confidence=0.42,
-                next_action=StepValidationDecision.REQUEST_MORE_EVIDENCE,
+                actor_self_confidence=0.42,
+                evidence_refs=(),
                 rationale_summary="Output is not strongly grounded.",
             ),
         )

@@ -3,10 +3,6 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from layer2_runtime_governance.domain.evidence_policy import (
-    available_evidence_support_level,
-    required_evidence_support_level,
-)
 from layer2_runtime_governance.domain import TaskState
 from layer2_runtime_governance.external_operations import ExternalOperationProposal
 from layer2_runtime_governance.judge import (
@@ -14,6 +10,7 @@ from layer2_runtime_governance.judge import (
     JudgeAssessmentStatus,
     JudgeContext,
     JudgeEvidenceContext,
+    JudgeOperationStage,
     JudgePlanStepContext,
     JudgeRecommendedDirective,
     JudgeSeverity,
@@ -38,6 +35,8 @@ def build_judge_context(
     )
     if step is None:
         raise ValueError("Cannot build JudgeContext without the evaluated actor plan step.")
+    validation = task_state.actor_result.step_validation if task_state.actor_result else None
+    selected_refs = set(validation.evidence_refs if validation else ())
     return JudgeContext(
         task_goal=task_state.task_spec.goal,
         task_constraints=tuple(task_state.task_spec.constraints),
@@ -49,23 +48,30 @@ def build_judge_context(
             expected_outcome=step.expected_outcome,
         ),
         external_operation=external_operation,
+        # A communication proposal is inspected before its required human approval.
+        operation_stage=(
+            JudgeOperationStage.COMMUNICATION_DRAFT_REVIEW
+            if external_operation.operation_family.value == "external_communication"
+            else JudgeOperationStage.EXECUTION_CANDIDATE
+        ),
         observed_evidence=tuple(
             JudgeEvidenceContext(
                 evidence_id=item.evidence_id,
                 title=item.title,
                 locator=item.locator,
                 excerpt=item.excerpt,
-                support_level=item.support_level,
+                content_state=item.content_state,
+                source_authority=item.source_authority,
+                document_type=item.document_type,
+                extractability=item.extractability,
+                citation_alignment=item.citation_alignment,
             )
             for item in task_state.observed_evidence
-            if item.plan_step_id == step.step_id or item.plan_step_id == "intake"
+            if item.evidence_id in selected_refs
         ),
-        available_evidence_support_level=available_evidence_support_level(
-            task_state=task_state
-        ),
-        required_evidence_support_level=required_evidence_support_level(
-            task_state=task_state
-        ),
+        selected_evidence_refs=tuple(validation.evidence_refs if validation else ()),
+        actor_self_confidence=(validation.actor_self_confidence if validation else None),
+        residual_uncertainty=(validation.residual_uncertainty if validation else None),
         destination_facts=(
             f"kind={external_operation.target.kind}",
             f"value={external_operation.target.value}",

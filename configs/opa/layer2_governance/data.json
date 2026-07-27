@@ -9,26 +9,10 @@
       "provider_failure_review_count": 3,
       "max_action_revisions_before_review": 3
     },
-    "evidence_weights": {
-      "evidence_sufficient": 0.3,
-      "objective_satisfied": 0.2,
-      "actor_confidence": 0.2,
-      "observed_evidence_present": 0.15,
-      "source_locator_present": 0.1,
-      "last_tool_success": 0.05
-    },
     "static_policy": {
       "prohibited_destinations": ["blocked@example.com"],
       "prohibited_destination_domains": ["blocked.example"]
     },
-    "trajectory_weights": {
-      "max_actor_turns_per_step": 5,
-      "max_replans": 2,
-      "actor_turn_overage_penalty": 0.1,
-      "completion_attempt_turn_overage_scale": 0.5,
-      "failed_tool_result_penalty": 0.2,
-      "needs_replan_penalty": 0.25,
-      "low_confidence_uncertainty_penalty": 0.2
-    }
+    "trajectory": { "no_progress_turns_before_replan": 2 }
   }
 }

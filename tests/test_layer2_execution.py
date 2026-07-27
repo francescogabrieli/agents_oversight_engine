@@ -11,13 +11,18 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from layer1_intake import DomainType
+from layer1_intake import (
+    DomainType,
+    RequestedOperation,
+    RequestedOperationType,
+    SensitivityLevel,
+    TaskSpec,
+)
 from layer2_runtime_governance.execution.action_schemas import (
     build_actor_runtime_tools,
     build_json_actor_output_shape,
     select_actor_runtime_tools_for_turn,
 )
-from layer2_runtime_governance.domain import PlanStepKind
 from layer2_runtime_governance.execution.errors import ActorExecutionError
 from layer2_runtime_governance.execution.response_parser import convert_json_payload_to_tool_call
 from layer2_runtime_governance.tools import load_tool_gateway_config
@@ -28,21 +33,42 @@ class ActorActionSchemaTests(unittest.TestCase):
     def test_external_synthesis_exposes_only_typed_completion_action(self) -> None:
         actions = select_actor_runtime_tools_for_turn(
             build_actor_runtime_tools(),
-            domain_type=DomainType.EXTERNAL_COMMUNICATION,
-            step_kind=PlanStepKind.FINAL_SYNTHESIS,
+            task_spec=TaskSpec(
+                goal="Prepare an email.",
+                context="Use deterministic facts.",
+                constraints=[],
+                domain_type=DomainType.RESEARCH,
+                domain_label="research",
+                sensitivity=SensitivityLevel.LOW,
+                success_criteria=["Prepare the draft."],
+                requested_operations=[
+                    RequestedOperation(
+                        operation_type=RequestedOperationType.EXTERNAL_COMMUNICATION,
+                        channel="email",
+                        recipient="ops@example.com",
+                    )
+                ],
+            ),
         )
         names = {str(action["name"]) for action in actions}
 
         self.assertIn("emit_external_communication_draft", names)
-        self.assertNotIn("emit_step_completed", names)
-        self.assertNotIn("emit_final_output", names)
+        self.assertIn("emit_step_completed", names)
+        self.assertIn("emit_final_output", names)
 
     # Evidence and non-communication steps must not emit a communication prematurely.
     def test_non_synthesis_turn_hides_external_draft_action(self) -> None:
         actions = select_actor_runtime_tools_for_turn(
             build_actor_runtime_tools(),
-            domain_type=DomainType.EXTERNAL_COMMUNICATION,
-            step_kind=PlanStepKind.SOURCE_DISCOVERY,
+            task_spec=TaskSpec(
+                goal="Collect evidence.",
+                context="Use deterministic facts.",
+                constraints=[],
+                domain_type=DomainType.EXTERNAL_COMMUNICATION,
+                domain_label="email",
+                sensitivity=SensitivityLevel.LOW,
+                success_criteria=["Collect evidence."],
+            ),
         )
         names = {str(action["name"]) for action in actions}
 

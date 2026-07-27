@@ -1,4 +1,4 @@
-from layer1_intake import DomainType
+from layer1_intake import RequestedOperationType
 
 from ..actor_contract import ActorPort, ActorResult, ActorResultType, build_actor_task
 from ..domain import (
@@ -7,7 +7,6 @@ from ..domain import (
     ExternalCommunicationPhase,
     PlanStepStatus,
     RuntimeState,
-    StepValidationDecision,
     TaskState,
 )
 
@@ -40,6 +39,14 @@ def actor(state: TaskState, *, actor_service: ActorPort) -> TaskState:
     state.approved_external_operation_digest = None
     state.current_external_execution_request = None
     state.actor_result = actor_result
+    if actor_result.provider_protocol_failure:
+        state.consecutive_provider_protocol_failures += 1
+    else:
+        state.consecutive_provider_protocol_failures = 0
+    if actor_result.tool_request is not None or actor_result.result_type in {ActorResultType.STEP_COMPLETED, ActorResultType.FINAL_OUTPUT}:
+        state.consecutive_no_progress_turns = 0
+    else:
+        state.consecutive_no_progress_turns += 1
     state.actor_name = actor_service.actor_name
     state.actor_prompt_version = actor_service.prompt_version
     state.current_tool_request = (
@@ -92,37 +99,12 @@ def _record_actor_execution(state: TaskState, *, actor_result: ActorResult) -> N
         current_step.status = PlanStepStatus.IN_PROGRESS
         return
 
-    if actor_result.step_validation is None:
-        raise ValueError("Completing a plan step requires step_validation.")
-
-    validation = actor_result.step_validation
-
-    if validation.next_action in {
-        StepValidationDecision.CONTINUE_ACTING,
-        StepValidationDecision.REQUEST_MORE_EVIDENCE,
-    }:
-        # A local output can be useful progress without satisfying the semantic objective.
+    if actor_result.result_type == ActorResultType.INTERMEDIATE_OUTPUT:
+        # Progress output deliberately leaves the semantic step open.
         current_step.status = PlanStepStatus.IN_PROGRESS
         return
 
-    if validation.next_action == StepValidationDecision.ASK_CLARIFICATION:
-        current_step.status = PlanStepStatus.BLOCKED
-        state.current_tool_request = None
-        state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
-        return
-
-    if validation.next_action == StepValidationDecision.NEEDS_REPLAN:
-        current_step.status = PlanStepStatus.BLOCKED
-        state.current_tool_request = None
-        state.current_state = RuntimeState.REPLANNING
-        return
-
-    if not (
-        validation.next_action == StepValidationDecision.COMPLETE_STEP
-        and validation.objective_satisfied
-        and validation.evidence_sufficient
-    ):
-        # Invalid or low-confidence completion attempts are treated as continued work.
+    if actor_result.result_type not in {ActorResultType.STEP_COMPLETED, ActorResultType.FINAL_OUTPUT}:
         current_step.status = PlanStepStatus.IN_PROGRESS
         return
 
@@ -142,7 +124,7 @@ def _record_actor_execution(state: TaskState, *, actor_result: ActorResult) -> N
     state.last_tool_result = None
 
     if actor_result.result_type == ActorResultType.FINAL_OUTPUT:
-        if state.task_spec.domain_type == DomainType.EXTERNAL_COMMUNICATION:
+        if _has_requested_external_communication(state):
             state.final_output_text = _build_external_communication_draft_body(state)
         else:
             state.final_output_text = actor_result.output_text
@@ -152,7 +134,7 @@ def _record_actor_execution(state: TaskState, *, actor_result: ActorResult) -> N
     _advance_to_next_plan_step(state)
     # Promote the last completed step output into the canonical final output slot.
     if state.current_plan_step_index is None and actor_result.output_text:
-        if state.task_spec.domain_type == DomainType.EXTERNAL_COMMUNICATION:
+        if _has_requested_external_communication(state):
             state.final_output_text = _build_external_communication_draft_body(state)
         else:
             state.final_output_text = actor_result.output_text
@@ -163,7 +145,7 @@ def _update_external_communication_after_actor_result(
     *,
     actor_result: ActorResult,
 ) -> None:
-    if state.task_spec.domain_type != DomainType.EXTERNAL_COMMUNICATION:
+    if not _has_requested_external_communication(state):
         return
 
     if actor_result.result_type in {
@@ -241,21 +223,13 @@ def _external_communication_output_is_review_ready(
     actor_result: ActorResult,
 ) -> bool:
     current_step = state.current_plan_step
-    validation = actor_result.step_validation
-    if current_step is None or validation is None:
+    if current_step is None:
         return False
 
     if actor_result.result_type not in {
-        ActorResultType.INTERMEDIATE_OUTPUT,
+        ActorResultType.STEP_COMPLETED,
         ActorResultType.FINAL_OUTPUT,
     }:
-        return False
-
-    if not (
-        validation.next_action == StepValidationDecision.COMPLETE_STEP
-        and validation.objective_satisfied
-        and validation.evidence_sufficient
-    ):
         return False
 
     if state.current_plan_step_index == len(state.plan_steps) - 1:
@@ -407,31 +381,11 @@ def _map_actor_result_to_runtime_state(
     if actor_result.result_type == ActorResultType.PROPOSE_ACTION:
         return RuntimeState.READY_TOOL_EXECUTION
 
-    if actor_result.step_validation is not None:
-        # StepValidation is the runtime-facing self-check that decides whether to continue,
-        # escalate, replan, or advance after local actor output.
-        if actor_result.step_validation.next_action in {
-            StepValidationDecision.CONTINUE_ACTING,
-            StepValidationDecision.REQUEST_MORE_EVIDENCE,
-        }:
-            return RuntimeState.ACTING
-        if actor_result.step_validation.next_action == StepValidationDecision.ASK_CLARIFICATION:
-            return RuntimeState.WAITING_HUMAN_REVIEW
-        if actor_result.step_validation.next_action == StepValidationDecision.NEEDS_REPLAN:
-            return RuntimeState.REPLANNING
-        if actor_result.step_validation.next_action == StepValidationDecision.COMPLETE_STEP:
-            if (
-                actor_result.step_validation.objective_satisfied
-                and actor_result.step_validation.evidence_sufficient
-                and state.current_plan_step_index is None
-            ):
-                return RuntimeState.COMPLETED
-            if (
-                actor_result.step_validation.objective_satisfied
-                and actor_result.step_validation.evidence_sufficient
-            ):
-                return RuntimeState.READY_NEXT_STEP
-            return RuntimeState.ACTING
+    if actor_result.result_type == ActorResultType.INTERMEDIATE_OUTPUT:
+        return RuntimeState.ACTING
+
+    if actor_result.result_type == ActorResultType.STEP_COMPLETED:
+        return RuntimeState.COMPLETED if state.current_plan_step_index is None else RuntimeState.READY_NEXT_STEP
 
     if actor_result.result_type == ActorResultType.FINAL_OUTPUT:
         return RuntimeState.COMPLETED
@@ -440,6 +394,14 @@ def _map_actor_result_to_runtime_state(
         return RuntimeState.COMPLETED
 
     return RuntimeState.READY_NEXT_STEP
+
+
+# Determine requested effect from explicit Layer 1 operation intent, never domain classification.
+def _has_requested_external_communication(state: TaskState) -> bool:
+    return any(
+        operation.operation_type == RequestedOperationType.EXTERNAL_COMMUNICATION
+        for operation in state.task_spec.requested_operations
+    )
 
 __all__ = [
     "actor",

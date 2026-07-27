@@ -27,10 +27,11 @@ def evaluate_normalized_trace(
         _iter_human_review_decision_types(normalized.human_review)
     )
     evidence_support_counts = _count_values(
-        evidence.support_level for evidence in normalized.observed_evidence
+        evidence.content_state for evidence in normalized.observed_evidence
     )
-    typed_mismatches, heuristic_mismatches = _count_requirement_mismatches(
-        normalized=normalized
+    typed_mismatches, heuristic_mismatches = _legacy_requirement_mismatch_counts(
+        plan_steps=normalized.plan_steps,
+        observed_evidence=normalized.observed_evidence,
     )
 
     tool_call_count = len(normalized.tool_calls)
@@ -104,83 +105,36 @@ def failed_run(*, source_path: Path, status: str, error: str) -> Layer2Evaluatio
     )
 
 
-# Count evidence requirement mismatches separately for typed metadata and heuristic fallback.
-def _count_requirement_mismatches(*, normalized: NormalizedTracePayload) -> tuple[int, int]:
-    plan_step = _resolve_evaluated_plan_step(normalized=normalized)
-    if plan_step is None:
-        return 0, 0
-
-    available_level = _max_observed_evidence_support_level(normalized.observed_evidence)
-    required_level, source = _resolve_required_support_level(plan_step=plan_step)
-    if _evidence_support_level_rank(available_level) >= _evidence_support_level_rank(required_level):
-        return 0, 0
-    if source in {
-        "plan_step_evidence_requirement",
-        "plan_step_claim_precision_ceiling",
-        "plan_step_kind",
-        "step_validation",
-    }:
-        return 1, 0
-    return 0, 1
-
-
-# Resolve the plan step used for the evaluation mismatch check.
-def _resolve_evaluated_plan_step(
-    *, normalized: NormalizedTracePayload
-) -> NormalizedPlanStep | None:
-    if not normalized.plan_steps:
-        return None
-    if normalized.current_plan_step_id is not None:
-        for step in normalized.plan_steps:
-            if step.step_id == normalized.current_plan_step_id:
-                return step
-    return normalized.plan_steps[-1]
-
-
-# Resolve the effective requirement and its provenance from normalized trace data.
-def _resolve_required_support_level(*, plan_step: NormalizedPlanStep) -> tuple[str, str]:
-    if plan_step.resolved_required_evidence_support_level:
-        return plan_step.resolved_required_evidence_support_level, (
-            plan_step.resolved_required_evidence_support_source or "heuristic_step"
-        )
-    if plan_step.evidence_requirement:
-        return plan_step.evidence_requirement, "plan_step_evidence_requirement"
-    if plan_step.claim_precision_ceiling:
-        return plan_step.claim_precision_ceiling, "plan_step_claim_precision_ceiling"
-    return "local_only", "heuristic_step"
-
-
-# Return the strongest observed evidence level from the normalized trace.
-def _max_observed_evidence_support_level(
-    observed_evidence: tuple[NormalizedObservedEvidence, ...],
-) -> str:
-    strongest = "local_only"
-    for evidence in observed_evidence:
-        if _evidence_support_level_rank(evidence.support_level) > _evidence_support_level_rank(
-            strongest
-        ):
-            strongest = evidence.support_level
-    return strongest
-
-
-# Order evidence support levels from weakest to strongest for evaluation comparisons.
-def _evidence_support_level_rank(level: str) -> int:
-    ordering = {
-        "local_only": 0,
-        "source_discovery": 1,
-        "high_level_summary": 2,
-        "detailed_extracted": 3,
-        "primary_legal": 4,
-    }
-    return ordering.get(level, 0)
-
-
 # Count string values while skipping missing entries.
 def _count_values(values: Iterable[str]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for value in values:
         counts[value] = counts.get(value, 0) + 1
     return counts
+
+
+# Preserve historical typed-vs-heuristic mismatch metrics without exposing rank
+# semantics to the canonical runtime or evaluation input contract.
+def _legacy_requirement_mismatch_counts(*, plan_steps, observed_evidence) -> tuple[int, int]:
+    if not observed_evidence:
+        return 0, 0
+    has_weak_content = any(
+        evidence.content_state in {"metadata_only", "provider_cited_summary"}
+        for evidence in observed_evidence
+    )
+    typed = sum(
+        1
+        for step in plan_steps
+        if step.legacy_requirement_source == "plan_step_evidence_requirement"
+        and has_weak_content
+    )
+    heuristic = sum(
+        1
+        for step in plan_steps
+        if step.legacy_requirement_source == "heuristic_step"
+        and has_weak_content
+    )
+    return typed, heuristic
 
 
 # Extract human-review decision types from the normalized trace payload.

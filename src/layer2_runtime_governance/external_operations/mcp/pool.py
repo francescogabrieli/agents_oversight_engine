@@ -12,6 +12,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import CallToolResult
 
+from ...infrastructure.environment import get_env_value
 from ..registry import ExternalCapabilityRegistry, MCPTransportKind
 
 
@@ -181,10 +182,11 @@ class MCPConnectionPool:
                 "Configured MCP transport is unsupported.",
                 outcome_may_be_indeterminate=False,
             )
+        # Resolve allowlisted connector settings from the process or repository .env.
         environment = {
             key: value
             for key in server.environment_keys
-            if (value := os.getenv(key)) is not None
+            if (value := get_env_value(key)) is not None
         }
         parameters = StdioServerParameters(
             command=server.command,

@@ -342,6 +342,9 @@ class MCPExternalExecutorIntegrationTests(unittest.TestCase):
         environment = {
             "LAYER2_SMTP_HOST": "127.0.0.1",
             "LAYER2_SMTP_PORT": str(capture.server_address[1]),
+            # Override any developer SMTP credentials loaded from the root .env.
+            "LAYER2_SMTP_USERNAME": "",
+            "LAYER2_SMTP_PASSWORD": "",
             "LAYER2_SMTP_SENDER": "sender@example.test",
             "LAYER2_SMTP_USE_TLS": "false",
             "LAYER2_SMTP_USE_SSL": "false",
@@ -460,9 +463,7 @@ class MCPExternalExecutorIntegrationTests(unittest.TestCase):
         from layer2_runtime_governance.domain import (
             ActorResult,
             ActorResultType,
-            EvidenceSupportLevel,
             PlanStep,
-            PlanStepKind,
             PlanStepStatus,
             PlannerDecision,
             RuntimeState,
@@ -484,9 +485,6 @@ class MCPExternalExecutorIntegrationTests(unittest.TestCase):
                             objective="Query admin user.",
                             rationale="Check admin user existence.",
                             expected_outcome="User data.",
-                            step_kind=PlanStepKind.FINAL_SYNTHESIS,
-                            evidence_requirement=EvidenceSupportLevel.LOCAL_ONLY,
-                            claim_precision_ceiling=EvidenceSupportLevel.LOCAL_ONLY,
                             status=PlanStepStatus.PENDING,
                         )
                     ],
@@ -495,7 +493,7 @@ class MCPExternalExecutorIntegrationTests(unittest.TestCase):
                     prompt_version=self.prompt_version,
                 )
 
-        from layer2_runtime_governance.domain import StepValidation, StepValidationDecision
+        from layer2_runtime_governance.domain import StepValidation
 
         class _SingleTurnDbActor(ActorPort):
             actor_name = "db_actor"
@@ -511,16 +509,16 @@ class MCPExternalExecutorIntegrationTests(unittest.TestCase):
                 )
                 return ActorResult(
                     plan_step_id=actor_task.current_plan_step.step_id,
-                    result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+                    result_type=ActorResultType.STEP_COMPLETED,
                     summary="Query admin user via SQL",
                     external_operation_proposal=proposal,
                     external_impact=True,
                     step_validation=StepValidation(
                         plan_step_id=actor_task.current_plan_step.step_id,
-                        objective_satisfied=True,
-                        evidence_sufficient=True,
-                        confidence=0.95,
-                        next_action=StepValidationDecision.COMPLETE_STEP,
+                        actor_self_confidence=0.95,
+                        evidence_refs=tuple(
+                            item.evidence_id for item in actor_task.observed_evidence
+                        ),
                         rationale_summary="Query executed.",
                     ),
                 )

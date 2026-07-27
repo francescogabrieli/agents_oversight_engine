@@ -110,9 +110,9 @@ class Layer2EvaluationTests(unittest.TestCase):
         self.assertEqual(
             report.aggregate.evidence_support_distribution,
             {
-                "detailed_extracted": 1,
-                "high_level_summary": 2,
-                "primary_legal": 1,
+                "extracted_full": 1,
+                "provider_cited_summary": 2,
+                "metadata_only": 1,
             },
         )
         self.assertEqual(report.aggregate.tool_call_total, 4)
@@ -212,8 +212,8 @@ def _completed_trace_payload() -> dict[str, object]:
             "decision_history": [],
         },
         observed_evidence=[
-            {"support_level": "high_level_summary"},
-            {"support_level": "detailed_extracted"},
+            {"content_state": "provider_cited_summary", "extractability": "complete"},
+            {"content_state": "extracted_full", "extractability": "complete"},
         ],
         tool_calls=[
             {"tool_name": "web_search", "success": True, "summary": "search ok", "error_message": None},
@@ -271,7 +271,7 @@ def _review_trace_payload() -> dict[str, object]:
             ],
         },
         observed_evidence=[
-            {"support_level": "high_level_summary"},
+            {"content_state": "provider_cited_summary", "extractability": "complete"},
         ],
         tool_calls=[
             {"tool_name": "web_search", "success": True, "summary": "search ok", "error_message": None},
@@ -299,7 +299,7 @@ def _aborted_trace_payload() -> dict[str, object]:
             "decision_history": [],
         },
         observed_evidence=[
-            {"support_level": "primary_legal"},
+            {"content_state": "metadata_only", "extractability": "unavailable"},
         ],
         tool_calls=[
             {
@@ -391,7 +391,7 @@ def _typed_requirement_mismatch_payload() -> dict[str, object]:
             "last_decision": None,
             "decision_history": [],
         },
-        observed_evidence=[{"support_level": "local_only"}],
+        observed_evidence=[{"content_state": "metadata_only", "extractability": "unavailable"}],
         tool_calls=[],
         oversight_assessments=[],
     )
@@ -425,7 +425,7 @@ def _heuristic_requirement_mismatch_payload() -> dict[str, object]:
             "last_decision": None,
             "decision_history": [],
         },
-        observed_evidence=[{"support_level": "local_only"}],
+        observed_evidence=[{"content_state": "metadata_only", "extractability": "unavailable"}],
         tool_calls=[],
         oversight_assessments=[],
     )

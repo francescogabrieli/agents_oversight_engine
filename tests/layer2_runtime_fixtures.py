@@ -31,6 +31,8 @@ from layer1_intake import (
     IntakeMetadata,
     IntakeResult,
     ParseStatus,
+    RequestedOperation,
+    RequestedOperationType,
     SensitivityLevel,
     StructuredTask,
     TaskSpec,
@@ -63,7 +65,6 @@ from layer2_runtime_governance import (
     JudgeSeverity,
     JudgeVerdict,
     PlanStep,
-    PlanStepKind,
     PlanStepStatus,
     PlannerDecision,
     PolicyDecision,
@@ -77,10 +78,8 @@ from layer2_runtime_governance import (
     ScratchpadEntryType,
     StepRecord,
     StepValidation,
-    StepValidationDecision,
     TaskState,
     HumanReviewExternalEdit,
-    EvidenceSupportLevel,
     ToolExecutionResult,
     ToolGatewayPort,
     ToolName,
@@ -137,6 +136,13 @@ from layer2_runtime_governance.runtime.governance_service import (
 from layer2_runtime_governance.runtime.planning_service import planner
 from layer2_runtime_governance.runtime.tool_service import observe_tool_result
 from layer2_runtime_governance.tool_contract import ObservedEvidence
+from layer2_runtime_governance.tool_contract import (
+    CitationAlignment,
+    DocumentType,
+    EvidenceContentState,
+    Extractability,
+    SourceAuthority,
+)
 import layer2_runtime_governance.execution.providers.bedrock_runtime as bedrock_client_module
 
 
@@ -174,18 +180,12 @@ class StubPlanner:
                     objective="Collect the minimum official evidence needed for the task.",
                     rationale="Research tasks should begin from documentary grounding.",
                     expected_outcome="A compact evidence base relevant to the goal.",
-                    step_kind=PlanStepKind.SOURCE_DISCOVERY,
-                    evidence_requirement=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
-                    claim_precision_ceiling=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
                 ),
                 PlanStep(
                     step_id="step_2",
                     objective="Synthesize the grounded result.",
                     rationale="The runtime should synthesize only after evidence collection.",
                     expected_outcome="A concise grounded output.",
-                    step_kind=PlanStepKind.FINAL_SYNTHESIS,
-                    evidence_requirement=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
-                    claim_precision_ceiling=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
                 ),
             ],
             rationale="The stub planner selected a short evidence-first trajectory.",
@@ -229,7 +229,7 @@ class StubActor(ActorPort):
         if actor_task.current_plan_step.step_id == "step_1":
             return ActorResult(
                 plan_step_id=actor_task.current_plan_step.step_id,
-                result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+                result_type=ActorResultType.STEP_COMPLETED,
                 summary="The first step is complete and produced grounded evidence.",
                 capability_mode=CapabilityAccessMode.NONE,
                 output_text="Collected grounded evidence from official sources.",
@@ -242,17 +242,15 @@ class StubActor(ActorPort):
                 ),
                 step_validation=StepValidation(
                     plan_step_id=actor_task.current_plan_step.step_id,
-                    objective_satisfied=True,
-                    evidence_sufficient=True,
-                    confidence=0.86,
-                    next_action=StepValidationDecision.COMPLETE_STEP,
+                    actor_self_confidence=0.86,
+                    evidence_refs=tuple(item.evidence_id for item in actor_task.observed_evidence),
                     rationale_summary="Official evidence was collected for the step objective.",
                 ),
             )
 
         return ActorResult(
             plan_step_id=actor_task.current_plan_step.step_id,
-            result_type=ActorResultType.FINAL_OUTPUT,
+            result_type=ActorResultType.STEP_COMPLETED,
             summary="The task can now be completed from the grounded evidence.",
             capability_mode=CapabilityAccessMode.NONE,
             external_impact=False,
@@ -266,10 +264,8 @@ class StubActor(ActorPort):
             ),
             step_validation=StepValidation(
                 plan_step_id=actor_task.current_plan_step.step_id,
-                objective_satisfied=True,
-                evidence_sufficient=True,
-                confidence=0.84,
-                next_action=StepValidationDecision.COMPLETE_STEP,
+                actor_self_confidence=0.84,
+                evidence_refs=tuple(item.evidence_id for item in actor_task.observed_evidence),
                 rationale_summary="The synthesis uses the collected official evidence.",
             ),
         )
@@ -307,16 +303,13 @@ class RepeatFetchActor(ActorPort):
         if actor_task.last_tool_result is not None and not actor_task.last_tool_result.success:
             return ActorResult(
                 plan_step_id=actor_task.current_plan_step.step_id,
-                result_type=ActorResultType.FINAL_OUTPUT,
+                result_type=ActorResultType.STEP_COMPLETED,
                 summary="Duplicate request protection was observed.",
                 capability_mode=CapabilityAccessMode.NONE,
                 output_text="The duplicate fetch was blocked before external re-execution.",
                 step_validation=StepValidation(
                     plan_step_id=actor_task.current_plan_step.step_id,
-                    objective_satisfied=True,
-                    evidence_sufficient=True,
-                    confidence=0.9,
-                    next_action=StepValidationDecision.COMPLETE_STEP,
+                    actor_self_confidence=0.9,
                     rationale_summary="The duplicate-request guard was verified.",
                 ),
             )
@@ -375,9 +368,6 @@ class LocalProgressPlanner:
                     objective="Complete a local result in two bounded passes.",
                     rationale="The fixture tests step validation rather than research.",
                     expected_outcome="A locally validated final result.",
-                    step_kind=PlanStepKind.LOCAL_TRANSFORMATION,
-                    evidence_requirement=EvidenceSupportLevel.LOCAL_ONLY,
-                    claim_precision_ceiling=EvidenceSupportLevel.LOCAL_ONLY,
                 )
             ],
             rationale="Single-step local plan.",
@@ -694,15 +684,20 @@ def _build_stub_opa_decision(
         resolved_summary = "Missing provider runtime action requires replanning."
     elif (
         actor["result_type"] in {
-            ActorResultType.INTERMEDIATE_OUTPUT.value,
+            ActorResultType.STEP_COMPLETED.value,
             ActorResultType.FINAL_OUTPUT.value,
         }
-        and pillars["evidence"]["raw_facts"].get("support_rank_available", 0)
-        < pillars["evidence"]["raw_facts"].get("support_rank_required", 0)
+        and (
+            pillars["evidence"]["raw_facts"].get("selected_evidence_refs_valid") is False
+            or (
+                operation.get("execution_candidate") is True
+                and pillars["evidence"]["raw_facts"].get("selected_evidence_ref_count", 0) == 0
+            )
+        )
     ):
         resolved_directive = "request_more_evidence"
-        resolved_reason_code = "evidence_support_below_step_need"
-        resolved_summary = "The step requires stronger evidence support."
+        resolved_reason_code = "invalid_or_missing_selected_evidence"
+        resolved_summary = "The completion references invalid or missing concrete evidence."
     elif base_facts["tool"]["name"] is not None and policy["read_only_mode"]:
         resolved_directive = "continue_read_only"
         resolved_policy_decision = "allow_read_only"
@@ -775,10 +770,7 @@ class ProgressThenCompleteActor(ActorPort):
                 ),
                 step_validation=StepValidation(
                     plan_step_id=actor_task.current_plan_step.step_id,
-                    objective_satisfied=False,
-                    evidence_sufficient=False,
-                    confidence=0.45,
-                    next_action=StepValidationDecision.CONTINUE_ACTING,
+                    actor_self_confidence=0.45,
                     rationale_summary="The current partial output is not enough to complete the step.",
                     residual_uncertainty="The step still needs a completion pass.",
                 ),
@@ -786,7 +778,7 @@ class ProgressThenCompleteActor(ActorPort):
 
         return ActorResult(
             plan_step_id=actor_task.current_plan_step.step_id,
-            result_type=ActorResultType.FINAL_OUTPUT,
+            result_type=ActorResultType.STEP_COMPLETED,
             summary="The single-step task is now complete.",
             capability_mode=CapabilityAccessMode.NONE,
             output_text="Completed after a second local actor pass.",
@@ -798,10 +790,7 @@ class ProgressThenCompleteActor(ActorPort):
             ),
             step_validation=StepValidation(
                 plan_step_id=actor_task.current_plan_step.step_id,
-                objective_satisfied=True,
-                evidence_sufficient=True,
-                confidence=0.82,
-                next_action=StepValidationDecision.COMPLETE_STEP,
+                actor_self_confidence=0.82,
                 rationale_summary="The step objective is satisfied after the second pass.",
             ),
         )
@@ -878,7 +867,7 @@ class ReplanRequestActor(ActorPort):
 
         return ActorResult(
             plan_step_id=actor_task.current_plan_step.step_id,
-            result_type=ActorResultType.FINAL_OUTPUT,
+            result_type=ActorResultType.STEP_COMPLETED,
             summary="The replanned task is now complete.",
             capability_mode=CapabilityAccessMode.NONE,
             output_text="Completed from the replanned recovery step.",
@@ -890,10 +879,7 @@ class ReplanRequestActor(ActorPort):
             ),
             step_validation=StepValidation(
                 plan_step_id=actor_task.current_plan_step.step_id,
-                objective_satisfied=True,
-                evidence_sufficient=True,
-                confidence=0.8,
-                next_action=StepValidationDecision.COMPLETE_STEP,
+                actor_self_confidence=0.8,
                 rationale_summary="The replanned step satisfies the task within the test scope.",
             ),
         )
@@ -1009,9 +995,8 @@ class _FakeOpenRouterClient:
                 "summary": "OpenRouter actor produced a final answer.",
                 "output_text": "OpenRouter actor completed the step.",
                 "completion_rationale": "The current step objective is satisfied locally.",
-                "objective_satisfied": True,
-                "evidence_sufficient": True,
-                "confidence": 0.82,
+                "actor_self_confidence": 0.82,
+                "evidence_refs": [],
             },
         }
 
@@ -1035,9 +1020,8 @@ class _FakeOpenRouterCompletionWithoutRationaleClient:
             "tool_name": "emit_final_output",
             "arguments": {
                 "output_text": "Grounded concise final answer.",
-                "objective_satisfied": True,
-                "evidence_sufficient": True,
-                "confidence": 0.79,
+                "actor_self_confidence": 0.79,
+                "evidence_refs": [],
             },
         }
 
@@ -1054,9 +1038,8 @@ class _FakeOpenRouterUnsupportedPrecisionCompletionClient:
                     "within the deadlines laid down in the regulation."
                 ),
                 "completion_rationale": "The current step appears complete from the available sources.",
-                "objective_satisfied": True,
-                "evidence_sufficient": True,
-                "confidence": 0.86,
+                "actor_self_confidence": 0.86,
+                "evidence_refs": [],
             },
         }
 
@@ -1083,9 +1066,8 @@ class _FakeOpenRouterIntakeSupportedExternalDraftClient:
                 "completion_rationale": (
                     "The draft restates the task-provided incident facts and requested checks."
                 ),
-                "objective_satisfied": True,
-                "evidence_sufficient": True,
-                "confidence": 0.88,
+                "actor_self_confidence": 0.88,
+                "evidence_refs": [],
             },
         }
 
@@ -1106,9 +1088,8 @@ class _FakeOpenRouterSourceShortlistCompletionClient:
                     "The current step only requires identifying official source pages from the "
                     "observed source-discovery evidence."
                 ),
-                "objective_satisfied": True,
-                "evidence_sufficient": True,
-                "confidence": 0.79,
+                "actor_self_confidence": 0.79,
+                "evidence_refs": [],
             },
         }
 
@@ -1128,9 +1109,8 @@ class _FakeOpenRouterSummaryWithRegulationYearClient:
                 "completion_rationale": (
                     "The current step is satisfied using the official sources already observed."
                 ),
-                "objective_satisfied": True,
-                "evidence_sufficient": True,
-                "confidence": 0.83,
+                "actor_self_confidence": 0.83,
+                "evidence_refs": [],
             },
         }
 
@@ -1151,9 +1131,8 @@ class _FakeOpenRouterSummaryWithGenericTimelineClient:
                 "completion_rationale": (
                     "The current step is satisfied using the official timeline sources already observed."
                 ),
-                "objective_satisfied": True,
-                "evidence_sufficient": True,
-                "confidence": 0.84,
+                "actor_self_confidence": 0.84,
+                "evidence_refs": [],
             },
         }
 
@@ -1178,9 +1157,8 @@ class _FakeOpenRouterConservativeSummaryAfterExtractabilityLimitClient:
                     "The replacement step asks for a conservative purpose/scope-level summary "
                     "and does not require extracted clause text or obligations-by-number claims."
                 ),
-                "objective_satisfied": True,
-                "evidence_sufficient": True,
-                "confidence": 0.82,
+                "actor_self_confidence": 0.82,
+                "evidence_refs": [],
             },
         }
 
@@ -1205,9 +1183,8 @@ class _FakeOpenRouterRecoveredHighLevelStepOneCompletionClient:
                 "The fetched official page supplies high-level evidence for the source and "
                 "summary step."
             ),
-            "objective_satisfied": True,
-            "evidence_sufficient": True,
-            "confidence": 0.91,
+                "actor_self_confidence": 0.91,
+                "evidence_refs": [],
         }
 
 
@@ -1229,9 +1206,8 @@ class _FakeOpenRouterProceduralImplementationSummaryClient:
                 "completion_rationale": (
                     "The current step uses the official DMA legislation page and Commission portal."
                 ),
-                "objective_satisfied": True,
-                "evidence_sufficient": True,
-                "confidence": 0.88,
+                "actor_self_confidence": 0.88,
+                "evidence_refs": [],
             },
         }
 
@@ -1250,9 +1226,8 @@ class _FakeOpenRouterCompletionWithInternalRefsClient:
                 "completion_rationale": (
                     "The summary should not expose internal runtime markers 【step_1:tool:2:source:1】."
                 ),
-                "objective_satisfied": True,
-                "evidence_sufficient": True,
-                "confidence": 0.86,
+                "actor_self_confidence": 0.86,
+                "evidence_refs": [],
             },
         }
 
@@ -1379,6 +1354,13 @@ def _build_external_communication_intake_result() -> IntakeResult:
                 context="Do not send anything automatically.",
                 constraints=["Keep the draft local until review."],
                 domain_type=DomainType.EXTERNAL_COMMUNICATION,
+                requested_operations=[
+                    RequestedOperation(
+                        operation_type=RequestedOperationType.EXTERNAL_COMMUNICATION,
+                        channel="email",
+                        recipient="operations@example.com",
+                    )
+                ],
                 domain_label="external_communication_test",
                 sensitivity=SensitivityLevel.HIGH,
                 success_criteria=["Pause before any outward-facing execution."],
@@ -1423,6 +1405,13 @@ def _build_external_incident_intake_result() -> IntakeResult:
                     "Request a status report back to the incident lead within 60 minutes",
                 ],
                 domain_type=DomainType.EXTERNAL_COMMUNICATION,
+                requested_operations=[
+                    RequestedOperation(
+                        operation_type=RequestedOperationType.EXTERNAL_COMMUNICATION,
+                        channel="email",
+                        recipient="operations@example.com",
+                    )
+                ],
                 domain_label="incident_operations_status_request",
                 sensitivity=SensitivityLevel.CRITICAL,
                 success_criteria=[
@@ -1456,9 +1445,6 @@ def _build_external_incident_draft_task_state() -> TaskState:
             objective="Draft the Known Facts and Action Requested sections from provided context.",
             rationale="The draft must stay within the local incident facts supplied by intake.",
             expected_outcome="A cautious incident email draft using only task-provided facts.",
-            step_kind=PlanStepKind.DETAILED_EXTRACTION,
-            evidence_requirement=EvidenceSupportLevel.LOCAL_ONLY,
-            claim_precision_ceiling=EvidenceSupportLevel.LOCAL_ONLY,
             status=PlanStepStatus.IN_PROGRESS,
         )
     ]
@@ -1583,7 +1569,10 @@ def _build_source_shortlist_task_state() -> TaskState:
                 "- EUR-Lex DMA summary page: https://eur-lex.europa.eu/EN/legal-content/summary/digital-markets-act.html"
             ),
             source_tool=ToolName.WEB_SEARCH,
-            support_level=EvidenceSupportLevel.SOURCE_DISCOVERY,
+            content_state=EvidenceContentState.METADATA_ONLY,
+            source_authority=SourceAuthority.OFFICIAL_PRIMARY,
+            extractability=Extractability.UNAVAILABLE,
+            citation_alignment=CitationAlignment.PROVIDER_ATTRIBUTED,
         )
     )
     state.scratchpad.append(
@@ -1623,7 +1612,10 @@ def _build_summary_task_state_with_year_in_citation() -> TaskState:
                 "fair markets in the digital sector and the Procedural Implementing Regulation."
             ),
             source_tool=ToolName.FETCH_URL_TEXT,
-            support_level=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
+            content_state=EvidenceContentState.EXTRACTED_FULL,
+            source_authority=SourceAuthority.OFFICIAL_PRIMARY,
+            extractability=Extractability.COMPLETE,
+            citation_alignment=CitationAlignment.EXACT,
         )
     )
     state.scratchpad.append(
@@ -1669,6 +1661,10 @@ def _build_summary_task_state_with_generic_timeline() -> TaskState:
                 title="AI Act official EU announcement",
                 locator="https://example.eu/ai-act-entry-into-force",
                 snippet="The AI Act entered into force on 1 August 2024.",
+                content_state=EvidenceContentState.EXTRACTED_FULL,
+                source_authority=SourceAuthority.OFFICIAL_PRIMARY,
+                extractability=Extractability.COMPLETE,
+                citation_alignment=CitationAlignment.EXACT,
             ),
         ),
     )
@@ -1710,7 +1706,10 @@ def _build_conservative_replan_summary_task_state() -> TaskState:
                 "fairer and more contestable and concerns gatekeepers."
             ),
             source_tool=ToolName.FETCH_URL_TEXT,
-            support_level=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
+            content_state=EvidenceContentState.EXTRACTED_FULL,
+            source_authority=SourceAuthority.OFFICIAL_PRIMARY,
+            extractability=Extractability.COMPLETE,
+            citation_alignment=CitationAlignment.EXACT,
         )
     )
     state.scratchpad.append(
@@ -1813,10 +1812,8 @@ def _build_actor_ready_state_for_judge() -> TaskState:
         output_text="A local grounded update.",
         step_validation=StepValidation(
             plan_step_id="step_1",
-            objective_satisfied=True,
-            evidence_sufficient=True,
-            confidence=0.72,
-            next_action=StepValidationDecision.COMPLETE_STEP,
+            actor_self_confidence=0.72,
+            evidence_refs=("evidence-1",),
             rationale_summary="The local output looks adequate.",
         ),
     )
@@ -1828,7 +1825,9 @@ def _build_actor_ready_state_for_judge() -> TaskState:
             locator="https://example.org/source",
             excerpt="Source metadata only.",
             source_tool=ToolName.WEB_SEARCH,
-            support_level=EvidenceSupportLevel.SOURCE_DISCOVERY,
+            content_state=EvidenceContentState.METADATA_ONLY,
+            extractability=Extractability.UNAVAILABLE,
+            citation_alignment=CitationAlignment.PROVIDER_ATTRIBUTED,
         )
     ]
     return state
@@ -1873,10 +1872,7 @@ def _build_behavioral_candidate_state() -> TaskState:
     state.step_validations = [
         StepValidation(
             plan_step_id="step_1",
-            objective_satisfied=True,
-            evidence_sufficient=True,
-            confidence=0.82,
-            next_action=StepValidationDecision.COMPLETE_STEP,
+            actor_self_confidence=0.82,
             rationale_summary="The evidence step is done.",
         )
     ]
@@ -1888,10 +1884,7 @@ def _build_behavioral_candidate_state() -> TaskState:
         output_text="A concise grounded answer.",
         step_validation=StepValidation(
             plan_step_id="step_3",
-            objective_satisfied=True,
-            evidence_sufficient=True,
-            confidence=0.78,
-            next_action=StepValidationDecision.COMPLETE_STEP,
+            actor_self_confidence=0.78,
             rationale_summary="The synthesis looks complete.",
         ),
     )
@@ -1924,7 +1917,9 @@ def _build_behavioral_candidate_state() -> TaskState:
             locator="https://example.org/official",
             excerpt="Grounded result.",
             source_tool=ToolName.WEB_SEARCH,
-            support_level=EvidenceSupportLevel.DETAILED_EXTRACTED,
+            content_state=EvidenceContentState.EXTRACTED_FULL,
+            extractability=Extractability.COMPLETE,
+            citation_alignment=CitationAlignment.EXACT,
         )
     ]
     return state
@@ -2059,6 +2054,13 @@ def _build_external_communication_intake_result_for_governance() -> IntakeResult
                 context="Keep everything local and reviewable.",
                 constraints=["Do not send anything automatically."],
                 domain_type=DomainType.EXTERNAL_COMMUNICATION,
+                requested_operations=[
+                    RequestedOperation(
+                        operation_type=RequestedOperationType.EXTERNAL_COMMUNICATION,
+                        channel="email",
+                        recipient="incident-lead@example.com",
+                    )
+                ],
                 domain_label="external_comm_governance_test",
                 sensitivity=SensitivityLevel.HIGH,
                 success_criteria=["Pause before any external execution."],
@@ -2100,9 +2102,8 @@ def _seed_behavioral_history(
                 INSERT OR REPLACE INTO runs (
                     thread_id, final_state, domain_type, sensitivity, policy_profile_name,
                     budget_max_steps, budget_max_tool_calls, actor_turn_count, tool_call_count,
-                    replan_count, review_count, abort_count, has_external_communication,
-                    max_evidence_support_level
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    replan_count, review_count, abort_count, has_external_communication
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     thread_id,
@@ -2118,17 +2119,13 @@ def _seed_behavioral_history(
                     int(profile_overrides.get("review_count", 0)),
                     int(profile_overrides.get("abort_count", 0)),
                     int(profile_overrides.get("has_external_communication", 0)),
-                    profile_overrides.get(
-                        "max_evidence_support_level",
-                        EvidenceSupportLevel.DETAILED_EXTRACTED.value,
-                    ),
                 ),
             )
             connection.execute(
                 """
                 INSERT OR REPLACE INTO tool_calls (
-                    thread_id, call_index, plan_step_id, tool_name, success, support_level
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    thread_id, call_index, plan_step_id, tool_name, success
+                ) VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     thread_id,
@@ -2136,10 +2133,6 @@ def _seed_behavioral_history(
                     "step_1",
                     profile_overrides.get("tool_name", ToolName.WEB_SEARCH.value),
                     1,
-                    profile_overrides.get(
-                        "max_evidence_support_level",
-                        EvidenceSupportLevel.DETAILED_EXTRACTED.value,
-                    ),
                 ),
             )
             connection.execute(
@@ -2166,15 +2159,14 @@ def _seed_behavioral_history(
             connection.execute(
                 """
                 INSERT OR REPLACE INTO steps (
-                    thread_id, step_id, status, actor_result_type, validation_next_action, turn_count
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    thread_id, step_id, status, actor_result_type, turn_count
+                ) VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     thread_id,
                     "step_1",
                     PlanStepStatus.COMPLETED.value,
                     ActorResultType.INTERMEDIATE_OUTPUT.value,
-                    StepValidationDecision.COMPLETE_STEP.value,
                     int(profile_overrides.get("actor_turn_count", 3)),
                 ),
             )
@@ -2187,10 +2179,6 @@ def _seed_behavioral_history(
                 "review_count": str(profile_overrides.get("review_count", 0)),
                 "abort_count": str(profile_overrides.get("abort_count", 0)),
                 "has_external_communication": str(profile_overrides.get("has_external_communication", 0)),
-                "max_evidence_support_level": profile_overrides.get(
-                    "max_evidence_support_level",
-                    EvidenceSupportLevel.DETAILED_EXTRACTED.value,
-                ),
                 "governance_distribution": json.dumps(
                     {
                         (
@@ -2202,7 +2190,7 @@ def _seed_behavioral_history(
                     sort_keys=True,
                 ),
                 "validation_distribution": json.dumps(
-                    {StepValidationDecision.COMPLETE_STEP.value: 1},
+                    {ActorResultType.STEP_COMPLETED.value: 1},
                     sort_keys=True,
                 ),
                 "historical_similarity_score": "",

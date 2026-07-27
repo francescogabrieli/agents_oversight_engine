@@ -64,7 +64,6 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
                     "step_id": step.step_id,
                     "objective": step.objective,
                     "status": step.status.value,
-                    "step_kind": step.step_kind.value if step.step_kind is not None else None,
                 }
                 for index, step in enumerate(actor_task.plan_steps)
                 if index != actor_task.current_plan_step_index
@@ -87,7 +86,11 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
                 "locator": item.locator,
                 "excerpt": item.excerpt,
                 "source_tool": item.source_tool.value if item.source_tool is not None else None,
-                "support_level": item.support_level.value,
+                "content_state": item.content_state.value,
+                "source_authority": item.source_authority.value,
+                "document_type": item.document_type.value,
+                "extractability": item.extractability.value,
+                "citation_alignment": item.citation_alignment.value,
             }
             for item in evidence
         ],
@@ -104,10 +107,8 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
         "current_step_validation": (
             {
                 "plan_step_id": current_validation.plan_step_id,
-                "objective_satisfied": current_validation.objective_satisfied,
-                "evidence_sufficient": current_validation.evidence_sufficient,
-                "confidence": current_validation.confidence,
-                "next_action": current_validation.next_action.value,
+                "actor_self_confidence": current_validation.actor_self_confidence,
+                "evidence_refs": list(current_validation.evidence_refs),
                 "rationale_summary": current_validation.rationale_summary,
                 "residual_uncertainty": current_validation.residual_uncertainty,
             }
@@ -125,11 +126,7 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
                 )
             ),
         ),
-        "execution_hints": {
-            "required_evidence_support_level": actor_task.required_evidence_support_level.value,
-            "max_supported_claim_precision": actor_task.max_supported_claim_precision.value,
-            "step_kind": actor_task.step_kind.value if actor_task.step_kind is not None else None,
-        },
+        "requested_operations": [operation.model_dump(mode="json") for operation in actor_task.task_spec.requested_operations],
     }
 
 
@@ -141,15 +138,6 @@ def _full_step(*, actor_task: ActorTask) -> dict[str, Any]:
         "objective": step.objective,
         "rationale": step.rationale,
         "expected_outcome": step.expected_outcome,
-        "step_kind": step.step_kind.value if step.step_kind is not None else None,
-        "evidence_requirement": (
-            step.evidence_requirement.value if step.evidence_requirement is not None else None
-        ),
-        "claim_precision_ceiling": (
-            step.claim_precision_ceiling.value
-            if step.claim_precision_ceiling is not None
-            else None
-        ),
         "status": step.status.value,
     }
 

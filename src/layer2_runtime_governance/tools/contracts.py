@@ -2,9 +2,14 @@
 
 # Keep domain contracts stable while the legacy import path is still supported.
 from ..tool_contract import (
+    CitationAlignment,
+    DocumentType,
+    EvidenceContentState,
     EvidenceSourceKind,
-    EvidenceSupportLevel,
+    Extractability,
     ObservedEvidence,
+    SourceAuthority,
+    ToolErrorCode,
     ToolExecutionResult,
     ToolGatewayPort,
     ToolName,
@@ -14,7 +19,12 @@ from ..tool_contract import (
 
 __all__ = [
     "EvidenceSourceKind",
-    "EvidenceSupportLevel",
+    "EvidenceContentState",
+    "CitationAlignment",
+    "DocumentType",
+    "Extractability",
+    "SourceAuthority",
+    "ToolErrorCode",
     "ObservedEvidence",
     "ToolExecutionResult",
     "ToolGatewayPort",

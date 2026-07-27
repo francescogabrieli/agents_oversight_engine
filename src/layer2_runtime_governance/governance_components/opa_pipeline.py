@@ -98,31 +98,34 @@ def evaluate_opa_first_governance(
     behavioral_assessment: BehavioralAssessment | None = None
     judge_assessment: JudgeAssessment | None = None
 
-    try:
-        pillars["evidence"] = build_evidence_signal(
-            task_state=task_state,
-            thresholds_version=thresholds_version,
-        )
-    except Exception as exc:
-        pillar_errors["evidence"] = str(exc)
-        pillars["evidence"] = _unavailable_pillar("evidence", thresholds_version)
+    if pillar_requirements.get("require_evidence", False):
+        try:
+            pillars["evidence"] = build_evidence_signal(task_state=task_state, thresholds_version=thresholds_version)
+        except Exception as exc:
+            pillar_errors["evidence"] = str(exc)
+            pillars["evidence"] = _unavailable_pillar("evidence", thresholds_version)
+    else:
+        pillars["evidence"] = _unavailable_pillar("evidence", thresholds_version, mode="inactive", decision_influence=False)
 
-    try:
-        pillars["risk"] = build_risk_signal(
-            policy_input=policy_input,
-            external_operation=external_operation,
-            thresholds_version=thresholds_version,
-            tool_gateway_config=tool_gateway_config,
-        )
-    except Exception as exc:
-        # Risk is shadow-only: its failure is visible but never activates fail-closed.
-        pillar_errors["risk"] = str(exc)
-        pillars["risk"] = _unavailable_pillar(
-            "risk",
-            thresholds_version,
-            mode="shadow",
-            decision_influence=False,
-        )
+    if external_operation is not None:
+        try:
+            pillars["risk"] = build_risk_signal(
+                policy_input=policy_input,
+                external_operation=external_operation,
+                thresholds_version=thresholds_version,
+                tool_gateway_config=tool_gateway_config,
+            )
+        except Exception as exc:
+            # Risk is shadow-only: its failure is visible but never activates fail-closed.
+            pillar_errors["risk"] = str(exc)
+            pillars["risk"] = _unavailable_pillar(
+                "risk",
+                thresholds_version,
+                mode="shadow",
+                decision_influence=False,
+            )
+    else:
+        pillars["risk"] = _unavailable_pillar("risk", thresholds_version, mode="shadow", decision_influence=False)
 
     try:
         pillars["trajectory"] = build_trajectory_signal(
@@ -137,28 +140,33 @@ def evaluate_opa_first_governance(
     dynamic_assessment = _build_dynamic_assessment_from_signals(pillars=pillars)
 
     resolved_thread_id = thread_id or task_state.runtime_thread_id or task_state.intake_metadata.request_id
-    try:
-        # Behavioral is shadow-only, so one cached read-model assessment per run is sufficient.
-        behavioral_assessment = (
-            task_state.last_behavioral_assessment
-            if task_state.last_behavioral_assessment is not None
-            else build_behavioral_assessment(
-                thread_id=resolved_thread_id,
-                task_state=task_state,
-                behavioral_store=behavioral_store_service,
+    # Behavioural SQLite is a shadow read model, sampled only at stable audit boundaries.
+    if task_state.current_state.value in {"waiting_human_review", "completed"} or external_operation is not None:
+        try:
+            # Behavioral is shadow-only, so one cached read-model assessment per run is sufficient.
+            behavioral_assessment = (
+                task_state.last_behavioral_assessment
+                if task_state.last_behavioral_assessment is not None
+                else build_behavioral_assessment(
+                    thread_id=resolved_thread_id,
+                    task_state=task_state,
+                    behavioral_store=behavioral_store_service,
+                )
             )
-        )
-        pillars["behavioral"] = build_behavioral_signal(
-            behavioral_assessment=behavioral_assessment,
-            thresholds_version=thresholds_version,
-        )
-    except Exception as exc:
-        pillar_errors["behavioral"] = str(exc)
-        behavioral_assessment = _unavailable_behavioral_assessment(str(exc))
-        pillars["behavioral"] = build_behavioral_signal(
-            behavioral_assessment=behavioral_assessment,
-            thresholds_version=thresholds_version,
-        )
+            pillars["behavioral"] = build_behavioral_signal(
+                behavioral_assessment=behavioral_assessment,
+                thresholds_version=thresholds_version,
+            )
+        except Exception as exc:
+            pillar_errors["behavioral"] = str(exc)
+            behavioral_assessment = _unavailable_behavioral_assessment(str(exc))
+            pillars["behavioral"] = build_behavioral_signal(
+                behavioral_assessment=behavioral_assessment,
+                thresholds_version=thresholds_version,
+            )
+    else:
+        behavioral_assessment = _unavailable_behavioral_assessment("shadow sampling deferred")
+        pillars["behavioral"] = build_behavioral_signal(behavioral_assessment=behavioral_assessment, thresholds_version=thresholds_version)
 
     if pillar_requirements.get("require_judge", False):
         try:

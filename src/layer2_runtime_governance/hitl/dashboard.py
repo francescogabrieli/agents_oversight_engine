@@ -8,7 +8,7 @@ from typing import Any
 from json_serialization import to_jsonable as _to_jsonable
 
 from ..behavioral import BehavioralAssessment
-from ..governance_components import GovernanceDecision
+from ..governance_components import GovernanceDecision, governance_reason_code_values
 from ..oversight.contracts import DynamicPolicyAssessment, OversightAssessment
 from ..domain import (
     HumanReviewDecision,
@@ -262,7 +262,7 @@ def _build_governance_panel(
         directive=governance_decision.directive.value,
         policy_decision=governance_decision.policy_decision.value,
         requires_human_review=governance_decision.requires_human_review,
-        reason_codes=tuple(code.value for code in governance_decision.reason_codes),
+        reason_codes=governance_reason_code_values(governance_decision),
         summary=governance_decision.summary,
         constrains_capability_use=governance_decision.constrains_capability_use,
         policy_directive=governance_decision.policy_directive.value,
@@ -514,7 +514,7 @@ def _resolve_reason_codes(*, task_state: TaskState) -> tuple[str, ...]:
 
     governance_decision = task_state.last_governance_decision
     if governance_decision is not None:
-        return tuple(code.value for code in governance_decision.reason_codes)
+        return governance_reason_code_values(governance_decision)
 
     oversight_assessment = task_state.last_dynamic_policy_assessment or task_state.last_oversight_assessment
     if oversight_assessment is not None:

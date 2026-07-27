@@ -1,0 +1,324 @@
+{
+  "deck_name": "governed_json_contracts",
+  "language": "Italian",
+  "goal": "Definire in modo definitivo, leggibile e verificabile i contratti JSON del flusso governato Layer 1 → Layer 2 → Tool Gateway → pilastri → Judge → OPA → HITL → esecuzione → trace.",
+  "deck_context": {
+    "source_summary": "Il runtime è stato snellito eliminando ranking universali, precision ceiling e autorità duplicate. Il planner produce solo passi semantici; l'actor opera sul passo corrente; Tool Gateway normalizza risultati ed evidenze; evidence e trajectory forniscono fatti attivi; risk e behavioral sono shadow-only; il Judge valuta semanticamente una proposta esterna legata a un digest; OPA è l'unica autorità della direttiva; HITL approva il digest corrente; l'executor applica l'operazione al massimo una volta.",
+    "core_claim": "Controllo forte non significa più metadati: significa contratti piccoli, fatti concreti, responsabilità separate e una sola autorità decisionale.",
+    "canonical_terms": [
+      "IntakeResult",
+      "PlannerDecision",
+      "ActorTask",
+      "ActorResult",
+      "ToolRequest",
+      "ToolExecutionResult",
+      "ObservedEvidence",
+      "StepValidation",
+      "ExternalOperationProposal",
+      "JudgeContext",
+      "JudgeAssessment",
+      "governance_decision_input.v1",
+      "governance_decision_output.v1",
+      "HumanReviewRequest",
+      "HumanReviewDecision",
+      "ExternalExecutionRequest",
+      "ExternalExecutionReceipt",
+      "layer2_trace.v4"
+    ],
+    "running_example": {
+      "goal": "Ricercare gli ultimi modelli AI, preparare una sintesi e inviarla via email a mario.rossi@example.com.",
+      "execution_intent": "execute_after_governance",
+      "requested_operation": "external_communication/email",
+      "final_boundary": "governed_external",
+      "final_effect": "send"
+    }
+  },
+  "selected_image_backend": "built-in image tool",
+  "max_concurrent_slides": 3,
+  "sample_generation_method": {
+    "backend_used": "built-in image tool",
+    "tool_name": "image_gen",
+    "mode": "generate",
+    "model_config": "built-in gpt-image-2 path; 16:9 landscape",
+    "prompt_source": "approved sample prompt for slide 16, Architecture Blueprint style",
+    "approved_sample_path": "origin_image/slide_16.png",
+    "input_context_preparation": "approved sample is supplied as a style-only reference; no source assets are required",
+    "handoff_rule": "Use the same built-in image_gen generation path; return a blocker if unavailable."
+  },
+  "style": {
+    "name": "Architecture Blueprint",
+    "visual_direction": "Academic technical editorial design: extremely clear, diagram-first, with readable monospaced JSON panels and generous whitespace.",
+    "color_palette": "Very light warm-gray background; runtime blue; evidence green; OPA violet; Judge, HITL and external execution amber; charcoal text; muted gray for shadow-only or compatibility information.",
+    "typography": "Large clean sans-serif titles, compact but highly readable body text, monospaced JSON, strict hierarchy, correct Italian spelling.",
+    "texture_and_finish": "Flat, crisp, vector-like, minimal gradients, no photography, no ornamental clutter.",
+    "deck_consistency": "Keep palette, typography, border radius, arrow language and panel treatment consistent; vary composition by slide role.",
+    "density_rule": "Never crowd the canvas. Show only a readable JSON excerpt on narrative slides; move exhaustive field lists to dedicated appendix-style slides."
+  },
+  "approved_style_reference": {
+    "path": "origin_image/slide_16.png",
+    "role": "approved sample slide style reference",
+    "fidelity": "match style only; do not copy layout or content"
+  },
+  "slides": [
+    {
+      "number": 1,
+      "title": "Il flusso governato, finalmente snello",
+      "role": "cover",
+      "intent": "Aprire con la tesi architetturale e il percorso completo.",
+      "key_points": ["Contratti JSON definitivi", "Una sola autorità decisionale", "Caso guida: invio di una vera email"],
+      "layout": {"composition": "Titolo grande a sinistra; pipeline orizzontale essenziale in basso con 8 nodi ben distanziati."},
+      "visual_elements": {"main_visual": "Task → Plan → Act/Tools → Evidence → Judge → OPA → HITL → Execute"},
+      "constraints": ["Pochissimo testo", "Non mostrare JSON in copertina"]
+    },
+    {
+      "number": 2,
+      "title": "Le regole architetturali rimaste",
+      "role": "principles",
+      "intent": "Separare le responsabilità che danno controllo senza overhead.",
+      "key_points": ["Planner: solo semantica", "Actor: un passo alla volta", "Tool Gateway: unico accesso alle capability", "OPA: unica autorità", "HITL: approvazione legata al digest"],
+      "layout": {"composition": "Cinque principi disposti come una catena verticale con una frase finale evidenziata."},
+      "visual_elements": {"main_visual": "Cinque blocchi con proprietario e confine di responsabilità"},
+      "constraints": ["Massimo cinque blocchi", "Risk e behavioral indicati solo come shadow-only in una nota discreta"]
+    },
+    {
+      "number": 3,
+      "title": "Caso guida: ricerca e invio di una vera email",
+      "role": "case study",
+      "intent": "Dare un esempio concreto che accompagni l'intero deck.",
+      "key_points": ["Ricerca gli ultimi modelli AI", "Prepara una sintesi con fonti", "Invia a mario.rossi@example.com", "Esegui solo dopo governance e approvazione"],
+      "layout": {"composition": "Brief della task a sinistra; timeline a quattro fasi a destra; destinatario e vincolo di approvazione ben visibili."},
+      "visual_elements": {"main_visual": "Research → Evidence → Email proposal → Approved send"},
+      "constraints": ["Non mostrare più di quattro fasi"]
+    },
+    {
+      "number": 4,
+      "title": "Ingresso grezzo → IntakeResult",
+      "role": "contract",
+      "intent": "Mostrare il primo confine canonico senza sovraccaricare i campi interni.",
+      "key_points": ["structured_task", "metadata", "Layer 1 normalizza forma e completezza"],
+      "local_context": {"required_background": "Top-level IntakeResult: structured_task {task_spec, execution_policy}; metadata {request_id, raw_input_fingerprint, parse_status, parser_name, prompt_version, schema_version, warnings, missing_information, created_at}."},
+      "layout": {"composition": "Input testuale breve a sinistra, freccia Layer 1 al centro, JSON top-level leggibile a destra."},
+      "visual_elements": {"main_visual": "Trasformazione da testo libero a oggetto canonico"},
+      "constraints": ["Mostrare solo il top-level JSON", "Rimandare i campi TaskSpec alla slide successiva"]
+    },
+    {
+      "number": 5,
+      "title": "Dentro TaskSpec: intenzione e operazione richiesta",
+      "role": "contract detail",
+      "intent": "Spiegare tutti i campi che definiscono la task e l'operazione email.",
+      "key_points": ["goal, context, constraints", "domain_type e sensitivity", "success_criteria", "execution_intent", "requested_operations"],
+      "local_context": {"required_background": "TaskSpec fields: goal, context, constraints, domain_type, domain_label, sensitivity, success_criteria, execution_intent, requested_operations. RequestedOperation fields: operation_type, channel, recipient. ExecutionPolicy fields: policy_profile_name, confidence_threshold, budget {max_steps,max_tool_calls}, read_only_mode."},
+      "layout": {"composition": "JSON TaskSpec leggibile a sinistra; legenda campo-significato a destra in due gruppi: intento utente e policy di sistema."},
+      "visual_elements": {"main_visual": "Evidenziare execute_after_governance e external_communication/email"},
+      "constraints": ["Non superare 11 righe nel JSON", "Usare valori abbreviati ma realistici"]
+    },
+    {
+      "number": 6,
+      "title": "IntakeResult → input del Planner",
+      "role": "handoff",
+      "intent": "Mostrare ciò che il planner riceve e ciò che resta fuori.",
+      "key_points": ["task_spec", "execution_policy", "intake_metadata", "runtime"],
+      "local_context": {"required_background": "Planner input: task_spec {goal,context,constraints,domain_type,domain_label,sensitivity,success_criteria}; execution_policy {policy_profile_name,confidence_threshold,read_only_mode,budget}; intake_metadata {parse_status,warnings,missing_information}; runtime {current_state,runtime_flags,step_index}. requested_operations govern external intent in runtime but planner output must remain semantic."},
+      "layout": {"composition": "Quattro pannelli input confluiscono nel Planner; una fascia 'non decide' indica tool call, payload email e governance."},
+      "visual_elements": {"main_visual": "Funnel controllato verso il planner"},
+      "constraints": ["Nessun JSON completo", "Usare etichette di campo"]
+    },
+    {
+      "number": 7,
+      "title": "Output del Planner: piano puramente semantico",
+      "role": "contract",
+      "intent": "Definire PlannerDecision e PlanStep rank-free.",
+      "key_points": ["plan_steps", "rationale", "planner_name", "prompt_version"],
+      "local_context": {"required_background": "PlanStep fields: step_id, objective, rationale, expected_outcome, status. PlannerDecision fields: plan_steps, rationale, planner_name, prompt_version. Example steps: ricerca fonti; sintetizza report; prepara proposta email."},
+      "layout": {"composition": "JSON breve a sinistra; tre step semantici come timeline a destra; riga inferiore 'non contiene tool call, rank, ceiling o payload'."},
+      "visual_elements": {"main_visual": "Timeline dei tre PlanStep"},
+      "constraints": ["Mostrare un solo PlanStep esteso", "Gli altri due solo come label"]
+    },
+    {
+      "number": 8,
+      "title": "Planner → Actor: ActorTask",
+      "role": "contract map",
+      "intent": "Raggruppare il grande contratto actor-facing per responsabilità.",
+      "key_points": ["Contesto autorizzato", "Passo corrente", "Memoria audit-safe", "Evidenza e progressi", "Feedback runtime"],
+      "local_context": {"required_background": "ActorTask fields: task_spec, execution_policy, intake_metadata, current_state, runtime_flags, plan_steps, past_steps, observed_evidence, scratchpad, step_validations, last_tool_result, tool_call_count, remaining_tool_calls, actor_turn_count, current_plan_step_index, current_plan_step, planner_rationale, planner_name, planner_prompt_version, governance_feedback."},
+      "layout": {"composition": "Cinque gruppi ben separati attorno a un Actor centrale; nessun JSON lungo."},
+      "visual_elements": {"main_visual": "Mappa dei campi raggruppati per funzione"},
+      "constraints": ["Non elencare più di cinque campi per gruppo", "Usare corpo grande"]
+    },
+    {
+      "number": 9,
+      "title": "Output dell’Actor: ActorResult",
+      "role": "state machine",
+      "intent": "Mostrare envelope comune e payload condizionali.",
+      "key_points": ["result_type guida la forma", "summary e output_text restano compatti", "tool, validation e proposal sono payload tipizzati"],
+      "local_context": {"required_background": "ActorResult fields: plan_step_id, result_type, summary, capability_mode, external_impact, output_text, blocking_reason, provider_protocol_failure, tool_request, scratchpad_entry, step_validation, external_communication_draft, database_statement_draft, external_operation_proposal. Result types: propose_action, intermediate_output, step_completed, final_output, ask_clarification, blocked, needs_replan."},
+      "layout": {"composition": "Envelope ActorResult al centro; sette esiti disposti ad arco; tre payload condizionali in basso."},
+      "visual_elements": {"main_visual": "Macchina a stati compatta"},
+      "constraints": ["Non stampare tutti i campi come JSON", "Evidenziare step_completed e propose_action"]
+    },
+    {
+      "number": 10,
+      "title": "Actor → Tool Gateway: ToolRequest",
+      "role": "contract",
+      "intent": "Mostrare la richiesta tipizzata e il confine Tool Gateway.",
+      "key_points": ["plan_step_id e reason", "tool_name", "parametri capability-specific", "nessun accesso diretto a HTTP o MCP"],
+      "local_context": {"required_background": "ToolRequest fields: plan_step_id, tool_name, reason, query, url, text, path, expression, timezone, limit, max_results, extractive_goal. Only fields relevant to the selected tool are populated."},
+      "layout": {"composition": "JSON web_search a sinistra; gateway centrale; tre adapter read-only a destra: OpenAI search, HTTP fetch, MCP."},
+      "visual_elements": {"main_visual": "Gateway come unico varco"},
+      "constraints": ["JSON massimo 8 righe", "Mostrare max_results ed extractive_goal"]
+    },
+    {
+      "number": 11,
+      "title": "Tool Gateway → runtime: ToolExecutionResult",
+      "role": "contract",
+      "intent": "Spiegare output, fonti, truncation ed errori tipizzati.",
+      "key_points": ["request, success, summary", "content e sources", "error_code", "truncated", "extractability_limited"],
+      "local_context": {"required_background": "ToolExecutionResult fields: request, success, summary, content, sources, error_message, error_code, truncated, extractability_limited. Error codes: forbidden, byte_limit, bot_challenge, empty_extraction, timeout, circuit_open, duplicate_request, unavailable."},
+      "layout": {"composition": "Due risultati affiancati: ricerca citata riuscita e fetch 403/byte-limit; footer con errori tipizzati."},
+      "visual_elements": {"main_visual": "Successo utilizzabile vs extractability limited"},
+      "constraints": ["Non presentare 403 come errore terminale", "Massimo quattro error code visibili, gli altri in nota"]
+    },
+    {
+      "number": 12,
+      "title": "Dal risultato a ObservedEvidence",
+      "role": "transformation",
+      "intent": "Mostrare come una fonte diventa evidenza atomica e auditabile.",
+      "key_points": ["Una fonte → una evidenza", "excerpt utile, non transcript duplicato", "provenienza intake o tool"],
+      "local_context": {"required_background": "ToolSource fields: title, locator, snippet, content_state, source_authority, document_type, extractability, citation_alignment. ObservedEvidence adds evidence_id, plan_step_id, excerpt, source_kind, source_tool. A provider-cited search answer without per-citation snippets can become provider_cited_summary evidence with URL and short cited context."},
+      "layout": {"composition": "Tool result aggregato a sinistra; separatore/normalizzatore; due card ObservedEvidence a destra."},
+      "visual_elements": {"main_visual": "Scomposizione 1:N senza clonare il transcript"},
+      "constraints": ["Evidenziare source_kind e source_tool", "Usare due sole evidenze di esempio"]
+    },
+    {
+      "number": 13,
+      "title": "Il nuovo modello evidence, senza ranking universale",
+      "role": "taxonomy",
+      "intent": "Spiegare i cinque attributi ortogonali.",
+      "key_points": ["content_state", "source_authority", "document_type", "extractability", "citation_alignment"],
+      "local_context": {"required_background": "content_state: metadata_only, provider_cited_summary, extracted_partial, extracted_full. source_authority: official_primary, primary, secondary, unknown. document_type: product_announcement, documentation, legal_text, community_post, unknown. extractability: complete, truncated, forbidden, empty, unavailable. citation_alignment: exact, provider_attributed, none."},
+      "layout": {"composition": "Cinque assi paralleli, ciascuno con valori enumerati; al centro una singola evidenza composta dai cinque attributi."},
+      "visual_elements": {"main_visual": "Coordinate ortogonali, non scala verticale"},
+      "constraints": ["Nessuna freccia dal debole al forte", "Nessun punteggio o rank"]
+    },
+    {
+      "number": 14,
+      "title": "Completion dello step: StepValidation",
+      "role": "contract",
+      "intent": "Collocare confidence ed evidence_refs nel loro ruolo corretto.",
+      "key_points": ["actor_self_confidence", "evidence_refs", "rationale_summary", "residual_uncertainty"],
+      "local_context": {"required_background": "StepValidation is attached to a specific plan_step_id. Low confidence alone does not force recovery; evidence refs and trajectory facts are evaluated by OPA. No Python precision guard remains."},
+      "layout": {"composition": "JSON compatto a sinistra; diagramma 'autovalutazione ≠ decisione' a destra."},
+      "visual_elements": {"main_visual": "Confidence come segnale, non semaforo"},
+      "constraints": ["Mostrare actor_self_confidence 0.82", "Non rappresentare una soglia automatica"]
+    },
+    {
+      "number": 15,
+      "title": "Dallo stato ai pilastri: fatti, non giudizi duplicati",
+      "role": "pillar map",
+      "intent": "Mostrare i fatti attivi e i moduli shadow-only.",
+      "key_points": ["Evidence: qualità e riferimenti concreti", "Trajectory: progresso e anti-loop", "Risk e Behavioral: osservazione shadow-only"],
+      "local_context": {"required_background": "Evidence raw facts include evidence_count, selected_evidence_refs_valid, source_locator_present, cited_context_present, extracted_content_present, official_source_present, extraction_truncated, extractability_limited, factual_completion_attempt, external_operation_candidate, actor_self_confidence. Trajectory raw facts include consecutive_no_progress_turns, new_evidence_since_last_turn, tool_call_since_last_turn, plan_step_advanced, draft_digest_changed, equivalent_tool_failures_for_host, consecutive_provider_protocol_failures, replan_budget_remaining, recovery_exhausted, needs_replan_signal."},
+      "layout": {"composition": "Due grandi pilastri attivi con 5 fatti ciascuno; due pilastri shadow più piccoli e grigi; freccia verso OPA."},
+      "visual_elements": {"main_visual": "Pillar facts envelopes"},
+      "constraints": ["Non mostrare formule o punteggi", "Non più di dieci raw facts visibili"]
+    },
+    {
+      "number": 16,
+      "title": "Tutto entra in OPA",
+      "role": "architecture",
+      "intent": "Mostrare input, precedenza e output OPA.",
+      "key_points": ["governance_decision_input.v1", "OPA / Rego", "governance_decision_output.v1", "HITL sul digest corrente"],
+      "layout": {"composition": "Usare esattamente la slide campione approvata."},
+      "visual_elements": {"main_visual": "Input JSON → OPA/Rego → output JSON → HITL"},
+      "constraints": ["Riutilizzare il campione senza rigenerarlo"],
+      "sample_approved": true
+    },
+    {
+      "number": 17,
+      "title": "La proposta di invio: ExternalOperationProposal",
+      "role": "contract",
+      "intent": "Definire l'oggetto immutabile valutato da Judge, OPA e HITL.",
+      "key_points": ["identità e capability", "boundary ed effect", "target", "payload", "payload_digest", "facts_provenance"],
+      "local_context": {"required_background": "ExternalOperationProposal fields: operation_id, plan_step_id, capability_id, boundary, operation_family, normalized_effect, execution_candidate, target {kind,value,destination_class}, payload, payload_preview, payload_digest, facts_provenance {normalizer_id,normalizer_version,source_kind,source_id,registry_entry_id,fact_notes}, capability_profile_id, capability_profile_version, modifiable. Communication payload: channel, recipient, subject, body, destination_class, cc, bcc."},
+      "layout": {"composition": "Proposta email come JSON ridotto a sinistra; anatomia del digest a destra con payload → SHA-256 → identità approvabile."},
+      "visual_elements": {"main_visual": "Busta email legata con lucchetto al digest"},
+      "constraints": ["Non mostrare il body completo", "Destinatario chiaramente leggibile"]
+    },
+    {
+      "number": 18,
+      "title": "LLM-as-Judge: JudgeContext",
+      "role": "contract",
+      "intent": "Mostrare l'input semantico e il suo confine.",
+      "key_points": ["goal e constraints autorizzati", "step corrente", "proposta esterna esatta", "evidenze selezionate", "confidence e incertezza residua"],
+      "local_context": {"required_background": "JudgeContext fields: task_goal, task_constraints, authorized_context, current_plan_step {step_id,objective,rationale,expected_outcome}, external_operation, selected_evidence_refs, observed_evidence, actor_self_confidence, residual_uncertainty, destination_facts, invocation_reason. It intentionally excludes static policy, risk and behavioral assessments."},
+      "layout": {"composition": "Cinque input semantici convergono verso il Judge; un bordo rosso sottile delimita 'non riceve direttive o policy combiner'."},
+      "visual_elements": {"main_visual": "Judge come semantic assessor bounded"},
+      "constraints": ["Nessun output in questa slide", "Massimo cinque gruppi"]
+    },
+    {
+      "number": 19,
+      "title": "LLM-as-Judge: JudgeAssessment",
+      "role": "contract",
+      "intent": "Spiegare verdict, findings e binding al digest senza attribuire autorità al Judge.",
+      "key_points": ["verdict e severity", "findings tipizzati", "confidence semantica", "evaluated_operation_digest", "nessuna direttiva runtime"],
+      "local_context": {"required_background": "JudgeAssessment canonical semantic fields: invoked, status, verdict, severity, confidence, findings, summary, rationale, evaluated_target, evaluated_operation_digest, prompt_version, model_metadata. Finding fields: category, code, severity, summary, evidence_refs. Compatibility fields recommendation and flags may remain readable for old checkpoints but OPA does not consume recommendation."},
+      "layout": {"composition": "JSON assessment safe a sinistra; tre finding categories di esempio a destra; footer grande 'Il Judge valuta. OPA decide.'"},
+      "visual_elements": {"main_visual": "Digest match come sigillo"},
+      "constraints": ["Non mostrare recommendation come campo attivo", "Verdict safe non deve sembrare autorizzazione all'invio"]
+    },
+    {
+      "number": 20,
+      "title": "HITL sul digest corrente",
+      "role": "workflow",
+      "intent": "Mostrare request, decision, edit e invalidazione.",
+      "key_points": ["HumanReviewRequest", "HumanReviewDecision", "Edit → nuovo digest", "Le approvazioni precedenti decadono"],
+      "local_context": {"required_background": "HumanReviewRequest fields include request_id, thread_id, current_state, resume_state, current_plan_step_id/objective, actor_result_type, current_tool_request, governance_directive/summary, static/dynamic/behavioral/judge/oversight summaries, external_communication_target_type/draft, reason_codes, allowed_decisions, review_summary, operation_id, operation_payload_digest, operation_proposal_summary, operation_target, external_operation_proposal, judge_findings. HumanReviewDecision fields: request_id, decision_type, note, clarification_text, external_communication_edit, reviewer_id, approved_operation_digest, external_operation_edit."},
+      "layout": {"composition": "Sequenza a tre pannelli: request → review/edit → decision; ramo edit torna a Judge/OPA con nuovo digest."},
+      "visual_elements": {"main_visual": "Loop controllato di invalidazione e rivalutazione"},
+      "constraints": ["Non elencare tutti i campi visivamente", "Evidenziare approved_operation_digest"]
+    },
+    {
+      "number": 21,
+      "title": "Resume ed esecuzione esterna",
+      "role": "sequence",
+      "intent": "Definire request e receipt dell'executor.",
+      "key_points": ["Digest autorizzato = digest corrente", "Idempotency key", "At-most-once", "Receipt tipizzata"],
+      "local_context": {"required_background": "ExternalExecutionRequest fields: operation_id, capability_id, proposal, current_payload_digest, authorized_payload_digest, execution_intent, idempotency_key, authorization_source, reviewer_id, governance_decision_reference, attempt_scope. ExternalExecutionReceipt fields: operation_id, capability_id, payload_digest, status, idempotency_key, started_at, completed_at, external_reference, summary, error_code, retryable, connector_kind, connector_id, server_id, tool_name, connector_metadata, attempt_number."},
+      "layout": {"composition": "Sequence diagram Human → Runtime → Executor → SMTP MCP; receipt ritorna al runtime; controllo digest in primo piano."},
+      "visual_elements": {"main_visual": "Handshake digest-bound e idempotente"},
+      "constraints": ["Massimo quattro lifeline", "Mostrare nessun invio prima dell'approvazione"]
+    },
+    {
+      "number": 22,
+      "title": "Trace v4: una proiezione osservabile",
+      "role": "observability",
+      "intent": "Mostrare che il trace registra il flusso senza diventare autorità.",
+      "key_points": ["runtime e intake", "plan ed execution", "tool calls ed evidence", "governance e HITL", "external execution"],
+      "local_context": {"required_background": "Layer2RuntimeTrace top fields: trace_version, runtime, intake, planner_name, planner_prompt_version, planner_rationale, planning_source, plan_steps, current_plan_step_index, current_plan_step_id, actor, execution, tool_calls, observed_evidence, governance_passes, human_review, external_communication, external_execution."},
+      "layout": {"composition": "Timeline della run in alto; trace JSON top-level sotto diviso in cinque sezioni cromatiche."},
+      "visual_elements": {"main_visual": "Trace come proiezione read-only dell'intera traiettoria"},
+      "constraints": ["Non mostrare sotto-campi", "Usare trace_version layer2_trace.v4"]
+    },
+    {
+      "number": 23,
+      "title": "Cosa è stato rimosso e cosa è rimasto",
+      "role": "comparison",
+      "intent": "Rendere esplicito lo snellimento architetturale.",
+      "key_points": ["Rimossi: rank, support level universale, precision ceiling, StepValidation.next_action", "Rimasti: actor confidence, evidence refs, fatti ortogonali, OPA, Judge semantico, HITL digest-bound"],
+      "layout": {"composition": "Confronto due colonne molto arioso: ritirato in grigio/rosso tenue; canonico in blu/verde/viola."},
+      "visual_elements": {"main_visual": "Prima vs adesso con una freccia 'meno overhead, più controllo reale'"},
+      "constraints": ["Non suggerire che confidence sia stata rimossa", "Massimo sei elementi per colonna"]
+    },
+    {
+      "number": 24,
+      "title": "Matrice definitiva dei contratti",
+      "role": "summary",
+      "intent": "Chiudere con la mappa di responsabilità produttore-consumatore-decisore.",
+      "key_points": ["Layer 1 → IntakeResult", "Planner → PlannerDecision", "Actor/Tools → risultati ed evidence", "Judge → assessment semantico", "OPA → direttiva", "HITL/Executor → autorizzazione e receipt"],
+      "local_context": {"required_background": "Rows: IntakeResult (Layer 1→bootstrap); PlannerDecision (planner→runtime); ActorTask (runtime→actor); ActorResult (actor→governance/tool/replanner); ToolRequest (actor→gateway); ToolExecutionResult and ObservedEvidence (gateway→runtime); StepValidation (actor→pillars/OPA); ExternalOperationProposal (actor/normalizer→Judge/OPA/HITL); JudgeAssessment (Judge→OPA); governance decision input/output (runtime↔OPA); HumanReviewRequest/Decision (runtime↔human); ExternalExecutionRequest/Receipt (runtime↔executor); layer2_trace.v4 (runtime→observability/evaluation)."},
+      "layout": {"composition": "Matrice a quattro colonne: Contratto, Produce, Consuma, Autorità; raggruppata in quattro fasi, con testo grande."},
+      "visual_elements": {"main_visual": "Tabella conclusiva con OPA evidenziata come unica riga decisionale"},
+      "constraints": ["Se necessario mostrare 8 macro-righe anziché 13 righe singole", "Chiudere con la frase: Contratti piccoli. Fatti concreti. Una sola decisione."]
+    }
+  ]
+}

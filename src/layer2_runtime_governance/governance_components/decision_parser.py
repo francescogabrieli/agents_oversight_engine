@@ -426,7 +426,7 @@ def _dynamic_recommendation_from_active_pillars(
         return DynamicPolicyRecommendedDirective.WAIT_HUMAN_REVIEW
     if trajectory.get("degraded_or_replan") is True:
         return DynamicPolicyRecommendedDirective.REPLAN
-    if evidence.get("evidence_gap") is True or evidence.get("precision_mismatch") is True:
+    if evidence.get("evidence_gap") is True:
         return DynamicPolicyRecommendedDirective.REQUEST_MORE_EVIDENCE
     return DynamicPolicyRecommendedDirective.CONTINUE
 

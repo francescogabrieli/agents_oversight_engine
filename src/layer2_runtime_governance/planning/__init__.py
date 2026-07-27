@@ -10,9 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from llm_retry import llm_retry
 
-from ..domain import PlanStep, PlanStepKind, PlannerDecision, TaskState
+from ..domain import PlanStep, PlannerDecision, TaskState
 from ..infrastructure.environment import candidate_env_paths, load_env_file_values
-from ..tool_contract import EvidenceSupportLevel
 
 try:
     from openai import OpenAI
@@ -64,9 +63,6 @@ class _PlanStepPayload(BaseModel):
     objective: str = Field(..., min_length=1)
     rationale: str = Field(..., min_length=1)
     expected_outcome: str = Field(..., min_length=1)
-    step_kind: PlanStepKind | None = None
-    evidence_requirement: EvidenceSupportLevel | None = None
-    claim_precision_ceiling: EvidenceSupportLevel | None = None
 
 
 class _PlanningPayload(BaseModel):
@@ -91,11 +87,6 @@ Each item in plan_steps must contain:
 - rationale
 - expected_outcome
 
-If you can classify the step safely, also emit:
-- step_kind
-- evidence_requirement
-- claim_precision_ceiling
-
 Rules:
 - Stay at the semantic planning level.
 - Do not emit executable tool calls.
@@ -115,6 +106,7 @@ Rules:
 - For research or analysis tasks, prefer evidence collection before synthesis.
 - Respect read_only_mode when it is true.
 - Do not include human review as a normal plan step.
+- Do not include compliance, legal classification, policy simulation, or governance as a plan step.
 - Do not pre-judge, reject, sanitize, or rewrite a requested external operation
   merely because it may be risky. Preserve the requested semantic objective and
   let the governance node evaluate the resulting proposal.
@@ -207,9 +199,6 @@ class OpenAIPlanner(PlannerPort):
             objective=item.objective,
             rationale=item.rationale,
             expected_outcome=item.expected_outcome,
-            step_kind=item.step_kind,
-            evidence_requirement=item.evidence_requirement,
-            claim_precision_ceiling=item.claim_precision_ceiling,
         )
         for index, item in enumerate(payload.plan_steps, start=1)
     ]

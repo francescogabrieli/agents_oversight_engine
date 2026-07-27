@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from tests.layer2_runtime_fixtures import *
+from layer2_runtime_governance.tool_contract import ToolErrorCode
 
 
 class Layer2ToolRuntimeTests(unittest.TestCase):
@@ -51,7 +52,7 @@ class Layer2ToolRuntimeTests(unittest.TestCase):
         )
         self.assertTrue(
             all(
-                "same tool request" in (result.error_message or "")
+                result.error_code == ToolErrorCode.DUPLICATE_REQUEST
                 for result in failed_results
             )
         )
@@ -105,7 +106,7 @@ class Layer2ToolRuntimeTests(unittest.TestCase):
         )
         self.assertTrue(
             all(
-                item.support_level == EvidenceSupportLevel.SOURCE_DISCOVERY
+                item.content_state == EvidenceContentState.METADATA_ONLY
                 for item in observed_state.observed_evidence
             )
         )
@@ -186,8 +187,8 @@ class Layer2ToolRuntimeTests(unittest.TestCase):
         observed_state = observe_tool_result(task_state)
 
         self.assertEqual(
-            observed_state.observed_evidence[0].support_level,
-            EvidenceSupportLevel.SOURCE_DISCOVERY,
+            observed_state.observed_evidence[0].content_state,
+            EvidenceContentState.METADATA_ONLY,
         )
 
 
@@ -220,6 +221,10 @@ class Layer2ToolRuntimeTests(unittest.TestCase):
                     title="Official DMA overview",
                     locator="https://example.org/dma",
                     snippet="The regulation was adopted on 14 September 2022 and entered into force later.",
+                    content_state=EvidenceContentState.EXTRACTED_FULL,
+                    source_authority=SourceAuthority.OFFICIAL_PRIMARY,
+                    extractability=Extractability.COMPLETE,
+                    citation_alignment=CitationAlignment.EXACT,
                 ),
             ),
         )
@@ -227,8 +232,8 @@ class Layer2ToolRuntimeTests(unittest.TestCase):
         observed_state = observe_tool_result(task_state)
 
         self.assertEqual(
-            observed_state.observed_evidence[0].support_level,
-            EvidenceSupportLevel.DETAILED_EXTRACTED,
+            observed_state.observed_evidence[0].content_state,
+            EvidenceContentState.EXTRACTED_FULL,
         )
 
 

@@ -40,9 +40,7 @@ from layer2_runtime_governance import (
     GovernanceDirective,
     GovernanceReasonCode,
     EvidenceSourceKind,
-    EvidenceSupportLevel,
     PlanStep,
-    PlanStepKind,
     PlannerDecision,
     PolicyDecision,
     PolicyEnginePort,
@@ -55,7 +53,6 @@ from layer2_runtime_governance import (
     ScratchpadEntry,
     ScratchpadEntryType,
     StepValidation,
-    StepValidationDecision,
     ToolExecutionResult,
     ToolGatewayPort,
     ToolName,
@@ -101,18 +98,12 @@ class StubPlanner:
                     objective="Collect reliable evidence aligned with the intake goal.",
                     rationale="The first step should ground the task before synthesis.",
                     expected_outcome="A compact reliable evidence base.",
-                    step_kind=PlanStepKind.SOURCE_DISCOVERY,
-                    evidence_requirement=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
-                    claim_precision_ceiling=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
                 ),
                 PlanStep(
                     step_id="step_2",
                     objective="Synthesize a grounded answer.",
                     rationale="A synthesis step should follow evidence gathering.",
                     expected_outcome="A concise grounded answer aligned with the goal.",
-                    step_kind=PlanStepKind.FINAL_SYNTHESIS,
-                    evidence_requirement=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
-                    claim_precision_ceiling=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
                 ),
             ],
             rationale="The stub planner selected an evidence-first semantic mini-plan.",
@@ -156,7 +147,7 @@ class StubActor(ActorPort):
         if actor_task.current_plan_step.step_id == "step_1":
             return ActorResult(
                 plan_step_id=actor_task.current_plan_step.step_id,
-                result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+                result_type=ActorResultType.STEP_COMPLETED,
                 summary="The first step is complete and produced grounded evidence.",
                 capability_mode=CapabilityAccessMode.NONE,
                 output_text="Collected grounded evidence from official sources.",
@@ -169,17 +160,15 @@ class StubActor(ActorPort):
                 ),
                 step_validation=StepValidation(
                     plan_step_id=actor_task.current_plan_step.step_id,
-                    objective_satisfied=True,
-                    evidence_sufficient=True,
-                    confidence=0.86,
-                    next_action=StepValidationDecision.COMPLETE_STEP,
+                    actor_self_confidence=0.86,
+                    evidence_refs=tuple(item.evidence_id for item in actor_task.observed_evidence),
                     rationale_summary="Official evidence was collected for the step objective.",
                 ),
             )
 
         return ActorResult(
             plan_step_id=actor_task.current_plan_step.step_id,
-            result_type=ActorResultType.FINAL_OUTPUT,
+            result_type=ActorResultType.STEP_COMPLETED,
             summary="The task can now be completed from the grounded evidence.",
             capability_mode=CapabilityAccessMode.NONE,
             external_impact=False,
@@ -193,10 +182,8 @@ class StubActor(ActorPort):
             ),
             step_validation=StepValidation(
                 plan_step_id=actor_task.current_plan_step.step_id,
-                objective_satisfied=True,
-                evidence_sufficient=True,
-                confidence=0.84,
-                next_action=StepValidationDecision.COMPLETE_STEP,
+                actor_self_confidence=0.84,
+                evidence_refs=tuple(item.evidence_id for item in actor_task.observed_evidence),
                 rationale_summary="The synthesis uses the collected official evidence.",
             ),
         )
@@ -260,10 +247,19 @@ class StubPolicyEngine(PolicyEnginePort):
             directive = "replan"
             reason_code = "repeated_recovery"
             summary = "Missing provider action requires replanning."
-        elif evidence.get("support_rank_available", 0) < evidence.get("support_rank_required", 0):
+        elif (
+            actor["result_type"] in {
+                ActorResultType.STEP_COMPLETED.value,
+                ActorResultType.FINAL_OUTPUT.value,
+            }
+            and (
+                evidence.get("selected_evidence_refs_valid") is False
+                or evidence.get("selected_evidence_ref_count", 0) == 0
+            )
+        ):
             directive = "request_more_evidence"
-            reason_code = "evidence_support_below_step_need"
-            summary = "The step requires stronger evidence support."
+            reason_code = "invalid_or_missing_selected_evidence"
+            summary = "The completion references invalid or missing concrete evidence."
         elif tool["name"] is not None and base_facts["policy"]["read_only_mode"]:
             directive = "continue_read_only"
             policy_decision = "allow_read_only"
@@ -456,7 +452,7 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
         self.assertIsNone(task_state.current_plan_step_index)
         self.assertEqual(task_state.planner_name, "stub_planner")
         self.assertIsNotNone(task_state.actor_result)
-        self.assertEqual(task_state.actor_result.result_type, ActorResultType.FINAL_OUTPUT)
+        self.assertEqual(task_state.actor_result.result_type, ActorResultType.STEP_COMPLETED)
         self.assertEqual(task_state.actor_result.capability_mode, CapabilityAccessMode.NONE)
         self.assertEqual(len(task_state.executed_steps), 2)
         self.assertEqual(task_state.tool_call_count, 1)
@@ -472,9 +468,11 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
         self.assertEqual(len(task_state.step_validations), 2)
         self.assertEqual(len(task_state.governance_history), 3)
         self.assertEqual(task_state.governance_history[0].policy_decision, PolicyDecision.ALLOW)
+        # A read-only capability request remains executable while evidence is
+        # being acquired; completion evidence is evaluated on the later turn.
         self.assertEqual(
             task_state.governance_history[0].directive,
-            GovernanceDirective.REQUEST_MORE_EVIDENCE,
+            GovernanceDirective.CONTINUE,
         )
 
     def test_clarification_task_bootstraps_end_to_end(self) -> None:

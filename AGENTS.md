@@ -48,7 +48,7 @@ It already includes:
 - typed human-review requests and decisions with LangGraph `interrupt / resume`
 - durable local LangGraph checkpoint persistence and per-thread runtime artifacts on disk
 - typed `external_communication` phase tracking for evidence, draft, review/edit, approval, and blocked states
-- the external communication draft body is taken from the latest governed draft output for the branch, while the trace retains the canonical final body and diagnostics for claim precision vs typed evidence requirements
+- the external communication draft body is taken from the latest governed draft output for the branch, while the trace retains the canonical final body, selected evidence references, and provenance diagnostics
 - external communication plan semantics remain planner-owned; runtime compaction must not introduce facts or rewrite the requested communication
 - typed runtime trace export through `observability/`, surfaced by `src/main_layer2.py`
 - offline trace evaluation and reporting through `evaluation/`, surfaced by `src/main_layer2_evaluation.py`
@@ -176,7 +176,7 @@ Modular capability packages introduced for the active Layer 2 baseline:
 - `domain/` exposes framework-independent views of canonical planning, execution, evidence, review, and task-state contracts
 - `runtime/` owns graph contracts, routing, node adapters, and thread context
 - `tools/` owns the Tool Gateway registry, validation, backend adapters, and content extractors; `tool_gateway.py` is a compatibility facade
-- `execution/` owns actor provider configuration, prompts, action schemas, response parsing, result construction, evidence guards, and provider adapters; `acting.py` is a compatibility facade and actor factory
+- `execution/` owns actor provider configuration, prompts, action schemas, response parsing, result construction, and provider adapters; `acting.py` is a compatibility facade and actor factory
 - `governance_components/` owns policy contracts, inputs, adapters, OPA-first evaluation, response parsing, and fail-closed handling
 - `observability/` owns immutable trace models, read-only builders, compact views, and JSON serialization
 - `src/evaluation_service/` owns runtime-independent trace discovery, loading, legacy normalization, per-run evaluation, metric aggregation, and report serialization; `aggregate.py` is a thin compatibility facade
@@ -186,11 +186,11 @@ Modular capability packages introduced for the active Layer 2 baseline:
 Current design:
 
 - `domain/` owns the canonical bootstrap state, runtime flags, plan models, actor execution records, review contracts, `TaskState`, and serialization recovery; `state.py` is an import-compatible facade
-- `domain/plan.py` carries typed semantic step metadata on `PlanStep`: `step_kind`, `evidence_requirement`, and `claim_precision_ceiling`, with legacy-compatible defaults
+- `domain/plan.py` carries only semantic `PlanStep` fields: identifier, objective, rationale, expected outcome, and runtime-owned status
 - `runtime/` owns lifecycle, planner, actor, governance, tool observation, replanning services, and thin LangGraph node adapters; the retired `nodes.py` facade must not be restored
 - `planning/` defines the planner port, prompt builders, the default OpenAI-backed planner, and replanning adapters
 - `acting.py` preserves the public actor imports and builds the configured actor; concrete Bedrock/OpenAI adapters, prompts, action schemas, response parsing, result construction, and evidence guards live under `execution/`
-- `actor_contract.py` now passes explicit evidence-support metadata to the actor, including `required_evidence_support_level`, `max_supported_claim_precision`, and the current `step_kind`
+- `actor_contract.py` passes observed concrete evidence and the semantic current step; it never passes a universal evidence rank or claim ceiling
 - `planning/replanning.py` defines the replanner port, prompt builders, the default OpenAI-backed replanner, and a local conservative fallback replanner for tests/offline use; `replanning.py` preserves the legacy import path
 - `actor_contract.py` defines the typed handoff from planner state into actor-facing execution context for the current plan step, including observed evidence, scratchpad entries, and prior step validations
 - `tool_contract.py` defines typed tool requests, tool results, and observed evidence contracts
@@ -358,6 +358,12 @@ Current relevant files:
 
 ### Layer 2 Rules
 
+- `PlanStep` is now semantic-only: `step_id`, `objective`, `rationale`, `expected_outcome`, and runtime-owned `status`. Evidence levels, precision ceilings, and compliance step kinds are not planner contracts.
+- Observed evidence records orthogonal facts (`content_state`, `source_authority`, `document_type`, `extractability`, and `citation_alignment`); no universal evidence ranking is active in the runtime or OPA.
+- Actor completion selects explicit `evidence_refs` and exposes `actor_self_confidence`. It does not declare evidence sufficiency or route itself; OPA interprets the contextual uncertainty signal.
+- Required OPA pillars are event-sensitive: read-only tool acquisition uses static plus minimal trajectory, progress uses trajectory, completion uses evidence plus trajectory, and governed external candidates require judge. Behavioral and risk remain deferred shadow observations.
+- `TaskSpec.requested_operations` describes requested effects independently of `domain_type`; an email proposal requires an explicit requested external-communication operation and still passes judge, digest binding, HITL, and idempotent execution.
+
 - `TaskState` is the central runtime contract.
 - New runtime data should be modeled explicitly before being spread through nodes.
 - `graph.py` should not contain business logic beyond routing and LangGraph integration.
@@ -373,12 +379,12 @@ Current relevant files:
 - external communication drafts are explicit runtime state; partial draft assembly does not invoke the judge, while each review-ready execution candidate is projected into a digest-bound `ExternalOperationProposal`
 - the planner/executor split should remain aligned with `docs/guidelines/plan-and-execute.ipynb` unless there is a clear thesis-driven reason to diverge
 - planner output must remain semantic and typed
-- planner output may now include typed `step_kind`, `evidence_requirement`, and `claim_precision_ceiling` metadata on each semantic step; older outputs without those fields remain valid
+- planner and replanner output only semantic steps and never introduce compliance, policy-simulation, or human-review meta-steps
 - planner output must not contain concrete tool calls, executable payloads, or framework-specific actions
 - small source-plus-short-summary tasks may be deterministically compacted from an over-decomposed source/extraction/synthesis pipeline into a proportional two-step trajectory
 - actor execution must operate on the current plan step, not on the full task as a second planner
 - actor output must remain typed and compact even when backed by an LLM
-- actor prompts and runtime hints should receive explicit evidence-support ceilings from the runtime contract instead of inferring them only from free-form wording
+- actor prompts receive concrete observed evidence attributes and explicit evidence identifiers; OPA alone interprets their sufficiency for a completion
 - the current Layer 2 actor backend is Amazon Bedrock with Nova 2 Lite through the fixed `eu.amazon.nova-2-lite-v1:0` inference profile in `eu-central-1`
 - planner and replanner remain OpenAI-backed for now
 - actor provider selection is controlled by `LAYER2_ACTOR_PROVIDER`, with supported values `bedrock` and `openai`; Bedrock is the default
@@ -388,21 +394,15 @@ Current relevant files:
 - actor execution should record audit-safe scratchpad entries rather than hidden chain-of-thought
 - official implementation pages and procedural regulations should be described as procedural sources, not as direct enforcers, unless the source explicitly says so
 - when the actor sees an implementation-oriented DMA source, it should phrase the enforcement description as procedural or procedural-enforcement context rather than direct enforcement unless the source text explicitly supports the stronger claim
-- plan steps should be completed only after a typed `StepValidation` indicates that the objective is satisfied and evidence is sufficient
-- observed evidence now carries an explicit support level (`local_only`, `source_discovery`, `high_level_summary`, `detailed_extracted`, `primary_legal`) so the runtime can reason about how much claim precision the evidence can safely support
+- plan steps complete only through the unambiguous `STEP_COMPLETED` or final completion outcome and the resulting OPA directive
+- observed evidence carries orthogonal concrete attributes: content state, source authority, document type, extractability, citation alignment, locator, excerpt, tool, and provenance
 - observed evidence now also carries an explicit provenance kind: `intake_provided` for authoritative Layer 1 task inputs and `tool_observation` for tool-derived runtime evidence; `source_tool` is therefore optional and only set for tool-observed evidence
-- `PlanStep`-level evidence requirements should now be typed first; wording-based heuristics are fallback-only and should remain conservative
-- bootstrap now materializes authoritative task-provided facts/requirements from Layer 1 into initial `observed_evidence` entries with support level `local_only`, so local drafting/transformation steps can stay grounded even before any tool call occurs
-- official timeline facts such as `entered into force`, `applies from`, `applies on`, and similar chronology statements are usually `detailed_extracted`; only threshold, article-level, or similarly strict legal claims should force `primary_legal`
-- conservative high-level summaries can be supported by `high_level_summary` evidence even when they mention broad policy themes such as gatekeepers or obligation themes; only granular, specific, article-level, threshold, or clause-like claims should force `detailed_extracted` or `primary_legal`
+- bootstrap materializes authoritative task-provided facts into initial observed evidence without assigning a universal support level
 - when a step is explicitly short, brief, concise, or high-level, the actor should reduce claim precision before requesting more evidence; named obligation examples such as self-preferencing, interoperability, data portability, ranking, non-discriminatory access, or transparent terms should appear only when directly present in observed evidence or specifically requested
-- governance guardrails must remain proportional: multiple safe-by-design checks should not combine into an execution-degrading loop when the task can be completed by lowering precision to the available evidence level
+- governance guardrails must remain proportional and must not create an evidence loop while the actor is asking for the read-only tool needed to acquire evidence
 - source discovery alone is not factual support; simple URL discovery is weaker than extracted content and should not justify detailed factual completion by itself
-- evaluation now distinguishes mismatch caused by typed requirements from mismatch caused by heuristic fallback, using resolved provenance exported in the trace
-- actor completion outputs that are more specific than the available evidence support level should remain in-progress rather than complete the step, even when the LLM self-reports `objective_satisfied=true` and `evidence_sufficient=true`
-- OPA may request more evidence when typed raw facts show that the evaluated step/output requires stronger support than currently observed evidence
-- `INTERMEDIATE_OUTPUT` is a progress/local-output outcome and must not automatically complete the current plan step without positive validation
-- when the last semantic step completes with positive validation, its output should be promoted into canonical `final_output_text` even if the actor result type is `INTERMEDIATE_OUTPUT`
+- OPA may request more evidence only from concrete completion facts, such as invalid selected references or missing usable selected evidence; Python does not infer semantic precision requirements
+- `INTERMEDIATE_OUTPUT` is progress only and never completes a plan step; `STEP_COMPLETED` is the explicit local completion type
 - executed step history and current plan step cursor must remain explicit in `TaskState`
 - when tools are added, do not rely on a prompt-only tool inventory as the primary mechanism; prefer structured tool binding in the LangGraph/LangChain style
 - prompt text may contain policy, behavioral, and architecture constraints, but should not replace the runtime-level tool contract

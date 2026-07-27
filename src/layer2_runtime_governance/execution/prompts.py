@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 
 from ..actor_contract import ActorTask
-from .evidence_guard import build_actor_execution_hints as _build_actor_execution_hints
 from .prompt_projection import build_actor_prompt_payload
 
 
@@ -38,13 +37,19 @@ Rules:
 - If runtime_flags includes `extractability_limited`, do not keep chasing near-equivalent extraction attempts; prefer a compact summary or source shortlist that uses already observed official metadata and clearly notes the limitation.
 - A residual uncertainty about missing precision is not, by itself, a reason to keep the current step open when the step only asks for high-level supported themes.
 - A discovered source URL is not factual support by itself. Treat only observed excerpts and successful fetched content as direct support for factual claims.
+- For provider model reports, copy a specific model identifier only when that exact identifier
+  appears in observed evidence. Never invent, repair, or generalize an identifier from an
+  alias, wildcard, truncated string, or Markdown fragment.
+- A generic models-overview page supports that a model is documented or available; it does
+  not establish that the model is the newest. Use "documented" or "available" unless the
+  observed evidence explicitly supports a stronger recency claim.
+- Do not claim that a draft satisfies every task constraint. State only the supported scope
+  and any material residual uncertainty.
 - When citing official implementation pages or procedural regulations, describe them as procedural/implementation sources; do not say they directly enforce the rules unless the source explicitly states that.
 - If current_or_prior_steps_have_procedural_implementation_source is true, describe it as procedural or implementation material unless the evidence explicitly supports a substantive-authority claim.
 - Do not introduce exact dates, years, thresholds, deadlines, or other precise numeric/legal claims unless those details are directly present in the observed evidence or fetched content.
 - When the current step asks for a short, brief, concise, or high-level summary, keep claim language broad unless a named example is directly present in observed evidence.
-- If the runtime says available_evidence_support_level is high_level_summary, do not try to satisfy the step by becoming more granular; reduce claim precision instead.
-- Respect the explicit required_evidence_support_level and max_supported_claim_precision fields from the runtime contract.
-- If the available evidence is below the requirement, prefer lowering claim precision or requesting more evidence rather than inventing finer-grained claims.
+- Select only the observed evidence IDs actually relevant to a completion. The runtime validates their existence and OPA evaluates evidence facts.
 - Keep the turn compact, explicit, and directly actionable by the runtime.
 - Respect read_only_mode when it is true.
 - Do not anticipate or impersonate OPA or the semantic judge. Unless provider-level
@@ -59,9 +64,6 @@ Rules:
 # Build the user prompt from the canonical actor handoff.
 def build_actor_user_prompt(*, actor_task: ActorTask) -> str:
     payload = build_actor_prompt_payload(actor_task=actor_task)
-    payload["execution_hints"].update(
-        _build_actor_execution_hints(actor_task=actor_task)
-    )
 
     return (
         "Execute the current plan step in the governed plan-and-execute runtime.\n\n"

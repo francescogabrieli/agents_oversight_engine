@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import json
 
-from layer1_intake import DomainType
-
-from ..domain import PlanStepKind
+from layer1_intake import RequestedOperationType, TaskSpec
 from ..tool_contract import ToolName
 from ..tools.models import ToolBackend, ToolGatewayConfig
 from ..tools.registry import load_tool_gateway_config
@@ -102,22 +100,18 @@ def build_actor_runtime_tools(
 def select_actor_runtime_tools_for_turn(
     runtime_tools: list[dict[str, object]],
     *,
-    domain_type: DomainType,
-    step_kind: PlanStepKind | None,
+    task_spec: TaskSpec,
 ) -> list[dict[str, object]]:
-    if (
-        domain_type == DomainType.EXTERNAL_COMMUNICATION
-        and step_kind == PlanStepKind.FINAL_SYNTHESIS
-    ):
-        excluded = {"emit_step_completed", "emit_final_output"}
-    else:
-        excluded = {"emit_external_communication_draft"}
-    if domain_type == DomainType.EXTERNAL_COMMUNICATION:
-        excluded.add("emit_database_statement")
+    # Capability eligibility is evaluated from requested operation, registry, static policy and HITL;
+    # descriptive domain labels and plan categories never gate actor actions.
+    requested_email = any(
+        operation.operation_type == RequestedOperationType.EXTERNAL_COMMUNICATION
+        and operation.channel == "email"
+        for operation in task_spec.requested_operations
+    )
     return [
-        tool
-        for tool in runtime_tools
-        if str(tool.get("name", "")) not in excluded
+        tool for tool in runtime_tools
+        if requested_email or tool.get("name") != "emit_external_communication_draft"
     ]
 
 
@@ -188,18 +182,16 @@ def _completion_action(name: str, description: str) -> dict[str, object]:
             "summary": _string(),
             "output_text": _string(),
             "completion_rationale": _string(),
-            "objective_satisfied": {"type": "boolean"},
-            "evidence_sufficient": {"type": "boolean"},
-            "confidence": _confidence(),
+            "actor_self_confidence": _confidence(),
+            "evidence_refs": {"type": "array", "items": _string(), "maxItems": 50},
             "residual_uncertainty": _string(),
         },
         (
             "summary",
             "output_text",
             "completion_rationale",
-            "objective_satisfied",
-            "evidence_sufficient",
-            "confidence",
+            "actor_self_confidence",
+            "evidence_refs",
         ),
     )
 
@@ -221,9 +213,8 @@ def _external_communication_draft_action() -> dict[str, object]:
             "cc": {"type": "array", "items": _string(), "maxItems": 20},
             "bcc": {"type": "array", "items": _string(), "maxItems": 20},
             "completion_rationale": _string(),
-            "objective_satisfied": {"type": "boolean"},
-            "evidence_sufficient": {"type": "boolean"},
-            "confidence": _confidence(),
+            "actor_self_confidence": _confidence(),
+            "evidence_refs": {"type": "array", "items": _string(), "maxItems": 50},
             "residual_uncertainty": _string(),
         },
         (
@@ -233,9 +224,8 @@ def _external_communication_draft_action() -> dict[str, object]:
             "subject",
             "body",
             "completion_rationale",
-            "objective_satisfied",
-            "evidence_sufficient",
-            "confidence",
+            "actor_self_confidence",
+            "evidence_refs",
         ),
     )
 
@@ -259,9 +249,8 @@ def _database_statement_action() -> dict[str, object]:
                 },
             },
             "completion_rationale": _string(),
-            "objective_satisfied": {"type": "boolean"},
-            "evidence_sufficient": {"type": "boolean"},
-            "confidence": _confidence(),
+            "actor_self_confidence": _confidence(),
+            "evidence_refs": {"type": "array", "items": _string(), "maxItems": 50},
             "residual_uncertainty": _string(),
         },
         (
@@ -270,9 +259,8 @@ def _database_statement_action() -> dict[str, object]:
             "statement",
             "parameters",
             "completion_rationale",
-            "objective_satisfied",
-            "evidence_sufficient",
-            "confidence",
+            "actor_self_confidence",
+            "evidence_refs",
         ),
     )
 

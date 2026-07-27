@@ -170,9 +170,7 @@ class Layer2ArchitectureTests(unittest.TestCase):
     # Domain-specific legal fixtures must not leak into generic actor/evidence services.
     def test_generic_runtime_has_no_case_specific_legal_markers(self) -> None:
         generic_files = (
-            LAYER2_ROOT / "domain" / "evidence_policy.py",
             LAYER2_ROOT / "execution" / "prompts.py",
-            LAYER2_ROOT / "execution" / "evidence_guard.py",
             LAYER2_ROOT / "execution" / "result_builder.py",
             LAYER2_ROOT / "runtime" / "tool_service.py",
         )

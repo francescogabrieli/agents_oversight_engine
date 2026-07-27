@@ -18,15 +18,6 @@ class ScratchpadEntryType(str, Enum):
 
 
 # Canonical domain contract extracted from the legacy state facade.
-class StepValidationDecision(str, Enum):
-    # Validation decisions let the actor self-check without directly mutating graph routing.
-    COMPLETE_STEP = "complete_step"
-    CONTINUE_ACTING = "continue_acting"
-    REQUEST_MORE_EVIDENCE = "request_more_evidence"
-    ASK_CLARIFICATION = "ask_clarification"
-    NEEDS_REPLAN = "needs_replan"
-
-
 # Canonical domain contract extracted from the legacy state facade.
 @dataclass
 class ExecutedPlanStep:
@@ -52,19 +43,16 @@ class ScratchpadEntry:
 # Canonical domain contract extracted from the legacy state facade.
 @dataclass(frozen=True)
 class StepValidation:
-    # Capture the actor self-check used before the runtime completes a semantic step.
+    # Preserve an audit-safe completion attestation; routing comes from ActorResult and OPA.
     plan_step_id: str
-    objective_satisfied: bool
-    evidence_sufficient: bool
-    confidence: float
-    next_action: StepValidationDecision
-    rationale_summary: str
+    actor_self_confidence: float = 0.0
+    rationale_summary: str = ""
+    evidence_refs: tuple[str, ...] = ()
     residual_uncertainty: str | None = None
 
 
 __all__ = [
     "ScratchpadEntryType",
-    "StepValidationDecision",
     "ExecutedPlanStep",
     "ScratchpadEntry",
     "StepValidation"

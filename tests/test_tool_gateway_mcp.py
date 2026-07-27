@@ -32,7 +32,6 @@ from layer2_runtime_governance import (
     ActorResultType,
     ActorTask,
     CapabilityAccessMode,
-    EvidenceSupportLevel,
     GovernanceReasonCode,
     PlanStep,
     PlannerDecision,
@@ -46,7 +45,6 @@ from layer2_runtime_governance import (
     ScratchpadEntry,
     ScratchpadEntryType,
     StepValidation,
-    StepValidationDecision,
     ToolExecutionResult,
     ToolGatewayConfig,
     ToolName,
@@ -63,6 +61,11 @@ from layer2_runtime_governance.tools import (
 )
 from layer2_runtime_governance.infrastructure.checkpointing import (
     build_runtime_serializer,
+)
+from layer2_runtime_governance.tool_contract import (
+    DocumentType,
+    Extractability,
+    SourceAuthority,
 )
 
 
@@ -309,7 +312,9 @@ class GatewayMCPTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertIn("publication fallback", result.summary)
         self.assertIn("proper functioning of the internal market", result.content or "")
-        self.assertEqual(result.sources[0].support_level_hint, EvidenceSupportLevel.PRIMARY_LEGAL)
+        self.assertEqual(result.sources[0].source_authority, SourceAuthority.OFFICIAL_PRIMARY)
+        self.assertEqual(result.sources[0].document_type, DocumentType.LEGAL_TEXT)
+        self.assertEqual(result.sources[0].extractability, Extractability.COMPLETE)
         self.assertEqual(
             result.sources[0].locator,
             "http://publications.europa.eu/resource/celex/32022R1925",
@@ -463,17 +468,15 @@ class MCPThenCompleteActor(ActorPort):
 
         return ActorResult(
             plan_step_id=actor_task.current_plan_step.step_id,
-            result_type=ActorResultType.FINAL_OUTPUT,
+            result_type=ActorResultType.STEP_COMPLETED,
             summary="MCP evidence observed.",
             capability_mode=CapabilityAccessMode.NONE,
             external_impact=False,
             output_text="The MCP tool returned deterministic text statistics.",
             step_validation=StepValidation(
                 plan_step_id=actor_task.current_plan_step.step_id,
-                objective_satisfied=True,
-                evidence_sufficient=True,
-                confidence=0.9,
-                next_action=StepValidationDecision.COMPLETE_STEP,
+                actor_self_confidence=0.9,
+                evidence_refs=tuple(item.evidence_id for item in actor_task.observed_evidence),
                 rationale_summary="The MCP result was observed and normalized as evidence.",
             ),
         )

@@ -113,7 +113,7 @@ class DisabledJudge(JudgePort):
 
 class OpenAIJudge(JudgePort):
     judge_name = "openai_layer2_external_operation_judge"
-    prompt_version = "external_operation_judge_v2"
+    prompt_version = "external_operation_judge_v3"
 
     def __init__(self, settings: JudgeSettings | None = None) -> None:
         self._settings = settings or JudgeSettings.from_env()

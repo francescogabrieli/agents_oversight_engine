@@ -25,15 +25,12 @@ from layer2_runtime_governance import (
     ActorResultType,
     CapabilityAccessMode,
     EvidenceSourceKind,
-    EvidenceSupportLevel,
     PlanStep,
-    PlanStepKind,
     PlanStepStatus,
     RuntimeState,
     ScratchpadEntry,
     ScratchpadEntryType,
     StepValidation,
-    StepValidationDecision,
     TaskState,
     ToolName,
     build_policy_evaluation_input,
@@ -44,6 +41,12 @@ from layer2_runtime_governance.signal_services import (
     build_trajectory_signal,
 )
 from layer2_runtime_governance.tool_contract import ObservedEvidence
+from layer2_runtime_governance.tool_contract import (
+    CitationAlignment,
+    EvidenceContentState,
+    Extractability,
+    SourceAuthority,
+)
 
 
 class Layer2OversightRawFactsTests(unittest.TestCase):
@@ -59,7 +62,10 @@ class Layer2OversightRawFactsTests(unittest.TestCase):
                 excerpt="A detailed fact collected by the tool.",
                 source_kind=EvidenceSourceKind.TOOL_OBSERVATION,
                 source_tool=ToolName.FETCH_URL_TEXT,
-                support_level=EvidenceSupportLevel.DETAILED_EXTRACTED,
+                content_state=EvidenceContentState.EXTRACTED_FULL,
+                source_authority=SourceAuthority.OFFICIAL_PRIMARY,
+                extractability=Extractability.COMPLETE,
+                citation_alignment=CitationAlignment.EXACT,
             )
         )
 
@@ -68,8 +74,9 @@ class Layer2OversightRawFactsTests(unittest.TestCase):
         self.assertIsNone(signal["diagnostic_score"])
         self.assertEqual(signal["diagnostic_level"], "unscored")
         self.assertNotIn("recommended_directive", signal)
-        self.assertEqual(signal["raw_facts"]["support_level_required"], "detailed_extracted")
-        self.assertEqual(signal["raw_facts"]["support_level_available"], "detailed_extracted")
+        self.assertTrue(signal["raw_facts"]["selected_evidence_refs_valid"])
+        self.assertTrue(signal["raw_facts"]["extracted_content_present"])
+        self.assertTrue(signal["raw_facts"]["official_source_present"])
 
     # Verify operational risk is expressed as raw policy facts only.
     def test_risk_signal_does_not_load_weights_or_choose_directive(self) -> None:
@@ -109,8 +116,9 @@ class Layer2OversightRawFactsTests(unittest.TestCase):
             thresholds_version="policy.v1",
         )
 
-        self.assertEqual(signal["raw_facts"]["actor_turn_count_for_step"], 3)
-        self.assertTrue(signal["raw_facts"]["completion_attempt"])
+        self.assertEqual(signal["raw_facts"]["configured_confidence_threshold"], 0.65)
+        self.assertIn("consecutive_no_progress_turns", signal["raw_facts"])
+        self.assertEqual(signal["raw_facts"]["external_action_revision_count"], 0)
         self.assertIsNone(signal["diagnostic_score"])
         self.assertNotIn("recommended_directive", signal)
 
@@ -145,24 +153,19 @@ def _build_state() -> TaskState:
             objective="Produce a detailed grounded summary.",
             rationale="The task needs a supported synthesis.",
             expected_outcome="A concise summary.",
-            step_kind=PlanStepKind.DETAILED_EXTRACTION,
-            evidence_requirement=EvidenceSupportLevel.DETAILED_EXTRACTED,
-            claim_precision_ceiling=EvidenceSupportLevel.DETAILED_EXTRACTED,
             status=PlanStepStatus.IN_PROGRESS,
         )
     ]
     state.current_plan_step_index = 0
     validation = StepValidation(
         plan_step_id="step_1",
-        objective_satisfied=True,
-        evidence_sufficient=True,
-        confidence=0.9,
-        next_action=StepValidationDecision.COMPLETE_STEP,
+        actor_self_confidence=0.9,
+        evidence_refs=("tool_evidence_1",),
         rationale_summary="The evidence supports the summary.",
     )
     state.actor_result = ActorResult(
         plan_step_id="step_1",
-        result_type=ActorResultType.FINAL_OUTPUT,
+        result_type=ActorResultType.STEP_COMPLETED,
         summary="Prepared the grounded summary.",
         capability_mode=CapabilityAccessMode.NONE,
         output_text="Grounded summary.",

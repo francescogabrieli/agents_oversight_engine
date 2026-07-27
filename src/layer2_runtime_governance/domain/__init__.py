@@ -1,15 +1,14 @@
 """Framework-independent public domain view for canonical Layer 2 state."""
 
-from .evidence import EvidenceSourceKind, EvidenceSupportLevel, ObservedEvidence
+from .evidence import CitationAlignment, DocumentType, EvidenceContentState, EvidenceSourceKind, Extractability, ObservedEvidence, SourceAuthority
 from .runtime_records import (
     ExecutedPlanStep,
     ScratchpadEntry,
     ScratchpadEntryType,
     StepValidation,
-    StepValidationDecision,
 )
 from .lifecycle import RuntimeFlag, RuntimeState, StepRecord
-from .plan import PlanStep, PlanStepKind, PlanStepStatus, PlannerDecision
+from .plan import PlanStep, PlanStepStatus, PlannerDecision
 from .review import (
     ExternalCommunicationDraft,
     ExternalCommunicationPhase,
@@ -43,7 +42,9 @@ __all__ = [
     "ActorResultType",
     "CapabilityAccessMode",
     "EvidenceSourceKind",
-    "EvidenceSupportLevel",
+    "CitationAlignment",
+    "DocumentType",
+    "EvidenceContentState",
     "ExecutedPlanStep",
     "ExternalCommunicationDraft",
     "ExternalCommunicationPhase",
@@ -54,7 +55,6 @@ __all__ = [
     "HumanReviewRequest",
     "ObservedEvidence",
     "PlanStep",
-    "PlanStepKind",
     "PlanStepStatus",
     "PlannerDecision",
     "RuntimeFlag",
@@ -63,7 +63,8 @@ __all__ = [
     "ScratchpadEntryType",
     "StepRecord",
     "StepValidation",
-    "StepValidationDecision",
+    "Extractability",
+    "SourceAuthority",
     "TaskState",
     "coerce_external_communication_draft",
     "coerce_external_operation_proposal",

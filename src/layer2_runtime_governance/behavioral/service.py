@@ -11,10 +11,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from layer1_intake import IntakeResult
 
-from ..actor_contract import ActorResultType
-from ..domain.evidence_policy import available_evidence_support_level
 from ..domain import TaskState
-from ..tool_contract import EvidenceSupportLevel
 
 if TYPE_CHECKING:
     from ..judge import JudgeAssessment
@@ -301,15 +298,13 @@ class SQLiteBehavioralStore(BehavioralStorePort):
                 replan_count INTEGER NOT NULL,
                 review_count INTEGER NOT NULL,
                 abort_count INTEGER NOT NULL,
-                has_external_communication INTEGER NOT NULL,
-                max_evidence_support_level TEXT NOT NULL
+                has_external_communication INTEGER NOT NULL
             );
             CREATE TABLE IF NOT EXISTS steps (
                 thread_id TEXT NOT NULL,
                 step_id TEXT NOT NULL,
                 status TEXT NOT NULL,
                 actor_result_type TEXT,
-                validation_next_action TEXT,
                 turn_count INTEGER NOT NULL,
                 PRIMARY KEY (thread_id, step_id)
             );
@@ -319,7 +314,6 @@ class SQLiteBehavioralStore(BehavioralStorePort):
                 plan_step_id TEXT NOT NULL,
                 tool_name TEXT NOT NULL,
                 success INTEGER,
-                support_level TEXT,
                 PRIMARY KEY (thread_id, call_index)
             );
             CREATE TABLE IF NOT EXISTS governance_decisions (
@@ -361,21 +355,47 @@ class SQLiteBehavioralStore(BehavioralStorePort):
             );
             """
         )
-        self._migrate_runs_budget_columns_to_nullable(connection)
+        self._migrate_behavioral_table_shapes(connection)
         self._migrate_dynamic_signal_scores_to_nullable(connection)
 
-    # Rebuild the runs table when older local schemas still require a non-null max_steps budget.
-    def _migrate_runs_budget_columns_to_nullable(self, connection: sqlite3.Connection) -> None:
+    # Rebuild old local read-model tables onto the current concrete, rank-free schema.
+    def _migrate_behavioral_table_shapes(self, connection: sqlite3.Connection) -> None:
+        self._migrate_runs_table(connection)
+        self._migrate_steps_table(connection)
+        self._migrate_tool_calls_table(connection)
+
+    # Preserve run history while removing retired columns and nullable-budget drift.
+    def _migrate_runs_table(self, connection: sqlite3.Connection) -> None:
         columns = connection.execute("PRAGMA table_info(runs)").fetchall()
         if not columns:
             return
-        budget_column = next((column for column in columns if column[1] == "budget_max_steps"), None)
-        if budget_column is None or int(budget_column[3]) == 0:
+        expected_columns = (
+            "thread_id",
+            "final_state",
+            "domain_type",
+            "sensitivity",
+            "policy_profile_name",
+            "budget_max_steps",
+            "budget_max_tool_calls",
+            "actor_turn_count",
+            "tool_call_count",
+            "replan_count",
+            "review_count",
+            "abort_count",
+            "has_external_communication",
+        )
+        actual_columns = tuple(str(column[1]) for column in columns)
+        budget_columns_are_nullable = all(
+            int(column[3]) == 0
+            for column in columns
+            if column[1] in {"budget_max_steps", "budget_max_tool_calls"}
+        )
+        if actual_columns == expected_columns and budget_columns_are_nullable:
             return
 
         connection.executescript(
             """
-            ALTER TABLE runs RENAME TO runs_legacy_budget_migration;
+            ALTER TABLE runs RENAME TO runs_schema_migration;
             CREATE TABLE runs (
                 thread_id TEXT PRIMARY KEY,
                 final_state TEXT NOT NULL,
@@ -389,22 +409,87 @@ class SQLiteBehavioralStore(BehavioralStorePort):
                 replan_count INTEGER NOT NULL,
                 review_count INTEGER NOT NULL,
                 abort_count INTEGER NOT NULL,
-                has_external_communication INTEGER NOT NULL,
-                max_evidence_support_level TEXT NOT NULL
+                has_external_communication INTEGER NOT NULL
             );
             INSERT INTO runs (
                 thread_id, final_state, domain_type, sensitivity, policy_profile_name,
                 budget_max_steps, budget_max_tool_calls, actor_turn_count, tool_call_count,
-                replan_count, review_count, abort_count, has_external_communication,
-                max_evidence_support_level
+                replan_count, review_count, abort_count, has_external_communication
             )
             SELECT
                 thread_id, final_state, domain_type, sensitivity, policy_profile_name,
                 budget_max_steps, budget_max_tool_calls, actor_turn_count, tool_call_count,
-                replan_count, review_count, abort_count, has_external_communication,
-                max_evidence_support_level
-            FROM runs_legacy_budget_migration;
-            DROP TABLE runs_legacy_budget_migration;
+                replan_count, review_count, abort_count, has_external_communication
+            FROM runs_schema_migration;
+            DROP TABLE runs_schema_migration;
+            """
+        )
+
+    # Preserve step history while retaining only explicit actor result facts.
+    def _migrate_steps_table(self, connection: sqlite3.Connection) -> None:
+        columns = connection.execute("PRAGMA table_info(steps)").fetchall()
+        expected_columns = (
+            "thread_id",
+            "step_id",
+            "status",
+            "actor_result_type",
+            "turn_count",
+        )
+        if tuple(str(column[1]) for column in columns) == expected_columns:
+            return
+
+        connection.executescript(
+            """
+            ALTER TABLE steps RENAME TO steps_schema_migration;
+            CREATE TABLE steps (
+                thread_id TEXT NOT NULL,
+                step_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                actor_result_type TEXT,
+                turn_count INTEGER NOT NULL,
+                PRIMARY KEY (thread_id, step_id)
+            );
+            INSERT INTO steps (
+                thread_id, step_id, status, actor_result_type, turn_count
+            )
+            SELECT
+                thread_id, step_id, status, actor_result_type, turn_count
+            FROM steps_schema_migration;
+            DROP TABLE steps_schema_migration;
+            """
+        )
+
+    # Preserve tool-call history without retaining a universal evidence rank.
+    def _migrate_tool_calls_table(self, connection: sqlite3.Connection) -> None:
+        columns = connection.execute("PRAGMA table_info(tool_calls)").fetchall()
+        expected_columns = (
+            "thread_id",
+            "call_index",
+            "plan_step_id",
+            "tool_name",
+            "success",
+        )
+        if tuple(str(column[1]) for column in columns) == expected_columns:
+            return
+
+        connection.executescript(
+            """
+            ALTER TABLE tool_calls RENAME TO tool_calls_schema_migration;
+            CREATE TABLE tool_calls (
+                thread_id TEXT NOT NULL,
+                call_index INTEGER NOT NULL,
+                plan_step_id TEXT NOT NULL,
+                tool_name TEXT NOT NULL,
+                success INTEGER,
+                PRIMARY KEY (thread_id, call_index)
+            );
+            INSERT INTO tool_calls (
+                thread_id, call_index, plan_step_id, tool_name, success
+            )
+            SELECT
+                thread_id, call_index, plan_step_id, tool_name, success
+            FROM tool_calls_schema_migration;
+            DROP TABLE tool_calls_schema_migration;
             """
         )
 
@@ -470,7 +555,7 @@ class SQLiteBehavioralStore(BehavioralStorePort):
             SELECT
                 thread_id, final_state, domain_type, sensitivity, policy_profile_name,
                 actor_turn_count, tool_call_count, replan_count, review_count, abort_count,
-                has_external_communication, max_evidence_support_level
+                has_external_communication
             FROM runs
             WHERE thread_id <> ?
               AND domain_type = ?
@@ -495,7 +580,7 @@ class SQLiteBehavioralStore(BehavioralStorePort):
             SELECT
                 thread_id, final_state, domain_type, sensitivity, policy_profile_name,
                 actor_turn_count, tool_call_count, replan_count, review_count, abort_count,
-                has_external_communication, max_evidence_support_level
+                has_external_communication
             FROM runs
             WHERE thread_id <> ?
               AND domain_type = ?
@@ -682,9 +767,8 @@ class SQLiteBehavioralStore(BehavioralStorePort):
             INSERT INTO runs (
                 thread_id, final_state, domain_type, sensitivity, policy_profile_name,
                 budget_max_steps, budget_max_tool_calls, actor_turn_count, tool_call_count,
-                replan_count, review_count, abort_count, has_external_communication,
-                max_evidence_support_level
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                replan_count, review_count, abort_count, has_external_communication
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 thread_id,
@@ -700,21 +784,15 @@ class SQLiteBehavioralStore(BehavioralStorePort):
                 sum(1 for decision in task_state.governance_history if decision.directive.value == "wait_human_review"),
                 1 if task_state.current_state.value == "aborted" else 0,
                 1 if task_state.external_communication is not None else 0,
-                _max_support_level(task_state=task_state).value,
             ),
         )
 
         for step in task_state.plan_steps:
             actor_result_type = None
-            validation_next_action = None
             turn_count = 0
             for executed_step in task_state.executed_steps:
                 if executed_step.step_id == step.step_id:
                     actor_result_type = executed_step.result_type.value
-                    break
-            for validation in reversed(task_state.step_validations):
-                if validation.plan_step_id == step.step_id:
-                    validation_next_action = validation.next_action.value
                     break
             for scratchpad_entry in task_state.scratchpad:
                 if scratchpad_entry.plan_step_id == step.step_id:
@@ -722,30 +800,24 @@ class SQLiteBehavioralStore(BehavioralStorePort):
             connection.execute(
                 """
                 INSERT INTO steps (
-                    thread_id, step_id, status, actor_result_type, validation_next_action, turn_count
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    thread_id, step_id, status, actor_result_type, turn_count
+                ) VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     thread_id,
                     step.step_id,
                     step.status.value,
                     actor_result_type,
-                    validation_next_action,
                     turn_count,
                 ),
             )
 
         for call_index, tool_result in enumerate(task_state.tool_results_history, start=1):
-            support_level = None
-            for evidence in task_state.observed_evidence:
-                if evidence.plan_step_id == tool_result.request.plan_step_id:
-                    support_level = evidence.support_level.value
-                    break
             connection.execute(
                 """
                 INSERT INTO tool_calls (
-                    thread_id, call_index, plan_step_id, tool_name, success, support_level
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    thread_id, call_index, plan_step_id, tool_name, success
+                ) VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     thread_id,
@@ -753,7 +825,6 @@ class SQLiteBehavioralStore(BehavioralStorePort):
                     tool_result.request.plan_step_id,
                     tool_result.request.tool_name.value,
                     None if tool_result.success is None else int(bool(tool_result.success)),
-                    support_level,
                 ),
             )
 
@@ -908,11 +979,7 @@ def persist_behavioral_runtime_snapshot(
 
 # Materialize the feature vector used by the behavioural similarity and deviation logic.
 def _build_feature_snapshot(*, task_state: TaskState) -> dict[str, str]:
-    validation_distribution: dict[str, int] = {}
-    for validation in task_state.step_validations:
-        validation_distribution[validation.next_action.value] = (
-            validation_distribution.get(validation.next_action.value, 0) + 1
-        )
+    validation_distribution = _distribution_from_validation(task_state=task_state)
 
     governance_distribution: dict[str, int] = {}
     for decision in task_state.governance_history:
@@ -922,7 +989,7 @@ def _build_feature_snapshot(*, task_state: TaskState) -> dict[str, str]:
 
     behavioral_assessment = task_state.last_behavioral_assessment
     return {
-        "feature_snapshot_version": "behavioral_features_v2",
+        "feature_snapshot_version": "behavioral_features_v3",
         "step_count": str(len(task_state.plan_steps)),
         "actor_turn_count": str(task_state.actor_turn_count),
         "tool_call_count": str(task_state.tool_call_count),
@@ -932,7 +999,12 @@ def _build_feature_snapshot(*, task_state: TaskState) -> dict[str, str]:
         ),
         "abort_count": str(1 if task_state.current_state.value == "aborted" else 0),
         "has_external_communication": "1" if task_state.external_communication is not None else "0",
-        "max_evidence_support_level": _max_support_level(task_state=task_state).value,
+        "evidence_count": str(len(task_state.observed_evidence)),
+        "official_source_count": str(sum(item.source_authority.value == "official_primary" for item in task_state.observed_evidence)),
+        "cited_summary_count": str(sum(item.content_state.value == "provider_cited_summary" for item in task_state.observed_evidence)),
+        "extracted_partial_count": str(sum(item.content_state.value == "extracted_partial" for item in task_state.observed_evidence)),
+        "extracted_full_count": str(sum(item.content_state.value == "extracted_full" for item in task_state.observed_evidence)),
+        "extractability_failure_count": str(sum(not result.success and result.extractability_limited for result in task_state.tool_results_history)),
         "governance_distribution": json.dumps(governance_distribution, ensure_ascii=False, sort_keys=True),
         "validation_distribution": json.dumps(validation_distribution, ensure_ascii=False, sort_keys=True),
         "historical_similarity_score": (
@@ -973,7 +1045,7 @@ def _build_current_profile(*, task_state: TaskState) -> dict[str, Any]:
             1 for decision in task_state.governance_history if decision.directive.value == "wait_human_review"
         ),
         "abort_count": 1 if task_state.current_state.value == "aborted" else 0,
-        "max_evidence_support_level": _max_support_level(task_state=task_state).value,
+        "evidence_count": len(task_state.observed_evidence),
         "tool_usage": {result.request.tool_name.value for result in task_state.tool_results_history},
         "governance_distribution": _distribution_from_governance(task_state=task_state),
         "validation_distribution": _distribution_from_validation(task_state=task_state),
@@ -1021,7 +1093,6 @@ def _row_to_candidate(row: tuple[Any, ...]) -> dict[str, Any]:
         "review_count": int(row[8]),
         "abort_count": int(row[9]),
         "has_external_communication": int(row[10]),
-        "max_evidence_support_level": str(row[11]),
     }
 
 
@@ -1079,12 +1150,9 @@ def _score_candidate_similarity(
         + 0.05 * _ratio_similarity(current_profile["replan_count"], candidate_replan_count)
         + 0.05 * _ratio_similarity(current_profile["review_count"], candidate_review_count)
         + 0.05 * _ratio_similarity(current_profile["abort_count"], candidate_abort_count)
-        + 0.10 * _support_level_similarity(
-            current_profile["max_evidence_support_level"],
-            candidate_features.get(
-                "max_evidence_support_level",
-                candidate_run["max_evidence_support_level"],
-            ),
+        + 0.10 * _ratio_similarity(
+            current_profile["evidence_count"],
+            _int_feature(candidate_features, "evidence_count", 0),
         )
         + 0.10 * _jaccard_similarity(current_profile["tool_usage"], candidate_tool_usage)
         + 0.03 * _distribution_similarity(
@@ -1176,17 +1244,6 @@ def _recommend_behavioral_directive(
     deviation_driver: str | None,
 ) -> tuple[BehavioralRecommendedDirective, tuple[str, ...]]:
     flags: list[str] = []
-    support_not_high = available_evidence_support_level(task_state=task_state) in {
-        EvidenceSupportLevel.LOCAL_ONLY,
-        EvidenceSupportLevel.SOURCE_DISCOVERY,
-        EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
-    }
-    completion_attempt = (
-        task_state.actor_result is not None
-        and task_state.actor_result.result_type
-        in {ActorResultType.INTERMEDIATE_OUTPUT, ActorResultType.FINAL_OUTPUT}
-    )
-
     if (
         novelty_score is not None
         and novelty_score >= 0.70
@@ -1194,14 +1251,8 @@ def _recommend_behavioral_directive(
         flags.append("high_novelty")
         return BehavioralRecommendedDirective.REQUEST_MORE_EVIDENCE, tuple(flags)
 
-    if (
-        historical_similarity_score is not None
-        and historical_similarity_score < 0.35
-        and completion_attempt
-        and support_not_high
-    ):
+    if historical_similarity_score is not None and historical_similarity_score < 0.35:
         flags.append("low_historical_similarity")
-        flags.append("completion_attempt_with_limited_support")
         return BehavioralRecommendedDirective.REQUEST_MORE_EVIDENCE, tuple(flags)
 
     if behavior_deviation_score is not None and behavior_deviation_score >= 0.80:
@@ -1242,20 +1293,6 @@ def _build_behavioral_summary(
     )
 
 
-# Return the strongest support level observed so the store can retain evidence quality context.
-def _max_support_level(*, task_state: TaskState) -> EvidenceSupportLevel:
-    if not task_state.observed_evidence:
-        return EvidenceSupportLevel.LOCAL_ONLY
-    ordering = {
-        EvidenceSupportLevel.LOCAL_ONLY: 0,
-        EvidenceSupportLevel.SOURCE_DISCOVERY: 1,
-        EvidenceSupportLevel.HIGH_LEVEL_SUMMARY: 2,
-        EvidenceSupportLevel.DETAILED_EXTRACTED: 3,
-        EvidenceSupportLevel.PRIMARY_LEGAL: 4,
-    }
-    return max(task_state.observed_evidence, key=lambda item: ordering[item.support_level]).support_level
-
-
 # Count governance directives so historical comparisons stay compact and deterministic.
 def _distribution_from_governance(*, task_state: TaskState) -> dict[str, int]:
     distribution: dict[str, int] = {}
@@ -1264,11 +1301,12 @@ def _distribution_from_governance(*, task_state: TaskState) -> dict[str, int]:
     return distribution
 
 
-# Count validation decisions so behavioural comparisons can detect unstable completion patterns.
+# Count completion attestations without turning validation into a routing authority.
 def _distribution_from_validation(*, task_state: TaskState) -> dict[str, int]:
     distribution: dict[str, int] = {}
     for validation in task_state.step_validations:
-        distribution[validation.next_action.value] = distribution.get(validation.next_action.value, 0) + 1
+        key = "completion_attestation"
+        distribution[key] = distribution.get(key, 0) + 1
     return distribution
 
 
@@ -1287,25 +1325,6 @@ def _normalized_deviation(*, current: float, baseline_mean: float) -> float:
 # Return one exact-match similarity for stable categorical fields.
 def _binary_match(left: Any, right: Any) -> float:
     return 1.0 if left == right else 0.0
-
-
-# Compare two evidence support levels by distance in the ordered support ladder.
-def _support_level_similarity(current_level: str, candidate_level: str) -> float:
-    current_rank = _support_level_rank(current_level)
-    candidate_rank = _support_level_rank(candidate_level)
-    return max(0.0, 1.0 - min(abs(current_rank - candidate_rank) / 4.0, 1.0))
-
-
-# Order persisted support-level strings from weakest to strongest.
-def _support_level_rank(level: str) -> int:
-    ordering = {
-        EvidenceSupportLevel.LOCAL_ONLY.value: 0,
-        EvidenceSupportLevel.SOURCE_DISCOVERY.value: 1,
-        EvidenceSupportLevel.HIGH_LEVEL_SUMMARY.value: 2,
-        EvidenceSupportLevel.DETAILED_EXTRACTED.value: 3,
-        EvidenceSupportLevel.PRIMARY_LEGAL.value: 4,
-    }
-    return ordering.get(level, 0)
 
 
 # Compute a Jaccard similarity over the tool sets used in comparable runs.

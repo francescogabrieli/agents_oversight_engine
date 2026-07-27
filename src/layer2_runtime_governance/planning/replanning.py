@@ -10,9 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from llm_retry import llm_retry
 
-from ..domain import PlanStep, PlanStepKind, PlanStepStatus, TaskState
+from ..domain import PlanStep, PlanStepStatus, TaskState
 from ..infrastructure.environment import candidate_env_paths, load_env_file_values
-from ..tool_contract import EvidenceSupportLevel
 
 try:
     from openai import OpenAI
@@ -73,9 +72,6 @@ class _ReplanStepPayload(BaseModel):
     objective: str = Field(..., min_length=1)
     rationale: str = Field(..., min_length=1)
     expected_outcome: str = Field(..., min_length=1)
-    step_kind: PlanStepKind | None = None
-    evidence_requirement: EvidenceSupportLevel | None = None
-    claim_precision_ceiling: EvidenceSupportLevel | None = None
 
 
 class _ReplanningPayload(BaseModel):
@@ -101,11 +97,6 @@ Each replacement step must contain:
 - rationale
 - expected_outcome
 
-If the runtime context makes it clear, also emit:
-- step_kind
-- evidence_requirement
-- claim_precision_ceiling
-
 Rules:
 - Do not modify or repeat completed steps.
 - Do not emit concrete tool calls, URLs, query strings, API inputs, shell commands, or executable payloads.
@@ -114,6 +105,7 @@ Rules:
 - Preserve alignment with the original task, constraints, success criteria, and policy.
 - Produce only the remaining steps needed from the current blocked point to completion.
 - Keep the replacement trajectory compact and executable by the actor.
+- Produce the minimum semantic delta necessary; never add compliance, policy simulation, or human-review meta-steps.
 - If the actor needs more evidence, plan semantic evidence acquisition, not a concrete tool invocation.
 - If runtime_flags includes `extractability_limited`, do not keep replacing the trajectory with more extraction-only steps; pivot to a compact source-backed summary path or a controlled stop/clarification if the task truly requires unavailable precision.
 - If the task is no longer safely executable, produce the safest semantic step that leads to clarification or controlled stopping.
@@ -200,7 +192,11 @@ def build_replanner_user_prompt(*, task_state: TaskState) -> str:
                 "excerpt": evidence.excerpt,
                 "source_kind": evidence.source_kind.value,
                 "source_tool": evidence.source_tool.value if evidence.source_tool is not None else None,
-                "support_level": evidence.support_level.value,
+                "content_state": evidence.content_state.value,
+                "source_authority": evidence.source_authority.value,
+                "document_type": evidence.document_type.value,
+                "extractability": evidence.extractability.value,
+                "citation_alignment": evidence.citation_alignment.value,
             }
             for evidence in task_state.observed_evidence
         ],
@@ -217,10 +213,8 @@ def build_replanner_user_prompt(*, task_state: TaskState) -> str:
         "step_validations": [
             {
                 "plan_step_id": validation.plan_step_id,
-                "objective_satisfied": validation.objective_satisfied,
-                "evidence_sufficient": validation.evidence_sufficient,
-                "confidence": validation.confidence,
-                "next_action": validation.next_action.value,
+                "actor_self_confidence": validation.actor_self_confidence,
+                "evidence_refs": list(validation.evidence_refs),
                 "rationale_summary": validation.rationale_summary,
                 "residual_uncertainty": validation.residual_uncertainty,
             }
@@ -274,9 +268,6 @@ class OpenAIReplanner(ReplannerPort):
                     objective=step.objective,
                     rationale=step.rationale,
                     expected_outcome=step.expected_outcome,
-                    step_kind=step.step_kind,
-                    evidence_requirement=step.evidence_requirement,
-                    claim_precision_ceiling=step.claim_precision_ceiling,
                     status=PlanStepStatus.PENDING,
                 )
                 for index, step in enumerate(payload.replacement_steps, start=1)
@@ -325,9 +316,6 @@ class LocalConservativeReplanner(ReplannerPort):
             objective=f"Recover from the blocked step: {current_step.objective}",
             rationale=f"The actor requested replanning because: {reason}",
             expected_outcome="A revised executable step that lets the runtime continue safely.",
-            step_kind=current_step.step_kind,
-            evidence_requirement=current_step.evidence_requirement,
-            claim_precision_ceiling=current_step.claim_precision_ceiling,
             status=PlanStepStatus.PENDING,
         )
 

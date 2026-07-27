@@ -43,7 +43,7 @@ class Layer2RuntimeCoreTests(unittest.TestCase):
         self.assertEqual(task_state.actor_name, "stub_actor")
         self.assertEqual(task_state.actor_prompt_version, "stub_actor_v1")
         self.assertIsNotNone(task_state.actor_result)
-        self.assertEqual(task_state.actor_result.result_type, ActorResultType.FINAL_OUTPUT)
+        self.assertEqual(task_state.actor_result.result_type, ActorResultType.STEP_COMPLETED)
         self.assertEqual(task_state.actor_result.capability_mode, CapabilityAccessMode.NONE)
         self.assertEqual(len(task_state.executed_steps), 2)
         self.assertEqual(task_state.actor_turn_count, 3)
@@ -63,7 +63,7 @@ class Layer2RuntimeCoreTests(unittest.TestCase):
             task_state.last_governance_decision.policy_decision,
             PolicyDecision.ALLOW,
         )
-        self.assertTrue(all(item.confidence > 0 for item in task_state.step_validations))
+        self.assertTrue(all(item.actor_self_confidence > 0 for item in task_state.step_validations))
         self.assertEqual(
             task_state.final_output_text,
             "The DMA is an EU regulation that targets gatekeeper platforms.",
@@ -79,7 +79,7 @@ class Layer2RuntimeCoreTests(unittest.TestCase):
         )
         self.assertTrue(all(item.source_tool is None for item in task_state.observed_evidence))
         self.assertTrue(
-            all(item.support_level == EvidenceSupportLevel.LOCAL_ONLY for item in task_state.observed_evidence)
+            all(item.content_state.value in {"metadata_only", "extracted_full"} for item in task_state.observed_evidence)
         )
 
 
@@ -115,14 +115,8 @@ class Layer2RuntimeCoreTests(unittest.TestCase):
                 "finalize_bootstrap",
             ],
         )
-        self.assertEqual(
-            task_state.step_validations[0].next_action,
-            StepValidationDecision.CONTINUE_ACTING,
-        )
-        self.assertEqual(
-            task_state.step_validations[1].next_action,
-            StepValidationDecision.COMPLETE_STEP,
-        )
+        self.assertEqual(task_state.step_validations[0].actor_self_confidence, 0.45)
+        self.assertEqual(task_state.step_validations[1].actor_self_confidence, 0.82)
         self.assertEqual(task_state.plan_steps[0].status, PlanStepStatus.COMPLETED)
 
 

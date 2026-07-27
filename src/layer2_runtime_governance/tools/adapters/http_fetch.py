@@ -3,8 +3,9 @@ from __future__ import annotations
 from email.message import Message
 from typing import Callable, Protocol
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 
-from ..contracts import ToolExecutionResult, ToolRequest, ToolSource
+from ..contracts import DocumentType, EvidenceContentState, Extractability, SourceAuthority, ToolErrorCode, ToolExecutionResult, ToolRequest, ToolSource
 from ..eu_legal import try_fetch_specialized_legal_document
 from ..extractors import extract_pdf_text, extract_title, extract_visible_text
 from ..models import ToolDefinition
@@ -53,9 +54,11 @@ class HttpFetchAdapter:
             max_bytes=definition.max_bytes,
             accept="text/html, text/plain;q=0.9, */*;q=0.1",
         )
-        if isinstance(fetch_result, str):
-            return failure_result(tool_request, f"URL fetch failed: {fetch_result}")
-        raw_body, charset, content_type = fetch_result
+        if isinstance(fetch_result, tuple) and len(fetch_result) == 2 and isinstance(fetch_result[1], ToolErrorCode):
+            return ToolExecutionResult(request=tool_request, success=False, summary="URL fetch failed.", error_message=str(fetch_result[0]), error_code=fetch_result[1], extractability_limited=True)
+        raw_body, charset, content_type, truncated = fetch_result
+        if truncated and content_type == "application/pdf":
+            return ToolExecutionResult(request=tool_request, success=False, summary="PDF extraction exceeded the byte limit.", error_message="PDF byte limit prevents treating the document as complete.", error_code=ToolErrorCode.BYTE_LIMIT, extractability_limited=True)
         decoded_body = raw_body.decode(charset, errors="replace")
         if content_type == "text/html":
             title = extract_title(decoded_body) or tool_request.url
@@ -74,20 +77,23 @@ class HttpFetchAdapter:
         if specialized_result is not None:
             return specialized_result
         if not is_meaningful_extracted_text(content):
-            return failure_result(
-                tool_request,
-                "URL fetch succeeded but extracted readable text was empty.",
-            )
+            return ToolExecutionResult(request=tool_request, success=False, summary="URL extraction was empty.", error_message="URL fetch succeeded but extracted readable text was empty.", error_code=ToolErrorCode.EMPTY_EXTRACTION, extractability_limited=True)
         return ToolExecutionResult(
             request=tool_request,
             success=True,
             summary="URL text fetched successfully.",
             content=content,
+            truncated=truncated,
+            extractability_limited=truncated,
             sources=(
                 ToolSource(
                     title=title,
                     locator=tool_request.url or "",
                     snippet=truncate_text(content, 500),
+                    content_state=EvidenceContentState.EXTRACTED_PARTIAL if truncated else EvidenceContentState.EXTRACTED_FULL,
+                    source_authority=SourceAuthority.UNKNOWN,
+                    document_type=DocumentType.DOCUMENTATION if content_type == "text/html" else DocumentType.UNKNOWN,
+                    extractability=Extractability.TRUNCATED if truncated else Extractability.COMPLETE,
                 ),
             ),
         )
@@ -101,7 +107,7 @@ class HttpFetchAdapter:
         max_bytes: int,
         accept: str,
         accept_language: str | None = None,
-    ) -> tuple[bytes, str, str] | str:
+    ) -> tuple[bytes, str, str, bool] | tuple[str, ToolErrorCode]:
         try:
             headers = {"User-Agent": "Layer2ToolGateway/1.0", "Accept": accept}
             if accept_language:
@@ -111,11 +117,18 @@ class HttpFetchAdapter:
                 raw_body = response.read(max_bytes + 1)
                 charset = response.headers.get_content_charset() or "utf-8"
                 content_type = response.headers.get_content_type()
+        except HTTPError as exc:
+            return (f"HTTP {exc.code}", ToolErrorCode.FORBIDDEN if exc.code == 403 else ToolErrorCode.UNAVAILABLE)
+        except TimeoutError as exc:
+            return (str(exc), ToolErrorCode.TIMEOUT)
+        except URLError as exc:  # pragma: no cover - network errors are normalized.
+            message = str(exc)
+            return (message, ToolErrorCode.BOT_CHALLENGE if "challenge" in message.lower() else ToolErrorCode.UNAVAILABLE)
         except Exception as exc:  # pragma: no cover - network errors are normalized.
-            return str(exc)
-        if len(raw_body) > max_bytes:
-            return "URL fetch exceeded the configured byte limit."
-        return raw_body, charset, content_type
+            return (str(exc), ToolErrorCode.UNAVAILABLE)
+        truncated = len(raw_body) > max_bytes
+        # HTML/text remains useful as an explicitly partial prefix; never claim a truncated PDF is complete.
+        return raw_body[:max_bytes], charset, content_type, truncated
 
 
 # Resolve urllib at call time so tests and deployments can inject transport cleanly.

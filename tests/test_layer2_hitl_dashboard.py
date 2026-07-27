@@ -20,6 +20,8 @@ from layer1_intake import (
     IntakeMetadata,
     IntakeResult,
     ParseStatus,
+    RequestedOperation,
+    RequestedOperationType,
     SensitivityLevel,
     StructuredTask,
     TaskSpec,
@@ -49,7 +51,6 @@ from layer2_runtime_governance import (
     PolicyDecision,
     RuntimeState,
     StepValidation,
-    StepValidationDecision,
     TaskState,
     ToolName,
     ToolRequest,
@@ -223,6 +224,13 @@ def _external_communication_intake_result() -> IntakeResult:
                 domain_label="external_comm_dashboard_test",
                 sensitivity=SensitivityLevel.HIGH,
                 success_criteria=["Pause before any outward-facing execution."],
+                requested_operations=[
+                    RequestedOperation(
+                        operation_type=RequestedOperationType.EXTERNAL_COMMUNICATION,
+                        channel="email",
+                        recipient="ops@example.com",
+                    )
+                ],
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.75,

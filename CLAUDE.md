@@ -87,7 +87,7 @@ finalize_bootstrap → END
 
 - **Typed planning/acting split**: Planner emits semantic `PlanStep` objects; actor executes one step at a time, emitting typed `ActorResult` with `ActorResultType` enum.
 - **Tool Gateway** (`tool_gateway.py`): Registry-controlled, typed `ToolRequest` → `ToolExecutionResult` → `ObservedEvidence`. Tools: `web_search`, `fetch_url_text`, and four MCP local test tools.
-- **Evidence tracking**: `ObservedEvidence` carries explicit `EvidenceSupportLevel` and `EvidenceSourceKind`. Task-provided facts are materialized into initial observed evidence at bootstrap.
+- **Evidence tracking**: `ObservedEvidence` carries orthogonal content-state, authority, document-type, extractability, citation-alignment, and provenance attributes. Task-provided facts are materialized into initial observed evidence at bootstrap.
 - **HITL** (`hitl.py`): LangGraph `interrupt`/`resume`. `WAITING_HUMAN_REVIEW` pauses the graph; typed `HumanReviewRequest` is persisted; decisions are typed (`APPROVE_CONTINUE`, `MODIFY_AND_CONTINUE`, `ABORT`, etc.).
 - **Replanner** (`replanning.py`): Triggered on `NEEDS_REPLAN`; replaces only current + pending steps; completed steps are immutable history.
 - **Persistence** (`persistence.py`): LangGraph checkpoints → `artifacts/runtime/checkpoints/`; per-thread artifacts → `artifacts/runtime/<thread_id>/`; behavioral SQLite → `artifacts/runtime/behavioral/behavioral.sqlite3`.

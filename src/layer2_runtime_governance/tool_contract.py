@@ -15,13 +15,53 @@ class ToolName(str, Enum):
     MCP_LOCAL_TEST_CALCULATE_EXPRESSION = "mcp.local_test.calculate_expression"
 
 
-class EvidenceSupportLevel(str, Enum):
-    # EvidenceSupportLevel states how much claim precision one observed evidence item can safely support.
-    LOCAL_ONLY = "local_only"
-    SOURCE_DISCOVERY = "source_discovery"
-    HIGH_LEVEL_SUMMARY = "high_level_summary"
-    DETAILED_EXTRACTED = "detailed_extracted"
-    PRIMARY_LEGAL = "primary_legal"
+class EvidenceContentState(str, Enum):
+    # Content state records the concrete amount of source material actually observed.
+    METADATA_ONLY = "metadata_only"
+    PROVIDER_CITED_SUMMARY = "provider_cited_summary"
+    EXTRACTED_PARTIAL = "extracted_partial"
+    EXTRACTED_FULL = "extracted_full"
+
+
+class SourceAuthority(str, Enum):
+    # Authority is descriptive and deliberately has no universal ordering.
+    OFFICIAL_PRIMARY = "official_primary"
+    PRIMARY = "primary"
+    SECONDARY = "secondary"
+    UNKNOWN = "unknown"
+
+
+class DocumentType(str, Enum):
+    PRODUCT_ANNOUNCEMENT = "product_announcement"
+    DOCUMENTATION = "documentation"
+    LEGAL_TEXT = "legal_text"
+    COMMUNITY_POST = "community_post"
+    UNKNOWN = "unknown"
+
+
+class Extractability(str, Enum):
+    COMPLETE = "complete"
+    TRUNCATED = "truncated"
+    FORBIDDEN = "forbidden"
+    EMPTY = "empty"
+    UNAVAILABLE = "unavailable"
+
+
+class CitationAlignment(str, Enum):
+    EXACT = "exact"
+    PROVIDER_ATTRIBUTED = "provider_attributed"
+    NONE = "none"
+
+
+class ToolErrorCode(str, Enum):
+    FORBIDDEN = "forbidden"
+    BYTE_LIMIT = "byte_limit"
+    BOT_CHALLENGE = "bot_challenge"
+    EMPTY_EXTRACTION = "empty_extraction"
+    TIMEOUT = "timeout"
+    CIRCUIT_OPEN = "circuit_open"
+    DUPLICATE_REQUEST = "duplicate_request"
+    UNAVAILABLE = "unavailable"
 
 
 class EvidenceSourceKind(str, Enum):
@@ -53,8 +93,11 @@ class ToolSource:
     title: str
     locator: str
     snippet: str | None = None
-    # Specialized adapters may declare a conservative support ceiling for this source.
-    support_level_hint: EvidenceSupportLevel | None = None
+    content_state: EvidenceContentState = EvidenceContentState.METADATA_ONLY
+    source_authority: SourceAuthority = SourceAuthority.UNKNOWN
+    document_type: DocumentType = DocumentType.UNKNOWN
+    extractability: Extractability = Extractability.UNAVAILABLE
+    citation_alignment: CitationAlignment = CitationAlignment.NONE
 
 
 @dataclass(frozen=True)
@@ -66,6 +109,9 @@ class ToolExecutionResult:
     content: str | None = None
     sources: tuple[ToolSource, ...] = ()
     error_message: str | None = None
+    error_code: ToolErrorCode | None = None
+    truncated: bool = False
+    extractability_limited: bool = False
 
 
 @dataclass(frozen=True)
@@ -78,7 +124,11 @@ class ObservedEvidence:
     excerpt: str
     source_kind: EvidenceSourceKind = EvidenceSourceKind.TOOL_OBSERVATION
     source_tool: ToolName | None = None
-    support_level: EvidenceSupportLevel = EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
+    content_state: EvidenceContentState = EvidenceContentState.METADATA_ONLY
+    source_authority: SourceAuthority = SourceAuthority.UNKNOWN
+    document_type: DocumentType = DocumentType.UNKNOWN
+    extractability: Extractability = Extractability.UNAVAILABLE
+    citation_alignment: CitationAlignment = CitationAlignment.NONE
 
 
 class ToolGatewayPort(Protocol):
@@ -90,7 +140,12 @@ class ToolGatewayPort(Protocol):
 
 __all__ = [
     "EvidenceSourceKind",
-    "EvidenceSupportLevel",
+    "EvidenceContentState",
+    "SourceAuthority",
+    "DocumentType",
+    "Extractability",
+    "CitationAlignment",
+    "ToolErrorCode",
     "ObservedEvidence",
     "ToolExecutionResult",
     "ToolGatewayPort",

@@ -42,6 +42,28 @@ class ExecutionIntent(str, Enum):
     EXECUTE_AFTER_GOVERNANCE = "execute_after_governance"
 
 
+class RequestedOperationType(str, Enum):
+    # Requested effects describe intent independently from the descriptive task domain.
+    EXTERNAL_COMMUNICATION = "external_communication"
+
+
+class RequestedOperation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation_type: RequestedOperationType
+    channel: str | None = None
+    recipient: str | None = None
+
+    @field_validator("channel", "recipient", mode="before")
+    @classmethod
+    def normalize_optional_operation_text(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise TypeError("Requested operation fields must be strings.")
+        return " ".join(value.strip().split()) or None
+
+
 # Keep domain validation failures separate from generic Python exceptions.
 class IntakeDomainError(Exception):
     """Base exception for layer 1 domain errors."""
@@ -121,6 +143,7 @@ class TaskSpec(BaseModel):
             "User-requested execution intent; this records intent and never grants authority."
         ),
     )
+    requested_operations: list[RequestedOperation] = Field(default_factory=list)
 
     @field_validator("goal", "context", "domain_label", mode="before")
     @classmethod
@@ -300,6 +323,8 @@ __all__ = [
     "InvalidExecutionPolicyError",
     "InvalidTaskSpecError",
     "ParseStatus",
+    "RequestedOperation",
+    "RequestedOperationType",
     "SensitivityLevel",
     "StructuredTask",
     "TaskCompletenessAssessment",

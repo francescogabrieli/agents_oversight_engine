@@ -160,7 +160,8 @@ def _normalize_observed_evidence(
     return tuple(
         NormalizedObservedEvidence(
             source_kind=_optional_text(item.get("source_kind")),
-            support_level=_require_str(item, "support_level", source_path=source_path),
+            content_state=_legacy_content_state(item, source_path=source_path),
+            extractability=_legacy_extractability(item, source_path=source_path),
         )
         for item in items
     )
@@ -172,16 +173,45 @@ def _normalize_plan_steps(payload: Any, *, source_path: Path) -> tuple[Normalize
     return tuple(
         NormalizedPlanStep(
             step_id=_require_str(item, "step_id", source_path=source_path),
-            evidence_requirement=_optional_text(item.get("evidence_requirement")),
-            claim_precision_ceiling=_optional_text(item.get("claim_precision_ceiling")),
-            resolved_required_evidence_support_level=_optional_text(
-                item.get("resolved_required_evidence_support_level")
-            ),
-            resolved_required_evidence_support_source=_optional_text(
+            legacy_requirement_source=_optional_text(
                 item.get("resolved_required_evidence_support_source")
+            ),
+            legacy_required_support=_optional_text(
+                item.get("resolved_required_evidence_support_level")
             ),
         )
         for item in items
+    )
+
+
+# Normalize removed evidence-rank fields only at the offline evaluation boundary.
+def _legacy_content_state(item: dict[str, Any], *, source_path: Path) -> str:
+    content_state = item.get("content_state")
+    if isinstance(content_state, str) and content_state:
+        return content_state
+    legacy_support = item.get("support_level")
+    legacy_map = {
+        "detailed_extracted": "extracted_full",
+        "high_level_summary": "provider_cited_summary",
+        "primary_legal": "metadata_only",
+        "local_only": "metadata_only",
+        "source_discovery": "metadata_only",
+    }
+    if isinstance(legacy_support, str) and legacy_support in legacy_map:
+        return legacy_map[legacy_support]
+    raise TraceEvaluationError(
+        issue_type="schema_invalid",
+        message=f"Trace file is missing a valid 'content_state' string: {source_path}",
+    )
+
+
+# Keep legacy extractability conservative when projecting rank-only evidence.
+def _legacy_extractability(item: dict[str, Any], *, source_path: Path) -> str:
+    extractability = item.get("extractability")
+    if isinstance(extractability, str) and extractability:
+        return extractability
+    return "unavailable" if "support_level" in item else _require_str(
+        item, "extractability", source_path=source_path
     )
 
 

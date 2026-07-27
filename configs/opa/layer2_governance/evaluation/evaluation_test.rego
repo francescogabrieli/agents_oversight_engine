@@ -1,63 +1,23 @@
 package layer2.evaluation
 
-base_evaluation_input := {
-	"derived": {"completeness": "complete"},
-	"trace": {
-		"actor": {"precision_mismatch_detected": false},
-		"observed_evidence": [],
-		"governance_passes": [],
-	},
+import rego.v1
+
+base_evaluation_input := {"derived": {"completeness": "complete"}, "trace": {"observed_evidence": [], "governance_passes": []}}
+
+test_cited_search_requires_source_locator if {
+  trace := object.union(base_evaluation_input.trace, {"observed_evidence": [{"evidence_id": "step:tool:1:source:1", "locator": "search query", "source_tool": "web_search", "content_state": "provider_cited_summary"}]})
+  result := compliance with input as object.union(base_evaluation_input, {"trace": trace})
+  "web_search_citation_missing_locator" in result.findings
 }
 
-# Aggregated web-search fallback cannot claim extracted source support.
-test_web_search_detailed_fallback_fails if {
-	trace := object.union(base_evaluation_input.trace, {
-		"observed_evidence": [{
-			"evidence_id": "step_1:tool:1:fallback",
-			"locator": "official source query",
-			"source_tool": "web_search",
-			"support_level": "detailed_extracted",
-		}],
-	})
-	result := compliance with input as object.union(base_evaluation_input, {"trace": trace})
-	"web_search_evidence_support_overstated" in result.findings
+test_aggregate_search_fallback_is_not_content if {
+  trace := object.union(base_evaluation_input.trace, {"observed_evidence": [{"evidence_id": "step:tool:1:fallback", "locator": "https://example.test", "source_tool": "web_search", "content_state": "provider_cited_summary"}]})
+  result := compliance with input as object.union(base_evaluation_input, {"trace": trace})
+  "web_search_aggregate_copied_as_content" in result.findings
 }
 
-# Query-only fallback evidence exposes the missing source-level locator.
-test_web_search_query_fallback_fails if {
-	trace := object.union(base_evaluation_input.trace, {
-		"observed_evidence": [{
-			"evidence_id": "step_1:tool:1:fallback",
-			"locator": "official source query",
-			"source_tool": "web_search",
-			"support_level": "source_discovery",
-		}],
-	})
-	result := compliance with input as object.union(base_evaluation_input, {"trace": trace})
-	"web_search_fallback_missing_source_locator" in result.findings
-}
-
-# Actor and final governance must share the canonical precision-mismatch result.
-test_precision_mismatch_disagreement_fails if {
-	trace := object.union(base_evaluation_input.trace, {
-		"actor": {"precision_mismatch_detected": true},
-		"governance_passes": [{
-			"directive": "continue",
-			"policy_decision": "allow",
-			"pillar_results": {"evidence": {"precision_mismatch": false}},
-		}],
-	})
-	result := compliance with input as object.union(base_evaluation_input, {"trace": trace})
-	"actor_governance_precision_mismatch_disagrees" in result.findings
-}
-
-# A strong numeric score cannot retain the old weak default level.
-test_evidence_score_level_disagreement_fails if {
-	trace := object.union(base_evaluation_input.trace, {
-		"governance_passes": [{
-			"pillar_results": {"evidence": {"score": 0.93, "level": "weak"}},
-		}],
-	})
-	result := compliance with input as object.union(base_evaluation_input, {"trace": trace})
-	"evidence_score_level_inconsistent" in result.findings
+test_recovery_exhaustion_must_not_be_deny if {
+  trace := object.union(base_evaluation_input.trace, {"governance_passes": [{"directive": "stop", "policy_decision": "deny", "pillar_results": {"trajectory": {"recovery_exhausted": true}, "static_policy": {"hard_deny": false}, "judge": {"invoked": false}, "behavioral": {"raw_facts": {"mode": "shadow", "decision_influence": false}}, "risk": {"raw_facts": {"mode": "shadow", "decision_influence": false}}}}]})
+  result := compliance with input as object.union(base_evaluation_input, {"trace": trace})
+  "recovery_exhaustion_denied" in result.findings
 }

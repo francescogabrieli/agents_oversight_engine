@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from llm_retry import llm_retry
 
-from ..contracts import ToolExecutionResult, ToolRequest, ToolSource
+from ..contracts import CitationAlignment, EvidenceContentState, Extractability, ToolExecutionResult, ToolRequest, ToolSource
 from ..models import OpenAIToolGatewaySettings, ToolDefinition
 from ..results import failure_result
 from ..text import truncate_text
@@ -75,11 +75,14 @@ def extract_web_sources(response: object) -> tuple[ToolSource, ...]:
                 if not url:
                     continue
                 title = _annotation_value(annotation, "title") or url
-                snippet = _annotation_value(annotation, "text")
+                snippet, alignment = _citation_snippet(content=content, annotation=annotation)
                 deduped[url] = ToolSource(
                     title=title,
                     locator=url,
                     snippet=truncate_text(snippet, 300) if snippet else None,
+                    content_state=(EvidenceContentState.PROVIDER_CITED_SUMMARY if snippet else EvidenceContentState.METADATA_ONLY),
+                    extractability=(Extractability.COMPLETE if snippet else Extractability.UNAVAILABLE),
+                    citation_alignment=alignment,
                 )
     return tuple(deduped.values())
 
@@ -93,6 +96,36 @@ def _annotation_value(annotation: object, key: str) -> str | None:
         raw_value = annotation.get(key)
         return str(raw_value) if raw_value is not None else None
     return None
+
+
+# Keep only the text actually tied to one citation; never copy the aggregate answer to every URL.
+def _citation_snippet(*, content: object, annotation: object) -> tuple[str | None, CitationAlignment]:
+    text = _annotation_value(content, "text") or ""
+    start = _annotation_int(annotation, "start_index")
+    end = _annotation_int(annotation, "end_index")
+    if text and start is not None and end is not None and 0 <= start < end <= len(text):
+        sentence = _containing_sentence(text=text, start=start, end=end)
+        return sentence, CitationAlignment.EXACT
+    attributed = _annotation_value(annotation, "text")
+    if attributed:
+        return attributed, CitationAlignment.PROVIDER_ATTRIBUTED
+    return None, CitationAlignment.NONE
+
+
+def _annotation_int(annotation: object, key: str) -> int | None:
+    value = getattr(annotation, key, None)
+    if value is None and isinstance(annotation, dict):
+        value = annotation.get(key)
+    return value if isinstance(value, int) else None
+
+
+def _containing_sentence(*, text: str, start: int, end: int) -> str:
+    left = max(text.rfind(".", 0, start), text.rfind("\n", 0, start)) + 1
+    right_period = text.find(".", end)
+    right_newline = text.find("\n", end)
+    candidates = [value for value in (right_period, right_newline) if value >= 0]
+    right = min(candidates) + 1 if candidates else len(text)
+    return text[left:right].strip()
 
 
 __all__ = ["OpenAIWebSearchAdapter", "extract_web_sources"]

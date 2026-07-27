@@ -5,18 +5,17 @@ from layer1_intake import IntakeResult
 
 from ..actor_contract import ActorResult
 from ..behavioral import BehavioralAssessment
-from ..governance_components import GovernanceDecision, StaticPolicyAssessment
+from ..governance_components import (
+    GovernanceDecision,
+    StaticPolicyAssessment,
+    governance_reason_code_values,
+)
 from ..judge import JudgeAssessment
 from ..oversight.contracts import (
     EvidenceQualityAssessment,
     OperationalRiskAssessment,
     OversightAssessment,
     TrajectoryHealthAssessment,
-)
-from ..domain.evidence_policy import (
-    output_claim_support_level,
-    precision_mismatch_detected,
-    resolve_required_evidence_support_context,
 )
 from .serialization import enum_value, to_jsonable
 from ..domain import (
@@ -69,7 +68,7 @@ def build_layer2_runtime_trace(
 ) -> Layer2RuntimeTrace:
     task_state = normalize_task_state_serialization(task_state)
     return Layer2RuntimeTrace(
-        trace_version="layer2_trace.v3",
+        trace_version="layer2_trace.v4",
         runtime=_build_runtime_summary(thread_id=thread_id, task_state=task_state),
         intake=_build_intake_summary(intake_result=intake_result),
         planner_name=task_state.planner_name,
@@ -136,36 +135,26 @@ def _build_intake_summary(*, intake_result: IntakeResult) -> TraceIntakeSummary:
         max_tool_calls=execution_policy.budget.max_tool_calls,
         read_only_mode=execution_policy.read_only_mode,
         execution_intent=task_spec.execution_intent.value,
+        requested_operations=tuple(
+            {"operation_type": operation.operation_type.value, "channel": operation.channel, "recipient": operation.recipient}
+            for operation in task_spec.requested_operations
+        ),
     )
 
 
 # Read-only observability component extracted from the trace facade.
 def _build_plan_step(*, step: Any, task_state: TaskState) -> TracePlanStep:
-    resolved_requirement = resolve_required_evidence_support_context(
-        task_state=task_state,
-        current_step=step,
-    )
     return TracePlanStep(
         step_id=step.step_id,
         objective=step.objective,
         rationale=step.rationale,
         expected_outcome=step.expected_outcome,
-        step_kind=enum_value(step.step_kind),
-        evidence_requirement=enum_value(step.evidence_requirement),
-        claim_precision_ceiling=enum_value(step.claim_precision_ceiling),
-        resolved_required_evidence_support_level=enum_value(
-            resolved_requirement.required_level
-        ),
-        resolved_required_evidence_support_source=enum_value(resolved_requirement.source),
         status=enum_value(step.status),
     )
 
 
 # Read-only observability component extracted from the trace facade.
 def _build_actor_turn(*, actor_result: ActorResult | None, task_state: TaskState) -> TraceActorTurn:
-    output_claim_level = (
-        output_claim_support_level(task_state=task_state) if actor_result is not None else None
-    )
     return TraceActorTurn(
         actor_name=task_state.actor_name,
         actor_prompt_version=task_state.actor_prompt_version,
@@ -181,12 +170,8 @@ def _build_actor_turn(*, actor_result: ActorResult | None, task_state: TaskState
             if actor_result is not None and actor_result.tool_request is not None
             else None
         ),
-        output_claim_support_level=output_claim_level.value if output_claim_level is not None else None,
-        precision_mismatch_detected=bool(
-            actor_result is not None
-            and actor_result.output_text
-            and precision_mismatch_detected(task_state=task_state)
-        ),
+        actor_self_confidence=(actor_result.step_validation.actor_self_confidence if actor_result and actor_result.step_validation else None),
+        selected_evidence_refs=(actor_result.step_validation.evidence_refs if actor_result and actor_result.step_validation else ()),
         external_operation=(
             to_jsonable(
                 actor_result.external_operation_proposal
@@ -235,6 +220,9 @@ def _build_tool_call_from_result(result: ToolExecutionResult) -> TraceToolCall:
         summary=result.summary,
         content=result.content,
         error_message=result.error_message,
+        error_code=result.error_code.value if result.error_code else None,
+        truncated=result.truncated,
+        extractability_limited=result.extractability_limited,
         sources=tuple(_build_tool_source(source) for source in result.sources),
     )
 
@@ -247,6 +235,9 @@ def _build_tool_call_from_request(request: ToolRequest) -> TraceToolCall:
         summary=None,
         content=None,
         error_message=None,
+        error_code=None,
+        truncated=False,
+        extractability_limited=False,
         sources=(),
     )
 
@@ -275,6 +266,11 @@ def _build_tool_source(source: ToolSource) -> dict[str, Any]:
         "title": source.title,
         "locator": source.locator,
         "snippet": source.snippet,
+        "content_state": source.content_state.value,
+        "source_authority": source.source_authority.value,
+        "document_type": source.document_type.value,
+        "extractability": source.extractability.value,
+        "citation_alignment": source.citation_alignment.value,
     }
 
 
@@ -288,7 +284,11 @@ def _build_observed_evidence(evidence: ObservedEvidence) -> TraceObservedEvidenc
         excerpt=evidence.excerpt,
         source_kind=evidence.source_kind.value,
         source_tool=evidence.source_tool.value if evidence.source_tool is not None else None,
-        support_level=evidence.support_level.value,
+        content_state=evidence.content_state.value,
+        source_authority=evidence.source_authority.value,
+        document_type=evidence.document_type.value,
+        extractability=evidence.extractability.value,
+        citation_alignment=evidence.citation_alignment.value,
     )
 
 
@@ -317,7 +317,7 @@ def _build_governance_pass(
         directive=decision.directive.value,
         policy_decision=decision.policy_decision.value,
         requires_human_review=decision.requires_human_review,
-        reason_codes=tuple(code.value for code in decision.reason_codes),
+        reason_codes=governance_reason_code_values(decision),
         selected_reason=decision.combiner_selected_reason or decision.summary,
         rejected_alternatives=dict(decision.combiner_rejected_alternatives or {}),
         safety_invariants=tuple(decision.combiner_safety_invariants_checked),
@@ -676,10 +676,8 @@ def _build_scratchpad_entry(entry: ScratchpadEntry) -> dict[str, Any]:
 def _build_step_validation(validation: StepValidation) -> dict[str, Any]:
     return {
         "plan_step_id": validation.plan_step_id,
-        "objective_satisfied": validation.objective_satisfied,
-        "evidence_sufficient": validation.evidence_sufficient,
-        "confidence": validation.confidence,
-        "next_action": validation.next_action.value,
+        "actor_self_confidence": validation.actor_self_confidence,
+        "evidence_refs": list(validation.evidence_refs),
         "rationale_summary": validation.rationale_summary,
         "residual_uncertainty": validation.residual_uncertainty,
     }

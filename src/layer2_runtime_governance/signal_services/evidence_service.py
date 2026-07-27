@@ -1,64 +1,39 @@
-from __future__ import annotations
-
 from typing import Any
 
-from layer2_runtime_governance.domain.evidence_policy import (
-    available_evidence_support_level,
-    effective_support_check_level,
-    evidence_support_level_rank,
-    latest_relevant_validation,
-    latest_tool_result_for_evaluated_step,
-    meaningful_observed_evidence,
-    output_claim_support_level,
-    precision_mismatch_detected,
-    required_evidence_support_level,
-)
+from layer2_runtime_governance.actor_contract import ActorResultType
 from layer2_runtime_governance.domain import TaskState
+from layer2_runtime_governance.tool_contract import EvidenceContentState, Extractability
 
 
-# Build raw evidence facts and diagnostic score components without selecting a directive.
+# Build concrete observed facts; OPA decides whether the event needs evidence and how to react.
 def build_evidence_signal(*, task_state: TaskState, thresholds_version: str) -> dict[str, Any]:
-    validation = latest_relevant_validation(task_state=task_state)
-    meaningful_evidence = meaningful_observed_evidence(task_state=task_state)
-    last_tool_result = latest_tool_result_for_evaluated_step(task_state=task_state)
-    required_level = required_evidence_support_level(task_state=task_state)
-    available_level = available_evidence_support_level(task_state=task_state)
-    output_claim_level = output_claim_support_level(task_state=task_state)
-    effective_required_level = effective_support_check_level(
-        required_level=required_level,
-        output_claim_level=output_claim_level,
-    )
-    precision_mismatch = precision_mismatch_detected(task_state=task_state)
+    result = task_state.actor_result
+    validation = result.step_validation if result is not None else None
+    selected_refs = validation.evidence_refs if validation is not None else ()
+    evidence_by_id = {item.evidence_id: item for item in task_state.observed_evidence}
+    selected = [evidence_by_id[item] for item in selected_refs if item in evidence_by_id]
+    factual_completion = bool(result and result.result_type in {ActorResultType.STEP_COMPLETED, ActorResultType.FINAL_OUTPUT})
     raw_facts = {
-        "actor_evidence_sufficient": bool(validation and validation.evidence_sufficient),
-        "actor_objective_satisfied": bool(validation and validation.objective_satisfied),
-        "actor_confidence": float(validation.confidence if validation is not None else 0.0),
-        "meaningful_observed_evidence_count": len(meaningful_evidence),
-        "observed_evidence_present": bool(meaningful_evidence),
-        "source_locator_present": any(item.locator.strip() for item in meaningful_evidence),
-        "last_tool_succeeded": bool(last_tool_result and last_tool_result.success),
-        "support_level_required": effective_required_level.value,
-        "support_level_available": available_level.value,
-        "support_rank_required": evidence_support_level_rank(effective_required_level),
-        "support_rank_available": evidence_support_level_rank(available_level),
-        "precision_mismatch": precision_mismatch,
-        "output_claim_support_level": output_claim_level.value,
-    }
-    score_components = {
-        "actor_evidence_sufficient": raw_facts["actor_evidence_sufficient"],
-        "actor_objective_satisfied": raw_facts["actor_objective_satisfied"],
-        "actor_confidence": raw_facts["actor_confidence"],
-        "observed_evidence_present": raw_facts["observed_evidence_present"],
-        "source_locator_present": raw_facts["source_locator_present"],
-        "last_tool_succeeded": raw_facts["last_tool_succeeded"],
+        "evidence_count": len(task_state.observed_evidence),
+        "selected_evidence_ref_count": len(selected_refs),
+        "selected_evidence_refs_valid": len(selected) == len(selected_refs),
+        "source_locator_present": any(item.locator.strip() for item in selected),
+        "cited_context_present": any(item.citation_alignment.value != "none" for item in selected),
+        "extracted_content_present": any(item.content_state in {EvidenceContentState.EXTRACTED_PARTIAL, EvidenceContentState.EXTRACTED_FULL} for item in selected),
+        "official_source_present": any(item.source_authority.value == "official_primary" for item in selected),
+        "extraction_truncated": any(item.extractability == Extractability.TRUNCATED for item in selected),
+        "extractability_limited": any(item.extractability in {Extractability.FORBIDDEN, Extractability.EMPTY, Extractability.UNAVAILABLE} for item in task_state.observed_evidence),
+        "factual_completion_attempt": factual_completion,
+        "external_operation_candidate": bool(task_state.external_operation_proposal and task_state.external_operation_proposal.execution_candidate),
+        "actor_self_confidence": validation.actor_self_confidence if validation is not None else None,
     }
     return {
         "raw_facts": raw_facts,
         "diagnostic_score": None,
         "diagnostic_level": "unscored",
-        "score_components": score_components,
+        "score_components": {},
         "reason_facts": [],
-        "summary": "Evidence facts collected; OPA owns score and threshold interpretation.",
-        "score_formula_version": "evidence_quality_v2_raw_facts",
+        "summary": "Concrete evidence observations collected; OPA owns the directive.",
+        "score_formula_version": "evidence_facts_v3",
         "thresholds_version": thresholds_version,
     }

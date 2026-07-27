@@ -25,6 +25,8 @@ from layer1_intake import (
     IntakeMetadata,
     IntakeResult,
     ParseStatus,
+    RequestedOperation,
+    RequestedOperationType,
     SensitivityLevel,
     StructuredTask,
     TaskSpec,
@@ -37,7 +39,6 @@ from layer2_runtime_governance import (
     CapabilityAccessMode,
     ExternalCommunicationDraft,
     ExternalCommunicationPhase,
-    EvidenceSupportLevel,
     EvidenceQualityAssessment,
     GovernanceDecision,
     GovernanceDirective,
@@ -62,7 +63,6 @@ from layer2_runtime_governance import (
     StaticPolicyAssessment,
     StepRecord,
     StepValidation,
-    StepValidationDecision,
     TaskState,
     ToolExecutionResult,
     ToolName,
@@ -82,12 +82,12 @@ from evaluation_service.trace_normalizer import normalize_trace_json
 
 
 class Layer2TraceTests(unittest.TestCase):
-    # A trace emitted directly by observability must satisfy the complete v3 schema.
-    def test_real_runtime_trace_validates_against_v3_schema(self) -> None:
+    # A trace emitted directly by observability must satisfy the complete v4 schema.
+    def test_real_runtime_trace_validates_against_v4_schema(self) -> None:
         state = _complete_task_state()
         payload = layer2_trace_to_dict(
             build_layer2_runtime_trace(
-                thread_id="schema-valid-v3",
+                thread_id="schema-valid-v4",
                 intake_result=state.intake_payload,
                 task_state=state,
             )
@@ -95,7 +95,7 @@ class Layer2TraceTests(unittest.TestCase):
         external_state = _external_communication_task_state()
         external_payload = layer2_trace_to_dict(
             build_layer2_runtime_trace(
-                thread_id="schema-valid-external-v3",
+                thread_id="schema-valid-external-v4",
                 intake_result=external_state.intake_payload,
                 task_state=external_state,
             )
@@ -104,8 +104,8 @@ class Layer2TraceTests(unittest.TestCase):
         _trace_schema_validator().validate(payload)
         _trace_schema_validator().validate(external_payload)
 
-    # The v3 schema must reject a v2 artifact before evaluation normalization.
-    def test_v3_schema_rejects_v2_trace(self) -> None:
+    # The v4 schema must reject a v2 artifact before evaluation normalization.
+    def test_v4_schema_rejects_v2_trace(self) -> None:
         payload = json.loads(
             (REPO_ROOT / "tests" / "fixtures" / "layer2_trace.v2.legacy.json").read_text(
                 encoding="utf-8"
@@ -115,20 +115,20 @@ class Layer2TraceTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             _trace_schema_validator().validate(payload)
 
-    # Retired root governance histories must not coexist with the canonical v3 pass list.
-    def test_v3_schema_rejects_legacy_root_governance_lists(self) -> None:
+    # Retired root governance histories must not coexist with the canonical v4 pass list.
+    def test_v4_schema_rejects_legacy_root_governance_lists(self) -> None:
         payload = _valid_v3_trace_payload()
         payload["governance_decisions"] = deepcopy(payload["governance_passes"])
 
         with self.assertRaises(ValidationError):
             _trace_schema_validator().validate(payload)
 
-    # Closed v3 sections must reject unknown properties and missing required fields.
-    def test_v3_schema_rejects_unknown_and_missing_properties(self) -> None:
+    # Closed v4 sections must reject unknown properties and missing required fields.
+    def test_v4_schema_rejects_unknown_and_missing_properties(self) -> None:
         unknown = _valid_v3_trace_payload()
         unknown["runtime"]["unexpected"] = True
         missing = _valid_v3_trace_payload()
-        del missing["actor"]["precision_mismatch_detected"]
+        del missing["actor"]["actor_self_confidence"]
 
         with self.assertRaises(ValidationError):
             _trace_schema_validator().validate(unknown)
@@ -136,7 +136,7 @@ class Layer2TraceTests(unittest.TestCase):
             _trace_schema_validator().validate(missing)
 
     # Stable enum and scalar contracts must reject values outside the producer vocabulary.
-    def test_v3_schema_rejects_wrong_enum_and_type(self) -> None:
+    def test_v4_schema_rejects_wrong_enum_and_type(self) -> None:
         wrong_enum = _valid_v3_trace_payload()
         wrong_enum["runtime"]["current_state"] = "unknown_state"
         wrong_type = _valid_v3_trace_payload()
@@ -148,7 +148,7 @@ class Layer2TraceTests(unittest.TestCase):
             _trace_schema_validator().validate(wrong_type)
 
     # Every governance pass must explicitly carry a boolean human-review flag.
-    def test_v3_schema_requires_boolean_human_review_flag(self) -> None:
+    def test_v4_schema_requires_boolean_human_review_flag(self) -> None:
         missing = _valid_v3_trace_payload()
         del missing["governance_passes"][0]["requires_human_review"]
         wrong_type = _valid_v3_trace_payload()
@@ -159,8 +159,8 @@ class Layer2TraceTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             _trace_schema_validator().validate(wrong_type)
 
-    # Evaluation is the only boundary allowed to project a legacy trace into valid v3.
-    def test_evaluation_normalized_v2_trace_validates_as_v3(self) -> None:
+    # Evaluation is the only boundary allowed to project a legacy trace into valid v4.
+    def test_evaluation_normalized_v2_trace_validates_as_v4(self) -> None:
         legacy = json.loads(
             (REPO_ROOT / "tests" / "fixtures" / "layer2_trace.v2.legacy.json").read_text(
                 encoding="utf-8"
@@ -169,7 +169,7 @@ class Layer2TraceTests(unittest.TestCase):
 
         normalized = normalize_trace_json(legacy)["trace"]
 
-        self.assertEqual(normalized["trace_version"], "layer2_trace.v3")
+        self.assertEqual(normalized["trace_version"], "layer2_trace.v4")
         _trace_schema_validator().validate(normalized)
 
     def test_runtime_trace_includes_core_sections_and_histories(self) -> None:
@@ -185,7 +185,7 @@ class Layer2TraceTests(unittest.TestCase):
         self.assertEqual(trace.runtime.current_state, "completed")
         self.assertEqual(trace.intake.goal, "Trace the governed runtime.")
         self.assertEqual(len(trace.plan_steps), 2)
-        self.assertEqual(trace.actor.result_type, "final_output")
+        self.assertEqual(trace.actor.result_type, "step_completed")
         self.assertEqual(trace.execution.final_output_text, "Final trace answer.")
         self.assertEqual(len(trace.tool_calls), 2)
         self.assertEqual(trace.tool_calls[0].tool_name, "mcp.local_test.text_stats")
@@ -193,33 +193,15 @@ class Layer2TraceTests(unittest.TestCase):
         self.assertEqual(len(trace.observed_evidence), 1)
         self.assertEqual(trace.observed_evidence[0].locator, "mcp://local_test/text_stats")
         self.assertEqual(trace.observed_evidence[0].source_kind, "tool_observation")
-        self.assertEqual(trace.trace_version, "layer2_trace.v3")
+        self.assertEqual(trace.trace_version, "layer2_trace.v4")
         self.assertEqual(len(trace.governance_passes), 2)
         self.assertEqual(trace.governance_passes[0].directive, "continue_read_only")
         self.assertFalse(trace.governance_passes[0].requires_human_review)
         self.assertFalse(trace.governance_passes[1].requires_human_review)
 
-    def test_runtime_trace_handles_legacy_string_step_kind_values(self) -> None:
+    # Actor observability and governance facts must expose the same selected evidence.
+    def test_actor_trace_and_governance_signal_share_selected_evidence(self) -> None:
         state = _complete_task_state()
-        state.plan_steps[0].step_kind = "source_discovery"
-        state.plan_steps[0].evidence_requirement = "source_discovery"
-        state.plan_steps[0].claim_precision_ceiling = "high_level_summary"
-
-        trace = build_layer2_runtime_trace(
-            thread_id="legacy-step-kind",
-            intake_result=state.intake_payload,
-            task_state=state,
-        )
-
-        self.assertEqual(trace.plan_steps[0].step_kind, "source_discovery")
-        self.assertEqual(trace.plan_steps[0].evidence_requirement, "source_discovery")
-        self.assertEqual(trace.plan_steps[0].claim_precision_ceiling, "high_level_summary")
-
-    # Actor observability and governance facts must call the same mismatch resolver.
-    def test_actor_trace_and_governance_signal_share_precision_mismatch_resolution(self) -> None:
-        state = _complete_task_state()
-        state.plan_steps[1].evidence_requirement = EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
-        state.plan_steps[1].claim_precision_ceiling = EvidenceSupportLevel.HIGH_LEVEL_SUMMARY
         state.observed_evidence = [
             ObservedEvidence(
                 evidence_id="step_1:tool:1:source:1",
@@ -228,12 +210,15 @@ class Layer2TraceTests(unittest.TestCase):
                 locator="https://example.org/source",
                 excerpt="Discovered source metadata. Content has not been extracted.",
                 source_tool=ToolName.WEB_SEARCH,
-                support_level=EvidenceSupportLevel.SOURCE_DISCOVERY,
             )
         ]
         state.actor_result = replace(
             state.actor_result,
-            output_text="Regulation (EU) 2022/1925 was adopted on 14 September 2022.",
+            result_type=ActorResultType.STEP_COMPLETED,
+            step_validation=replace(
+                state.actor_result.step_validation,
+                evidence_refs=("step_1:tool:1:source:1",),
+            ),
         )
 
         trace = build_layer2_runtime_trace(
@@ -246,8 +231,9 @@ class Layer2TraceTests(unittest.TestCase):
             thresholds_version="test_thresholds",
         )
 
-        self.assertTrue(trace.actor.precision_mismatch_detected)
-        self.assertTrue(evidence_signal["raw_facts"]["precision_mismatch"])
+        self.assertEqual(trace.actor.selected_evidence_refs, ("step_1:tool:1:source:1",))
+        self.assertEqual(evidence_signal["raw_facts"]["selected_evidence_ref_count"], 1)
+        self.assertTrue(evidence_signal["raw_facts"]["selected_evidence_refs_valid"])
 
     def test_trace_dict_and_json_are_json_safe(self) -> None:
         state = _complete_task_state()
@@ -262,7 +248,7 @@ class Layer2TraceTests(unittest.TestCase):
         decoded = json.loads(encoded)
 
         self.assertEqual(payload["runtime"]["current_state"], "completed")
-        self.assertEqual(decoded["trace_version"], "layer2_trace.v3")
+        self.assertEqual(decoded["trace_version"], "layer2_trace.v4")
         self.assertEqual(decoded["governance_passes"][0]["policy_decision"], "allow_read_only")
         self.assertFalse(decoded["governance_passes"][0]["requires_human_review"])
         self.assertNotIn("governance_decisions", decoded)
@@ -271,7 +257,7 @@ class Layer2TraceTests(unittest.TestCase):
         schema = json.loads(
             (REPO_ROOT / "schemas" / "layer2_trace.schema.json").read_text(encoding="utf-8")
         )
-        self.assertEqual(schema["properties"]["trace_version"]["const"], "layer2_trace.v3")
+        self.assertEqual(schema["properties"]["trace_version"]["const"], "layer2_trace.v4")
         self.assertFalse(schema["additionalProperties"])
         self.assertFalse(schema["$defs"]["governancePass"]["additionalProperties"])
 
@@ -430,6 +416,13 @@ def _external_communication_intake_result() -> IntakeResult:
                 domain_label="trace_external_comm",
                 sensitivity=SensitivityLevel.HIGH,
                 success_criteria=["Expose the typed external communication trace."],
+                requested_operations=[
+                    RequestedOperation(
+                        operation_type=RequestedOperationType.EXTERNAL_COMMUNICATION,
+                        channel="email",
+                        recipient="ops@example.com",
+                    )
+                ],
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.7,
@@ -484,7 +477,7 @@ def _complete_task_state() -> TaskState:
     state.final_output_text = "Final trace answer."
     state.actor_result = ActorResult(
         plan_step_id="step_2",
-        result_type=ActorResultType.FINAL_OUTPUT,
+        result_type=ActorResultType.STEP_COMPLETED,
         summary="Final output produced.",
         capability_mode=CapabilityAccessMode.NONE,
         external_impact=False,
@@ -493,7 +486,7 @@ def _complete_task_state() -> TaskState:
     )
     state.executed_steps = [
         _executed_step("step_1", ActorResultType.INTERMEDIATE_OUTPUT),
-        _executed_step("step_2", ActorResultType.FINAL_OUTPUT),
+        _executed_step("step_2", ActorResultType.STEP_COMPLETED),
     ]
     state.scratchpad = [
         ScratchpadEntry(
@@ -609,10 +602,8 @@ def _executed_step(step_id: str, result_type: ActorResultType) -> Any:
 def _validation(step_id: str) -> StepValidation:
     return StepValidation(
         plan_step_id=step_id,
-        objective_satisfied=True,
-        evidence_sufficient=True,
-        confidence=0.9,
-        next_action=StepValidationDecision.COMPLETE_STEP,
+        actor_self_confidence=0.9,
+        evidence_refs=(),
         rationale_summary="Validation passed.",
     )
 

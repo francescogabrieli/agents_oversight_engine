@@ -19,6 +19,7 @@ from .models import (
     ExecutionIntent,
     InvalidTaskSpecError,
     SensitivityLevel,
+    RequestedOperation,
     TaskSpec,
 )
 from .service import (
@@ -117,6 +118,7 @@ Return a structured object with these fields:
 - sensitivity
 - success_criteria
 - execution_intent
+- requested_operations
 
 Rules:
 - Be concise and literal.
@@ -135,6 +137,8 @@ Rules:
 - Set execution_intent to "execute_after_governance" only when the user explicitly asks
   to send, execute, publish, create, update, delete, or otherwise carry out an external
   operation. This field records requested intent and does not grant authority.
+- requested_operations is an empty list unless an external effect is requested. For email,
+  emit {{"operation_type":"external_communication","channel":"email","recipient":"..."}}.
 - If no category fits well, use domain_type = "other".
 - domain_label can be more specific and free-form.
 - Use one sensitivity from this exact list: {allowed_sensitivity}.
@@ -176,6 +180,7 @@ class TaskSpecExtractionPayload(BaseModel):
     sensitivity: SensitivityLevel = SensitivityLevel.MEDIUM
     success_criteria: list[str] = Field(default_factory=list)
     execution_intent: ExecutionIntent = ExecutionIntent.PROPOSAL_ONLY
+    requested_operations: list[RequestedOperation] = Field(default_factory=list)
 
 
 class OpenAITaskSpecParser(TaskSpecParserPort):

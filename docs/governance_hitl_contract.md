@@ -113,7 +113,9 @@ returns to `ACTING`. Repeated revisions contribute to trajectory health.
 OPA, not Python, decides when invocation is required. `JudgeContext` includes
 only the authorized task goal/constraints/context, the step identified by
 `actor_result.plan_step_id`, the exact proposal and digest, relevant evidence
-and support levels, target/destination facts, and invocation reason.
+selected evidence references with concrete provenance attributes, target/destination facts,
+actor self-confidence, residual uncertainty, and invocation reason. The judge never receives
+or compares a universal evidence-support rank.
 
 The judge returns:
 

@@ -39,6 +39,7 @@ class TraceIntakeSummary:
     max_tool_calls: int | None
     read_only_mode: bool
     execution_intent: str
+    requested_operations: tuple[dict[str, str | None], ...]
 
 
 # Read-only observability component extracted from the trace facade.
@@ -49,11 +50,6 @@ class TracePlanStep:
     objective: str
     rationale: str
     expected_outcome: str
-    step_kind: str | None
-    evidence_requirement: str | None
-    claim_precision_ceiling: str | None
-    resolved_required_evidence_support_level: str | None
-    resolved_required_evidence_support_source: str | None
     status: str
 
 
@@ -71,8 +67,8 @@ class TraceActorTurn:
     output_text: str | None
     blocking_reason: str | None
     proposed_tool_name: str | None
-    output_claim_support_level: str | None
-    precision_mismatch_detected: bool
+    actor_self_confidence: float | None
+    selected_evidence_refs: tuple[str, ...]
     external_operation: dict[str, Any] | None
 
 
@@ -96,6 +92,9 @@ class TraceToolCall:
     summary: str | None
     content: str | None
     error_message: str | None
+    error_code: str | None
+    truncated: bool
+    extractability_limited: bool
     sources: tuple[dict[str, Any], ...]
 
 
@@ -110,7 +109,11 @@ class TraceObservedEvidence:
     excerpt: str
     source_kind: str
     source_tool: str | None
-    support_level: str
+    content_state: str
+    source_authority: str
+    document_type: str
+    extractability: str
+    citation_alignment: str
 
 
 # Read-only canonical governance record; pillar outputs are stored exactly once per pass.

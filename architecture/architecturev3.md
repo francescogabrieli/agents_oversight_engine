@@ -339,6 +339,8 @@ Nota operativa:
 
 #### Governance Core: OPA-first, operazioni external e pilastri active/shadow
 
+Aggiornamento di refactor: il piano semantico non incorpora livelli di evidenza, precision ceilings o meta-step di compliance. Il PEP invia a OPA fatti osservabili e non ordinati su contenuto, autorità, tipo documento, estraibilità e allineamento della citazione. `actor_self_confidence` è un segnale contestuale di incertezza: da sola non ferma né degrada una run che progredisce; OPA la combina solo con assenza di progresso, recovery esaurito o una proposta governed-external. I pilastri sono richiesti per evento, mentre behavioural e risk sono shadow e campionati fuori dal percorso caldo. Gli effetti richiesti sono espressi esplicitamente nell'intake, quindi una task research può includere una proposta email senza dipendere dal suo `domain_type`; l'esecuzione email continua a richiedere judge, digest esatto e resume HITL.
+
 Il nodo LangGraph `governance` è il **Policy Enforcement Point (PEP)**. OPA è il solo **Policy Decision Point (PDP)**: possiede policy statica, soglie, pesi, precedenze, cap, invarianti e direttiva finale. Python non combina più direttive con un decision combiner nel percorso live.
 
 Flusso di un turno governato:

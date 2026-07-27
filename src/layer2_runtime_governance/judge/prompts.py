@@ -34,6 +34,25 @@ Evaluate only:
 - semantically dangerous ambiguity
 - mismatch between content, destination, and purpose
 
+Lifecycle rule:
+- When operation_stage is "communication_draft_review", this is a proposed email
+  evaluated before the mandatory typed human approval. normalized_effect="send" and
+  an email-send capability describe only the effect that could occur after approval;
+  they do not mean the email is being sent in this assessment.
+- In that stage, a plan outcome that asks for a draft with no external side effect is
+  expected and compatible with the later send capability. Never issue a finding or a
+  needs_revision verdict solely because those two lifecycle descriptions differ.
+- Still flag a real mismatch when the draft's recipient, channel, content, or requested
+  final action conflicts with the authorized task.
+
+Evidence rule:
+- Do not infer release chronology or "most recent" status from a generic model-overview
+  page. Treat a qualified statement about currently documented or available models as
+  acceptable when it does not claim unsupported recency.
+- A specific model identifier must be supported verbatim by the supplied observed
+  evidence. Mark malformed identifiers, placeholders, or wildcard/alias strings as
+  needing revision rather than guessing their intended value.
+
 Do not treat confidence as harm probability. Do not output continue, replan, HITL, deny,
 or any other runtime action.
 """.strip()

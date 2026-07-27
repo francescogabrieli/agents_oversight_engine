@@ -75,7 +75,14 @@ def governance(
 
     state.static_policy_history.append(static_policy_assessment)
     state.dynamic_policy_history.append(dynamic_policy_assessment)
-    state.behavioral_history.append(behavioral_assessment)
+    # Keep the last usable shadow sample visible instead of replacing it with
+    # a deferred/unavailable marker from an intermediate governance turn.
+    if not (
+        behavioral_assessment.status == "unavailable"
+        and state.behavioral_history
+        and state.behavioral_history[-1].status != "unavailable"
+    ):
+        state.behavioral_history.append(behavioral_assessment)
     state.judge_history.append(judge_assessment)
     state.governance_history.append(governance_decision)
     _apply_governance_decision(
@@ -163,6 +170,18 @@ def _apply_governance_decision(
         state.current_tool_request = None
         state.pending_human_review_request = None
         state.human_review_resume_state = None
+        return
+
+    # A typed provider protocol failure is recoverable runtime state; it must
+    # re-enter replanning before any generic review recommendation is applied.
+    if (
+        state.actor_result is not None
+        and state.actor_result.provider_protocol_failure
+    ):
+        state.pending_human_review_request = None
+        state.human_review_resume_state = None
+        state.current_state = RuntimeState.REPLANNING
+        state.current_tool_request = None
         return
 
     if governance_decision.directive in {
@@ -272,8 +291,11 @@ def _apply_governance_decision(
 
     if policy_input.actor_result_type in {
         ActorResultType.INTERMEDIATE_OUTPUT,
+        ActorResultType.STEP_COMPLETED,
         ActorResultType.FINAL_OUTPUT,
     }:
+        # Preserve the actor transition: STEP_COMPLETED already advanced the
+        # semantic cursor, while INTERMEDIATE_OUTPUT deliberately kept it open.
         return
 
     state.current_state = RuntimeState.ACTING
@@ -305,6 +327,18 @@ def _route_authorized_external_operation(
                 "the user did not request external execution."
             ),
             review_ready=False,
+        )
+        return True
+    if proposal.operation_family.value == "external_communication":
+        # Email execution is intentionally never authorized by OPA alone: resume approval owns this seam.
+        state.current_external_execution_request = None
+        state.human_review_resume_state = RuntimeState.READY_EXTERNAL_EXECUTION
+        state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        _set_external_communication_phase(
+            state,
+            phase=ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED,
+            summary="The exact governed email digest requires typed human approval before execution.",
+            review_ready=True,
         )
         return True
     if not proposal.execution_candidate:

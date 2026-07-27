@@ -15,7 +15,7 @@ def normalize_trace_json(trace_payload: dict[str, Any]) -> dict[str, Any]:
         trace_payload=source_trace,
         governance_decisions=governance_decisions,
     )
-    normalized_trace = normalize_legacy_trace_to_v3(source_trace)
+    normalized_trace = normalize_legacy_trace_to_v4(source_trace)
     return {
         "schema_version": "evaluation_input.v1",
         "trace": normalized_trace,
@@ -30,17 +30,17 @@ def normalize_trace_json(trace_payload: dict[str, Any]) -> dict[str, Any]:
             ),
             "trace_version": trace_version,
             "completeness": completeness,
-            "pillar_results_available": trace_version in {"v2", "v3"},
-            "safety_invariants_available": trace_version in {"v2", "v3"},
+            "pillar_results_available": trace_version in {"v2", "v3", "v4"},
+            "safety_invariants_available": trace_version in {"v2", "v3", "v4"},
         },
     }
 
 
-# Project a legacy trace into the closed v3 read model without mutating its source payload.
-def normalize_legacy_trace_to_v3(trace_payload: dict[str, Any]) -> dict[str, Any]:
+# Project a legacy trace into the closed v4 read model without mutating its source payload.
+def normalize_legacy_trace_to_v4(trace_payload: dict[str, Any]) -> dict[str, Any]:
     source = deepcopy(trace_payload)
-    if source.get("trace_version") == "layer2_trace.v3":
-        return _add_current_v3_compatibility_defaults(source)
+    if source.get("trace_version") == "layer2_trace.v4":
+        return _add_current_v4_compatibility_defaults(source)
 
     runtime = _dict_or_empty(source.get("runtime"))
     intake = _dict_or_empty(source.get("intake"))
@@ -49,7 +49,7 @@ def normalize_legacy_trace_to_v3(trace_payload: dict[str, Any]) -> dict[str, Any
     governance_passes = _normalize_governance_passes(source)
 
     return {
-        "trace_version": "layer2_trace.v3",
+        "trace_version": "layer2_trace.v4",
         "runtime": {
             "thread_id": _text_or(runtime.get("thread_id"), "legacy_unknown"),
             "current_state": _text_or(runtime.get("current_state"), "aborted"),
@@ -89,6 +89,7 @@ def normalize_legacy_trace_to_v3(trace_payload: dict[str, Any]) -> dict[str, Any
             "max_tool_calls": _optional_integer(intake.get("max_tool_calls")),
             "read_only_mode": bool(intake.get("read_only_mode", False)),
             "execution_intent": "proposal_only",
+            "requested_operations": [],
         },
         "planner_name": _optional_text(source.get("planner_name")),
         "planner_prompt_version": _optional_text(source.get("planner_prompt_version")),
@@ -111,12 +112,10 @@ def normalize_legacy_trace_to_v3(trace_payload: dict[str, Any]) -> dict[str, Any
             "output_text": _optional_text(actor.get("output_text")),
             "blocking_reason": _optional_text(actor.get("blocking_reason")),
             "proposed_tool_name": _optional_text(actor.get("proposed_tool_name")),
-            "output_claim_support_level": _optional_text(
-                actor.get("output_claim_support_level")
+            "actor_self_confidence": _number_or(
+                actor.get("actor_self_confidence", actor.get("confidence")), 0.0
             ),
-            "precision_mismatch_detected": bool(
-                actor.get("precision_mismatch_detected", False)
-            ),
+            "selected_evidence_refs": _string_list(actor.get("selected_evidence_refs")),
         },
         "execution": {
             "final_output_text": _optional_text(execution.get("final_output_text")),
@@ -144,22 +143,13 @@ def normalize_legacy_trace_to_v3(trace_payload: dict[str, Any]) -> dict[str, Any
     }
 
 
-# Normalize one legacy semantic plan step into the v3 contract.
+# Normalize one legacy semantic plan step into the v4 contract.
 def _normalize_legacy_plan_step(item: dict[str, Any], *, index: int) -> dict[str, Any]:
     return {
         "step_id": _text_or(item.get("step_id"), f"legacy_step_{index}"),
         "objective": _text_or(item.get("objective"), "legacy_unknown"),
         "rationale": _text_or(item.get("rationale"), ""),
         "expected_outcome": _text_or(item.get("expected_outcome"), ""),
-        "step_kind": _optional_text(item.get("step_kind")),
-        "evidence_requirement": _optional_text(item.get("evidence_requirement")),
-        "claim_precision_ceiling": _optional_text(item.get("claim_precision_ceiling")),
-        "resolved_required_evidence_support_level": _optional_text(
-            item.get("resolved_required_evidence_support_level")
-        ),
-        "resolved_required_evidence_support_source": _optional_text(
-            item.get("resolved_required_evidence_support_source")
-        ),
         "status": _text_or(item.get("status"), "pending"),
     }
 
@@ -183,11 +173,19 @@ def _normalize_legacy_tool_call(item: dict[str, Any]) -> dict[str, Any]:
         "summary": _optional_text(item.get("summary")),
         "content": _optional_text(item.get("content")),
         "error_message": _optional_text(item.get("error_message")),
+        "error_code": _optional_text(item.get("error_code")),
+        "truncated": bool(item.get("truncated", False)),
+        "extractability_limited": bool(item.get("extractability_limited", False)),
         "sources": [
             {
                 "title": _text_or(source.get("title"), ""),
                 "locator": _text_or(source.get("locator"), ""),
                 "snippet": _optional_text(source.get("snippet")),
+                "content_state": _text_or(source.get("content_state"), "metadata_only"),
+                "source_authority": _text_or(source.get("source_authority"), "unknown"),
+                "document_type": _text_or(source.get("document_type"), "unknown"),
+                "extractability": _text_or(source.get("extractability"), "unavailable"),
+                "citation_alignment": _text_or(source.get("citation_alignment"), "none"),
             }
             for source in _dict_list(item.get("sources"))
         ],
@@ -204,11 +202,15 @@ def _normalize_legacy_evidence(item: dict[str, Any], *, index: int) -> dict[str,
         "excerpt": _text_or(item.get("excerpt"), ""),
         "source_kind": _text_or(item.get("source_kind"), "tool_observation"),
         "source_tool": _optional_text(item.get("source_tool")),
-        "support_level": _text_or(item.get("support_level"), "local_only"),
+        "content_state": _text_or(item.get("content_state"), "metadata_only"),
+        "source_authority": _text_or(item.get("source_authority"), "unknown"),
+        "document_type": _text_or(item.get("document_type"), "unknown"),
+        "extractability": _text_or(item.get("extractability"), "unavailable"),
+        "citation_alignment": _text_or(item.get("citation_alignment"), "none"),
     }
 
 
-# Normalize a legacy governance decision into one closed v3 pass.
+# Normalize a legacy governance decision into one closed v4 pass.
 def _normalize_legacy_governance_pass(
     item: dict[str, Any], *, index: int, actor: dict[str, Any]
 ) -> dict[str, Any]:
@@ -243,8 +245,8 @@ def _normalize_legacy_governance_pass(
     }
 
 
-# Add conservative defaults when reading traces produced before the v3 extension.
-def _add_current_v3_compatibility_defaults(
+# Add conservative defaults when reading current v4 traces at the evaluation boundary.
+def _add_current_v4_compatibility_defaults(
     source: dict[str, Any],
 ) -> dict[str, Any]:
     intake = _dict_or_empty(source.get("intake"))
@@ -384,7 +386,7 @@ def _object_dict(value: Any) -> dict[str, dict[str, Any]]:
     }
 
 
-# Normalize v1/v2 decisions into the v3 read model without mutating the source file.
+# Normalize v1/v2/v3 decisions into the v4 read model without mutating the source file.
 def _normalize_governance_passes(trace_payload: dict[str, Any]) -> list[dict[str, Any]]:
     current = trace_payload.get("governance_passes")
     if isinstance(current, list):
@@ -447,12 +449,12 @@ def _trace_version_and_completeness(*, trace_payload: dict[str, Any], governance
     decisions = [item for item in governance_decisions if isinstance(item, dict)]
     if not decisions:
         return "unknown", "inconclusive"
-    if trace_payload.get("trace_version") == "layer2_trace.v3" and all(
+    if trace_payload.get("trace_version") == "layer2_trace.v4" and all(
         isinstance(item.get("pillar_results"), dict)
         and isinstance(item.get("safety_invariants"), list)
         for item in decisions
     ):
-        return "v3", "complete"
+        return "v4", "complete"
     is_v2 = all(
         isinstance(item.get("pillar_results"), dict)
         and (

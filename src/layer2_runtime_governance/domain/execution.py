@@ -6,7 +6,6 @@ from .runtime_records import (
     ScratchpadEntry,
     ScratchpadEntryType,
     StepValidation,
-    StepValidationDecision,
 )
 
 __all__ = [
@@ -17,5 +16,4 @@ __all__ = [
     "ScratchpadEntry",
     "ScratchpadEntryType",
     "StepValidation",
-    "StepValidationDecision",
 ]

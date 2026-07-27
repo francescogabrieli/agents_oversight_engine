@@ -82,6 +82,7 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
             summary="Actor provider returned no usable runtime action.",
             capability_mode=CapabilityAccessMode.NONE,
             external_impact=False,
+            provider_protocol_failure=True,
             blocking_reason=(
                 "Actor provider returned no usable runtime action: OpenRouter returned no "
                 "tool call and no assistant content. finish_reason='stop'."
@@ -104,7 +105,9 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
 
         self.assertEqual(result.current_state, RuntimeState.REPLANNING)
         self.assertIsNone(result.pending_human_review_request)
-        self.assertEqual(result.last_governance_decision.directive, GovernanceDirective.REPLAN)
+        # The runtime recovery route is separate from the OPA directive; this
+        # fixture's policy stub allows the turn while the typed failure replans.
+        self.assertEqual(result.last_governance_decision.directive, GovernanceDirective.CONTINUE)
         self.assertEqual(
             result.external_communication.phase,
             ExternalCommunicationPhase.EVIDENCE_COLLECTION,
@@ -198,9 +201,6 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
                 rationale="This is still partial draft work.",
                 expected_outcome="A header concept only.",
                 status=PlanStepStatus.IN_PROGRESS,
-                step_kind=PlanStepKind.LOCAL_TRANSFORMATION,
-                evidence_requirement=EvidenceSupportLevel.LOCAL_ONLY,
-                claim_precision_ceiling=EvidenceSupportLevel.LOCAL_ONLY,
             )
         ]
         task_state.current_plan_step_index = 0
@@ -270,10 +270,8 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
                 ),
                 step_validation=StepValidation(
                     plan_step_id="step_1",
-                    objective_satisfied=False,
-                    evidence_sufficient=False,
-                    confidence=0.35,
-                    next_action=StepValidationDecision.REQUEST_MORE_EVIDENCE,
+                    actor_self_confidence=0.35,
+                    evidence_refs=(),
                     rationale_summary="This is only a partial draft fragment.",
                 ),
             ),
@@ -322,10 +320,8 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
                 ),
                 step_validation=StepValidation(
                     plan_step_id="step_1",
-                    objective_satisfied=False,
-                    evidence_sufficient=False,
-                    confidence=0.35,
-                    next_action=StepValidationDecision.REQUEST_MORE_EVIDENCE,
+                    actor_self_confidence=0.35,
+                    evidence_refs=(),
                     rationale_summary="This is still only a partial outline.",
                 ),
             ),
@@ -355,7 +351,7 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
             task_state,
             actor_result=ActorResult(
                 plan_step_id="step_6",
-                result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+                result_type=ActorResultType.STEP_COMPLETED,
                 summary="Final draft prepared.",
                 capability_mode=CapabilityAccessMode.NONE,
                 external_impact=False,
@@ -368,10 +364,8 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
                 ),
                 step_validation=StepValidation(
                     plan_step_id="step_6",
-                    objective_satisfied=True,
-                    evidence_sufficient=True,
-                    confidence=0.91,
-                    next_action=StepValidationDecision.COMPLETE_STEP,
+                    actor_self_confidence=0.91,
+                    evidence_refs=(),
                     rationale_summary="The final external draft is complete and reviewable.",
                 ),
             ),
@@ -772,10 +766,8 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
             output_text="Draft email body.",
             step_validation=StepValidation(
                 plan_step_id="step_1",
-                objective_satisfied=True,
-                evidence_sufficient=True,
-                confidence=0.72,
-                next_action=StepValidationDecision.COMPLETE_STEP,
+                actor_self_confidence=0.72,
+                evidence_refs=(),
                 rationale_summary="Draft is complete.",
             ),
         )

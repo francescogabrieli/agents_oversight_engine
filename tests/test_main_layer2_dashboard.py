@@ -25,6 +25,8 @@ from layer1_intake import (
     IntakeMetadata,
     IntakeResult,
     ParseStatus,
+    RequestedOperation,
+    RequestedOperationType,
     SensitivityLevel,
     StructuredTask,
     TaskSpec,
@@ -528,6 +530,13 @@ def _intake_result() -> IntakeResult:
                 domain_label="dashboard_test_external_comm",
                 sensitivity=SensitivityLevel.HIGH,
                 success_criteria=["Expose a typed dashboard snapshot."],
+                requested_operations=[
+                    RequestedOperation(
+                        operation_type=RequestedOperationType.EXTERNAL_COMMUNICATION,
+                        channel="email",
+                        recipient="ops@example.com",
+                    )
+                ],
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.65,

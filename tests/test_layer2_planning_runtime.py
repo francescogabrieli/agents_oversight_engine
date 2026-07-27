@@ -284,7 +284,7 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         self.assertLessEqual(len(task_state.plan_steps), 2)
         self.assertIn("normalized to the task scope", task_state.step_history[0].summary)
         self.assertIn("high-level evidence", task_state.plan_steps[0].objective)
-        self.assertIn("precision level supported", task_state.plan_steps[1].objective)
+        self.assertIn("precision supported", task_state.plan_steps[1].objective)
 
 
     def test_external_email_plan_compacts_governance_meta_steps(self) -> None:
@@ -358,23 +358,18 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
                             objective="Discover the relevant official source.",
                             rationale="Find the source before extraction.",
                             expected_outcome="One official source.",
-                            step_kind=PlanStepKind.SOURCE_DISCOVERY,
-                            evidence_requirement=EvidenceSupportLevel.SOURCE_DISCOVERY,
                         ),
                         PlanStep(
                             step_id="step_2",
                             objective="Extract the exact authorized facts for the email.",
                             rationale="The requested claims require extracted support.",
                             expected_outcome="Detailed evidence for the draft.",
-                            step_kind=PlanStepKind.DETAILED_EXTRACTION,
-                            evidence_requirement=EvidenceSupportLevel.DETAILED_EXTRACTED,
                         ),
                         PlanStep(
                             step_id="step_3",
                             objective="Draft the email.",
                             rationale="Use the extracted evidence.",
                             expected_outcome="A complete email.",
-                            step_kind=PlanStepKind.FINAL_SYNTHESIS,
                         ),
                     ],
                     rationale="Collect evidence and draft the requested email.",
@@ -385,13 +380,11 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         planned_state = planner(task_state, planner_service=EvidenceExternalEmailPlanner())
 
         self.assertEqual(len(planned_state.plan_steps), 2)
+        self.assertIn("Extract the exact authorized facts", planned_state.plan_steps[0].objective)
+        self.assertIn("typed email proposal", planned_state.plan_steps[1].expected_outcome)
         self.assertEqual(
-            planned_state.plan_steps[0].evidence_requirement,
-            EvidenceSupportLevel.DETAILED_EXTRACTED,
-        )
-        self.assertEqual(
-            planned_state.plan_steps[1].evidence_requirement,
-            EvidenceSupportLevel.DETAILED_EXTRACTED,
+            set(vars(planned_state.plan_steps[0])),
+            {"step_id", "objective", "rationale", "expected_outcome", "status"},
         )
 
 

@@ -166,6 +166,7 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
     final_result = to_jsonable(trace["final_result"])
 
     task_spec = build_result["task_spec"]
+    assessment = build_result["assessment"]
 
     return {
         "runtime": {
@@ -191,9 +192,10 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
             "constraints": task_spec["constraints"],
             "success_criteria_count": len(task_spec["success_criteria"]),
             "success_criteria": task_spec["success_criteria"],
-            "parse_status": build_result["parse_status"],
-            "warnings": build_result["warnings"],
-            "missing_information": build_result["missing_information"],
+            # TaskSpecBuildResult keeps completeness data under its assessment contract.
+            "parse_status": assessment["parse_status"],
+            "warnings": assessment["warnings"],
+            "missing_information": assessment["missing_information"],
         },
         "execution_policy": {
             "policy_profile_name": execution_policy["policy_profile_name"],

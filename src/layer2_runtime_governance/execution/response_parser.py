@@ -74,9 +74,11 @@ def normalize_actor_payload(*, payload: dict[str, Any]) -> dict[str, Any]:
                     "content",
                 )
                 or "Provider JSON was recovered as a completion payload.",
-                "objective_satisfied": bool(payload.get("objective_satisfied", True)),
-                "evidence_sufficient": bool(payload.get("evidence_sufficient", True)),
-                "confidence": coerce_provider_confidence(payload.get("confidence"), default=0.55),
+                # This is a provider-boundary recovery, not a canonical legacy contract.
+                "actor_self_confidence": coerce_provider_confidence(
+                    payload.get("actor_self_confidence", payload.get("confidence")), default=0.55
+                ),
+                "evidence_refs": payload.get("evidence_refs", []),
             },
         }
     if output_value:
@@ -121,7 +123,7 @@ def _looks_like_completion_payload(payload: dict[str, Any]) -> bool:
     rationale = payload.get("completion_rationale")
     if isinstance(rationale, str) and rationale.strip():
         return True
-    return any(key in payload for key in ("objective_satisfied", "evidence_sufficient", "confidence"))
+    return any(key in payload for key in ("completion_rationale", "actor_self_confidence", "confidence", "evidence_refs"))
 
 
 # Clamp provider confidence before it enters typed validation.

@@ -26,7 +26,7 @@ except ImportError:  # pragma: no cover - dependency is checked during construct
 class OpenAIActor(ActorPort):
     # Execute one bounded actor turn through OpenAI native function calling.
     actor_name = "openai_layer2_actor"
-    prompt_version = "actor_v4_runtime_tool_binding"
+    prompt_version = "actor_v5_runtime_tool_binding"
 
     def __init__(
         self,
@@ -52,9 +52,7 @@ class OpenAIActor(ActorPort):
     # Ask the provider for one action and normalize it into ActorResult.
     def act(self, *, actor_task: ActorTask) -> ActorResult:
         runtime_tools = select_actor_runtime_tools_for_turn(
-            self._runtime_tools,
-            domain_type=actor_task.task_spec.domain_type,
-            step_kind=actor_task.step_kind,
+            self._runtime_tools, task_spec=actor_task.task_spec
         )
         allowed_action_names = {str(tool["name"]) for tool in runtime_tools}
         try:

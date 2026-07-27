@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 import re
 
-from layer1_intake import DomainType, ExecutionIntent
+from layer1_intake import ExecutionIntent, RequestedOperationType
 
 from ..actor_contract import ActorResult, ActorResultType, ActorTask, CapabilityAccessMode
-from ..domain import ScratchpadEntry, ScratchpadEntryType, StepValidation, StepValidationDecision
+from ..domain import ScratchpadEntry, ScratchpadEntryType, StepValidation
 from ..domain import ExternalCommunicationDraft
 from ..external_operations import (
     DatabaseOperationParameter,
@@ -16,9 +16,6 @@ from ..external_operations import (
 )
 from ..tool_contract import ToolName, ToolRequest
 from .errors import ActorExecutionError
-from .evidence_guard import (
-    guard_completion_against_unsupported_precision as _guard_completion_against_unsupported_precision,
-)
 
 # Convert empty provider responses into a typed blocked actor result instead of crashing the graph.
 def build_provider_blocked_result(*, actor_task: ActorTask, detail: str) -> ActorResult:
@@ -29,6 +26,7 @@ def build_provider_blocked_result(*, actor_task: ActorTask, detail: str) -> Acto
         summary="Actor provider returned no usable runtime action.",
         capability_mode=CapabilityAccessMode.NONE,
         blocking_reason=blocking_reason,
+        provider_protocol_failure=True,
         scratchpad_entry=_build_scratchpad_entry(
             actor_task=actor_task,
             entry_type=ScratchpadEntryType.UNCERTAINTY,
@@ -46,6 +44,7 @@ def build_provider_replan_result(*, actor_task: ActorTask, detail: str) -> Actor
         summary="Actor provider emitted an incomplete runtime action.",
         capability_mode=CapabilityAccessMode.NONE,
         blocking_reason=blocking_reason,
+        provider_protocol_failure=True,
         scratchpad_entry=_build_scratchpad_entry(
             actor_task=actor_task,
             entry_type=ScratchpadEntryType.UNCERTAINTY,
@@ -171,14 +170,6 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
                 entry_type=ScratchpadEntryType.PROGRESS_NOTE,
                 summary=arguments["progress_note"],
             ),
-            step_validation=_build_step_validation(
-                actor_task=actor_task,
-                arguments=arguments,
-                next_action=StepValidationDecision.CONTINUE_ACTING,
-                rationale_key="progress_note",
-                objective_satisfied=False,
-                evidence_sufficient=False,
-            ),
         )
 
     if tool_name == "emit_step_completed":
@@ -193,15 +184,10 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
         completion_arguments["completion_rationale"] = _sanitize_completion_text(
             str(completion_arguments.get("completion_rationale", ""))
         )
-        completion_arguments = _guard_completion_against_unsupported_precision(
-            actor_task=actor_task,
-            arguments=completion_arguments,
-        )
-        next_action = _resolve_completion_next_action(arguments=completion_arguments)
-        # Step completion is represented as local output plus positive validation.
+        # Evidence selection is preserved as a concrete claim-to-evidence reference list for OPA.
         return ActorResult(
             plan_step_id=plan_step_id,
-            result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+            result_type=ActorResultType.STEP_COMPLETED,
             summary=completion_arguments["summary"],
             capability_mode=CapabilityAccessMode.NONE,
             output_text=completion_arguments["output_text"],
@@ -213,7 +199,6 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
             step_validation=_build_step_validation(
                 actor_task=actor_task,
                 arguments=completion_arguments,
-                next_action=next_action,
                 rationale_key="completion_rationale",
             ),
         )
@@ -230,11 +215,6 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
         completion_arguments["completion_rationale"] = _sanitize_completion_text(
             str(completion_arguments.get("completion_rationale", ""))
         )
-        completion_arguments = _guard_completion_against_unsupported_precision(
-            actor_task=actor_task,
-            arguments=completion_arguments,
-        )
-        next_action = _resolve_completion_next_action(arguments=completion_arguments)
         # Final output is still subject to the same validation contract as normal steps.
         return ActorResult(
             plan_step_id=plan_step_id,
@@ -250,15 +230,18 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
             step_validation=_build_step_validation(
                 actor_task=actor_task,
                 arguments=completion_arguments,
-                next_action=next_action,
                 rationale_key="completion_rationale",
             ),
         )
 
     if tool_name == "emit_external_communication_draft":
-        if actor_task.task_spec.domain_type != DomainType.EXTERNAL_COMMUNICATION:
+        if not any(
+            operation.operation_type == RequestedOperationType.EXTERNAL_COMMUNICATION
+            and operation.channel == "email"
+            for operation in actor_task.task_spec.requested_operations
+        ):
             raise ActorExecutionError(
-                "emit_external_communication_draft is valid only for external communication tasks."
+                "emit_external_communication_draft requires an explicit requested email operation."
             )
         _require_arguments(
             arguments,
@@ -279,21 +262,12 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
             completion_arguments[key] = _sanitize_completion_text(
                 str(completion_arguments.get(key, ""))
             )
-        completion_arguments = _guard_completion_against_unsupported_precision(
-            actor_task=actor_task,
-            arguments=completion_arguments,
-        )
-        next_action = _resolve_completion_next_action(arguments=completion_arguments)
         is_final_step = (
             actor_task.current_plan_step_index == len(actor_task.plan_steps) - 1
         )
         return ActorResult(
             plan_step_id=plan_step_id,
-            result_type=(
-                ActorResultType.FINAL_OUTPUT
-                if is_final_step
-                else ActorResultType.INTERMEDIATE_OUTPUT
-            ),
+            result_type=ActorResultType.STEP_COMPLETED,
             summary=completion_arguments["summary"],
             capability_mode=CapabilityAccessMode.WRITE,
             external_impact=True,
@@ -318,7 +292,6 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
             step_validation=_build_step_validation(
                 actor_task=actor_task,
                 arguments=completion_arguments,
-                next_action=next_action,
                 rationale_key="completion_rationale",
             ),
         )
@@ -344,11 +317,6 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
             completion_arguments[key] = _sanitize_completion_text(
                 str(completion_arguments.get(key, ""))
             )
-        completion_arguments = _guard_completion_against_unsupported_precision(
-            actor_task=actor_task,
-            arguments=completion_arguments,
-        )
-        next_action = _resolve_completion_next_action(arguments=completion_arguments)
         parameters = tuple(
             DatabaseOperationParameter(name=str(name), value=value)
             for name, value in arguments["parameters"].items()
@@ -378,11 +346,7 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
         )
         return ActorResult(
             plan_step_id=plan_step_id,
-            result_type=(
-                ActorResultType.FINAL_OUTPUT
-                if is_final_step
-                else ActorResultType.INTERMEDIATE_OUTPUT
-            ),
+            result_type=ActorResultType.STEP_COMPLETED,
             summary=completion_arguments["summary"],
             capability_mode=(
                 CapabilityAccessMode.READ_ONLY
@@ -401,7 +365,6 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
             step_validation=_build_step_validation(
                 actor_task=actor_task,
                 arguments=completion_arguments,
-                next_action=next_action,
                 rationale_key="completion_rationale",
             ),
         )
@@ -582,26 +545,11 @@ def _build_step_validation(
     *,
     actor_task: ActorTask,
     arguments: dict[str, object],
-    next_action: StepValidationDecision,
     rationale_key: str,
-    objective_satisfied: bool | None = None,
-    evidence_sufficient: bool | None = None,
 ) -> StepValidation:
-    confidence = arguments.get("confidence", 0.0)
+    confidence = arguments.get("actor_self_confidence")
     if not isinstance(confidence, int | float):
         raise ActorExecutionError("Actor validation confidence must be numeric.")
-
-    # Some runtime tools fix these booleans, while completion tools read them from the model.
-    resolved_objective_satisfied = (
-        bool(arguments.get("objective_satisfied"))
-        if objective_satisfied is None
-        else objective_satisfied
-    )
-    resolved_evidence_sufficient = (
-        bool(arguments.get("evidence_sufficient"))
-        if evidence_sufficient is None
-        else evidence_sufficient
-    )
 
     rationale = arguments.get(rationale_key)
     if not isinstance(rationale, str) or not rationale.strip():
@@ -613,24 +561,25 @@ def _build_step_validation(
 
     return StepValidation(
         plan_step_id=actor_task.current_plan_step.step_id,
-        objective_satisfied=resolved_objective_satisfied,
-        evidence_sufficient=resolved_evidence_sufficient,
-        confidence=max(0.0, min(float(confidence), 1.0)),
-        next_action=next_action,
+        actor_self_confidence=max(0.0, min(float(confidence), 1.0)),
         rationale_summary=rationale,
         residual_uncertainty=residual_uncertainty,
+        evidence_refs=_selected_evidence_refs(actor_task=actor_task, arguments=arguments),
     )
 
 
-# Let runtime guards downgrade optimistic completions into explicit evidence-seeking actions.
-def _resolve_completion_next_action(*, arguments: dict[str, object]) -> StepValidationDecision:
-    raw_next_action = arguments.get("_guarded_next_action")
-    if isinstance(raw_next_action, str):
-        try:
-            return StepValidationDecision(raw_next_action)
-        except ValueError:
-            pass
-    return StepValidationDecision.COMPLETE_STEP
+# Accept only explicit, existing evidence IDs; the actor no longer inherits all observed evidence.
+def _selected_evidence_refs(*, actor_task: ActorTask, arguments: dict[str, object]) -> tuple[str, ...]:
+    supplied = arguments.get("evidence_refs", [])
+    if supplied is None:
+        return ()
+    if not isinstance(supplied, list) or not all(isinstance(item, str) for item in supplied):
+        raise ActorExecutionError("evidence_refs must be a list of evidence identifiers.")
+    known = {item.evidence_id for item in actor_task.observed_evidence}
+    unknown = set(supplied) - known
+    if unknown:
+        raise ActorExecutionError("Actor completion references evidence IDs that do not exist.")
+    return tuple(dict.fromkeys(supplied))
 
 
 # Validate that required tool arguments are present and non-empty.

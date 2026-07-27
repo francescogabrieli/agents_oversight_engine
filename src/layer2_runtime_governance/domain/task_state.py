@@ -4,13 +4,13 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from layer1_intake import (
-    DomainType,
     ExecutionIntent,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeResult,
     ParseStatus,
     SensitivityLevel,
+    RequestedOperationType,
     TaskSpec,
 )
 
@@ -78,6 +78,9 @@ class TaskState:
     executed_steps: list[ExecutedPlanStep] = field(default_factory=list)
     final_output_text: str | None = None
     actor_turn_count: int = 0
+    # Typed runtime recovery fact; never inferred from provider error text.
+    consecutive_provider_protocol_failures: int = 0
+    consecutive_no_progress_turns: int = 0
     # Scratchpad is intentionally summarized working memory, safe for audit and HITL display.
     scratchpad: list[ScratchpadEntry] = field(default_factory=list)
     # Step validations are the bridge toward confidence/self-stop logic.
@@ -275,8 +278,10 @@ class TaskState:
                         "and typed review gate are reached."
                     ),
                 )
-                if intake_result.structured_task.task_spec.domain_type
-                == DomainType.EXTERNAL_COMMUNICATION
+                if any(
+                    operation.operation_type == RequestedOperationType.EXTERNAL_COMMUNICATION
+                    for operation in intake_result.structured_task.task_spec.requested_operations
+                )
                 else None
             ),
             observed_evidence=_build_initial_observed_evidence_from_intake(

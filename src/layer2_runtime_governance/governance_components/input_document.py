@@ -62,17 +62,6 @@ def build_governance_base_facts(
         "step": {
             "id": policy_input.current_plan_step_id,
             "objective": policy_input.current_plan_step_objective,
-            "step_kind": current_step.step_kind.value if current_step and current_step.step_kind else None,
-            "evidence_requirement": (
-                current_step.evidence_requirement.value
-                if current_step and current_step.evidence_requirement
-                else None
-            ),
-            "claim_precision_ceiling": (
-                current_step.claim_precision_ceiling.value
-                if current_step and current_step.claim_precision_ceiling
-                else None
-            ),
         },
         "actor": {
             "result_type": policy_input.actor_result_type.value,
@@ -105,10 +94,8 @@ def build_governance_base_facts(
         },
         "step_validation": (
             {
-                "objective_satisfied": validation.objective_satisfied,
-                "evidence_sufficient": validation.evidence_sufficient,
-                "confidence": validation.confidence,
-                "next_action": validation.next_action.value,
+                "actor_self_confidence": validation.actor_self_confidence,
+                "evidence_refs": list(validation.evidence_refs),
             }
             if validation is not None
             else None

@@ -80,12 +80,10 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
     ".hitl": ("build_human_review_request", "coerce_human_review_decision_payload"),
     ".oversight": (
         "DynamicPolicyAssessment", "DynamicPolicyRecommendedDirective",
-        "EvidenceQualityAssessment", "EvidenceRequirementResolution",
-        "EvidenceRequirementSource", "EvidenceQualityWeights", "OperationalRiskAssessment",
-        "OversightAssessment", "OversightPolicyConfig", "OversightReasonCode",
-        "OversightRecommendedDirective", "OversightSignalLevel", "RiskScores",
-        "TrajectoryHealthAssessment", "TrajectoryPenalties",
-        "resolve_required_evidence_support_context",
+        "EvidenceQualityAssessment", "OperationalRiskAssessment",
+        "OversightAssessment", "OversightReasonCode",
+        "OversightRecommendedDirective", "OversightSignalLevel",
+        "TrajectoryHealthAssessment",
     ),
     ".infrastructure.runtime_artifacts": (
         "build_sqlite_checkpointer", "RuntimeArtifactPaths", "RuntimeArtifactStore",
@@ -104,13 +102,13 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
     ".domain": (
         "ExecutedPlanStep", "ExternalCommunicationPhase", "ExternalCommunicationDraft",
         "ExternalCommunicationState", "HumanReviewDecision", "HumanReviewDecisionType",
-        "HumanReviewExternalEdit", "HumanReviewRequest", "PlanStep", "PlanStepKind",
+        "HumanReviewExternalEdit", "HumanReviewRequest", "PlanStep",
         "PlanStepStatus", "PlannerDecision", "RuntimeFlag", "RuntimeState",
         "ScratchpadEntry", "ScratchpadEntryType", "StepRecord", "StepValidation",
-        "StepValidationDecision", "TaskState",
+        "TaskState",
     ),
     ".tool_contract": (
-        "EvidenceSourceKind", "EvidenceSupportLevel", "ObservedEvidence",
+        "EvidenceSourceKind", "ObservedEvidence",
         "ToolExecutionResult", "ToolGatewayPort", "ToolName", "ToolRequest", "ToolSource",
     ),
     ".tools": (

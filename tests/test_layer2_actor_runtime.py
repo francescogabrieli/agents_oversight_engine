@@ -53,7 +53,8 @@ class Layer2ActorExecutionTests(unittest.TestCase):
         self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
         self.assertEqual(result.output_text, "OpenRouter actor completed the step.")
         self.assertIsNotNone(result.step_validation)
-        self.assertEqual(result.step_validation.confidence, 0.82)
+        self.assertEqual(result.step_validation.actor_self_confidence, 0.82)
+        self.assertEqual(result.step_validation.evidence_refs, ())
 
 
     def test_bedrock_client_retries_retryable_failures_and_omits_inference_config(self) -> None:
@@ -254,14 +255,10 @@ class Layer2ActorExecutionTests(unittest.TestCase):
 
         result = actor.act(actor_task=actor_task)
 
-        self.assertEqual(result.result_type, ActorResultType.INTERMEDIATE_OUTPUT)
+        self.assertEqual(result.result_type, ActorResultType.STEP_COMPLETED)
         self.assertIsNotNone(result.step_validation)
-        self.assertTrue(result.step_validation.objective_satisfied)
-        self.assertTrue(result.step_validation.evidence_sufficient)
-        self.assertEqual(
-            result.step_validation.next_action,
-            StepValidationDecision.COMPLETE_STEP,
-        )
+        self.assertGreater(result.step_validation.actor_self_confidence, 0.0)
+        self.assertEqual(result.step_validation.evidence_refs, ())
         self.assertIsNone(result.step_validation.residual_uncertainty)
 
 
@@ -297,10 +294,9 @@ class Layer2ActorExecutionTests(unittest.TestCase):
         self.assertIn("Do not gather evidence for future steps", system_prompt)
         self.assertIn("replacement step objective overrides the older blocked path", system_prompt)
         self.assertIn("A discovered source URL is not factual support", system_prompt)
-        self.assertIn('"prefer_completion_with_existing_evidence": true', user_prompt)
-        self.assertIn('"replan_replacement_step_active": true', user_prompt)
-        self.assertIn('"source_discovery_is_not_direct_fact_support": true', user_prompt)
-        self.assertIn('"available_evidence_support_level": "high_level_summary"', user_prompt)
+        self.assertIn('"observed_evidence":', user_prompt)
+        self.assertNotIn("support_level", user_prompt)
+        self.assertIn('"content_state": "metadata_only"', user_prompt)
 
 
     def test_actor_prompts_high_level_summary_to_avoid_granular_examples(self) -> None:
@@ -329,16 +325,8 @@ class Layer2ActorExecutionTests(unittest.TestCase):
             "describe them as procedural/implementation sources",
             system_prompt,
         )
-        self.assertIn(
-            '"current_or_prior_steps_have_procedural_implementation_source": true',
-            user_prompt,
-        )
-        self.assertIn('"high_level_summary_mode": true', user_prompt)
-        self.assertIn(
-            '"avoid_granular_obligation_examples_unless_directly_observed": true',
-            user_prompt,
-        )
-        self.assertIn("safe_high_level_claim_guidance", user_prompt)
+        self.assertIn('"content_state":', user_prompt)
+        self.assertIn('"source_authority":', user_prompt)
         self.assertNotIn("self-preferencing", user_prompt)
 
 
@@ -357,7 +345,6 @@ class Layer2ActorExecutionTests(unittest.TestCase):
                 objective="Synthesize the final answer.",
                 rationale="Use evidence collected in the completed source step.",
                 expected_outcome="A concise grounded final answer.",
-                step_kind=PlanStepKind.FINAL_SYNTHESIS,
                 status=PlanStepStatus.IN_PROGRESS,
             ),
         ]
@@ -379,7 +366,8 @@ class Layer2ActorExecutionTests(unittest.TestCase):
                 locator="intake://task_spec/goal",
                 excerpt=state.task_spec.goal,
                 source_kind=EvidenceSourceKind.INTAKE_PROVIDED,
-                support_level=EvidenceSupportLevel.LOCAL_ONLY,
+                content_state=EvidenceContentState.METADATA_ONLY,
+                extractability=Extractability.UNAVAILABLE,
             ),
             ObservedEvidence(
                 evidence_id="step_1:tool:1:source:1",
@@ -388,7 +376,8 @@ class Layer2ActorExecutionTests(unittest.TestCase):
                 locator="https://example.org/prior-source",
                 excerpt="Evidence collected during the completed source step.",
                 source_tool=ToolName.FETCH_URL_TEXT,
-                support_level=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
+                content_state=EvidenceContentState.EXTRACTED_FULL,
+                extractability=Extractability.COMPLETE,
             ),
         ]
         state.last_tool_result = ToolExecutionResult(
@@ -447,15 +436,8 @@ class Layer2ActorExecutionTests(unittest.TestCase):
 
         self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
         self.assertIsNotNone(result.step_validation)
-        self.assertFalse(result.step_validation.objective_satisfied)
-        self.assertFalse(result.step_validation.evidence_sufficient)
-        self.assertEqual(
-            result.step_validation.next_action,
-            StepValidationDecision.REQUEST_MORE_EVIDENCE,
-        )
-        self.assertIn("more specific than the observed evidence", result.summary.lower())
-        self.assertIsNotNone(result.step_validation.residual_uncertainty)
-        self.assertIn("more specific legal or factual claims", result.step_validation.residual_uncertainty)
+        self.assertEqual(result.step_validation.evidence_refs, ())
+        self.assertGreaterEqual(result.step_validation.actor_self_confidence, 0.0)
 
 
     def test_openrouter_completion_allows_precise_facts_from_intake(self) -> None:
@@ -473,15 +455,9 @@ class Layer2ActorExecutionTests(unittest.TestCase):
 
         result = actor.act(actor_task=actor_task)
 
-        self.assertEqual(result.result_type, ActorResultType.INTERMEDIATE_OUTPUT)
+        self.assertEqual(result.result_type, ActorResultType.STEP_COMPLETED)
         self.assertIsNotNone(result.step_validation)
-        self.assertTrue(result.step_validation.objective_satisfied)
-        self.assertTrue(result.step_validation.evidence_sufficient)
-        self.assertEqual(
-            result.step_validation.next_action,
-            StepValidationDecision.COMPLETE_STEP,
-        )
-        self.assertNotIn("more specific than the observed evidence", result.summary.lower())
+        self.assertGreater(result.step_validation.actor_self_confidence, 0.0)
 
 
     def test_openrouter_completion_sanitizes_internal_trace_refs(self) -> None:
@@ -520,11 +496,9 @@ class Layer2ActorExecutionTests(unittest.TestCase):
 
         result = actor.act(actor_task=actor_task)
 
-        self.assertEqual(result.result_type, ActorResultType.INTERMEDIATE_OUTPUT)
+        self.assertEqual(result.result_type, ActorResultType.STEP_COMPLETED)
         self.assertIsNotNone(result.step_validation)
-        self.assertTrue(result.step_validation.objective_satisfied)
-        self.assertTrue(result.step_validation.evidence_sufficient)
-        self.assertEqual(result.step_validation.next_action, StepValidationDecision.COMPLETE_STEP)
+        self.assertGreater(result.step_validation.actor_self_confidence, 0.0)
 
 
     def test_openrouter_summary_with_regulation_year_stays_supported(self) -> None:
@@ -544,9 +518,7 @@ class Layer2ActorExecutionTests(unittest.TestCase):
 
         self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
         self.assertIsNotNone(result.step_validation)
-        self.assertTrue(result.step_validation.objective_satisfied)
-        self.assertTrue(result.step_validation.evidence_sufficient)
-        self.assertEqual(result.step_validation.next_action, StepValidationDecision.COMPLETE_STEP)
+        self.assertGreater(result.step_validation.actor_self_confidence, 0.0)
 
 
     def test_openrouter_does_not_rewrite_provider_text_with_domain_specific_regex(self) -> None:
@@ -586,17 +558,15 @@ class Layer2ActorExecutionTests(unittest.TestCase):
         actor_task = build_actor_task(task_state=observed_state)
 
         self.assertEqual(
-            observed_state.observed_evidence[0].support_level,
-            EvidenceSupportLevel.DETAILED_EXTRACTED,
+            observed_state.observed_evidence[0].content_state,
+            EvidenceContentState.EXTRACTED_FULL,
         )
 
         result = actor.act(actor_task=actor_task)
 
         self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
         self.assertIsNotNone(result.step_validation)
-        self.assertTrue(result.step_validation.objective_satisfied)
-        self.assertTrue(result.step_validation.evidence_sufficient)
-        self.assertEqual(result.step_validation.next_action, StepValidationDecision.COMPLETE_STEP)
+        self.assertGreater(result.step_validation.actor_self_confidence, 0.0)
 
 
     def test_openrouter_conservative_summary_after_extractability_limit_completes(self) -> None:
@@ -616,9 +586,7 @@ class Layer2ActorExecutionTests(unittest.TestCase):
 
         self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
         self.assertIsNotNone(result.step_validation)
-        self.assertTrue(result.step_validation.objective_satisfied)
-        self.assertTrue(result.step_validation.evidence_sufficient)
-        self.assertEqual(result.step_validation.next_action, StepValidationDecision.COMPLETE_STEP)
+        self.assertGreater(result.step_validation.actor_self_confidence, 0.0)
 
 
     def test_openrouter_false_no_tool_blocked_recovers_to_web_search(self) -> None:
@@ -692,9 +660,6 @@ class Layer2ActorExecutionTests(unittest.TestCase):
                 objective="Collect official sources.",
                 rationale="The step is source discovery.",
                 expected_outcome="A shortlist of official sources.",
-                step_kind=PlanStepKind.SOURCE_DISCOVERY,
-                evidence_requirement=EvidenceSupportLevel.SOURCE_DISCOVERY,
-                claim_precision_ceiling=EvidenceSupportLevel.HIGH_LEVEL_SUMMARY,
                 status=PlanStepStatus.IN_PROGRESS,
             )
         ]
@@ -702,9 +667,12 @@ class Layer2ActorExecutionTests(unittest.TestCase):
 
         actor_task = build_actor_task(task_state=task_state)
 
-        self.assertEqual(actor_task.step_kind, PlanStepKind.SOURCE_DISCOVERY)
-        self.assertEqual(actor_task.required_evidence_support_level, EvidenceSupportLevel.SOURCE_DISCOVERY)
-        self.assertEqual(actor_task.max_supported_claim_precision, EvidenceSupportLevel.HIGH_LEVEL_SUMMARY)
+        self.assertEqual(actor_task.current_plan_step.step_id, "step_1")
+        self.assertEqual(actor_task.current_plan_step.objective, "Collect official sources.")
+        self.assertEqual(
+            set(vars(actor_task.current_plan_step)),
+            {"step_id", "objective", "rationale", "expected_outcome", "status"},
+        )
 
 
 if __name__ == "__main__":

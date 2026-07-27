@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
@@ -15,6 +14,7 @@ from .contracts import (
     GenericPayloadField,
     OperationBoundary,
 )
+from ..infrastructure.environment import get_env_value
 
 
 class ExternalConnectorKind(str, Enum):
@@ -220,7 +220,7 @@ def _validate_registry(registry: ExternalCapabilityRegistry) -> None:
 
 # Select the configured registry path without reading any secret values.
 def _configured_registry_path() -> Path:
-    configured = os.getenv("LAYER2_EXTERNAL_CAPABILITY_CONFIG_PATH")
+    configured = get_env_value("LAYER2_EXTERNAL_CAPABILITY_CONFIG_PATH")
     if configured:
         return Path(configured)
     return (

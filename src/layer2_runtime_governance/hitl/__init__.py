@@ -10,6 +10,7 @@ from layer1_intake import ExecutionIntent
 
 from ..actor_contract import ActorResultType
 from ..behavioral import BehavioralAssessment
+from ..governance_components import governance_reason_code_values
 from ..oversight.contracts import DynamicPolicyAssessment, OversightAssessment
 from ..domain import (
     ExternalCommunicationPhase,
@@ -66,7 +67,7 @@ def build_human_review_request(*, state: TaskState, thread_id: str) -> HumanRevi
 
     reason_codes: list[str] = []
     if governance_decision is not None:
-        reason_codes.extend(code.value for code in governance_decision.reason_codes)
+        reason_codes.extend(governance_reason_code_values(governance_decision))
     if dynamic_policy_assessment is not None:
         reason_codes.extend(code.value for code in dynamic_policy_assessment.reason_codes)
     if not reason_codes:

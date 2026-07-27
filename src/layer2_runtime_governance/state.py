@@ -12,7 +12,6 @@ from .domain.lifecycle import (
 )
 from .domain.plan import (
     PlanStepStatus,
-    PlanStepKind,
     PlanStep,
     PlannerDecision,
 )
@@ -27,7 +26,6 @@ from .domain.review import (
 )
 from .domain.runtime_records import (
     ScratchpadEntryType,
-    StepValidationDecision,
     ExecutedPlanStep,
     ScratchpadEntry,
     StepValidation,
@@ -43,11 +41,9 @@ __all__ = [
     "RuntimeFlag",
     "StepRecord",
     "PlanStepStatus",
-    "PlanStepKind",
     "PlanStep",
     "PlannerDecision",
     "ScratchpadEntryType",
-    "StepValidationDecision",
     "ExecutedPlanStep",
     "ScratchpadEntry",
     "StepValidation",
