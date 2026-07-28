@@ -27,3 +27,4 @@ It also explores different models of human–agent interaction (Human-in-the-Loo
 In parallel, the topic of continuous agent improvement through human feedback is addressed. The course demonstrates how to collect, structure, and leverage feedback from users and domain experts to refine prompts, policies, tools, and agent configurations.
 
 The focus is not only on technical effectiveness, but also on key aspects such as security, traceability, transparency toward end users, and organizational accountability.
+
