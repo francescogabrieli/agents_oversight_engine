@@ -457,7 +457,7 @@
     {
       "slide_id": "slide_12",
       "number": 12,
-      "title": "Dal risultato a ObservedEvidence",
+      "title": "Dal risultato a ToolObservation",
       "job": "prompts/slide_12.json",
       "out": "origin_image/slide_12.png",
       "input_images": [
@@ -489,7 +489,7 @@
           "image_gen"
         ],
         "sample_generation_method_matched": true,
-        "qa_note": "ToolSource e ObservedEvidence completi, atomici e con provenienza esplicita.",
+        "qa_note": "ToolSource e ToolObservation completi, atomici e con provenienza esplicita.",
         "recorded_at": "2026-07-27T11:29:45Z"
       },
       "blocker": null
@@ -839,7 +839,7 @@
     {
       "slide_id": "slide_22",
       "number": 22,
-      "title": "Trace v4: una proiezione osservabile",
+      "title": "Trace v5: una proiezione osservabile",
       "job": "prompts/slide_22.json",
       "out": "origin_image/slide_22.png",
       "input_images": [
@@ -871,7 +871,7 @@
           "image_gen"
         ],
         "sample_generation_method_matched": true,
-        "qa_note": "Trace v4 top-level completo, read-only e non autoritativo.",
+        "qa_note": "Trace v5 top-level completo, read-only e non autoritativo.",
         "recorded_at": "2026-07-27T11:57:50Z"
       },
       "blocker": null

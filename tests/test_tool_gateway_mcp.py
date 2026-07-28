@@ -17,7 +17,6 @@ if str(SRC_ROOT) not in sys.path:
 
 from layer1_intake import (
     BudgetConfig,
-    DomainType,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeResult,
@@ -62,11 +61,6 @@ from layer2_runtime_governance.tools import (
 from layer2_runtime_governance.infrastructure.checkpointing import (
     build_runtime_serializer,
 )
-from layer2_runtime_governance.tool_contract import (
-    DocumentType,
-    Extractability,
-    SourceAuthority,
-)
 
 
 MCP_TEST_CONFIG_PATH = REPO_ROOT / "configs" / "layer2_tool_gateway.test.json"
@@ -101,7 +95,7 @@ class GatewayMCPTests(unittest.TestCase):
 
         self.assertTrue(result.success)
         self.assertEqual(result.content, "hello mcp")
-        self.assertEqual(result.sources[0].locator, "mcp://local_test/echo")
+        self.assertEqual(result.observations[0].locator, "mcp://local_test/echo")
 
     def test_mcp_text_stats_tool_executes_through_gateway(self) -> None:
         gateway = _build_mcp_test_gateway()
@@ -249,7 +243,7 @@ class GatewayMCPTests(unittest.TestCase):
                 )
 
         self.assertTrue(result.success)
-        self.assertEqual(result.sources[0].title, "Example")
+        self.assertEqual(result.observations[0].locator, "https://example.org/doc")
         self.assertIn("Hello source", result.content or "")
 
     def test_fetch_url_empty_extracted_text_returns_failure(self) -> None:
@@ -312,11 +306,13 @@ class GatewayMCPTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertIn("publication fallback", result.summary)
         self.assertIn("proper functioning of the internal market", result.content or "")
-        self.assertEqual(result.sources[0].source_authority, SourceAuthority.OFFICIAL_PRIMARY)
-        self.assertEqual(result.sources[0].document_type, DocumentType.LEGAL_TEXT)
-        self.assertEqual(result.sources[0].extractability, Extractability.COMPLETE)
+        self.assertEqual(len(result.observations), 1)
+        self.assertIn(
+            "proper functioning of the internal market",
+            result.observations[0].content,
+        )
         self.assertEqual(
-            result.sources[0].locator,
+            result.observations[0].locator,
             "http://publications.europa.eu/resource/celex/32022R1925",
         )
 
@@ -370,16 +366,8 @@ class GatewayMCPTests(unittest.TestCase):
         task_state = result["task_state"]
         self.assertEqual(task_state.current_state, RuntimeState.COMPLETED)
         self.assertEqual(task_state.tool_call_count, 1)
-        tool_observations = [
-            evidence
-            for evidence in task_state.observed_evidence
-            if evidence.source_tool is not None
-        ]
-        self.assertEqual(len(tool_observations), 1)
-        self.assertEqual(
-            tool_observations[0].source_tool,
-            ToolName.MCP_LOCAL_TEST_TEXT_STATS,
-        )
+        self.assertEqual(len(task_state.observations), 1)
+        self.assertIn("agent", task_state.observations[0].content)
 
 
 class FakeHTTPHeaders:
@@ -440,10 +428,7 @@ class MCPThenCompleteActor(ActorPort):
 
     # Request an MCP tool once, then complete after observing evidence.
     def act(self, *, actor_task: ActorTask) -> ActorResult:
-        has_mcp_observation = any(
-            evidence.source_tool == ToolName.MCP_LOCAL_TEST_TEXT_STATS
-            for evidence in actor_task.observed_evidence
-        )
+        has_mcp_observation = bool(actor_task.observations)
         if not has_mcp_observation:
             return ActorResult(
                 plan_step_id=actor_task.current_plan_step.step_id,
@@ -476,7 +461,9 @@ class MCPThenCompleteActor(ActorPort):
             step_validation=StepValidation(
                 plan_step_id=actor_task.current_plan_step.step_id,
                 actor_self_confidence=0.9,
-                evidence_refs=tuple(item.evidence_id for item in actor_task.observed_evidence),
+                evidence_refs=tuple(
+                    item.observation_id for item in actor_task.observations
+                ),
                 rationale_summary="The MCP result was observed and normalized as evidence.",
             ),
         )
@@ -484,8 +471,8 @@ class MCPThenCompleteActor(ActorPort):
 
 class AllowPolicyEngine(PolicyEnginePort):
     policy_engine_name = "allow_policy_engine"
-    policy_bundle_version = "layer2_governance_v3"
-    policy_config_version = "layer2_governance_thresholds_v1"
+    policy_bundle_version = "layer2_governance_v4"
+    policy_config_version = "layer2_governance_thresholds_v2"
 
     # Request deterministic pillars without invoking a semantic judge in this tool test.
     def evaluate_required_pillars(self, *, base_facts):
@@ -563,8 +550,6 @@ def build_research_intake_result() -> IntakeResult:
                 goal="Use a local MCP test tool.",
                 context="Runtime test.",
                 constraints=[],
-                domain_type=DomainType.RESEARCH,
-                domain_label="mcp_gateway_test",
                 sensitivity=SensitivityLevel.LOW,
                 success_criteria=["Produce normalized MCP evidence."],
             ),

@@ -22,11 +22,11 @@ Layer 1 trasforma il testo libero in `IntakeResult`. Il contratto separa il cont
 
 Questo è il primo confine stabile: Layer 2 non deve reinterpretare la richiesta originale, ma partire da una forma già validata.
 
-## Slide 5: Dentro TaskSpec: intenzione e operazione richiesta
+## Slide 5: Dentro TaskSpec: obiettivo e intento
 
-`TaskSpec` descrive obiettivo, contesto, vincoli, dominio, sensibilità e criteri di successo. `execution_intent` distingue la sola proposta dall’intenzione di eseguire dopo governance.
+`TaskSpec` descrive obiettivo, contesto, vincoli, sensibilità e criteri di successo. `execution_intent` distingue la sola proposta dall’intenzione di eseguire dopo governance, senza concedere autorità.
 
-`requested_operations` rende esplicito che la task richiede una comunicazione email e conserva destinatario e canale. La policy, invece, rimane controllata dal sistema.
+L’effetto concreto non viene duplicato in un secondo JSON: emerge dal piano e dalla proposta tipizzata prodotta dall’actor. La policy rimane controllata dal sistema.
 
 ## Slide 6: IntakeResult → input del Planner
 
@@ -42,9 +42,9 @@ Non compaiono rank, precision ceiling, tool call o destinatari eseguibili. Il pl
 
 ## Slide 8: Planner → Actor: ActorTask
 
-`ActorTask` è il contesto operativo del singolo turno. Contiene task autorizzata, passo corrente, evidenze, cronologia, scratchpad audit-safe, validazioni, contatori e feedback di governance.
+`ActorTask` è il contesto operativo del singolo turno. Contiene task autorizzata, piano completo, passo corrente, osservazioni, cronologia, scratchpad audit-safe, validazioni, contatori e feedback di governance.
 
-È un contratto ampio, ma non ambiguo: ogni gruppo serve a rispondere a una domanda precisa senza trasformare l’actor in un secondo planner.
+Il piano completo permette reasoning globale; l’actor può però committare soltanto il passo corrente. Ogni gruppo risponde a una domanda precisa senza duplicare il planner.
 
 ## Slide 9: Output dell’Actor: ActorResult
 
@@ -64,17 +64,17 @@ Il risultato conserva richiesta, successo, sintesi, contenuto, fonti e diagnosti
 
 Un `403` o un byte limit non deve causare un loop terminale: il runtime può usare una sintesi citata, provare una fonte alternativa o chiedere supporto umano.
 
-## Slide 12: Dal risultato a ObservedEvidence
+## Slide 12: Dal risultato a ToolObservation
 
-Il runtime trasforma ogni fonte utile in un’`ObservedEvidence` distinta. In questo modo URL, estratto e attributi descrivono davvero quella fonte.
+Ogni adapter restituisce `ToolObservation` minimali dal risultato reale della propria azione: identificatore, contenuto e locator opzionale.
 
-La risposta aggregata non viene clonata su tutti i link. Anche una risposta di ricerca citata può diventare evidenza riassuntiva quando la pagina non è estraibile.
+Il runtime valida e registra queste osservazioni senza attribuire qualità, autorità o significati dedotti da parole chiave. La risposta aggregata non viene clonata su tutti i link.
 
-## Slide 13: Il nuovo modello evidence, senza ranking universale
+## Slide 13: Osservazioni minime, interpretazione contestuale
 
-L’evidenza non è più compressa in una scala universale. È descritta lungo cinque dimensioni indipendenti: contenuto disponibile, autorità, tipo di documento, estraibilità e allineamento della citazione.
+Goal, contesto, vincoli e criteri di successo restano istruzioni. Le osservazioni runtime nascono soltanto da azioni concrete.
 
-OPA ragiona sui fatti necessari alla decisione corrente. Non esiste più un campo singolo che pretende di stabilire la forza assoluta di una fonte.
+I riferimenti selezionati dall’actor sono opzionali ma devono esistere. OPA ne controlla l’integrità; per una proposta esterna il Judge interpreta semanticamente contenuto, contesto e digest.
 
 ## Slide 14: Completion dello step: StepValidation
 

@@ -7,15 +7,17 @@ from typing import Protocol
 from layer1_intake import ExecutionPolicy, IntakeMetadata, TaskSpec
 
 from .domain import (
+    AgentWorkspace,
     ExternalCommunicationDraft,
     PlanStepStatus,
     RuntimeFlag,
     RuntimeState,
     ScratchpadEntry,
+    StepArtifact,
     StepValidation,
     TaskState,
 )
-from .tool_contract import ObservedEvidence, ToolExecutionResult, ToolRequest
+from .tool_contract import ToolExecutionResult, ToolObservation, ToolRequest
 from .external_operations.contracts import (
     DatabaseStatementDraft,
     ExternalOperationProposal,
@@ -35,7 +37,6 @@ class ActorResultType(str, Enum):
     PROPOSE_ACTION = "propose_action"
     INTERMEDIATE_OUTPUT = "intermediate_output"
     STEP_COMPLETED = "step_completed"
-    FINAL_OUTPUT = "final_output"
     ASK_CLARIFICATION = "ask_clarification"
     BLOCKED = "blocked"
     NEEDS_REPLAN = "needs_replan"
@@ -72,7 +73,7 @@ class ActorTask:
     runtime_flags: tuple[RuntimeFlag, ...]
     plan_steps: tuple[ActorPlanStep, ...]
     past_steps: tuple[ActorPastStep, ...]
-    observed_evidence: tuple[ObservedEvidence, ...]
+    observations: tuple[ToolObservation, ...]
     scratchpad: tuple[ScratchpadEntry, ...]
     step_validations: tuple[StepValidation, ...]
     last_tool_result: ToolExecutionResult | None
@@ -85,6 +86,9 @@ class ActorTask:
     planner_name: str | None = None
     planner_prompt_version: str | None = None
     governance_feedback: tuple[GovernanceActionFeedback, ...] = ()
+    workspace: AgentWorkspace | None = None
+    progress_epoch: int = 0
+    attempted_action_keys: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -110,6 +114,8 @@ class ActorResult:
     database_statement_draft: DatabaseStatementDraft | None = None
     # Runtime normalizers populate this field; provider-supplied boundary flags are not authoritative.
     external_operation_proposal: ExternalOperationProposal | None = None
+    # An actor can persist a compact durable delta without turning audit prose into progress.
+    artifact_delta: StepArtifact | None = None
 
 
 class ActorPort(Protocol):
@@ -165,7 +171,7 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
         runtime_flags=tuple(task_state.runtime_flags),
         plan_steps=actor_plan_steps,
         past_steps=actor_past_steps,
-        observed_evidence=tuple(task_state.observed_evidence),
+        observations=tuple(task_state.observations),
         scratchpad=tuple(task_state.scratchpad),
         step_validations=tuple(task_state.step_validations),
         last_tool_result=task_state.last_tool_result,
@@ -179,6 +185,9 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
         planner_name=task_state.planner_name,
         planner_prompt_version=task_state.planner_prompt_version,
         governance_feedback=tuple(task_state.governance_action_feedback),
+        workspace=task_state.workspace,
+        progress_epoch=task_state.progress_epoch,
+        attempted_action_keys=tuple(item.action_key for item in task_state.tool_attempts),
     )
 
 

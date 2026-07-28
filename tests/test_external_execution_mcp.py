@@ -517,7 +517,7 @@ class MCPExternalExecutorIntegrationTests(unittest.TestCase):
                         plan_step_id=actor_task.current_plan_step.step_id,
                         actor_self_confidence=0.95,
                         evidence_refs=tuple(
-                            item.evidence_id for item in actor_task.observed_evidence
+                            item.observation_id for item in actor_task.observations
                         ),
                         rationale_summary="Query executed.",
                     ),

@@ -17,7 +17,6 @@
       "read_only_mode": true
     }
   },
-  "domain_overrides": {},
   "sensitivity_overrides": {
     "high": {
       "confidence_threshold": 0.75,
@@ -34,26 +33,6 @@
         "max_tool_calls": null
       },
       "read_only_mode": true
-    }
-  },
-  "domain_sensitivity_overrides": {
-    "external_communication": {
-      "high": {
-        "confidence_threshold": 0.85,
-        "budget": {
-          "max_steps": null,
-          "max_tool_calls": null
-        },
-        "read_only_mode": false
-      },
-      "critical": {
-        "confidence_threshold": 0.9,
-        "budget": {
-          "max_steps": null,
-          "max_tool_calls": null
-        },
-        "read_only_mode": false
-      }
     }
   }
 }

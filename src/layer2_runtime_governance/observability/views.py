@@ -28,7 +28,6 @@ def build_compact_trace_from_runtime_trace(trace: Layer2RuntimeTrace) -> dict[st
         },
         "intake_summary": {
             "goal": trace.intake.goal,
-            "domain_type": trace.intake.domain_type,
             "sensitivity": trace.intake.sensitivity,
             "parse_status": trace.intake.parse_status,
             "read_only_mode": trace.intake.read_only_mode,
@@ -69,7 +68,7 @@ def build_compact_trace_from_runtime_trace(trace: Layer2RuntimeTrace) -> dict[st
             "tool_call_count": trace.runtime.tool_call_count,
             "current_tool_request": _compact_current_tool_request(trace.tool_calls),
             "last_tool_result": _compact_last_tool_result(trace.tool_calls),
-            "observed_evidence_count": len(trace.observed_evidence),
+            "observation_count": len(trace.observations),
         },
     }
 
@@ -120,7 +119,7 @@ def _compact_last_tool_result(tool_calls: tuple[TraceToolCall, ...]) -> dict[str
         "success": call.success,
         "summary": call.summary,
         "error_message": call.error_message,
-        "source_count": len(call.sources),
+        "observation_count": len(call.observations),
     }
 
 

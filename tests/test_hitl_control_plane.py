@@ -16,7 +16,6 @@ if str(SRC_ROOT) not in sys.path:
 
 from layer1_intake import (
     BudgetConfig,
-    DomainType,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeResult,
@@ -215,8 +214,6 @@ def _intake_result() -> IntakeResult:
                 goal="Inspect the HITL control plane contract.",
                 context="Use deterministic fixtures.",
                 constraints=["Stay read-only."],
-                domain_type=DomainType.ANALYSIS,
-                domain_label="hitl_control_plane_test",
                 sensitivity=SensitivityLevel.MEDIUM,
                 success_criteria=["Expose a typed dashboard snapshot."],
             ),

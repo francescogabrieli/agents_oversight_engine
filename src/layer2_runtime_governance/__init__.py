@@ -104,12 +104,11 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
         "ExternalCommunicationState", "HumanReviewDecision", "HumanReviewDecisionType",
         "HumanReviewExternalEdit", "HumanReviewRequest", "PlanStep",
         "PlanStepStatus", "PlannerDecision", "RuntimeFlag", "RuntimeState",
-        "ScratchpadEntry", "ScratchpadEntryType", "StepRecord", "StepValidation",
+        "ReplanCheckpoint", "ScratchpadEntry", "ScratchpadEntryType", "StepRecord", "StepValidation",
         "TaskState",
     ),
     ".tool_contract": (
-        "EvidenceSourceKind", "ObservedEvidence",
-        "ToolExecutionResult", "ToolGatewayPort", "ToolName", "ToolRequest", "ToolSource",
+        "ToolExecutionResult", "ToolGatewayPort", "ToolName", "ToolObservation", "ToolRequest",
     ),
     ".tools": (
         "McpServerDefinition", "OpenAIToolGateway", "OpenAIToolGatewaySettings", "ToolBackend",
@@ -124,7 +123,7 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
         "TraceExternalExecutionSummary", "TraceGovernancePass",
         "TraceHumanReviewDecision", "TraceHumanReviewExternalEdit", "TraceHumanReviewRequest",
         "TraceHumanReviewSummary", "TraceIntakeSummary", "TraceJudgeAssessment",
-        "TraceObservedEvidence", "TraceOversightAssessment", "TracePlanStep",
+        "TraceToolObservation", "TraceOversightAssessment", "TracePlanStep",
         "TraceRuntimeSummary", "TraceStaticPolicyAssessment", "TraceToolCall",
         "build_compact_trace_from_runtime_trace", "build_layer2_runtime_trace",
         "layer2_trace_to_dict", "layer2_trace_to_json",

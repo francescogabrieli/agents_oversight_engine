@@ -104,10 +104,21 @@ Rules:
 - Use completed steps, observed evidence, scratchpad entries, step validations, and the actor blocking reason as context.
 - Preserve alignment with the original task, constraints, success criteria, and policy.
 - Produce only the remaining steps needed from the current blocked point to completion.
-- Keep the replacement trajectory compact and executable by the actor.
-- Produce the minimum semantic delta necessary; never add compliance, policy simulation, or human-review meta-steps.
+- Make the replacement trajectory complete, specific, proportional to the remaining
+  work, and executable by the actor. Do not optimize for a fixed or artificially small
+  number of steps.
+- Every replacement step must produce a meaningful semantic outcome. Do not create
+  standalone bookkeeping, formatting, citation-checklist, quality-scoring, compliance,
+  policy-simulation, or human-review meta-steps unless that activity is itself an
+  explicit user-requested result.
+- Do not introduce evidence taxonomies, universal source grades, claim ceilings, or
+  per-claim certification procedures. Use the concrete observations already available
+  and plan only the substantive work still required.
 - If the actor needs more evidence, plan semantic evidence acquisition, not a concrete tool invocation.
-- If runtime_flags includes `extractability_limited`, do not keep replacing the trajectory with more extraction-only steps; pivot to a compact source-backed summary path or a controlled stop/clarification if the task truly requires unavailable precision.
+- Do not add speculative retry, delivery-verification, or failure-recovery steps before
+  such a failure has actually been observed. Runtime execution handles concrete
+  failures and may request another replan from the resulting observable state.
+- If runtime_flags includes `extractability_limited`, do not keep replacing the trajectory with equivalent extraction-only steps; choose a materially different recovery path or controlled clarification if the task truly requires unavailable information.
 - If the task is no longer safely executable, produce the safest semantic step that leads to clarification or controlled stopping.
 - Do not explain your reasoning outside the schema.
 """.strip()
@@ -123,8 +134,6 @@ def build_replanner_user_prompt(*, task_state: TaskState) -> str:
             "goal": task_state.task_spec.goal,
             "context": task_state.task_spec.context,
             "constraints": task_state.task_spec.constraints,
-            "domain_type": task_state.task_spec.domain_type.value,
-            "domain_label": task_state.task_spec.domain_label,
             "sensitivity": task_state.task_spec.sensitivity.value,
             "success_criteria": task_state.task_spec.success_criteria,
         },
@@ -183,22 +192,13 @@ def build_replanner_user_prompt(*, task_state: TaskState) -> str:
             }
             for step in task_state.executed_steps
         ],
-        "observed_evidence": [
+        "observations": [
             {
-                "evidence_id": evidence.evidence_id,
-                "plan_step_id": evidence.plan_step_id,
-                "title": evidence.title,
-                "locator": evidence.locator,
-                "excerpt": evidence.excerpt,
-                "source_kind": evidence.source_kind.value,
-                "source_tool": evidence.source_tool.value if evidence.source_tool is not None else None,
-                "content_state": evidence.content_state.value,
-                "source_authority": evidence.source_authority.value,
-                "document_type": evidence.document_type.value,
-                "extractability": evidence.extractability.value,
-                "citation_alignment": evidence.citation_alignment.value,
+                "observation_id": observation.observation_id,
+                "locator": observation.locator,
+                "content": observation.content,
             }
-            for evidence in task_state.observed_evidence
+            for observation in task_state.observations
         ],
         "scratchpad": [
             {
@@ -230,7 +230,7 @@ def build_replanner_user_prompt(*, task_state: TaskState) -> str:
 
 class OpenAIReplanner(ReplannerPort):
     replanner_name = "openai_layer2_replanner"
-    prompt_version = "replanner_v1"
+    prompt_version = "replanner_v3"
 
     def __init__(self, settings: OpenAIReplannerSettings | None = None) -> None:
         # Validate replanner prerequisites once at construction time.
@@ -299,7 +299,7 @@ class OpenAIReplanner(ReplannerPort):
 class LocalConservativeReplanner(ReplannerPort):
     # This fallback remains useful for tests and offline demos.
     replanner_name = "local_conservative_replanner"
-    prompt_version = "replanner_v1"
+    prompt_version = "replanner_v3"
 
     # Produce a compact recovery step from the actor blocking reason.
     def replan(self, *, task_state: TaskState) -> ReplanDecision:

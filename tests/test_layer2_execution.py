@@ -12,9 +12,6 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from layer1_intake import (
-    DomainType,
-    RequestedOperation,
-    RequestedOperationType,
     SensitivityLevel,
     TaskSpec,
 )
@@ -37,42 +34,31 @@ class ActorActionSchemaTests(unittest.TestCase):
                 goal="Prepare an email.",
                 context="Use deterministic facts.",
                 constraints=[],
-                domain_type=DomainType.RESEARCH,
-                domain_label="research",
                 sensitivity=SensitivityLevel.LOW,
                 success_criteria=["Prepare the draft."],
-                requested_operations=[
-                    RequestedOperation(
-                        operation_type=RequestedOperationType.EXTERNAL_COMMUNICATION,
-                        channel="email",
-                        recipient="ops@example.com",
-                    )
-                ],
             ),
         )
         names = {str(action["name"]) for action in actions}
 
         self.assertIn("emit_external_communication_draft", names)
         self.assertIn("emit_step_completed", names)
-        self.assertIn("emit_final_output", names)
+        self.assertNotIn("emit_final_output", names)
 
     # Evidence and non-communication steps must not emit a communication prematurely.
-    def test_non_synthesis_turn_hides_external_draft_action(self) -> None:
+    def test_generic_actor_turn_exposes_typed_outcome_actions(self) -> None:
         actions = select_actor_runtime_tools_for_turn(
             build_actor_runtime_tools(),
             task_spec=TaskSpec(
                 goal="Collect evidence.",
                 context="Use deterministic facts.",
                 constraints=[],
-                domain_type=DomainType.EXTERNAL_COMMUNICATION,
-                domain_label="email",
                 sensitivity=SensitivityLevel.LOW,
                 success_criteria=["Collect evidence."],
             ),
         )
         names = {str(action["name"]) for action in actions}
 
-        self.assertNotIn("emit_external_communication_draft", names)
+        self.assertIn("emit_external_communication_draft", names)
         self.assertIn("emit_step_completed", names)
 
     # Runtime actions must remain unique, closed, and provider-neutral.
@@ -82,7 +68,7 @@ class ActorActionSchemaTests(unittest.TestCase):
 
         self.assertEqual(len(names), len(set(names)))
         self.assertIn("request_web_search", names)
-        self.assertIn("emit_final_output", names)
+        self.assertNotIn("emit_final_output", names)
         self.assertIn("emit_external_communication_draft", names)
         self.assertIn("emit_needs_replan", names)
         for action in actions:
@@ -111,7 +97,7 @@ class ActorActionSchemaTests(unittest.TestCase):
 
         self.assertEqual(names[:2], ["request_web_search", "request_fetch_url_text"])
         self.assertFalse(any(name.startswith("request_mcp_") for name in names))
-        self.assertIn("emit_final_output", names)
+        self.assertNotIn("emit_final_output", names)
         self.assertIn("emit_needs_replan", names)
 
     # The explicit MCP test registry enables only its allowlisted local capabilities.

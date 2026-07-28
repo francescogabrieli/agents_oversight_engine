@@ -561,7 +561,7 @@
         <div class="grid cols-3" style="margin-top: 20px;">
           <div class="card green">
             <h3>Implementato</h3>
-            <p>Output tipizzato del planner, output tipizzato dell'actor, governance dopo l'actor, instradamento read-only dei tool, observed evidence, replanning, HITL interrupt/resume, persistenza e trace export.</p>
+            <p>Output tipizzato del planner e dell'actor, continuazione locale degli intermediate output, governance ai confini semantici e operativi, instradamento read-only dei tool, observed evidence, replanning, HITL interrupt/resume, persistenza e trace export.</p>
           </div>
           <div class="card amber">
             <h3>Deliberatamente vincolato</h3>
@@ -601,7 +601,7 @@
   "structured_task": {
     "task_spec": {
       "goal": "...",
-      "domain_type": "research",
+      "execution_intent": "proposal_only",
       "sensitivity": "medium"
     },
     "execution_policy": {
@@ -697,7 +697,7 @@
             <h3>Esecuzione limitata allo step</h3>
             <ul class="tight-list">
               <li>Riceve l'intero piano come contesto.</li>
-              <li>Puo agire solo sullo step corrente.</li>
+              <li>Vede il piano completo e può committare solo lo step corrente.</li>
               <li>Puo richiedere tool read-only, produrre output locale, chiedere chiarimenti o segnalare replan.</li>
               <li>Non puo riscrivere il piano da solo.</li>
             </ul>
@@ -770,7 +770,7 @@
           </div>
           <div class="path-step">
             <strong>4</strong>
-            <p>`observe_tool_result` converte il risultato del tool in `ObservedEvidence` esplicita, preservando provenienza e support level per il reasoning successivo.</p>
+            <p><code>observe_tool_result</code> registra le <code>ToolObservation</code> prodotte dall'adapter: identificatore, contenuto concreto e locator opzionale.</p>
           </div>
           <div class="path-step">
             <strong>5</strong>
@@ -872,7 +872,7 @@
           </div>
           <div class="card blue">
             <h3>Record di esecuzione</h3>
-            <p>`executed_steps`, `step_validations`, `scratchpad`, `tool_results_history`, `observed_evidence`.</p>
+            <p><code>executed_steps</code>, <code>step_validations</code>, <code>scratchpad</code>, <code>tool_results_history</code>, <code>observations</code>.</p>
           </div>
           <div class="card blue">
             <h3>Contatori operativi</h3>
@@ -908,7 +908,7 @@
   "runtime": {"thread_id": "...", "current_state": "completed"},
   "plan_steps": [...],
   "tool_calls": [...],
-  "observed_evidence": [...],
+  "observations": [...],
   "governance_decisions": [...],
   "oversight_assessments": [...],
   "human_review": {...},

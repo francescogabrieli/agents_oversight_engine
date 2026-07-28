@@ -288,7 +288,6 @@ class SQLiteBehavioralStore(BehavioralStorePort):
             CREATE TABLE IF NOT EXISTS runs (
                 thread_id TEXT PRIMARY KEY,
                 final_state TEXT NOT NULL,
-                domain_type TEXT NOT NULL,
                 sensitivity TEXT NOT NULL,
                 policy_profile_name TEXT NOT NULL,
                 budget_max_steps INTEGER,
@@ -372,7 +371,6 @@ class SQLiteBehavioralStore(BehavioralStorePort):
         expected_columns = (
             "thread_id",
             "final_state",
-            "domain_type",
             "sensitivity",
             "policy_profile_name",
             "budget_max_steps",
@@ -399,7 +397,6 @@ class SQLiteBehavioralStore(BehavioralStorePort):
             CREATE TABLE runs (
                 thread_id TEXT PRIMARY KEY,
                 final_state TEXT NOT NULL,
-                domain_type TEXT NOT NULL,
                 sensitivity TEXT NOT NULL,
                 policy_profile_name TEXT NOT NULL,
                 budget_max_steps INTEGER,
@@ -412,12 +409,12 @@ class SQLiteBehavioralStore(BehavioralStorePort):
                 has_external_communication INTEGER NOT NULL
             );
             INSERT INTO runs (
-                thread_id, final_state, domain_type, sensitivity, policy_profile_name,
+                thread_id, final_state, sensitivity, policy_profile_name,
                 budget_max_steps, budget_max_tool_calls, actor_turn_count, tool_call_count,
                 replan_count, review_count, abort_count, has_external_communication
             )
             SELECT
-                thread_id, final_state, domain_type, sensitivity, policy_profile_name,
+                thread_id, final_state, sensitivity, policy_profile_name,
                 budget_max_steps, budget_max_tool_calls, actor_turn_count, tool_call_count,
                 replan_count, review_count, abort_count, has_external_communication
             FROM runs_schema_migration;
@@ -553,12 +550,11 @@ class SQLiteBehavioralStore(BehavioralStorePort):
         strict_rows = connection.execute(
             """
             SELECT
-                thread_id, final_state, domain_type, sensitivity, policy_profile_name,
+                thread_id, final_state, sensitivity, policy_profile_name,
                 actor_turn_count, tool_call_count, replan_count, review_count, abort_count,
                 has_external_communication
             FROM runs
             WHERE thread_id <> ?
-              AND domain_type = ?
               AND sensitivity = ?
               AND policy_profile_name = ?
             ORDER BY has_external_communication = ? DESC, thread_id DESC
@@ -566,7 +562,6 @@ class SQLiteBehavioralStore(BehavioralStorePort):
             """,
             (
                 thread_id,
-                current_profile["domain_type"],
                 current_profile["sensitivity"],
                 current_profile["policy_profile_name"],
                 current_profile["has_external_communication"],
@@ -578,19 +573,17 @@ class SQLiteBehavioralStore(BehavioralStorePort):
         fallback_rows = connection.execute(
             """
             SELECT
-                thread_id, final_state, domain_type, sensitivity, policy_profile_name,
+                thread_id, final_state, sensitivity, policy_profile_name,
                 actor_turn_count, tool_call_count, replan_count, review_count, abort_count,
                 has_external_communication
             FROM runs
             WHERE thread_id <> ?
-              AND domain_type = ?
               AND has_external_communication = ?
             ORDER BY thread_id DESC
             LIMIT 300
             """,
             (
                 thread_id,
-                current_profile["domain_type"],
                 current_profile["has_external_communication"],
             ),
         ).fetchall()
@@ -765,15 +758,14 @@ class SQLiteBehavioralStore(BehavioralStorePort):
         connection.execute(
             """
             INSERT INTO runs (
-                thread_id, final_state, domain_type, sensitivity, policy_profile_name,
+                thread_id, final_state, sensitivity, policy_profile_name,
                 budget_max_steps, budget_max_tool_calls, actor_turn_count, tool_call_count,
                 replan_count, review_count, abort_count, has_external_communication
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 thread_id,
                 task_state.current_state.value,
-                structured_task.task_spec.domain_type.value,
                 structured_task.task_spec.sensitivity.value,
                 structured_task.execution_policy.policy_profile_name,
                 structured_task.execution_policy.budget.max_steps,
@@ -999,11 +991,11 @@ def _build_feature_snapshot(*, task_state: TaskState) -> dict[str, str]:
         ),
         "abort_count": str(1 if task_state.current_state.value == "aborted" else 0),
         "has_external_communication": "1" if task_state.external_communication is not None else "0",
-        "evidence_count": str(len(task_state.observed_evidence)),
-        "official_source_count": str(sum(item.source_authority.value == "official_primary" for item in task_state.observed_evidence)),
-        "cited_summary_count": str(sum(item.content_state.value == "provider_cited_summary" for item in task_state.observed_evidence)),
-        "extracted_partial_count": str(sum(item.content_state.value == "extracted_partial" for item in task_state.observed_evidence)),
-        "extracted_full_count": str(sum(item.content_state.value == "extracted_full" for item in task_state.observed_evidence)),
+        "evidence_count": str(len(task_state.observations)),
+        "official_source_count": "0",
+        "cited_summary_count": "0",
+        "extracted_partial_count": "0",
+        "extracted_full_count": str(len(task_state.observations)),
         "extractability_failure_count": str(sum(not result.success and result.extractability_limited for result in task_state.tool_results_history)),
         "governance_distribution": json.dumps(governance_distribution, ensure_ascii=False, sort_keys=True),
         "validation_distribution": json.dumps(validation_distribution, ensure_ascii=False, sort_keys=True),
@@ -1033,7 +1025,6 @@ def _build_feature_snapshot(*, task_state: TaskState) -> dict[str, str]:
 # Build the current behavioural profile directly from the live runtime state.
 def _build_current_profile(*, task_state: TaskState) -> dict[str, Any]:
     return {
-        "domain_type": task_state.task_spec.domain_type.value,
         "sensitivity": task_state.task_spec.sensitivity.value,
         "policy_profile_name": task_state.execution_policy.policy_profile_name,
         "has_external_communication": 1 if task_state.external_communication is not None else 0,
@@ -1045,7 +1036,7 @@ def _build_current_profile(*, task_state: TaskState) -> dict[str, Any]:
             1 for decision in task_state.governance_history if decision.directive.value == "wait_human_review"
         ),
         "abort_count": 1 if task_state.current_state.value == "aborted" else 0,
-        "evidence_count": len(task_state.observed_evidence),
+        "evidence_count": len(task_state.observations),
         "tool_usage": {result.request.tool_name.value for result in task_state.tool_results_history},
         "governance_distribution": _distribution_from_governance(task_state=task_state),
         "validation_distribution": _distribution_from_validation(task_state=task_state),
@@ -1084,15 +1075,14 @@ def _row_to_candidate(row: tuple[Any, ...]) -> dict[str, Any]:
     return {
         "thread_id": str(row[0]),
         "final_state": str(row[1]),
-        "domain_type": str(row[2]),
-        "sensitivity": str(row[3]),
-        "policy_profile_name": str(row[4]),
-        "actor_turn_count": int(row[5]),
-        "tool_call_count": int(row[6]),
-        "replan_count": int(row[7]),
-        "review_count": int(row[8]),
-        "abort_count": int(row[9]),
-        "has_external_communication": int(row[10]),
+        "sensitivity": str(row[2]),
+        "policy_profile_name": str(row[3]),
+        "actor_turn_count": int(row[4]),
+        "tool_call_count": int(row[5]),
+        "replan_count": int(row[6]),
+        "review_count": int(row[7]),
+        "abort_count": int(row[8]),
+        "has_external_communication": int(row[9]),
     }
 
 
@@ -1134,8 +1124,7 @@ def _score_candidate_similarity(
     )
 
     score = (
-        0.10 * _binary_match(current_profile["domain_type"], candidate_run["domain_type"])
-        + 0.10 * _binary_match(current_profile["sensitivity"], candidate_run["sensitivity"])
+        0.10 * _binary_match(current_profile["sensitivity"], candidate_run["sensitivity"])
         + 0.10 * _binary_match(
             current_profile["policy_profile_name"],
             candidate_run["policy_profile_name"],

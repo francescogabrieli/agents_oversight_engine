@@ -7,20 +7,6 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-
-# DomainType keeps the layer 1 taxonomy stable for policy resolution and tracing.
-class DomainType(str, Enum):
-    RESEARCH = "research"
-    ANALYSIS = "analysis"
-    SUMMARIZATION = "summarization"
-    DATA_EXTRACTION = "data_extraction"
-    CONTENT_GENERATION = "content_generation"
-    EXTERNAL_COMMUNICATION = "external_communication"
-    CUSTOMER_SUPPORT = "customer_support"
-    PRODUCTIVITY = "productivity"
-    SOFTWARE_ENGINEERING = "software_engineering"
-    OTHER = "other"
-
 # SensitivityLevel captures the coarse risk class used by downstream controls.
 class SensitivityLevel(str, Enum):
     LOW = "low"
@@ -40,28 +26,6 @@ class ParseStatus(str, Enum):
 class ExecutionIntent(str, Enum):
     PROPOSAL_ONLY = "proposal_only"
     EXECUTE_AFTER_GOVERNANCE = "execute_after_governance"
-
-
-class RequestedOperationType(str, Enum):
-    # Requested effects describe intent independently from the descriptive task domain.
-    EXTERNAL_COMMUNICATION = "external_communication"
-
-
-class RequestedOperation(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    operation_type: RequestedOperationType
-    channel: str | None = None
-    recipient: str | None = None
-
-    @field_validator("channel", "recipient", mode="before")
-    @classmethod
-    def normalize_optional_operation_text(cls, value: object) -> str | None:
-        if value is None:
-            return None
-        if not isinstance(value, str):
-            raise TypeError("Requested operation fields must be strings.")
-        return " ".join(value.strip().split()) or None
 
 
 # Keep domain validation failures separate from generic Python exceptions.
@@ -129,12 +93,6 @@ class TaskSpec(BaseModel):
     goal: str = Field(..., min_length=1)
     context: str = Field(default="")
     constraints: list[str] = Field(default_factory=list)
-    domain_type: DomainType = Field(default=DomainType.OTHER)
-    domain_label: str = Field(
-        default="other",
-        min_length=1,
-        description="Free-form domain label inferred from the task.",
-    )
     sensitivity: SensitivityLevel = Field(default=SensitivityLevel.MEDIUM)
     success_criteria: list[str] = Field(default_factory=list)
     execution_intent: ExecutionIntent = Field(
@@ -143,9 +101,8 @@ class TaskSpec(BaseModel):
             "User-requested execution intent; this records intent and never grants authority."
         ),
     )
-    requested_operations: list[RequestedOperation] = Field(default_factory=list)
 
-    @field_validator("goal", "context", "domain_label", mode="before")
+    @field_validator("goal", "context", mode="before")
     @classmethod
     def normalize_text_fields(cls, value: object) -> str:
         # Normalize free text early to keep the canonical payload stable.
@@ -181,9 +138,6 @@ class TaskSpec(BaseModel):
         # Keep the semantic core of the task always usable by downstream layers.
         if not self.goal:
             raise ValueError("TaskSpec.goal cannot be empty.")
-
-        if not self.domain_label:
-            self.domain_label = self.domain_type.value
 
         return self
 
@@ -313,7 +267,6 @@ class IntakeResult(BaseModel):
 
 __all__ = [
     "BudgetConfig",
-    "DomainType",
     "ExecutionIntent",
     "ExecutionPolicy",
     "IntakeDomainError",
@@ -323,8 +276,6 @@ __all__ = [
     "InvalidExecutionPolicyError",
     "InvalidTaskSpecError",
     "ParseStatus",
-    "RequestedOperation",
-    "RequestedOperationType",
     "SensitivityLevel",
     "StructuredTask",
     "TaskCompletenessAssessment",

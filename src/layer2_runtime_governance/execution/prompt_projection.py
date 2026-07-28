@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from ..actor_contract import ActorTask
-from ..tool_contract import EvidenceSourceKind
 
 
 # Keep only a bounded tail of audit-safe working-memory entries in each model turn.
@@ -16,12 +15,6 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
         actor_task.current_plan_step.step_id,
         *(step.step_id for step in actor_task.past_steps),
     }
-    evidence = [
-        item
-        for item in actor_task.observed_evidence
-        if item.source_kind == EvidenceSourceKind.TOOL_OBSERVATION
-        and item.plan_step_id in relevant_step_ids
-    ]
     current_validation = next(
         (
             validation
@@ -41,10 +34,9 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
             "goal": actor_task.task_spec.goal,
             "context": actor_task.task_spec.context,
             "constraints": actor_task.task_spec.constraints,
-            "domain_type": actor_task.task_spec.domain_type.value,
-            "domain_label": actor_task.task_spec.domain_label,
             "sensitivity": actor_task.task_spec.sensitivity.value,
             "success_criteria": actor_task.task_spec.success_criteria,
+            "execution_intent": actor_task.task_spec.execution_intent.value,
         },
         "runtime": {
             "current_state": actor_task.current_state.value,
@@ -55,6 +47,8 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
             "max_tool_calls": actor_task.execution_policy.budget.max_tool_calls,
             "remaining_tool_calls": actor_task.remaining_tool_calls,
             "confidence_threshold": actor_task.execution_policy.confidence_threshold,
+            "progress_epoch": actor_task.progress_epoch,
+            "attempted_action_keys": list(actor_task.attempted_action_keys[-12:]),
         },
         "plan": {
             "current_step_number": actor_task.current_plan_step_index + 1,
@@ -63,6 +57,8 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
                 {
                     "step_id": step.step_id,
                     "objective": step.objective,
+                    "rationale": step.rationale,
+                    "expected_outcome": step.expected_outcome,
                     "status": step.status.value,
                 }
                 for index, step in enumerate(actor_task.plan_steps)
@@ -75,24 +71,17 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
                 "objective": step.objective,
                 "result_type": step.result_type.value,
                 "summary": step.summary,
+                "output_text": step.output_text,
             }
             for step in actor_task.past_steps
         ],
-        "observed_evidence": [
+        "observations": [
             {
-                "evidence_id": item.evidence_id,
-                "plan_step_id": item.plan_step_id,
-                "title": item.title,
+                "observation_id": item.observation_id,
                 "locator": item.locator,
-                "excerpt": item.excerpt,
-                "source_tool": item.source_tool.value if item.source_tool is not None else None,
-                "content_state": item.content_state.value,
-                "source_authority": item.source_authority.value,
-                "document_type": item.document_type.value,
-                "extractability": item.extractability.value,
-                "citation_alignment": item.citation_alignment.value,
+                "content": item.content,
             }
-            for item in evidence
+            for item in actor_task.observations
         ],
         "scratchpad": [
             {
@@ -117,16 +106,26 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
         ),
         "last_tool_result": _project_last_tool_result(
             actor_task=actor_task,
-            has_equivalent_evidence=bool(
+            has_equivalent_observations=bool(
                 actor_task.last_tool_result
-                and any(
-                    item.plan_step_id == actor_task.last_tool_result.request.plan_step_id
-                    and item.source_tool == actor_task.last_tool_result.request.tool_name
-                    for item in evidence
-                )
+                and actor_task.last_tool_result.observations
             ),
         ),
-        "requested_operations": [operation.model_dump(mode="json") for operation in actor_task.task_spec.requested_operations],
+        "workspace": {
+            "revision": actor_task.workspace.revision if actor_task.workspace else 0,
+            "artifacts": [
+                {"artifact_id": item.artifact_id, "step_id": item.step_id, "content": item.content,
+                 "evidence_refs": list(item.evidence_refs), "revision": item.revision, "provenance": item.provenance}
+                for item in (actor_task.workspace.artifacts if actor_task.workspace else [])
+            ],
+            "blockers": list(actor_task.workspace.blockers if actor_task.workspace else []),
+            "decisions": list(actor_task.workspace.decisions if actor_task.workspace else []),
+        },
+        "governance_feedback": [
+            {"operation_id": item.operation_id, "invalidated_payload_digest": item.invalidated_payload_digest,
+             "finding_codes": list(item.finding_codes), "summary": item.summary, "revision_index": item.revision_index}
+            for item in actor_task.governance_feedback
+        ],
     }
 
 
@@ -146,7 +145,7 @@ def _full_step(*, actor_task: ActorTask) -> dict[str, Any]:
 def _project_last_tool_result(
     *,
     actor_task: ActorTask,
-    has_equivalent_evidence: bool,
+    has_equivalent_observations: bool,
 ) -> dict[str, Any] | None:
     result = actor_task.last_tool_result
     if result is None:
@@ -156,16 +155,18 @@ def _project_last_tool_result(
         "success": result.success,
         "summary": result.summary,
         "error_message": result.error_message,
+        "error_code": result.error_code.value if result.error_code else None,
+        "retryable": result.error_code is not None and result.error_code.value in {"timeout", "unavailable"},
     }
-    if not has_equivalent_evidence:
+    if not has_equivalent_observations:
         projected["content"] = result.content
-        projected["sources"] = [
+        projected["observations"] = [
             {
-                "title": source.title,
-                "locator": source.locator,
-                "snippet": source.snippet,
+                "observation_id": observation.observation_id,
+                "locator": observation.locator,
+                "content": observation.content,
             }
-            for source in result.sources
+            for observation in result.observations
         ]
     return projected
 

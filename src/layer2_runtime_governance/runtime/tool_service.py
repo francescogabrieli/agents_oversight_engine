@@ -1,124 +1,243 @@
+from dataclasses import replace
 from urllib.parse import urlparse
 
+from ..actor_contract import ActorResult, ActorResultType, CapabilityAccessMode
 from ..domain import RuntimeFlag, RuntimeState, ScratchpadEntry, ScratchpadEntryType, TaskState
-from ..tool_contract import (
-    EvidenceContentState,
-    EvidenceSourceKind,
-    Extractability,
-    ObservedEvidence,
-    ToolErrorCode,
-    ToolExecutionResult,
-    ToolGatewayPort,
-    ToolName,
-    ToolRequest,
-)
+from ..domain.runtime_records import ToolAttempt, ToolDisposition, ToolInvocation
+from ..tool_contract import ToolErrorCode, ToolExecutionResult, ToolGatewayPort, ToolName, ToolObservation, ToolRequest
 from .lifecycle_service import _append_step_record
 
 
-# Execute a typed read-only capability and enforce only technical budgets and host circuit state.
+# Execute a capability through a progress-aware local guard before any backend or OPA boundary.
 def tool_gateway(state: TaskState, *, tool_gateway_service: ToolGatewayPort) -> TaskState:
     if state.current_state != RuntimeState.READY_TOOL_EXECUTION or state.current_tool_request is None:
         _append_step_record(state, node_name="tool_gateway", summary="Tool gateway skipped because no tool request was ready.")
         return state
     request = state.current_tool_request
-    if _tool_call_budget_exhausted(state=state):
-        result = ToolExecutionResult(request=request, success=False, summary="Tool call budget exhausted.", error_message="Configured tool-call budget exhausted.", error_code=ToolErrorCode.UNAVAILABLE)
-    elif _is_exact_duplicate_request(state=state, request=request):
-        result = ToolExecutionResult(request=request, success=False, summary="Exact duplicate tool request was not repeated.", error_message="The same request has already been attempted for this step.", error_code=ToolErrorCode.DUPLICATE_REQUEST)
-    elif _host_circuit_open(state=state, request=request):
-        result = ToolExecutionResult(request=request, success=False, summary="Equivalent fetch circuit is open.", error_message="Repeated equivalent failures for this host; fetch deferred.", error_code=ToolErrorCode.CIRCUIT_OPEN, extractability_limited=True)
-    else:
-        result = tool_gateway_service.execute(tool_request=request)
+    action_key = canonical_action_key(request)
+    result, disposition, invoked = _guarded_tool_result(
+        state=state, request=request, action_key=action_key, tool_gateway_service=tool_gateway_service
+    )
+    state.tool_attempts.append(ToolAttempt(action_key, request.plan_step_id, state.progress_epoch, disposition))
+    if invoked:
+        retryable = _is_retryable_backend_failure(result)
+        state.tool_invocations.append(ToolInvocation(action_key, request.plan_step_id, state.progress_epoch, retryable))
         state.tool_call_count += 1
     state.last_tool_result = result
     state.tool_results_history.append(result)
     state.current_tool_request = None
-    state.current_state = RuntimeState.ACTING
-    _append_step_record(state, node_name="tool_gateway", summary=f"Tool gateway executed '{request.tool_name.value}' with typed normalization.")
+    if disposition in {ToolDisposition.REJECTED_DUPLICATE, ToolDisposition.CACHE_HIT} and _same_epoch_repeat_count(state, action_key) >= 2:
+        _request_protocol_replan(state, action_key=action_key)
+    else:
+        state.current_state = RuntimeState.ACTING
+    _append_step_record(state, node_name="tool_gateway", summary=f"Tool gateway recorded {disposition.value} for '{request.tool_name.value}'.")
     return state
 
 
-# Turn normalized source observations into explicit evidence without claim-precision inference.
+# Canonicalize only arguments that change execution; actor prose intentionally has no effect.
+def canonical_action_key(request: ToolRequest) -> str:
+    values: tuple[object, ...]
+    if request.tool_name == ToolName.WEB_SEARCH:
+        values = (_normalize_value(request.query), request.max_results)
+    elif request.tool_name == ToolName.FETCH_URL_TEXT:
+        values = (_normalize_url(request.url),)
+    elif request.tool_name == ToolName.MCP_LOCAL_TEST_TEXT_STATS:
+        values = (_normalize_value(request.text), request.limit)
+    elif request.tool_name == ToolName.MCP_LOCAL_TEST_ECHO:
+        values = (_normalize_value(request.text),)
+    elif request.tool_name == ToolName.MCP_LOCAL_TEST_READ_FIXTURE:
+        values = (_normalize_value(request.path),)
+    elif request.tool_name == ToolName.MCP_LOCAL_TEST_CALCULATE_EXPRESSION:
+        values = (_normalize_value(request.expression),)
+    else:
+        values = ()
+    return f"{request.tool_name.value}:{values!r}"
+
+
+# Return cache/rejection results without allowing them to become backend invocations.
+def _guarded_tool_result(*, state: TaskState, request: ToolRequest, action_key: str, tool_gateway_service: ToolGatewayPort) -> tuple[ToolExecutionResult, ToolDisposition, bool]:
+    if _tool_call_budget_exhausted(state=state):
+        return _synthetic_result(request, "Tool call budget exhausted.", ToolErrorCode.UNAVAILABLE), ToolDisposition.REJECTED_BUDGET, False
+    cached = _successful_result_for_action(state, action_key)
+    if cached is not None:
+        return ToolExecutionResult(
+            request=request, success=False, summary="Cached result is already available in workspace observations.",
+            content=cached.content, observations=(), error_message="Equivalent capability result was reused locally.",
+            error_code=ToolErrorCode.DUPLICATE_REQUEST,
+        ), ToolDisposition.CACHE_HIT, False
+    if _terminal_failure_for_action(state, action_key):
+        return _synthetic_result(request, "Equivalent capability failed terminally in this progress epoch.", ToolErrorCode.DUPLICATE_REQUEST), ToolDisposition.REJECTED_DUPLICATE, False
+    if _retryable_failure_for_action(state, action_key):
+        return _synthetic_result(request, "Equivalent capability already exhausted its local retry for this progress epoch.", ToolErrorCode.DUPLICATE_REQUEST), ToolDisposition.REJECTED_DUPLICATE, False
+    if _circuit_open(state, request, action_key):
+        return _synthetic_result(request, "Capability circuit is open after retryable backend failures.", ToolErrorCode.CIRCUIT_OPEN), ToolDisposition.REJECTED_CIRCUIT, False
+    result = tool_gateway_service.execute(tool_request=request)
+    if result.success:
+        return result, ToolDisposition.EXECUTED_SUCCESS, True
+    if _is_retryable_backend_failure(result):
+        return result, ToolDisposition.EXECUTED_RETRYABLE_FAILURE, True
+    return result, ToolDisposition.EXECUTED_TERMINAL_FAILURE, True
+
+
+# Build a typed runtime-only result; synthetic outcomes never count as backend failures.
+def _synthetic_result(request: ToolRequest, summary: str, error_code: ToolErrorCode) -> ToolExecutionResult:
+    return ToolExecutionResult(request=request, success=False, summary=summary, error_message=summary, error_code=error_code)
+
+
+# Identify retryability only from an executed backend response.
+def _is_retryable_backend_failure(result: ToolExecutionResult) -> bool:
+    return not result.success and result.error_code in {ToolErrorCode.TIMEOUT, ToolErrorCode.UNAVAILABLE}
+
+
+# Count same-epoch attempts after adding the current rejected duplicate.
+def _same_epoch_repeat_count(state: TaskState, action_key: str) -> int:
+    return sum(1 for item in state.tool_attempts if item.action_key == action_key and item.progress_epoch == state.progress_epoch)
+
+
+# Escalate local protocol churn to replanning without asking OPA to supervise technical loops.
+def _request_protocol_replan(state: TaskState, *, action_key: str) -> None:
+    step = state.current_plan_step
+    if step is None:
+        return
+    state.actor_result = ActorResult(
+        plan_step_id=step.step_id, result_type=ActorResultType.NEEDS_REPLAN,
+        summary="Repeated capability request made no progress.",
+        blocking_reason=f"Capability action '{action_key}' was repeated in progress epoch {state.progress_epoch} without a state delta.",
+        capability_mode=CapabilityAccessMode.NONE,
+    )
+    state.current_state = RuntimeState.REPLANNING
+
+
+# A cached success is valid only for the current execution epoch.
+def _successful_result_for_action(state: TaskState, action_key: str) -> ToolExecutionResult | None:
+    for result in reversed(state.tool_results_history):
+        if result.success and canonical_action_key(result.request) == action_key:
+            return result
+    return None
+
+
+# Terminal failures are not retried until progress changes.
+def _terminal_failure_for_action(state: TaskState, action_key: str) -> bool:
+    return any(
+        item.action_key == action_key and item.progress_epoch == state.progress_epoch
+        and item.disposition == ToolDisposition.EXECUTED_TERMINAL_FAILURE
+        for item in state.tool_attempts
+    )
+
+
+# Permit one backend retryable failure, then route equivalent work to finite recovery.
+def _retryable_failure_for_action(state: TaskState, action_key: str) -> bool:
+    return any(
+        item.action_key == action_key and item.progress_epoch == state.progress_epoch
+        and item.disposition == ToolDisposition.EXECUTED_RETRYABLE_FAILURE
+        for item in state.tool_attempts
+    )
+
+
+# The circuit counts only backend retryable failures in the current reset window.
+def _circuit_open(state: TaskState, request: ToolRequest, action_key: str) -> bool:
+    if request.tool_name != ToolName.FETCH_URL_TEXT:
+        return False
+    host = urlparse(request.url or "").netloc.casefold()
+    failures = 0
+    for invocation in state.tool_invocations:
+        if not invocation.retryable_failure or invocation.progress_epoch != state.progress_epoch:
+            continue
+        if not invocation.action_key.startswith(f"{ToolName.FETCH_URL_TEXT.value}:"):
+            continue
+        candidate = next((result.request for result in state.tool_results_history if canonical_action_key(result.request) == invocation.action_key), None)
+        if candidate and urlparse(candidate.url or "").netloc.casefold() == host:
+            failures += 1
+    return failures >= 2
+
+
+# Normalize a value for capability-owned equivalence, not for semantic quality scoring.
+def _normalize_value(value: str | None) -> str:
+    return " ".join((value or "").split()).casefold()
+
+
+# Normalize URL comparison enough to avoid textual variants of the same fetch.
+def _normalize_url(value: str | None) -> str:
+    return (value or "").strip().casefold().rstrip("/")
+
+
+# Turn adapter observations into evidence and advance progress only for concrete new content.
 def observe_tool_result(state: TaskState) -> TaskState:
     if state.last_tool_result is None:
         _append_step_record(state, node_name="observe_tool_result", summary="Observation skipped because no tool result exists.")
         return state
-    evidence = _build_observed_evidence_from_tool_result(state=state, tool_result=state.last_tool_result)
-    state.observed_evidence.extend(evidence)
-    if evidence:
-        state.consecutive_no_progress_turns = 0
+    cached = bool(state.tool_attempts and state.tool_attempts[-1].disposition == ToolDisposition.CACHE_HIT)
+    observations = [] if cached else _validated_tool_observations(state=state, tool_result=state.last_tool_result)
+    if observations:
+        state.observations.extend(observations)
+        state.progress_epoch += 1
+        state.state_revision += 1
+        state.no_progress_turns = 0
     if state.last_tool_result.extractability_limited or _tool_result_indicates_extractability_limit(state.last_tool_result):
         if RuntimeFlag.EXTRACTABILITY_LIMITED not in state.runtime_flags:
             state.runtime_flags.append(RuntimeFlag.EXTRACTABILITY_LIMITED)
-    state.current_state = RuntimeState.ACTING
-    _append_step_record(state, node_name="observe_tool_result", summary="Tool result observed with concrete provenance facts.")
+    if state.current_state != RuntimeState.REPLANNING:
+        state.current_state = RuntimeState.ACTING
+    _append_step_record(state, node_name="observe_tool_result", summary="Tool result observations recorded without semantic classification.")
     return state
 
 
+# Respect the configured capability-invocation budget.
 def _tool_call_budget_exhausted(*, state: TaskState) -> bool:
     maximum = state.execution_policy.budget.max_tool_calls
     return maximum is not None and state.tool_call_count >= maximum
 
 
-# Avoid re-executing the identical request only within the same semantic step.
+# Backwards-compatible helper now delegates to capability-owned canonicalization.
 def _is_exact_duplicate_request(*, state: TaskState, request: ToolRequest) -> bool:
-    def fingerprint(candidate: ToolRequest) -> tuple[object, ...]:
-        return (candidate.plan_step_id, candidate.tool_name, candidate.query, candidate.url, candidate.text, candidate.path, candidate.expression, candidate.timezone, candidate.limit, candidate.max_results, candidate.extractive_goal)
-
-    target = fingerprint(request)
-    return any(fingerprint(result.request) == target for result in state.tool_results_history)
+    return _successful_result_for_action(state, canonical_action_key(request)) is not None
 
 
-# Open a narrow circuit only after two failed fetches on the exact host; successful or different work is unaffected.
+# Backwards-compatible helper for tests and callers.
 def _host_circuit_open(*, state: TaskState, request: ToolRequest) -> bool:
-    if request.tool_name != ToolName.FETCH_URL_TEXT or not request.url:
-        return False
-    host = urlparse(request.url).netloc.lower()
-    failures = [item for item in state.tool_results_history if item.request.tool_name == ToolName.FETCH_URL_TEXT and item.request.url and urlparse(item.request.url).netloc.lower() == host and not item.success]
-    return len(failures) >= 2
+    return _circuit_open(state, request, canonical_action_key(request))
 
 
-def _build_observed_evidence_from_tool_result(*, state: TaskState, tool_result: ToolExecutionResult) -> list[ObservedEvidence]:
-    step = state.current_plan_step
-    if step is None or not tool_result.success:
+# Validate adapter-produced observations without assigning semantic quality.
+def _validated_tool_observations(*, state: TaskState, tool_result: ToolExecutionResult) -> list[ToolObservation]:
+    if not tool_result.success:
         _append_observation(state=state, tool_result=tool_result, evidence_refs=[])
         return []
-    evidence: list[ObservedEvidence] = []
-    for index, source in enumerate(tool_result.sources, start=1):
-        excerpt = (source.snippet or "").strip()
-        if not excerpt:
-            excerpt = f"Source metadata: {source.title}."
-        evidence.append(ObservedEvidence(
-            evidence_id=f"{step.step_id}:tool:{state.tool_call_count}:source:{index}", plan_step_id=step.step_id,
-            title=source.title, locator=source.locator, excerpt=excerpt[:1000], source_kind=EvidenceSourceKind.TOOL_OBSERVATION,
-            source_tool=tool_result.request.tool_name, content_state=source.content_state, source_authority=source.source_authority,
-            document_type=source.document_type, extractability=source.extractability, citation_alignment=source.citation_alignment,
-        ))
-    if not evidence and tool_result.content and tool_result.content.strip():
-        evidence.append(ObservedEvidence(
-            evidence_id=f"{step.step_id}:tool:{state.tool_call_count}:fallback", plan_step_id=step.step_id,
-            title=tool_result.request.tool_name.value, locator=tool_result.request.url or tool_result.request.query or tool_result.request.tool_name.value,
-            excerpt=tool_result.content[:1000], source_kind=EvidenceSourceKind.TOOL_OBSERVATION, source_tool=tool_result.request.tool_name,
-            content_state=EvidenceContentState.EXTRACTED_PARTIAL if tool_result.truncated else EvidenceContentState.EXTRACTED_FULL,
-            extractability=Extractability.TRUNCATED if tool_result.truncated else Extractability.COMPLETE,
-        ))
-    _append_observation(state=state, tool_result=tool_result, evidence_refs=[item.evidence_id for item in evidence])
-    return evidence
+    existing_ids = {item.observation_id for item in state.observations}
+    accepted: list[ToolObservation] = []
+    for observation in tool_result.observations:
+        if not observation.content.strip():
+            continue
+        if observation.observation_id in existing_ids:
+            observation = replace(observation, observation_id=_next_available_observation_id(base_id=observation.observation_id, existing_ids=existing_ids))
+        accepted.append(observation)
+        existing_ids.add(observation.observation_id)
+    _append_observation(state=state, tool_result=tool_result, evidence_refs=[item.observation_id for item in accepted])
+    return accepted
 
 
+# Create a stable request-scoped suffix instead of failing the whole execution.
+def _next_available_observation_id(*, base_id: str, existing_ids: set[str]) -> str:
+    suffix = 2
+    while f"{base_id}:normalized:{suffix}" in existing_ids:
+        suffix += 1
+    return f"{base_id}:normalized:{suffix}"
+
+
+# Preserve extractability warnings as operational facts, never quality classifications.
 def _tool_result_indicates_extractability_limit(result: ToolExecutionResult) -> bool:
     if result.request.tool_name != ToolName.FETCH_URL_TEXT:
         return False
-    if result.error_code in {ToolErrorCode.FORBIDDEN, ToolErrorCode.BYTE_LIMIT, ToolErrorCode.BOT_CHALLENGE, ToolErrorCode.EMPTY_EXTRACTION, ToolErrorCode.TIMEOUT, ToolErrorCode.CIRCUIT_OPEN}:
+    if result.error_code in {ToolErrorCode.FORBIDDEN, ToolErrorCode.BYTE_LIMIT, ToolErrorCode.BOT_CHALLENGE, ToolErrorCode.EMPTY_EXTRACTION, ToolErrorCode.TIMEOUT}:
         return True
-    return not result.success and "empty" in " ".join(part or "" for part in (result.summary, result.error_message)).lower()
+    return not result.success and "empty" in " ".join(part or "" for part in (result.summary, result.error_message)).casefold()
 
 
+# Add only request-local evidence references to the audit trail.
 def _append_observation(*, state: TaskState, tool_result: ToolExecutionResult, evidence_refs: list[str]) -> None:
     step = state.current_plan_step
-    if step is None:
-        return
-    state.scratchpad.append(ScratchpadEntry(turn_index=state.actor_turn_count, plan_step_id=step.step_id, entry_type=ScratchpadEntryType.OBSERVATION, summary=f"Observed tool result from '{tool_result.request.tool_name.value}': {tool_result.summary}", evidence_refs=evidence_refs))
+    if step is not None:
+        state.scratchpad.append(ScratchpadEntry(state.actor_turn_count, step.step_id, ScratchpadEntryType.OBSERVATION, f"Observed tool result from '{tool_result.request.tool_name.value}': {tool_result.summary}", evidence_refs))
 
 
-__all__ = ["tool_gateway", "observe_tool_result", "_tool_call_budget_exhausted", "_is_exact_duplicate_request", "_host_circuit_open", "_build_observed_evidence_from_tool_result", "_tool_result_indicates_extractability_limit"]
+__all__ = ["canonical_action_key", "observe_tool_result", "tool_gateway", "_host_circuit_open", "_is_exact_duplicate_request", "_tool_call_budget_exhausted"]

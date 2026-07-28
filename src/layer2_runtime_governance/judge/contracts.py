@@ -5,13 +5,6 @@ from enum import Enum
 from typing import Protocol
 
 from ..external_operations.contracts import ExternalOperationProposal
-from ..tool_contract import (
-    CitationAlignment,
-    DocumentType,
-    EvidenceContentState,
-    Extractability,
-    SourceAuthority,
-)
 
 
 class JudgeRecommendedDirective(str, Enum):
@@ -51,6 +44,9 @@ class JudgeOperationStage(str, Enum):
 
 class JudgeFindingCategory(str, Enum):
     GOAL_ALIGNMENT = "goal_alignment"
+    FACTUAL_SUPPORT = "factual_support"
+    COMPLETENESS = "completeness"
+    INTERNAL_CONSISTENCY = "internal_consistency"
     TARGET_APPROPRIATENESS = "target_appropriateness"
     DECEPTION_OR_COERCION = "deception_or_coercion"
     OFFENSIVE_OR_HARMFUL_CONTENT = "offensive_or_harmful_content"
@@ -78,20 +74,77 @@ class JudgePlanStepContext:
     objective: str
     rationale: str
     expected_outcome: str
+    status: str | None = None
 
 
 @dataclass(frozen=True)
 class JudgeEvidenceContext:
     # Judge evidence contains concrete, audit-safe provenance observations.
     evidence_id: str
-    title: str
-    locator: str
-    excerpt: str
-    content_state: EvidenceContentState
-    source_authority: SourceAuthority
-    document_type: DocumentType
-    extractability: Extractability
-    citation_alignment: CitationAlignment
+    locator: str | None
+    content: str
+
+
+@dataclass(frozen=True)
+class JudgeCompletedStepContext:
+    # Completed outputs show what the actor actually committed before the proposal.
+    step_id: str
+    objective: str
+    result_type: str
+    summary: str
+    output_text: str | None
+
+
+@dataclass(frozen=True)
+class JudgeScratchpadContext:
+    # Scratchpad entries are audit-safe summaries, never hidden chain-of-thought.
+    turn_index: int
+    plan_step_id: str
+    entry_type: str
+    summary: str
+    evidence_refs: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class JudgeToolArgumentContext:
+    # Tool arguments preserve the concrete read-only action without an open dict contract.
+    name: str
+    value: str
+
+
+@dataclass(frozen=True)
+class JudgeToolExecutionContext:
+    # Tool history exposes both successful acquisition and observable failures.
+    request_id: str
+    plan_step_id: str
+    tool_name: str
+    reason: str
+    arguments: tuple[JudgeToolArgumentContext, ...]
+    success: bool
+    summary: str
+    content: str | None
+    observation_ids: tuple[str, ...]
+    error_code: str | None
+    error_message: str | None
+
+
+@dataclass(frozen=True)
+class JudgeRuntimeEventContext:
+    # Ordered node events preserve the runtime path without infrastructure payload noise.
+    sequence: int
+    runtime_state: str
+    node_name: str
+    summary: str
+
+
+@dataclass(frozen=True)
+class JudgeExternalRevisionContext:
+    # Prior proposal digests and feedback make semantic revisions visible to the judge.
+    operation_id: str
+    payload_digest: str
+    payload_preview: str
+    finding_codes: tuple[str, ...] = ()
+    feedback_summary: str | None = None
 
 
 @dataclass(frozen=True)
@@ -104,11 +157,19 @@ class JudgeContext:
     external_operation: ExternalOperationProposal
     operation_stage: JudgeOperationStage
     selected_evidence_refs: tuple[str, ...]
-    observed_evidence: tuple[JudgeEvidenceContext, ...]
+    observations: tuple[JudgeEvidenceContext, ...]
     actor_self_confidence: float | None
     residual_uncertainty: str | None
     destination_facts: tuple[str, ...]
     invocation_reason: str
+    task_success_criteria: tuple[str, ...] = ()
+    execution_intent: str = "proposal_only"
+    full_plan: tuple[JudgePlanStepContext, ...] = ()
+    completed_steps: tuple[JudgeCompletedStepContext, ...] = ()
+    scratchpad_entries: tuple[JudgeScratchpadContext, ...] = ()
+    tool_executions: tuple[JudgeToolExecutionContext, ...] = ()
+    runtime_events: tuple[JudgeRuntimeEventContext, ...] = ()
+    prior_external_revisions: tuple[JudgeExternalRevisionContext, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -168,9 +229,11 @@ class JudgeExecutionError(RuntimeError):
 __all__ = [
     "JudgeAssessment",
     "JudgeAssessmentStatus",
+    "JudgeCompletedStepContext",
     "JudgeContext",
     "JudgeEvidenceContext",
     "JudgeExecutionError",
+    "JudgeExternalRevisionContext",
     "JudgeFinding",
     "JudgeFindingCategory",
     "JudgeModelMetadata",
@@ -178,6 +241,10 @@ __all__ = [
     "JudgePlanStepContext",
     "JudgePort",
     "JudgeRecommendedDirective",
+    "JudgeRuntimeEventContext",
+    "JudgeScratchpadContext",
     "JudgeSeverity",
+    "JudgeToolArgumentContext",
+    "JudgeToolExecutionContext",
     "JudgeVerdict",
 ]

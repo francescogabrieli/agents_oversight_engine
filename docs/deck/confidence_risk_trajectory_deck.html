@@ -704,7 +704,7 @@
     "evidence_sufficient": 0.30,
     "objective_satisfied": 0.20,
     "actor_confidence": 0.20,
-    "observed_evidence_present": 0.15,
+    "selected_observations_valid": 0.15,
     "source_locator_present": 0.10,
     "last_tool_success": 0.05
   },
@@ -869,7 +869,7 @@
               <li><code>last_oversight_assessment</code></li>
               <li><code>oversight_history</code> con valutazioni tipizzate</li>
               <li><code>governance_history</code> per il livello policy</li>
-              <li><code>step_validations</code>, <code>observed_evidence</code>, <code>tool_results_history</code></li>
+              <li><code>step_validations</code>, <code>observations</code>, <code>tool_results_history</code></li>
               <li><code>actor_turn_count</code> e <code>tool_call_count</code></li>
             </ul>
           </div>
@@ -878,7 +878,7 @@
             <ul class="tight-list">
               <li><code>observability/</code> costruisce <code>oversight_assessments</code> e <code>governance_decisions</code> dal <code>TaskState</code>.</li>
               <li>Il trace non inventa un nuovo contratto: serializza in modo leggibile lo stato canonico.</li>
-              <li>I dettagli operativi restano in <code>observed_evidence</code>, <code>scratchpad</code> e <code>step_history</code>.</li>
+              <li>I dettagli operativi restano in <code>observations</code>, <code>scratchpad</code> e <code>step_history</code>.</li>
             </ul>
           </div>
         </div>

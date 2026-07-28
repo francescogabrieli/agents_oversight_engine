@@ -28,7 +28,7 @@ from ..tools import ToolGatewayConfig
 
 # Nodes.py contains the executable Layer 2 business logic.
 # At this stage the runtime performs bootstrap, planning, and the actor/tool loop.
-from .actor_service import _set_external_communication_phase
+from .actor_service import _set_external_communication_phase, commit_completion_candidate
 from .lifecycle_service import _append_step_record
 from ..domain.step_recovery import restore_actor_step_for_more_evidence
 from ..external_operations import (
@@ -291,11 +291,25 @@ def _apply_governance_decision(
 
     if policy_input.actor_result_type in {
         ActorResultType.INTERMEDIATE_OUTPUT,
-        ActorResultType.STEP_COMPLETED,
-        ActorResultType.FINAL_OUTPUT,
     }:
         # Preserve the actor transition: STEP_COMPLETED already advanced the
         # semantic cursor, while INTERMEDIATE_OUTPUT deliberately kept it open.
+        return
+
+    if policy_input.actor_result_type == ActorResultType.STEP_COMPLETED:
+        # OPA acceptance is the only commit gate for a local materialized result.
+        if state.external_operation_proposal is None:
+            if state.pending_completion_candidate is None:
+                # Recovered legacy state cannot bypass the proposal/commit boundary.
+                restore_actor_step_for_more_evidence(state)
+                state.current_state = RuntimeState.ACTING
+                return
+            commit_completion_candidate(state)
+            state.current_state = (
+                RuntimeState.COMPLETED
+                if state.current_plan_step_index is None
+                else RuntimeState.READY_NEXT_STEP
+            )
         return
 
     state.current_state = RuntimeState.ACTING
@@ -317,6 +331,8 @@ def _route_authorized_external_operation(
     ):
         return False
     if state.execution_intent == ExecutionIntent.PROPOSAL_ONLY:
+        if state.pending_completion_candidate is not None:
+            commit_completion_candidate(state)
         state.current_external_execution_request = None
         state.current_state = RuntimeState.COMPLETED
         _set_external_communication_phase(
@@ -327,18 +343,6 @@ def _route_authorized_external_operation(
                 "the user did not request external execution."
             ),
             review_ready=False,
-        )
-        return True
-    if proposal.operation_family.value == "external_communication":
-        # Email execution is intentionally never authorized by OPA alone: resume approval owns this seam.
-        state.current_external_execution_request = None
-        state.human_review_resume_state = RuntimeState.READY_EXTERNAL_EXECUTION
-        state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
-        _set_external_communication_phase(
-            state,
-            phase=ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED,
-            summary="The exact governed email digest requires typed human approval before execution.",
-            review_ready=True,
         )
         return True
     if not proposal.execution_candidate:

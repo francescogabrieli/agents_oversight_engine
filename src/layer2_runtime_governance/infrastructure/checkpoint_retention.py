@@ -15,14 +15,14 @@ class ThreadDeletingCheckpointer(Protocol):
 
 @dataclass(frozen=True)
 class CheckpointRetentionSettings:
-    # Completed checkpoint threads remain resumable/debuggable for a bounded period.
-    completed_thread_days: int = 30
+    # Terminal runs are audit artifacts, while only active/HITL runs need resumable checkpoints.
+    completed_thread_days: int = 0
 
     # Resolve retention policy at the maintenance boundary.
     @classmethod
     def from_env(cls) -> "CheckpointRetentionSettings":
-        value = get_env_value("LAYER2_COMPLETED_THREAD_RETENTION_DAYS", "30") or "30"
-        return cls(completed_thread_days=max(1, int(value)))
+        value = get_env_value("LAYER2_COMPLETED_THREAD_RETENTION_DAYS", "0") or "0"
+        return cls(completed_thread_days=max(0, int(value)))
 
 
 @dataclass(frozen=True)

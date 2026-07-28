@@ -10,6 +10,7 @@ from ..external_operations.contracts import (
     ExternalOperationProposal,
     GenericExternalOperationPayload,
 )
+from ..external_operations.profiles import load_capability_consequence_profiles
 
 
 # Build the base facts document sent to OPA before optional pillar selection.
@@ -39,8 +40,6 @@ def build_governance_base_facts(
     )
     return {
         "task": {
-            "domain_type": policy_input.task_domain_type.value,
-            "domain_label": policy_input.task_domain_label,
             "sensitivity": policy_input.task_sensitivity.value,
         },
         "policy": {
@@ -57,7 +56,7 @@ def build_governance_base_facts(
             "flags": [flag.value for flag in policy_input.runtime_flags],
             "actor_turn_count": policy_input.actor_turn_count,
             "tool_call_count": policy_input.tool_call_count,
-            "observed_evidence_count": policy_input.observed_evidence_count,
+            "observation_count": policy_input.observation_count,
         },
         "step": {
             "id": policy_input.current_plan_step_id,
@@ -125,9 +124,13 @@ def _external_operation_facts(
             "payload_preview": None,
             "capability_profile_id": None,
             "capability_profile_version": None,
+            "approval_mode": "never",
             "facts_provenance": None,
             "payload": {"payload_type": "none"},
         }
+    profile = load_capability_consequence_profiles().get(
+        proposal.capability_profile_id or ""
+    )
     return {
         "operation_id": proposal.operation_id,
         "plan_step_id": proposal.plan_step_id,
@@ -145,6 +148,8 @@ def _external_operation_facts(
         "payload_preview": proposal.payload_preview,
         "capability_profile_id": proposal.capability_profile_id,
         "capability_profile_version": proposal.capability_profile_version,
+        # Unknown profiles are conservative facts; OPA remains the authority deciding the gate.
+        "approval_mode": profile.approval_mode if profile is not None else "conditional",
         "facts_provenance": {
             "normalizer_id": proposal.facts_provenance.normalizer_id,
             "normalizer_version": proposal.facts_provenance.normalizer_version,

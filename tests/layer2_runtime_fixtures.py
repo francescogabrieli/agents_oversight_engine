@@ -26,13 +26,11 @@ if str(SRC_ROOT) not in sys.path:
 
 from layer1_intake import (
     BudgetConfig,
-    DomainType,
+    ExecutionIntent,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeResult,
     ParseStatus,
-    RequestedOperation,
-    RequestedOperationType,
     SensitivityLevel,
     StructuredTask,
     TaskSpec,
@@ -49,10 +47,10 @@ from layer2_runtime_governance import (
     CapabilityAccessMode,
     DynamicPolicyAssessment,
     DynamicPolicyRecommendedDirective,
-    EvidenceSourceKind,
     EvidenceQualityAssessment,
     ExternalCommunicationDraft,
     ExternalCommunicationPhase,
+    ExternalCommunicationState,
     GovernanceDecision,
     GovernanceDirective,
     GovernanceReasonCode,
@@ -84,7 +82,7 @@ from layer2_runtime_governance import (
     ToolGatewayPort,
     ToolName,
     ToolRequest,
-    ToolSource,
+    ToolObservation,
     BedrockNovaActor,
     BedrockNovaActorSettings,
     OperationalRiskAssessment,
@@ -135,14 +133,6 @@ from layer2_runtime_governance.runtime.governance_service import (
 )
 from layer2_runtime_governance.runtime.planning_service import planner
 from layer2_runtime_governance.runtime.tool_service import observe_tool_result
-from layer2_runtime_governance.tool_contract import ObservedEvidence
-from layer2_runtime_governance.tool_contract import (
-    CitationAlignment,
-    DocumentType,
-    EvidenceContentState,
-    Extractability,
-    SourceAuthority,
-)
 import layer2_runtime_governance.execution.providers.bedrock_runtime as bedrock_client_module
 
 
@@ -200,10 +190,7 @@ class StubActor(ActorPort):
 
     # Drive one deterministic actor/tool/observe loop across two semantic steps.
     def act(self, *, actor_task: ActorTask) -> ActorResult:
-        if actor_task.current_plan_step.step_id == "step_1" and not any(
-            item.source_kind == EvidenceSourceKind.TOOL_OBSERVATION
-            for item in actor_task.observed_evidence
-        ):
+        if actor_task.current_plan_step.step_id == "step_1" and not actor_task.observations:
             return ActorResult(
                 plan_step_id=actor_task.current_plan_step.step_id,
                 result_type=ActorResultType.PROPOSE_ACTION,
@@ -238,12 +225,12 @@ class StubActor(ActorPort):
                     plan_step_id=actor_task.current_plan_step.step_id,
                     entry_type=ScratchpadEntryType.COMPLETION_RATIONALE,
                     summary="The observed source satisfies the evidence collection step.",
-                    evidence_refs=[item.evidence_id for item in actor_task.observed_evidence],
+                    evidence_refs=[item.observation_id for item in actor_task.observations],
                 ),
                 step_validation=StepValidation(
                     plan_step_id=actor_task.current_plan_step.step_id,
                     actor_self_confidence=0.86,
-                    evidence_refs=tuple(item.evidence_id for item in actor_task.observed_evidence),
+                    evidence_refs=tuple(item.observation_id for item in actor_task.observations),
                     rationale_summary="Official evidence was collected for the step objective.",
                 ),
             )
@@ -260,12 +247,12 @@ class StubActor(ActorPort):
                 plan_step_id=actor_task.current_plan_step.step_id,
                 entry_type=ScratchpadEntryType.COMPLETION_RATIONALE,
                 summary="The final synthesis satisfies the remaining plan step.",
-                evidence_refs=[item.evidence_id for item in actor_task.observed_evidence],
+                evidence_refs=[item.observation_id for item in actor_task.observations],
             ),
             step_validation=StepValidation(
                 plan_step_id=actor_task.current_plan_step.step_id,
                 actor_self_confidence=0.84,
-                evidence_refs=tuple(item.evidence_id for item in actor_task.observed_evidence),
+                evidence_refs=tuple(item.observation_id for item in actor_task.observations),
                 rationale_summary="The synthesis uses the collected official evidence.",
             ),
         )
@@ -281,11 +268,11 @@ class StubToolGateway(ToolGatewayPort):
             success=True,
             summary="Stub web search completed successfully.",
             content="Official EU sources describe the Digital Markets Act as a regulation for gatekeeper platforms.",
-            sources=(
-                ToolSource(
-                    title="European Commission - Digital Markets Act",
+            observations=(
+                ToolObservation(
+                    observation_id=f"{tool_request.request_id}:1",
                     locator="https://commission.europa.eu/dma",
-                    snippet=(
+                    content=(
                         "Official EU material describes DMA rules and obligations for "
                         "gatekeepers and core platform services."
                     ),
@@ -411,8 +398,8 @@ class OverDecomposedSourceSummaryPlanner:
 
 class StubPolicyEngine(PolicyEnginePort):
     policy_engine_name = "stub_policy_engine"
-    policy_bundle_version = "layer2_governance_v3"
-    policy_config_version = "layer2_governance_thresholds_v1"
+    policy_bundle_version = "layer2_governance_v4"
+    policy_config_version = "layer2_governance_thresholds_v2"
 
     # Model OPA's inexpensive first pass so graph tests never contact a live policy engine.
     def evaluate_required_pillars(self, *, base_facts: dict[str, Any]) -> dict[str, bool]:
@@ -528,8 +515,8 @@ class JudgeRequiredPolicyEngine(StubPolicyEngine):
 
 class ReviewPolicyEngine(PolicyEnginePort):
     policy_engine_name = "review_policy_engine"
-    policy_bundle_version = "layer2_governance_v3"
-    policy_config_version = "layer2_governance_thresholds_v1"
+    policy_bundle_version = "layer2_governance_v4"
+    policy_config_version = "layer2_governance_thresholds_v2"
 
     # Keep required-pillar selection deterministic for HITL graph tests.
     def evaluate_required_pillars(self, *, base_facts: dict[str, Any]) -> dict[str, bool]:
@@ -685,15 +672,9 @@ def _build_stub_opa_decision(
     elif (
         actor["result_type"] in {
             ActorResultType.STEP_COMPLETED.value,
-            ActorResultType.FINAL_OUTPUT.value,
+            ActorResultType.STEP_COMPLETED.value,
         }
-        and (
-            pillars["evidence"]["raw_facts"].get("selected_evidence_refs_valid") is False
-            or (
-                operation.get("execution_candidate") is True
-                and pillars["evidence"]["raw_facts"].get("selected_evidence_ref_count", 0) == 0
-            )
-        )
+        and pillars["evidence"]["raw_facts"].get("selected_evidence_refs_valid") is False
     ):
         resolved_directive = "request_more_evidence"
         resolved_reason_code = "invalid_or_missing_selected_evidence"
@@ -990,7 +971,7 @@ class _FakeOpenRouterClient:
     # Return one cloud actor JSON action without touching the OpenRouter service.
     def complete_tool_call(self, **kwargs):
         return {
-            "tool_name": "emit_final_output",
+            "tool_name": "emit_step_completed",
             "arguments": {
                 "summary": "OpenRouter actor produced a final answer.",
                 "output_text": "OpenRouter actor completed the step.",
@@ -1017,7 +998,7 @@ class _FakeOpenRouterCompletionWithoutRationaleClient:
     # Return a completion action missing audit fields to verify normalization remains robust.
     def complete_tool_call(self, **kwargs):
         return {
-            "tool_name": "emit_final_output",
+            "tool_name": "emit_step_completed",
             "arguments": {
                 "output_text": "Grounded concise final answer.",
                 "actor_self_confidence": 0.79,
@@ -1030,7 +1011,7 @@ class _FakeOpenRouterUnsupportedPrecisionCompletionClient:
     # Return a completion with precise legal timing despite missing primary-source excerpt support.
     def complete_tool_call(self, **kwargs):
         return {
-            "tool_name": "emit_final_output",
+            "tool_name": "emit_step_completed",
             "arguments": {
                 "summary": "Finalize the DMA summary.",
                 "output_text": (
@@ -1099,7 +1080,7 @@ class _FakeOpenRouterSummaryWithRegulationYearClient:
     # Keep this response on the safe side of the precision gate.
     def complete_tool_call(self, **kwargs):
         return {
-            "tool_name": "emit_final_output",
+            "tool_name": "emit_step_completed",
             "arguments": {
                 "summary": "Summarize the official DMA sources.",
                 "output_text": (
@@ -1120,7 +1101,7 @@ class _FakeOpenRouterSummaryWithGenericTimelineClient:
     # This exercises the generalized timeline rule outside the DMA.
     def complete_tool_call(self, **kwargs):
         return {
-            "tool_name": "emit_final_output",
+            "tool_name": "emit_step_completed",
             "arguments": {
                 "summary": "Summarize the official AI Act timeline.",
                 "output_text": (
@@ -1141,7 +1122,7 @@ class _FakeOpenRouterConservativeSummaryAfterExtractabilityLimitClient:
     # Return the compact recovery shape expected after extraction attempts are limited.
     def complete_tool_call(self, **kwargs):
         return {
-            "tool_name": "emit_final_output",
+            "tool_name": "emit_step_completed",
             "arguments": {
                 "summary": "Write a conservative high-level official-source summary.",
                 "output_text": (
@@ -1192,7 +1173,7 @@ class _FakeOpenRouterProceduralImplementationSummaryClient:
     # Return a too-strong implementation-summary draft so the actor can normalize procedural wording.
     def complete_tool_call(self, **kwargs):
         return {
-            "tool_name": "emit_final_output",
+            "tool_name": "emit_step_completed",
             "arguments": {
                 "summary": "Summarize the DMA procedural implementation page.",
                 "output_text": (
@@ -1216,7 +1197,7 @@ class _FakeOpenRouterCompletionWithInternalRefsClient:
     # Return a completion that leaks internal trace refs so sanitization can strip them.
     def complete_tool_call(self, **kwargs):
         return {
-            "tool_name": "emit_final_output",
+            "tool_name": "emit_step_completed",
             "arguments": {
                 "summary": "Step 2 completed with trace refs.",
                 "output_text": (
@@ -1326,8 +1307,6 @@ def _build_research_intake_result(
                 goal="Find official sources about the Digital Markets Act and summarize them.",
                 context="Use official EU sources.",
                 constraints=["Use official EU sources."],
-                domain_type=DomainType.RESEARCH,
-                domain_label="dma_research",
                 sensitivity=SensitivityLevel.LOW,
                 success_criteria=["Produce a grounded short summary."],
             ),
@@ -1353,15 +1332,7 @@ def _build_external_communication_intake_result() -> IntakeResult:
                 goal="Prepare a cautious external communication draft.",
                 context="Do not send anything automatically.",
                 constraints=["Keep the draft local until review."],
-                domain_type=DomainType.EXTERNAL_COMMUNICATION,
-                requested_operations=[
-                    RequestedOperation(
-                        operation_type=RequestedOperationType.EXTERNAL_COMMUNICATION,
-                        channel="email",
-                        recipient="operations@example.com",
-                    )
-                ],
-                domain_label="external_communication_test",
+                execution_intent=ExecutionIntent.EXECUTE_AFTER_GOVERNANCE,
                 sensitivity=SensitivityLevel.HIGH,
                 success_criteria=["Pause before any outward-facing execution."],
             ),
@@ -1404,15 +1375,7 @@ def _build_external_incident_intake_result() -> IntakeResult:
                     "Ask operations to confirm whether customer-facing impact extended beyond the notification pipeline",
                     "Request a status report back to the incident lead within 60 minutes",
                 ],
-                domain_type=DomainType.EXTERNAL_COMMUNICATION,
-                requested_operations=[
-                    RequestedOperation(
-                        operation_type=RequestedOperationType.EXTERNAL_COMMUNICATION,
-                        channel="email",
-                        recipient="operations@example.com",
-                    )
-                ],
-                domain_label="incident_operations_status_request",
+                execution_intent=ExecutionIntent.EXECUTE_AFTER_GOVERNANCE,
                 sensitivity=SensitivityLevel.CRITICAL,
                 success_criteria=[
                     "Includes all incident details provided and clearly states current investigation status",
@@ -1455,7 +1418,7 @@ def _build_external_incident_draft_task_state() -> TaskState:
 
 def _build_policy_input_task_state(*, read_only_mode: bool = False) -> TaskState:
     state = TaskState.from_intake(_build_research_intake_result(read_only_mode=read_only_mode))
-    state.observed_evidence = []
+    state.observations = []
     state.plan_steps = [
         PlanStep(
             step_id="step_1",
@@ -1494,7 +1457,7 @@ def _build_policy_input_task_state(*, read_only_mode: bool = False) -> TaskState
 
 def _build_high_precision_research_task_state() -> TaskState:
     state = TaskState.from_intake(_build_research_intake_result())
-    state.observed_evidence = []
+    state.observations = []
     state.plan_steps = [
         PlanStep(
             step_id="step_2",
@@ -1509,17 +1472,14 @@ def _build_high_precision_research_task_state() -> TaskState:
     ]
     state.current_plan_step_index = 0
     state.actor_turn_count = 2
-    state.observed_evidence.append(
-        ObservedEvidence(
-            evidence_id="step_2:tool:2:source:1",
-            plan_step_id="step_2",
-            title="Digital Markets Act",
+    state.observations.append(
+        ToolObservation(
+            observation_id="step_2:tool:2:observation:1",
             locator="https://digital-markets-act.ec.europa.eu/index_en",
-            excerpt=(
+            content=(
                 "The Digital Markets Act is the EU’s law to make the markets in the digital "
                 "sector fairer and more contestable."
             ),
-            source_tool=ToolName.FETCH_URL_TEXT,
         )
     )
     state.scratchpad.append(
@@ -1543,7 +1503,7 @@ def _build_high_precision_research_task_state() -> TaskState:
 
 def _build_source_shortlist_task_state() -> TaskState:
     state = TaskState.from_intake(_build_research_intake_result())
-    state.observed_evidence = []
+    state.observations = []
     state.plan_steps = [
         PlanStep(
             step_id="replan_step_1",
@@ -1558,21 +1518,14 @@ def _build_source_shortlist_task_state() -> TaskState:
     ]
     state.current_plan_step_index = 0
     state.actor_turn_count = 2
-    state.observed_evidence.append(
-        ObservedEvidence(
-            evidence_id="replan_step_1:tool:1:fallback",
-            plan_step_id="replan_step_1",
-            title="web_search",
+    state.observations.append(
+        ToolObservation(
+            observation_id="replan_step_1:tool:1:observation:1",
             locator="Digital Markets Act official site:europa.eu OR site:eur-lex.europa.eu",
-            excerpt=(
+            content=(
                 "- European Commission DMA portal: https://digital-markets-act.ec.europa.eu/index_en\n"
                 "- EUR-Lex DMA summary page: https://eur-lex.europa.eu/EN/legal-content/summary/digital-markets-act.html"
             ),
-            source_tool=ToolName.WEB_SEARCH,
-            content_state=EvidenceContentState.METADATA_ONLY,
-            source_authority=SourceAuthority.OFFICIAL_PRIMARY,
-            extractability=Extractability.UNAVAILABLE,
-            citation_alignment=CitationAlignment.PROVIDER_ATTRIBUTED,
         )
     )
     state.scratchpad.append(
@@ -1588,7 +1541,7 @@ def _build_source_shortlist_task_state() -> TaskState:
 
 def _build_summary_task_state_with_year_in_citation() -> TaskState:
     state = TaskState.from_intake(_build_research_intake_result())
-    state.observed_evidence = []
+    state.observations = []
     state.plan_steps = [
         PlanStep(
             step_id="step_1",
@@ -1600,22 +1553,15 @@ def _build_summary_task_state_with_year_in_citation() -> TaskState:
     ]
     state.current_plan_step_index = 0
     state.actor_turn_count = 2
-    state.observed_evidence.append(
-        ObservedEvidence(
-            evidence_id="step_1:tool:1:source:1",
-            plan_step_id="step_1",
-            title="Digital Markets Act (DMA) Legislation",
+    state.observations.append(
+        ToolObservation(
+            observation_id="step_1:tool:1:observation:1",
             locator="https://digital-markets-act.ec.europa.eu/legislation_en",
-            excerpt=(
+            content=(
                 "The main legislative texts for the DMA are Regulation (EU) 2022/1925 of the "
                 "European Parliament and of the Council of 14 September 2022 on contestable and "
                 "fair markets in the digital sector and the Procedural Implementing Regulation."
             ),
-            source_tool=ToolName.FETCH_URL_TEXT,
-            content_state=EvidenceContentState.EXTRACTED_FULL,
-            source_authority=SourceAuthority.OFFICIAL_PRIMARY,
-            extractability=Extractability.COMPLETE,
-            citation_alignment=CitationAlignment.EXACT,
         )
     )
     state.scratchpad.append(
@@ -1632,7 +1578,7 @@ def _build_summary_task_state_with_year_in_citation() -> TaskState:
 # Build a non-DMA timeline state so the regression covers a different official source task.
 def _build_summary_task_state_with_generic_timeline() -> TaskState:
     state = TaskState.from_intake(_build_research_intake_result())
-    state.observed_evidence = []
+    state.observations = []
     state.plan_steps = [
         PlanStep(
             step_id="step_1",
@@ -1656,15 +1602,11 @@ def _build_summary_task_state_with_generic_timeline() -> TaskState:
         success=True,
         summary="Web search executed successfully.",
         content="The AI Act entered into force on 1 August 2024.",
-        sources=(
-            ToolSource(
-                title="AI Act official EU announcement",
+        observations=(
+            ToolObservation(
+                observation_id=f"{state.last_tool_result.request.request_id}:1" if state.last_tool_result else "timeline:1",
                 locator="https://example.eu/ai-act-entry-into-force",
-                snippet="The AI Act entered into force on 1 August 2024.",
-                content_state=EvidenceContentState.EXTRACTED_FULL,
-                source_authority=SourceAuthority.OFFICIAL_PRIMARY,
-                extractability=Extractability.COMPLETE,
-                citation_alignment=CitationAlignment.EXACT,
+                content="The AI Act entered into force on 1 August 2024.",
             ),
         ),
     )
@@ -1673,7 +1615,7 @@ def _build_summary_task_state_with_generic_timeline() -> TaskState:
 
 def _build_conservative_replan_summary_task_state() -> TaskState:
     state = TaskState.from_intake(_build_research_intake_result())
-    state.observed_evidence = []
+    state.observations = []
     state.plan_steps = [
         PlanStep(
             step_id="replan_step_1",
@@ -1695,21 +1637,14 @@ def _build_conservative_replan_summary_task_state() -> TaskState:
     state.current_state = RuntimeState.ACTING
     state.actor_turn_count = 3
     state.runtime_flags.append(RuntimeFlag.EXTRACTABILITY_LIMITED)
-    state.observed_evidence.append(
-        ObservedEvidence(
-            evidence_id="replan_step_1:tool:5:source:1",
-            plan_step_id="replan_step_1",
-            title="Digital Markets Act",
+    state.observations.append(
+        ToolObservation(
+            observation_id="replan_step_1:tool:5:observation:1",
             locator="https://digital-markets-act.ec.europa.eu/index_en",
-            excerpt=(
+            content=(
                 "The Digital Markets Act is the EU law to make the markets in the digital sector "
                 "fairer and more contestable and concerns gatekeepers."
             ),
-            source_tool=ToolName.FETCH_URL_TEXT,
-            content_state=EvidenceContentState.EXTRACTED_FULL,
-            source_authority=SourceAuthority.OFFICIAL_PRIMARY,
-            extractability=Extractability.COMPLETE,
-            citation_alignment=CitationAlignment.EXACT,
         )
     )
     state.scratchpad.append(
@@ -1730,8 +1665,6 @@ def _build_clarification_intake_result() -> IntakeResult:
                 goal="Review this contract and tell me whether I should sign it.",
                 context="Contract review request.",
                 constraints=[],
-                domain_type=DomainType.ANALYSIS,
-                domain_label="contract_review",
                 sensitivity=SensitivityLevel.HIGH,
                 success_criteria=[],
             ),
@@ -1817,17 +1750,11 @@ def _build_actor_ready_state_for_judge() -> TaskState:
             rationale_summary="The local output looks adequate.",
         ),
     )
-    state.observed_evidence = [
-        ObservedEvidence(
-            evidence_id="evidence-1",
-            plan_step_id="step_1",
-            title="Source shortlist",
+    state.observations = [
+        ToolObservation(
+            observation_id="evidence-1",
             locator="https://example.org/source",
-            excerpt="Source metadata only.",
-            source_tool=ToolName.WEB_SEARCH,
-            content_state=EvidenceContentState.METADATA_ONLY,
-            extractability=Extractability.UNAVAILABLE,
-            citation_alignment=CitationAlignment.PROVIDER_ATTRIBUTED,
+            content="Source metadata only.",
         )
     ]
     return state
@@ -1900,26 +1827,20 @@ def _build_behavioral_candidate_state() -> TaskState:
             success=True,
             summary="Collected official evidence.",
             content="Grounded result.",
-            sources=(
-                ToolSource(
-                    title="Official source",
+            observations=(
+                ToolObservation(
+                    observation_id=f"{request.request_id}:1",
                     locator="https://example.org/official",
-                    snippet="Grounded result.",
+                    content="Grounded result.",
                 ),
             ),
         )
     ]
-    state.observed_evidence = [
-        ObservedEvidence(
-            evidence_id="behavioral-evidence-1",
-            plan_step_id="step_1",
-            title="Official source",
+    state.observations = [
+        ToolObservation(
+            observation_id="behavioral-evidence-1",
             locator="https://example.org/official",
-            excerpt="Grounded result.",
-            source_tool=ToolName.WEB_SEARCH,
-            content_state=EvidenceContentState.EXTRACTED_FULL,
-            extractability=Extractability.COMPLETE,
-            citation_alignment=CitationAlignment.EXACT,
+            content="Grounded result.",
         )
     ]
     return state
@@ -1955,7 +1876,7 @@ def _weak_dynamic_policy_assessment() -> DynamicPolicyAssessment:
         evidence_quality=EvidenceQualityAssessment(
             score=0.30,
             level=OversightSignalLevel.WEAK,
-            reason_codes=(OversightReasonCode.OBSERVED_EVIDENCE_MISSING,),
+            reason_codes=(OversightReasonCode.OBSERVATIONS_MISSING,),
         ),
         operational_risk=OperationalRiskAssessment(
             score=0.18,
@@ -2053,15 +1974,7 @@ def _build_external_communication_intake_result_for_governance() -> IntakeResult
                 goal="Prepare a cautious external communication draft.",
                 context="Keep everything local and reviewable.",
                 constraints=["Do not send anything automatically."],
-                domain_type=DomainType.EXTERNAL_COMMUNICATION,
-                requested_operations=[
-                    RequestedOperation(
-                        operation_type=RequestedOperationType.EXTERNAL_COMMUNICATION,
-                        channel="email",
-                        recipient="incident-lead@example.com",
-                    )
-                ],
-                domain_label="external_comm_governance_test",
+                execution_intent=ExecutionIntent.EXECUTE_AFTER_GOVERNANCE,
                 sensitivity=SensitivityLevel.HIGH,
                 success_criteria=["Pause before any external execution."],
             ),
@@ -2100,15 +2013,14 @@ def _seed_behavioral_history(
             connection.execute(
                 """
                 INSERT OR REPLACE INTO runs (
-                    thread_id, final_state, domain_type, sensitivity, policy_profile_name,
+                    thread_id, final_state, sensitivity, policy_profile_name,
                     budget_max_steps, budget_max_tool_calls, actor_turn_count, tool_call_count,
                     replan_count, review_count, abort_count, has_external_communication
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     thread_id,
                     "completed",
-                    profile_overrides.get("domain_type", DomainType.RESEARCH.value),
                     profile_overrides.get("sensitivity", SensitivityLevel.LOW.value),
                     profile_overrides.get("policy_profile_name", "default"),
                     5,

@@ -31,6 +31,7 @@ from .runtime.node_adapters import (
     observe_tool_result_node,
 )
 from .runtime.routing import (
+    route_after_actor,
     route_after_external_execution,
     route_after_governance,
     route_after_human_review,
@@ -120,7 +121,13 @@ def build_runtime_graph(
     builder.add_edge(START, "bootstrap_from_intake")
     builder.add_edge("bootstrap_from_intake", "planner")
     builder.add_edge("planner", "actor")
-    builder.add_edge("actor", "governance")
+    builder.add_conditional_edges(
+        "actor",
+        route_after_actor,
+        {
+            "governance": "governance",
+        },
+    )
     builder.add_conditional_edges(
         "governance",
         route_after_governance,

@@ -11,7 +11,6 @@ if str(SRC_ROOT) not in sys.path:
 
 from layer1_intake import (
     BudgetConfig,
-    DomainType,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeResult,
@@ -24,7 +23,6 @@ from layer2_runtime_governance import (
     ActorResult,
     ActorResultType,
     CapabilityAccessMode,
-    EvidenceSourceKind,
     PlanStep,
     PlanStepStatus,
     RuntimeState,
@@ -32,7 +30,7 @@ from layer2_runtime_governance import (
     ScratchpadEntryType,
     StepValidation,
     TaskState,
-    ToolName,
+    ToolObservation,
     build_policy_evaluation_input,
 )
 from layer2_runtime_governance.signal_services import (
@@ -40,32 +38,17 @@ from layer2_runtime_governance.signal_services import (
     build_risk_signal,
     build_trajectory_signal,
 )
-from layer2_runtime_governance.tool_contract import ObservedEvidence
-from layer2_runtime_governance.tool_contract import (
-    CitationAlignment,
-    EvidenceContentState,
-    Extractability,
-    SourceAuthority,
-)
 
 
 class Layer2OversightRawFactsTests(unittest.TestCase):
     # Verify Python exports evidence facts without computing a parallel score or directive.
-    def test_evidence_signal_is_unscored_and_preserves_typed_support(self) -> None:
+    def test_evidence_signal_is_unscored_and_preserves_concrete_observation(self) -> None:
         state = _build_state()
-        state.observed_evidence.append(
-            ObservedEvidence(
-                evidence_id="tool_evidence_1",
-                plan_step_id="step_1",
-                title="Authoritative source",
+        state.observations.append(
+            ToolObservation(
+                observation_id="tool_evidence_1",
                 locator="https://example.test/source",
-                excerpt="A detailed fact collected by the tool.",
-                source_kind=EvidenceSourceKind.TOOL_OBSERVATION,
-                source_tool=ToolName.FETCH_URL_TEXT,
-                content_state=EvidenceContentState.EXTRACTED_FULL,
-                source_authority=SourceAuthority.OFFICIAL_PRIMARY,
-                extractability=Extractability.COMPLETE,
-                citation_alignment=CitationAlignment.EXACT,
+                content="A detailed fact collected by the tool.",
             )
         )
 
@@ -75,8 +58,8 @@ class Layer2OversightRawFactsTests(unittest.TestCase):
         self.assertEqual(signal["diagnostic_level"], "unscored")
         self.assertNotIn("recommended_directive", signal)
         self.assertTrue(signal["raw_facts"]["selected_evidence_refs_valid"])
-        self.assertTrue(signal["raw_facts"]["extracted_content_present"])
-        self.assertTrue(signal["raw_facts"]["official_source_present"])
+        self.assertTrue(signal["raw_facts"]["selected_observations_have_content"])
+        self.assertEqual(signal["raw_facts"]["observation_count"], 1)
 
     # Verify operational risk is expressed as raw policy facts only.
     def test_risk_signal_does_not_load_weights_or_choose_directive(self) -> None:
@@ -117,7 +100,10 @@ class Layer2OversightRawFactsTests(unittest.TestCase):
         )
 
         self.assertEqual(signal["raw_facts"]["configured_confidence_threshold"], 0.65)
-        self.assertIn("consecutive_no_progress_turns", signal["raw_facts"])
+        self.assertEqual(signal["raw_facts"]["actor_turn_count"], 3)
+        self.assertEqual(signal["raw_facts"]["completed_step_count"], 0)
+        self.assertNotIn("consecutive_no_progress_turns", signal["raw_facts"])
+        self.assertFalse(signal["raw_facts"]["needs_replan_signal"])
         self.assertEqual(signal["raw_facts"]["external_action_revision_count"], 0)
         self.assertIsNone(signal["diagnostic_score"])
         self.assertNotIn("recommended_directive", signal)
@@ -131,8 +117,6 @@ def _build_state() -> TaskState:
                 goal="Summarize the supplied material.",
                 context="Use only grounded evidence.",
                 constraints=["Do not invent facts."],
-                domain_type=DomainType.SUMMARIZATION,
-                domain_label="summary",
                 sensitivity=SensitivityLevel.LOW,
                 success_criteria=["Return a concise supported summary."],
             ),

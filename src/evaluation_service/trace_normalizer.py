@@ -15,7 +15,7 @@ def normalize_trace_json(trace_payload: dict[str, Any]) -> dict[str, Any]:
         trace_payload=source_trace,
         governance_decisions=governance_decisions,
     )
-    normalized_trace = normalize_legacy_trace_to_v4(source_trace)
+    normalized_trace = normalize_legacy_trace_to_v5(source_trace)
     return {
         "schema_version": "evaluation_input.v1",
         "trace": normalized_trace,
@@ -30,17 +30,17 @@ def normalize_trace_json(trace_payload: dict[str, Any]) -> dict[str, Any]:
             ),
             "trace_version": trace_version,
             "completeness": completeness,
-            "pillar_results_available": trace_version in {"v2", "v3", "v4"},
-            "safety_invariants_available": trace_version in {"v2", "v3", "v4"},
+            "pillar_results_available": trace_version in {"v2", "v3", "v4", "v5"},
+            "safety_invariants_available": trace_version in {"v2", "v3", "v4", "v5"},
         },
     }
 
 
-# Project a legacy trace into the closed v4 read model without mutating its source payload.
-def normalize_legacy_trace_to_v4(trace_payload: dict[str, Any]) -> dict[str, Any]:
+# Project a legacy trace into the closed v5 read model without mutating its source payload.
+def normalize_legacy_trace_to_v5(trace_payload: dict[str, Any]) -> dict[str, Any]:
     source = deepcopy(trace_payload)
-    if source.get("trace_version") == "layer2_trace.v4":
-        return _add_current_v4_compatibility_defaults(source)
+    if source.get("trace_version") == "layer2_trace.v5":
+        return _add_current_v5_compatibility_defaults(source)
 
     runtime = _dict_or_empty(source.get("runtime"))
     intake = _dict_or_empty(source.get("intake"))
@@ -49,7 +49,7 @@ def normalize_legacy_trace_to_v4(trace_payload: dict[str, Any]) -> dict[str, Any
     governance_passes = _normalize_governance_passes(source)
 
     return {
-        "trace_version": "layer2_trace.v4",
+        "trace_version": "layer2_trace.v5",
         "runtime": {
             "thread_id": _text_or(runtime.get("thread_id"), "legacy_unknown"),
             "current_state": _text_or(runtime.get("current_state"), "aborted"),
@@ -72,8 +72,6 @@ def normalize_legacy_trace_to_v4(trace_payload: dict[str, Any]) -> dict[str, Any
         "intake": {
             "goal": _text_or(intake.get("goal"), "legacy_unknown"),
             "context": _text_or(intake.get("context"), ""),
-            "domain_type": _text_or(intake.get("domain_type"), "other"),
-            "domain_label": _text_or(intake.get("domain_label"), "other"),
             "sensitivity": _text_or(intake.get("sensitivity"), "medium"),
             "success_criteria": _string_list(intake.get("success_criteria")),
             "constraints": _string_list(intake.get("constraints")),
@@ -88,8 +86,9 @@ def normalize_legacy_trace_to_v4(trace_payload: dict[str, Any]) -> dict[str, Any
             "max_steps": _optional_integer(intake.get("max_steps")),
             "max_tool_calls": _optional_integer(intake.get("max_tool_calls")),
             "read_only_mode": bool(intake.get("read_only_mode", False)),
-            "execution_intent": "proposal_only",
-            "requested_operations": [],
+            "execution_intent": _text_or(
+                intake.get("execution_intent"), "proposal_only"
+            ),
         },
         "planner_name": _optional_text(source.get("planner_name")),
         "planner_prompt_version": _optional_text(source.get("planner_prompt_version")),
@@ -104,7 +103,7 @@ def normalize_legacy_trace_to_v4(trace_payload: dict[str, Any]) -> dict[str, Any
         "actor": {
             "actor_name": _optional_text(actor.get("actor_name")),
             "actor_prompt_version": _optional_text(actor.get("actor_prompt_version")),
-            "result_type": _optional_text(actor.get("result_type")),
+            "result_type": _legacy_actor_result_type(actor.get("result_type")),
             "plan_step_id": _optional_text(actor.get("plan_step_id")),
             "summary": _optional_text(actor.get("summary")),
             "capability_mode": _optional_capability_mode(actor.get("capability_mode")),
@@ -119,7 +118,16 @@ def normalize_legacy_trace_to_v4(trace_payload: dict[str, Any]) -> dict[str, Any
         },
         "execution": {
             "final_output_text": _optional_text(execution.get("final_output_text")),
-            "executed_steps": _dict_list(execution.get("executed_steps")),
+            "executed_steps": [
+                {
+                    **item,
+                    "result_type": _legacy_actor_result_type(
+                        item.get("result_type")
+                    )
+                    or "step_completed",
+                }
+                for item in _dict_list(execution.get("executed_steps"))
+            ],
             "scratchpad": _dict_list(execution.get("scratchpad")),
             "step_validations": _dict_list(execution.get("step_validations")),
         },
@@ -127,10 +135,13 @@ def normalize_legacy_trace_to_v4(trace_payload: dict[str, Any]) -> dict[str, Any
             _normalize_legacy_tool_call(item)
             for item in _dict_list(source.get("tool_calls"))
         ],
-        "observed_evidence": [
-            _normalize_legacy_evidence(item, index=index)
+        "observations": [
+            _normalize_legacy_observation(item, index=index)
             for index, item in enumerate(
-                _dict_list(source.get("observed_evidence")), start=1
+                _dict_list(
+                    source.get("observations", source.get("observed_evidence"))
+                ),
+                start=1,
             )
         ],
         "governance_passes": [
@@ -157,6 +168,7 @@ def _normalize_legacy_plan_step(item: dict[str, Any], *, index: int) -> dict[str
 # Normalize one legacy tool record while preserving its observable request/result fields.
 def _normalize_legacy_tool_call(item: dict[str, Any]) -> dict[str, Any]:
     return {
+        "request_id": _text_or(item.get("request_id"), "legacy_request"),
         "plan_step_id": _text_or(item.get("plan_step_id"), "legacy_unknown"),
         "tool_name": _text_or(item.get("tool_name"), "legacy_unknown"),
         "reason": _text_or(item.get("reason"), ""),
@@ -176,37 +188,28 @@ def _normalize_legacy_tool_call(item: dict[str, Any]) -> dict[str, Any]:
         "error_code": _optional_text(item.get("error_code")),
         "truncated": bool(item.get("truncated", False)),
         "extractability_limited": bool(item.get("extractability_limited", False)),
-        "sources": [
-            {
-                "title": _text_or(source.get("title"), ""),
-                "locator": _text_or(source.get("locator"), ""),
-                "snippet": _optional_text(source.get("snippet")),
-                "content_state": _text_or(source.get("content_state"), "metadata_only"),
-                "source_authority": _text_or(source.get("source_authority"), "unknown"),
-                "document_type": _text_or(source.get("document_type"), "unknown"),
-                "extractability": _text_or(source.get("extractability"), "unavailable"),
-                "citation_alignment": _text_or(source.get("citation_alignment"), "none"),
-            }
-            for source in _dict_list(item.get("sources"))
+        "observations": [
+            _normalize_legacy_observation(observation, index=index)
+            for index, observation in enumerate(
+                _dict_list(item.get("observations", item.get("sources"))),
+                start=1,
+            )
         ],
     }
 
 
-# Normalize one legacy evidence item without strengthening its support level.
-def _normalize_legacy_evidence(item: dict[str, Any], *, index: int) -> dict[str, Any]:
+# Normalize one legacy evidence entry into a concrete observation.
+def _normalize_legacy_observation(item: dict[str, Any], *, index: int) -> dict[str, Any]:
     return {
-        "evidence_id": _text_or(item.get("evidence_id"), f"legacy:{index}"),
-        "plan_step_id": _text_or(item.get("plan_step_id"), "legacy_unknown"),
-        "title": _text_or(item.get("title"), ""),
-        "locator": _text_or(item.get("locator"), ""),
-        "excerpt": _text_or(item.get("excerpt"), ""),
-        "source_kind": _text_or(item.get("source_kind"), "tool_observation"),
-        "source_tool": _optional_text(item.get("source_tool")),
-        "content_state": _text_or(item.get("content_state"), "metadata_only"),
-        "source_authority": _text_or(item.get("source_authority"), "unknown"),
-        "document_type": _text_or(item.get("document_type"), "unknown"),
-        "extractability": _text_or(item.get("extractability"), "unavailable"),
-        "citation_alignment": _text_or(item.get("citation_alignment"), "none"),
+        "observation_id": _text_or(
+            item.get("observation_id", item.get("evidence_id")),
+            f"legacy_observation_{index}",
+        ),
+        "content": _text_or(
+            item.get("content", item.get("excerpt", item.get("snippet"))),
+            "Legacy observation contained no retained text.",
+        ),
+        "locator": _optional_text(item.get("locator")),
     }
 
 
@@ -217,9 +220,10 @@ def _normalize_legacy_governance_pass(
     return {
         "pass_index": _integer_or(item.get("pass_index"), index),
         "evaluated_plan_step_id": _optional_text(item.get("evaluated_plan_step_id")),
-        "evaluated_actor_result_type": _text_or(
-            item.get("evaluated_actor_result_type"),
-            _text_or(actor.get("result_type"), "blocked"),
+        "evaluated_actor_result_type": (
+            _legacy_actor_result_type(item.get("evaluated_actor_result_type"))
+            or _legacy_actor_result_type(actor.get("result_type"))
+            or "blocked"
         ),
         "evaluated_tool_name": _optional_text(item.get("evaluated_tool_name")),
         "evaluated_operation_digest": _optional_text(
@@ -245,8 +249,8 @@ def _normalize_legacy_governance_pass(
     }
 
 
-# Add conservative defaults when reading current v4 traces at the evaluation boundary.
-def _add_current_v4_compatibility_defaults(
+# Add conservative defaults when reading current v5 traces at the evaluation boundary.
+def _add_current_v5_compatibility_defaults(
     source: dict[str, Any],
 ) -> dict[str, Any]:
     intake = _dict_or_empty(source.get("intake"))
@@ -329,6 +333,13 @@ def _optional_text(value: Any) -> str | None:
     return value if isinstance(value, str) else None
 
 
+# Map the retired final marker to the canonical step-completion outcome.
+def _legacy_actor_result_type(value: Any) -> str | None:
+    if value == "final_output":
+        return "step_completed"
+    return _optional_text(value)
+
+
 # Retain only the two producer-owned planning source values.
 def _optional_planning_source(value: Any) -> str | None:
     return value if value in {"planner", "replanner"} else None
@@ -386,7 +397,7 @@ def _object_dict(value: Any) -> dict[str, dict[str, Any]]:
     }
 
 
-# Normalize v1/v2/v3 decisions into the v4 read model without mutating the source file.
+# Normalize v1-v4 decisions into the v5 read model without mutating the source file.
 def _normalize_governance_passes(trace_payload: dict[str, Any]) -> list[dict[str, Any]]:
     current = trace_payload.get("governance_passes")
     if isinstance(current, list):
@@ -449,12 +460,15 @@ def _trace_version_and_completeness(*, trace_payload: dict[str, Any], governance
     decisions = [item for item in governance_decisions if isinstance(item, dict)]
     if not decisions:
         return "unknown", "inconclusive"
-    if trace_payload.get("trace_version") == "layer2_trace.v4" and all(
+    if trace_payload.get("trace_version") in {"layer2_trace.v4", "layer2_trace.v5"} and all(
         isinstance(item.get("pillar_results"), dict)
         and isinstance(item.get("safety_invariants"), list)
         for item in decisions
     ):
-        return "v4", "complete"
+        return (
+            "v5" if trace_payload.get("trace_version") == "layer2_trace.v5" else "v4",
+            "complete",
+        )
     is_v2 = all(
         isinstance(item.get("pillar_results"), dict)
         and (

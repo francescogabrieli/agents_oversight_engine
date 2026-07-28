@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from .models import (
-    DomainType,
     ParseStatus,
     SensitivityLevel,
     TaskCompletenessAssessment,
@@ -21,8 +20,6 @@ def assess_task_completeness(task_spec: TaskSpec) -> TaskCompletenessAssessment:
     if not task_spec.success_criteria:
         warnings.append("No explicit success criteria were extracted.")
         missing_information.append("success_criteria")
-    if task_spec.domain_type == DomainType.OTHER:
-        warnings.append("Domain taxonomy fallback OTHER was used.")
     if (
         task_spec.sensitivity in {SensitivityLevel.HIGH, SensitivityLevel.CRITICAL}
         and not task_spec.constraints

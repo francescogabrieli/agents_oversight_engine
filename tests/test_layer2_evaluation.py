@@ -109,11 +109,7 @@ class Layer2EvaluationTests(unittest.TestCase):
         self.assertEqual(report.aggregate.unresolved_human_review_count, 1)
         self.assertEqual(
             report.aggregate.evidence_support_distribution,
-            {
-                "extracted_full": 1,
-                "provider_cited_summary": 2,
-                "metadata_only": 1,
-            },
+            {"without_locator": 4},
         )
         self.assertEqual(report.aggregate.tool_call_total, 4)
         self.assertEqual(report.aggregate.failed_tool_total, 1)

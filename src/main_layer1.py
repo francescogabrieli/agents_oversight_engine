@@ -185,8 +185,6 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
             # Keep the parser section close to the TaskSpec contract rather than the raw model shape.
             "goal": task_spec["goal"],
             "context": task_spec["context"],
-            "domain_type": task_spec["domain_type"],
-            "domain_label": task_spec["domain_label"],
             "sensitivity": task_spec["sensitivity"],
             "constraints_count": len(task_spec["constraints"]),
             "constraints": task_spec["constraints"],

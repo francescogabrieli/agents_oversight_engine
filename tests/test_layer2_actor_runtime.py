@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from tests.layer2_runtime_fixtures import *
 from layer2_runtime_governance.domain import ExecutedPlanStep
+from layer2_runtime_governance.runtime.actor_service import (
+    _enforce_actor_runtime_contract,
+)
+from layer2_runtime_governance.runtime.lifecycle_service import finalize_bootstrap
 
 
 class Layer2ActorExecutionTests(unittest.TestCase):
@@ -50,7 +54,7 @@ class Layer2ActorExecutionTests(unittest.TestCase):
 
         result = actor.act(actor_task=actor_task)
 
-        self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
+        self.assertEqual(result.result_type, ActorResultType.STEP_COMPLETED)
         self.assertEqual(result.output_text, "OpenRouter actor completed the step.")
         self.assertIsNotNone(result.step_validation)
         self.assertEqual(result.step_validation.actor_self_confidence, 0.82)
@@ -90,7 +94,7 @@ class Layer2ActorExecutionTests(unittest.TestCase):
                                 {
                                     "toolUse": {
                                         "toolUseId": "test-tool-use",
-                                        "name": "emit_final_output",
+                                        "name": "emit_step_completed",
                                         "input": {"output_text": "Recovered output."},
                                     }
                                 }
@@ -108,7 +112,7 @@ class Layer2ActorExecutionTests(unittest.TestCase):
                 tools=[
                     {
                         "type": "function",
-                        "name": "emit_final_output",
+                        "name": "emit_step_completed",
                         "description": "Return the final output envelope.",
                         "parameters": {
                             "type": "object",
@@ -120,7 +124,7 @@ class Layer2ActorExecutionTests(unittest.TestCase):
                 ],
             )
 
-        self.assertEqual(payload["tool_name"], "emit_final_output")
+        self.assertEqual(payload["tool_name"], "emit_step_completed")
         self.assertEqual(fake_client.call_count, 3)
         self.assertIsNotNone(fake_client.last_kwargs)
         self.assertNotIn("inferenceConfig", fake_client.last_kwargs)
@@ -167,7 +171,7 @@ class Layer2ActorExecutionTests(unittest.TestCase):
 
         result = actor.act(actor_task=actor_task)
 
-        self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
+        self.assertEqual(result.result_type, ActorResultType.STEP_COMPLETED)
         self.assertEqual(result.summary, "Grounded concise final answer.")
         self.assertIsNotNone(result.step_validation)
         self.assertEqual(
@@ -191,28 +195,38 @@ class Layer2ActorExecutionTests(unittest.TestCase):
             )
 
 
-    def test_bedrock_rejects_any_model_except_the_approved_inference_profile(self) -> None:
+    def test_bedrock_allows_a_configured_model_identifier(self) -> None:
+        bedrock_client_module._validate_settings(  # type: ignore[attr-defined]
+            settings=bedrock_client_module.BedrockRuntimeSettings(
+                model_id="anthropic.claude-haiku-4-5-20251001-v1:0",
+                access_key_id="test-key",
+                secret_access_key="test-secret-key",
+            )
+        )
+
+
+    def test_bedrock_rejects_an_empty_model_identifier(self) -> None:
         with self.assertRaisesRegex(
             bedrock_client_module.BedrockRuntimeError,
-            "must be 'eu.amazon.nova-2-lite-v1:0'",
+            "must be a non-empty",
         ):
-            bedrock_client_module.BedrockChatClient(
-                bedrock_client_module.BedrockRuntimeSettings(
-                    model_id="some-other-model",
+            bedrock_client_module._validate_settings(  # type: ignore[attr-defined]
+                settings=bedrock_client_module.BedrockRuntimeSettings(
+                    model_id=" ",
                     access_key_id="test-key",
                     secret_access_key="test-secret-key",
                 )
             )
 
 
-    def test_bedrock_rejects_any_region_except_eu_central_1(self) -> None:
+    def test_bedrock_rejects_an_empty_region(self) -> None:
         with self.assertRaisesRegex(
             bedrock_client_module.BedrockRuntimeError,
-            "region must be 'eu-central-1'",
+            "AWS_REGION must be a non-empty",
         ):
-            bedrock_client_module.BedrockChatClient(
-                bedrock_client_module.BedrockRuntimeSettings(
-                    region_name="eu-west-1",
+            bedrock_client_module._validate_settings(  # type: ignore[attr-defined]
+                settings=bedrock_client_module.BedrockRuntimeSettings(
+                    region_name=" ",
                     access_key_id="test-key",
                     secret_access_key="test-secret-key",
                 )
@@ -268,14 +282,11 @@ class Layer2ActorExecutionTests(unittest.TestCase):
         state.current_plan_step.objective = (
             "Use the already-fetched Commission page content to extract high-level supported themes."
         )
-        state.observed_evidence.append(
-            ObservedEvidence(
-                evidence_id="replan_step_1:tool:1:source:1",
-                plan_step_id="replan_step_1",
-                title="Commission DMA Legislation",
+        state.observations.append(
+            ToolObservation(
+                observation_id="replan_step_1:tool:1:source:1",
                 locator="https://digital-markets-act.ec.europa.eu/legislation_en",
-                excerpt="The DMA contains the main rules for the designation of gatekeepers and the implementation of obligations and prohibitions.",
-                source_tool=ToolName.FETCH_URL_TEXT,
+                content="The DMA contains the main rules for the designation of gatekeepers and the implementation of obligations and prohibitions.",
             )
         )
         state.scratchpad.append(
@@ -291,28 +302,109 @@ class Layer2ActorExecutionTests(unittest.TestCase):
         system_prompt = build_actor_system_prompt()
         user_prompt = build_actor_user_prompt(actor_task=actor_task)
 
-        self.assertIn("Do not gather evidence for future steps", system_prompt)
-        self.assertIn("replacement step objective overrides the older blocked path", system_prompt)
-        self.assertIn("A discovered source URL is not factual support", system_prompt)
-        self.assertIn('"observed_evidence":', user_prompt)
-        self.assertNotIn("support_level", user_prompt)
-        self.assertIn('"content_state": "metadata_only"', user_prompt)
+        self.assertIn("only step you may complete or commit", system_prompt)
+        self.assertIn("Use the full plan as context", system_prompt)
+        self.assertIn('"observations":', user_prompt)
+        self.assertNotIn("content_state", user_prompt)
+        self.assertIn('"observation_id": "replan_step_1:tool:1:source:1"', user_prompt)
 
 
-    def test_actor_prompts_high_level_summary_to_avoid_granular_examples(self) -> None:
+    # A requested external effect cannot disappear behind an ordinary terminal completion.
+    def test_terminal_local_completion_becomes_replan_for_execution_task(self) -> None:
+        state = TaskState.from_intake(
+            _build_external_communication_intake_result_for_governance()
+        )
+        state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Produce and send the requested communication.",
+                rationale="The user requested an external effect.",
+                expected_outcome="A governed external communication candidate.",
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        state.current_plan_step_index = 0
+        state.actor_turn_count = 1
+        local_completion = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.STEP_COMPLETED,
+            summary="The task is complete.",
+            output_text="The message was prepared.",
+        )
+
+        normalized = _enforce_actor_runtime_contract(
+            state,
+            actor_result=local_completion,
+        )
+
+        self.assertEqual(normalized.result_type, ActorResultType.NEEDS_REPLAN)
+        self.assertIn("no typed external-operation candidate", normalized.blocking_reason)
+
+
+    # Multi-turn reasoning remains valid, while exact replay is a recoverable stuck protocol.
+    def test_identical_intermediate_replay_becomes_replan(self) -> None:
+        state = _build_policy_input_task_state()
+        previous = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+            summary="Derived one grounded comparison.",
+            output_text="Comparison draft.",
+            scratchpad_entry=ScratchpadEntry(
+                turn_index=1,
+                plan_step_id="step_1",
+                entry_type=ScratchpadEntryType.PROGRESS_NOTE,
+                summary="One grounded comparison is now available.",
+            ),
+        )
+        state.actor_result = previous
+        state.actor_turn_count = 2
+        repeated = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+            summary="  DERIVED one grounded comparison. ",
+            output_text="Comparison   draft.",
+            scratchpad_entry=ScratchpadEntry(
+                turn_index=2,
+                plan_step_id="step_1",
+                entry_type=ScratchpadEntryType.PROGRESS_NOTE,
+                summary="One grounded comparison is now available.",
+            ),
+        )
+
+        normalized = _enforce_actor_runtime_contract(
+            state,
+            actor_result=repeated,
+        )
+
+        self.assertEqual(normalized.result_type, ActorResultType.NEEDS_REPLAN)
+        self.assertIn("repeated the same", normalized.blocking_reason)
+
+
+    # Finalization is the defense-in-depth boundary for execution receipt integrity.
+    def test_finalize_rejects_completed_execution_task_without_receipt(self) -> None:
+        state = TaskState.from_intake(
+            _build_external_communication_intake_result_for_governance()
+        )
+        state.current_state = RuntimeState.COMPLETED
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "without an executed external-operation receipt",
+        ):
+            finalize_bootstrap(state)
+
+
+    def test_actor_prompt_has_no_case_specific_claim_rewriting(self) -> None:
         state = _build_conservative_replan_summary_task_state()
-        state.observed_evidence.append(
-            ObservedEvidence(
-                evidence_id="replan_step_1:tool:6:source:1",
-                plan_step_id="replan_step_1",
-                title="Digital Markets Act (DMA) Legislation",
+        state.observations.append(
+            ToolObservation(
+                observation_id="replan_step_1:tool:6:source:1",
                 locator="https://digital-markets-act.ec.europa.eu/legislation_en",
-                excerpt=(
+                content=(
                     "The Procedural Implementing Regulation (EU) 2023/814 details "
                     "procedural aspects related to the implementation and enforcement "
                     "of the DMA."
                 ),
-                source_tool=ToolName.FETCH_URL_TEXT,
             )
         )
         actor_task = build_actor_task(task_state=state)
@@ -320,13 +412,10 @@ class Layer2ActorExecutionTests(unittest.TestCase):
         system_prompt = build_actor_system_prompt()
         user_prompt = build_actor_user_prompt(actor_task=actor_task)
 
-        self.assertIn("keep claim language broad", system_prompt)
-        self.assertIn(
-            "describe them as procedural/implementation sources",
-            system_prompt,
-        )
-        self.assertIn('"content_state":', user_prompt)
-        self.assertIn('"source_authority":', user_prompt)
+        self.assertIn("Base externally verifiable claims on concrete observations", system_prompt)
+        self.assertNotIn("procedural/implementation sources", system_prompt)
+        self.assertNotIn("content_state", user_prompt)
+        self.assertNotIn("source_authority", user_prompt)
         self.assertNotIn("self-preferencing", user_prompt)
 
 
@@ -358,26 +447,11 @@ class Layer2ActorExecutionTests(unittest.TestCase):
                 output_text="A large intermediate transcript that is not needed twice.",
             )
         ]
-        state.observed_evidence = [
-            ObservedEvidence(
-                evidence_id="intake:goal",
-                plan_step_id="intake",
-                title="Task goal",
-                locator="intake://task_spec/goal",
-                excerpt=state.task_spec.goal,
-                source_kind=EvidenceSourceKind.INTAKE_PROVIDED,
-                content_state=EvidenceContentState.METADATA_ONLY,
-                extractability=Extractability.UNAVAILABLE,
-            ),
-            ObservedEvidence(
-                evidence_id="step_1:tool:1:source:1",
-                plan_step_id="step_1",
-                title="Prior source",
+        state.observations = [
+            ToolObservation(
+                observation_id="step_1:tool:1:source:1",
                 locator="https://example.org/prior-source",
-                excerpt="Evidence collected during the completed source step.",
-                source_tool=ToolName.FETCH_URL_TEXT,
-                content_state=EvidenceContentState.EXTRACTED_FULL,
-                extractability=Extractability.COMPLETE,
+                content="Evidence collected during the completed source step.",
             ),
         ]
         state.last_tool_result = ToolExecutionResult(
@@ -390,11 +464,11 @@ class Layer2ActorExecutionTests(unittest.TestCase):
             success=True,
             summary="Prior source fetched.",
             content="Evidence collected during the completed source step.",
-            sources=(
-                ToolSource(
-                    title="Prior source",
+            observations=(
+                ToolObservation(
+                    observation_id="step_1:tool:1:source:1",
                     locator="https://example.org/prior-source",
-                    snippet="Evidence collected during the completed source step.",
+                    content="Evidence collected during the completed source step.",
                 ),
             ),
         )
@@ -409,14 +483,17 @@ class Layer2ActorExecutionTests(unittest.TestCase):
             [step["step_id"] for step in payload["plan"]["other_steps"]],
             ["step_1"],
         )
-        self.assertNotIn("rationale", payload["plan"]["other_steps"][0])
+        self.assertIn("rationale", payload["plan"]["other_steps"][0])
         self.assertEqual(
-            [item["evidence_id"] for item in payload["observed_evidence"]],
+            [item["observation_id"] for item in payload["observations"]],
             ["step_1:tool:1:source:1"],
         )
         self.assertNotIn("content", payload["last_tool_result"])
         self.assertNotIn("sources", payload["last_tool_result"])
-        self.assertNotIn("output_text", payload["past_steps"][0])
+        self.assertEqual(
+            payload["past_steps"][0]["output_text"],
+            "A large intermediate transcript that is not needed twice.",
+        )
 
 
     def test_openrouter_completion_with_unsupported_precision_stays_in_progress(self) -> None:
@@ -434,7 +511,7 @@ class Layer2ActorExecutionTests(unittest.TestCase):
 
         result = actor.act(actor_task=actor_task)
 
-        self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
+        self.assertEqual(result.result_type, ActorResultType.STEP_COMPLETED)
         self.assertIsNotNone(result.step_validation)
         self.assertEqual(result.step_validation.evidence_refs, ())
         self.assertGreaterEqual(result.step_validation.actor_self_confidence, 0.0)
@@ -475,7 +552,7 @@ class Layer2ActorExecutionTests(unittest.TestCase):
 
         result = actor.act(actor_task=actor_task)
 
-        self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
+        self.assertEqual(result.result_type, ActorResultType.STEP_COMPLETED)
         self.assertNotIn("【", result.output_text or "")
         self.assertNotIn("step_1:tool:", result.output_text or "")
         self.assertNotIn("【", result.step_validation.rationale_summary)
@@ -516,7 +593,7 @@ class Layer2ActorExecutionTests(unittest.TestCase):
 
         result = actor.act(actor_task=actor_task)
 
-        self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
+        self.assertEqual(result.result_type, ActorResultType.STEP_COMPLETED)
         self.assertIsNotNone(result.step_validation)
         self.assertGreater(result.step_validation.actor_self_confidence, 0.0)
 
@@ -536,7 +613,7 @@ class Layer2ActorExecutionTests(unittest.TestCase):
 
         result = actor.act(actor_task=actor_task)
 
-        self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
+        self.assertEqual(result.result_type, ActorResultType.STEP_COMPLETED)
         self.assertIn(
             "establishes enforcement by the European Commission",
             result.output_text,
@@ -558,13 +635,13 @@ class Layer2ActorExecutionTests(unittest.TestCase):
         actor_task = build_actor_task(task_state=observed_state)
 
         self.assertEqual(
-            observed_state.observed_evidence[0].content_state,
-            EvidenceContentState.EXTRACTED_FULL,
+            observed_state.observations[0].content,
+            "The AI Act entered into force on 1 August 2024.",
         )
 
         result = actor.act(actor_task=actor_task)
 
-        self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
+        self.assertEqual(result.result_type, ActorResultType.STEP_COMPLETED)
         self.assertIsNotNone(result.step_validation)
         self.assertGreater(result.step_validation.actor_self_confidence, 0.0)
 
@@ -584,7 +661,7 @@ class Layer2ActorExecutionTests(unittest.TestCase):
 
         result = actor.act(actor_task=actor_task)
 
-        self.assertEqual(result.result_type, ActorResultType.FINAL_OUTPUT)
+        self.assertEqual(result.result_type, ActorResultType.STEP_COMPLETED)
         self.assertIsNotNone(result.step_validation)
         self.assertGreater(result.step_validation.actor_self_confidence, 0.0)
 

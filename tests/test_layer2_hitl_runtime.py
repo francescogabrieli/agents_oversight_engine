@@ -108,10 +108,7 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
         # The runtime recovery route is separate from the OPA directive; this
         # fixture's policy stub allows the turn while the typed failure replans.
         self.assertEqual(result.last_governance_decision.directive, GovernanceDirective.CONTINUE)
-        self.assertEqual(
-            result.external_communication.phase,
-            ExternalCommunicationPhase.EVIDENCE_COLLECTION,
-        )
+        self.assertIsNone(result.external_communication)
 
 
     def test_opa_policy_does_not_deny_write_compatibility_flag_alone(self) -> None:
@@ -155,6 +152,9 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
 
     def test_opa_input_marks_external_communication_draft_phase(self) -> None:
         task_state = TaskState.from_intake(_build_external_communication_intake_result())
+        task_state.external_communication = ExternalCommunicationState(
+            phase=ExternalCommunicationPhase.DRAFT_PROPOSAL
+        )
         task_state.external_communication.phase = ExternalCommunicationPhase.DRAFT_PROPOSAL
         task_state.external_communication.review_ready = True
         task_state.plan_steps = [
@@ -192,6 +192,9 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
             self.skipTest("OPA executable is not available.")
 
         task_state = TaskState.from_intake(_build_external_communication_intake_result())
+        task_state.external_communication = ExternalCommunicationState(
+            phase=ExternalCommunicationPhase.DRAFT_IN_PROGRESS
+        )
         task_state.external_communication.phase = ExternalCommunicationPhase.DRAFT_IN_PROGRESS
         task_state.external_communication.review_ready = False
         task_state.plan_steps = [
@@ -242,7 +245,7 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
         self.assertNotIn("external_communication_review_required", decision["reason_codes"])
 
 
-    def test_external_partial_draft_progress_is_preserved_as_markdown_body(self) -> None:
+    def test_plain_intermediate_output_does_not_create_external_draft(self) -> None:
         task_state = TaskState.from_intake(_build_external_communication_intake_result())
         task_state.plan_steps = [
             PlanStep(
@@ -277,18 +280,10 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(
-            task_state.external_communication.phase,
-            ExternalCommunicationPhase.DRAFT_IN_PROGRESS,
-        )
-        self.assertFalse(task_state.external_communication.review_ready)
-        self.assertIsNone(task_state.external_communication.draft.recipient)
-        self.assertIsNone(task_state.external_communication.draft.subject)
-        self.assertIn("Recipient: Acme Cloud Operations Team", task_state.external_communication.draft.body)
-        self.assertIn("Subject: Urgent incident verification required", task_state.external_communication.draft.body)
+        self.assertIsNone(task_state.external_communication)
 
 
-    def test_external_markdown_outline_partial_draft_stays_in_single_body(self) -> None:
+    def test_plain_markdown_outline_does_not_create_external_draft(self) -> None:
         task_state = TaskState.from_intake(_build_external_communication_intake_result())
         task_state.plan_steps = [
             PlanStep(
@@ -327,11 +322,7 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
             ),
         )
 
-        self.assertIsNone(task_state.external_communication.draft.recipient)
-        self.assertIsNone(task_state.external_communication.draft.subject)
-        self.assertIn("**Email Audience & Purpose**", task_state.external_communication.draft.body)
-        self.assertIn("**Subject Line:**", task_state.external_communication.draft.body)
-        self.assertIn("**Requested Actions:**", task_state.external_communication.draft.body)
+        self.assertIsNone(task_state.external_communication)
 
 
     def test_external_final_draft_becomes_review_ready_proposal(self) -> None:
@@ -361,6 +352,18 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
                     "We detected intermittent delivery failures at 09:12 CET on May 25, 2026. "
                     "Please verify delivery queues, inspect the retry backlog, confirm whether impact "
                     "extended beyond the notification pipeline, and report status back within 60 minutes."
+                ),
+                external_communication_draft=ExternalCommunicationDraft(
+                    channel="email",
+                    recipient="operations@example.com",
+                    subject="Incident verification request",
+                    body=(
+                        "Operations team,\n\n"
+                        "We detected intermittent delivery failures at 09:12 CET on May 25, 2026. "
+                        "Please verify delivery queues, inspect the retry backlog, confirm whether "
+                        "impact extended beyond the notification pipeline, and report status back "
+                        "within 60 minutes."
+                    ),
                 ),
                 step_validation=StepValidation(
                     plan_step_id="step_6",
@@ -580,6 +583,9 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
         task_state = TaskState.from_intake(_build_external_communication_intake_result())
         task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
         task_state.human_review_resume_state = RuntimeState.ACTING
+        task_state.external_communication = ExternalCommunicationState(
+            phase=ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
+        )
         task_state.external_communication.phase = ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
         task_state.external_communication.draft = ExternalCommunicationDraft(
             channel="email",
@@ -630,6 +636,9 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
         task_state = TaskState.from_intake(_build_external_communication_intake_result())
         task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
         task_state.human_review_resume_state = RuntimeState.ACTING
+        task_state.external_communication = ExternalCommunicationState(
+            phase=ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
+        )
         task_state.external_communication.phase = ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
         task_state.external_communication.draft = ExternalCommunicationDraft(
             channel="email",
@@ -662,6 +671,9 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
         task_state = TaskState.from_intake(_build_external_communication_intake_result())
         task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
         task_state.human_review_resume_state = RuntimeState.ACTING
+        task_state.external_communication = ExternalCommunicationState(
+            phase=ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
+        )
         task_state.external_communication.phase = ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
         task_state.external_communication.draft = {
             "channel": "email",
@@ -687,6 +699,9 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
         task_state = TaskState.from_intake(_build_external_communication_intake_result())
         task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
         task_state.human_review_resume_state = RuntimeState.ACTING
+        task_state.external_communication = ExternalCommunicationState(
+            phase=ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
+        )
         task_state.external_communication.phase = ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
         task_state.external_communication.draft = ExternalCommunicationDraft(
             channel="email",
@@ -750,6 +765,9 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
             )
         ]
         state.current_plan_step_index = 0
+        state.external_communication = ExternalCommunicationState(
+            phase=ExternalCommunicationPhase.DRAFT_PROPOSAL
+        )
         state.external_communication.phase = ExternalCommunicationPhase.DRAFT_PROPOSAL
         state.external_communication.review_ready = True
         state.external_communication.draft = ExternalCommunicationDraft(

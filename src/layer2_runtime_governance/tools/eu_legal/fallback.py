@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from ...tool_contract import DocumentType, EvidenceContentState, Extractability, SourceAuthority, ToolExecutionResult, ToolRequest, ToolSource
+from ...tool_contract import ToolExecutionResult, ToolObservation, ToolRequest
 from ..models import ToolDefinition
 from ..text import is_meaningful_extracted_text, truncate_text
 from ..extractors import extract_visible_text
@@ -54,15 +54,11 @@ def try_fetch_specialized_legal_document(
         success=True,
         summary="Official EU legal text fetched through the publication fallback.",
         content=content,
-        sources=(
-            ToolSource(
-                title=f"Official EU legal text ({celex_identifier(tool_request.url)})",
+        observations=(
+            ToolObservation(
+                observation_id=f"{tool_request.request_id}:document",
                 locator=fallback_url,
-                snippet=truncate_text(content, 500),
-                content_state=EvidenceContentState.EXTRACTED_FULL,
-                source_authority=SourceAuthority.OFFICIAL_PRIMARY,
-                document_type=DocumentType.LEGAL_TEXT,
-                extractability=Extractability.COMPLETE,
+                content=content,
             ),
         ),
     )

@@ -11,7 +11,7 @@ from .contracts import (
     NormalizedGovernanceDecision,
     NormalizedHumanReview,
     NormalizedIntake,
-    NormalizedObservedEvidence,
+    NormalizedObservation,
     NormalizedOversightAssessment,
     NormalizedOversightSignal,
     NormalizedPlanStep,
@@ -44,8 +44,9 @@ def normalize_trace_payload(payload: Any, *, source_path: Path) -> NormalizedTra
         plan_steps=_normalize_plan_steps(payload.get("plan_steps"), source_path=source_path),
         current_plan_step_id=_optional_text(payload.get("current_plan_step_id")),
         tool_calls=_normalize_tool_calls(payload.get("tool_calls"), source_path=source_path),
-        observed_evidence=_normalize_observed_evidence(
-            payload.get("observed_evidence"), source_path=source_path
+        observations=_normalize_observations(
+            payload.get("observations", payload.get("observed_evidence")),
+            source_path=source_path,
         ),
         governance_decisions=_normalize_governance_decisions(
             payload.get("governance_passes", payload.get("governance_decisions")),
@@ -97,8 +98,6 @@ def _normalize_intake(payload: dict[str, Any], *, source_path: Path) -> Normaliz
     return NormalizedIntake(
         goal=_require_str(payload, "goal", source_path=source_path),
         context=str(payload.get("context", "")),
-        domain_type=_require_str(payload, "domain_type", source_path=source_path),
-        domain_label=_require_str(payload, "domain_label", source_path=source_path),
         sensitivity=_require_str(payload, "sensitivity", source_path=source_path),
         success_criteria=_string_tuple(payload.get("success_criteria")),
         constraints=_string_tuple(payload.get("constraints")),
@@ -150,21 +149,36 @@ def _normalize_tool_calls(payload: Any, *, source_path: Path) -> tuple[Normalize
     )
 
 
-# Normalize observed evidence.
-def _normalize_observed_evidence(
+# Normalize current observations and legacy evidence at the offline boundary.
+def _normalize_observations(
     payload: Any, *, source_path: Path
-) -> tuple[NormalizedObservedEvidence, ...]:
+) -> tuple[NormalizedObservation, ...]:
     items = _normalize_optional_list(
-        payload, source_path=source_path, field_name="observed_evidence"
+        payload, source_path=source_path, field_name="observations"
     )
     return tuple(
-        NormalizedObservedEvidence(
-            source_kind=_optional_text(item.get("source_kind")),
-            content_state=_legacy_content_state(item, source_path=source_path),
-            extractability=_legacy_extractability(item, source_path=source_path),
+        NormalizedObservation(
+            observation_id=_observation_id(item, index=index),
+            content=_observation_content(item),
+            locator=_optional_text(item.get("locator")),
+            legacy_content_state=_optional_text(item.get("content_state")),
         )
-        for item in items
+        for index, item in enumerate(items, start=1)
     )
+
+
+# Recover a stable identifier from current or legacy trace entries.
+def _observation_id(item: dict[str, Any], *, index: int) -> str:
+    return str(
+        item.get("observation_id")
+        or item.get("evidence_id")
+        or f"legacy_observation_{index}"
+    )
+
+
+# Recover concrete content from current observations or legacy excerpts.
+def _observation_content(item: dict[str, Any]) -> str:
+    return str(item.get("content") or item.get("excerpt") or item.get("snippet") or "")
 
 
 # Normalize retained plan-step metadata used for evidence requirement analysis.
@@ -181,37 +195,6 @@ def _normalize_plan_steps(payload: Any, *, source_path: Path) -> tuple[Normalize
             ),
         )
         for item in items
-    )
-
-
-# Normalize removed evidence-rank fields only at the offline evaluation boundary.
-def _legacy_content_state(item: dict[str, Any], *, source_path: Path) -> str:
-    content_state = item.get("content_state")
-    if isinstance(content_state, str) and content_state:
-        return content_state
-    legacy_support = item.get("support_level")
-    legacy_map = {
-        "detailed_extracted": "extracted_full",
-        "high_level_summary": "provider_cited_summary",
-        "primary_legal": "metadata_only",
-        "local_only": "metadata_only",
-        "source_discovery": "metadata_only",
-    }
-    if isinstance(legacy_support, str) and legacy_support in legacy_map:
-        return legacy_map[legacy_support]
-    raise TraceEvaluationError(
-        issue_type="schema_invalid",
-        message=f"Trace file is missing a valid 'content_state' string: {source_path}",
-    )
-
-
-# Keep legacy extractability conservative when projecting rank-only evidence.
-def _legacy_extractability(item: dict[str, Any], *, source_path: Path) -> str:
-    extractability = item.get("extractability")
-    if isinstance(extractability, str) and extractability:
-        return extractability
-    return "unavailable" if "support_level" in item else _require_str(
-        item, "extractability", source_path=source_path
     )
 
 

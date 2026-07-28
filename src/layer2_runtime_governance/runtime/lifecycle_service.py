@@ -3,6 +3,7 @@ from copy import deepcopy
 from layer1_intake import IntakeResult
 
 from ..domain import RuntimeState, StepRecord, TaskState
+from .completion_contract import terminal_execution_contract_satisfied
 
 # Nodes.py contains the executable Layer 2 business logic.
 # At this stage the runtime performs bootstrap, planning, and the actor/tool loop.
@@ -36,6 +37,14 @@ def _append_step_record(state: TaskState, *, node_name: str, summary: str) -> No
 # Maintain explicit lifecycle state and audit records.
 def finalize_bootstrap(state: TaskState) -> TaskState:
     # Close the current runtime slice after the planner/actor/tool loop reaches a stable stop point.
+    if (
+        state.current_state == RuntimeState.COMPLETED
+        and not terminal_execution_contract_satisfied(state)
+    ):
+        raise RuntimeError(
+            "Cannot finalize an execute-after-governance task without an executed "
+            "external-operation receipt."
+        )
     next_state = deepcopy(state)
     next_state.bootstrap_completed = True
     next_state.step_index += 1

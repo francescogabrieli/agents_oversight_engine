@@ -5,12 +5,14 @@
       "family": "communication",
       "target_criticality": "standard",
       "scope": "single_destination",
+      "approval_mode": "always",
       "compensation_mechanism": null
     },
     "enterprise_db.read_only": {
       "family": "database",
       "target_criticality": "business_system",
       "scope": "query_bounded",
+      "approval_mode": "never",
       "allowed_statement_classes": ["select"],
       "compensation_mechanism": null
     },
@@ -18,6 +20,7 @@
       "family": "generic",
       "target_criticality": "unknown",
       "scope": "unknown",
+      "approval_mode": "conditional",
       "compensation_mechanism": null
     }
   }

@@ -14,14 +14,11 @@ if str(SRC_ROOT) not in sys.path:
 
 from layer1_intake import (
     BudgetConfig,
-    DomainType,
     ExecutionIntent,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeResult,
     ParseStatus,
-    RequestedOperation,
-    RequestedOperationType,
     SensitivityLevel,
     StructuredTask,
     TaskSpec,
@@ -61,17 +58,12 @@ from layer2_runtime_governance.judge import (
 )
 from layer2_runtime_governance.planning import PlannerPort
 from layer2_runtime_governance.tool_contract import (
-    CitationAlignment,
-    DocumentType,
-    EvidenceContentState,
-    Extractability,
-    SourceAuthority,
     ToolErrorCode,
     ToolExecutionResult,
     ToolGatewayPort,
     ToolName,
     ToolRequest,
-    ToolSource,
+    ToolObservation,
 )
 from layer2_runtime_governance.graph import build_runtime_graph
 from layer2_runtime_governance.infrastructure.checkpointing import build_runtime_serializer
@@ -125,7 +117,9 @@ class LatestAIModelsEmailRegressionTests(unittest.TestCase):
         self.assertNotEqual(state.current_state, RuntimeState.ABORTED)
         self.assertEqual(state.external_communication.phase, ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED)
         self.assertTrue(state.external_communication.review_ready)
-        self.assertIn("report", state.external_communication.draft.body.lower())
+        self.assertIn("OpenAI", state.external_communication.draft.body)
+        self.assertIn("Anthropic", state.external_communication.draft.body)
+        self.assertIn("Google", state.external_communication.draft.body)
         self.assertEqual(state.external_communication.draft.recipient, "recipient@example.com")
         self.assertIsNotNone(state.external_operation_proposal)
         self.assertTrue(state.external_operation_proposal.execution_candidate)
@@ -135,7 +129,8 @@ class LatestAIModelsEmailRegressionTests(unittest.TestCase):
             state.external_operation_proposal.payload_digest,
         )
         self.assertEqual(state.actor_result.result_type, ActorResultType.STEP_COMPLETED)
-        self.assertEqual(len(state.executed_steps), 2)
+        self.assertEqual(len(state.executed_steps), 1)
+        self.assertIsNotNone(state.pending_completion_candidate)
         self.assertFalse(any(item.directive == GovernanceDirective.STOP for item in state.governance_history))
         self.assertIn(RuntimeState.WAITING_HUMAN_REVIEW, [item.runtime_state for item in state.step_history])
         self.assertTrue(any(item.request.tool_name == ToolName.WEB_SEARCH for item in state.tool_results_history))
@@ -144,9 +139,10 @@ class LatestAIModelsEmailRegressionTests(unittest.TestCase):
             for item in state.tool_results_history
             if item.request.tool_name == ToolName.FETCH_URL_TEXT
         ]
-        self.assertEqual(fetch_errors, [ToolErrorCode.FORBIDDEN, ToolErrorCode.BYTE_LIMIT, ToolErrorCode.CIRCUIT_OPEN])
+        self.assertEqual(fetch_errors, [ToolErrorCode.FORBIDDEN, ToolErrorCode.BYTE_LIMIT, ToolErrorCode.BYTE_LIMIT])
         self.assertTrue(state.runtime_flags)
-        self.assertIn("provider_cited_summary", {item.content_state.value for item in state.observed_evidence})
+        self.assertEqual(len(state.observations), 3)
+        self.assertTrue(all(item.content for item in state.observations))
         self.assertTrue(state.last_judge_assessment.invoked)
         self.assertEqual(
             state.last_judge_assessment.evaluated_operation_digest,
@@ -183,22 +179,16 @@ def _research_email_intake(*, with_email: bool = True) -> IntakeResult:
             task_spec=TaskSpec(
                 goal="Research the latest AI models and email a concise report.",
                 context="Use deterministic source fixtures; do not alter the recipient.",
-                constraints=["Keep the report concise."],
-                domain_type=DomainType.RESEARCH,
-                domain_label="latest_ai_models",
+                constraints=[
+                    "Keep the report concise.",
+                    "Send only to recipient@example.com.",
+                ],
                 sensitivity=SensitivityLevel.LOW,
                 success_criteria=["Produce a grounded report draft for review."],
-                execution_intent=ExecutionIntent.EXECUTE_AFTER_GOVERNANCE,
-                requested_operations=(
-                    [
-                        RequestedOperation(
-                            operation_type=RequestedOperationType.EXTERNAL_COMMUNICATION,
-                            channel="email",
-                            recipient="recipient@example.com",
-                        )
-                    ]
+                execution_intent=(
+                    ExecutionIntent.EXECUTE_AFTER_GOVERNANCE
                     if with_email
-                    else []
+                    else ExecutionIntent.PROPOSAL_ONLY
                 ),
             ),
             execution_policy=ExecutionPolicy(
@@ -326,12 +316,22 @@ class _ResearchEmailActor(ActorPort):
                         url=f"https://sources.example/{paths[turn - 2]}",
                     ),
                 )
-            refs = tuple(item.evidence_id for item in actor_task.observed_evidence)
+            refs = tuple(item.observation_id for item in actor_task.observations)
+            report = (
+                "Report:\n"
+                "- OpenAI: current model release documented in the official model catalog "
+                "(https://openai.com/models).\n"
+                "- Anthropic: current Claude release documented in the official model overview "
+                "(https://anthropic.com/claude).\n"
+                "- Google: current Gemini release documented in the official Gemini models page "
+                "(https://ai.google.dev/gemini-api/docs/models).\n"
+                "Extraction limits encountered on secondary fetch paths are recorded."
+            )
             return ActorResult(
                 plan_step_id=step_id,
                 result_type=ActorResultType.STEP_COMPLETED,
                 summary="A concise report was prepared from available citations.",
-                output_text="Report: current AI model names and dates are listed with linked sources; extraction limits are noted.",
+                output_text=report,
                 step_validation=StepValidation(
                     plan_step_id=step_id,
                     actor_self_confidence=0.78,
@@ -344,7 +344,14 @@ class _ResearchEmailActor(ActorPort):
             channel="email",
             recipient="recipient@example.com",
             subject="Latest AI models report",
-            body="Report: current AI model names and dates are listed with linked sources; extraction limits are noted.",
+            body=(
+                "Report:\n"
+                "- OpenAI: current model release documented at https://openai.com/models.\n"
+                "- Anthropic: current Claude release documented at https://anthropic.com/claude.\n"
+                "- Google: current Gemini release documented at "
+                "https://ai.google.dev/gemini-api/docs/models.\n"
+                "Extraction limits on secondary paths are noted."
+            ),
         )
         proposal = normalize_communication_operation(
             operation_id="latest-ai-models-email-operation",
@@ -365,7 +372,9 @@ class _ResearchEmailActor(ActorPort):
             step_validation=StepValidation(
                 plan_step_id=step_id,
                 actor_self_confidence=0.74,
-                evidence_refs=tuple(item.evidence_id for item in actor_task.observed_evidence),
+                evidence_refs=tuple(
+                    item.observation_id for item in actor_task.observations
+                ),
                 rationale_summary="The draft preserves the requested recipient and contains the grounded report.",
             ),
         )
@@ -381,27 +390,22 @@ class _ResearchEmailToolGateway(ToolGatewayPort):
                 request=tool_request,
                 success=True,
                 summary="Provider-cited search summary.",
-                content="Aggregate provider answer with model dates and links.",
-                sources=(
-                    ToolSource(
-                        title="Model registry",
+                content="Official provider model pages returned concrete release information.",
+                observations=(
+                    ToolObservation(
+                        observation_id=f"{tool_request.request_id}:openai",
                         locator="https://models.example/registry",
-                        snippet=None,
-                        content_state=EvidenceContentState.PROVIDER_CITED_SUMMARY,
-                        source_authority=SourceAuthority.PRIMARY,
-                        document_type=DocumentType.DOCUMENTATION,
-                        extractability=Extractability.COMPLETE,
-                        citation_alignment=CitationAlignment.PROVIDER_ATTRIBUTED,
+                        content="OpenAI model catalog: current model release and capabilities.",
                     ),
-                    ToolSource(
-                        title="Release archive",
+                    ToolObservation(
+                        observation_id=f"{tool_request.request_id}:anthropic",
                         locator="https://models.example/releases",
-                        snippet=None,
-                        content_state=EvidenceContentState.PROVIDER_CITED_SUMMARY,
-                        source_authority=SourceAuthority.SECONDARY,
-                        document_type=DocumentType.UNKNOWN,
-                        extractability=Extractability.COMPLETE,
-                        citation_alignment=CitationAlignment.EXACT,
+                        content="Anthropic Claude overview: current model release and capabilities.",
+                    ),
+                    ToolObservation(
+                        observation_id=f"{tool_request.request_id}:google",
+                        locator="https://ai.google.dev/gemini-api/docs/models",
+                        content="Google Gemini models page: current model release and capabilities.",
                     ),
                 ),
             )

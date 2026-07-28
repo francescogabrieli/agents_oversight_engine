@@ -110,7 +110,9 @@ only the one exact MCP tool mapped to the canonical capability.
 - Deployed multi-worker environments can select the official `PostgresSaver` with
   `LAYER2_CHECKPOINT_BACKEND=postgres` and `LAYER2_CHECKPOINT_POSTGRES_URI`.
 - PostgreSQL extras are isolated in `requirements-production.txt`.
-- `LAYER2_COMPLETED_THREAD_RETENTION_DAYS` bounds terminal checkpoint retention; pending
+- `LAYER2_COMPLETED_THREAD_RETENTION_DAYS` bounds terminal checkpoint retention and
+  defaults to `0`, because completed/aborted runs remain available through immutable
+  runtime artifacts while only active or interrupted runs require resumable checkpoints; pending
   human reviews and non-terminal threads are never pruned by the maintenance pass.
 - Audit artifacts remain available after terminal checkpoint pruning.
 

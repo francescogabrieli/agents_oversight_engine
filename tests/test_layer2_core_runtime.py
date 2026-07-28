@@ -3,6 +3,15 @@ from __future__ import annotations
 from tests.layer2_runtime_fixtures import *
 
 
+class _CrashingActor:
+    actor_name = "crashing_actor"
+    prompt_version = "crashing_actor_v1"
+
+    # Simulate one unexpected runtime failure after a durable planner checkpoint.
+    def act(self, *, actor_task: ActorTask) -> ActorResult:
+        raise RuntimeError("synthetic actor failure")
+
+
 class Layer2RuntimeCoreTests(unittest.TestCase):
     # Scenarios remain grouped by the capability whose behavior they verify.
     def test_complete_intake_reaches_completed_state(self) -> None:
@@ -48,9 +57,7 @@ class Layer2RuntimeCoreTests(unittest.TestCase):
         self.assertEqual(len(task_state.executed_steps), 2)
         self.assertEqual(task_state.actor_turn_count, 3)
         self.assertEqual(task_state.tool_call_count, 1)
-        self.assertTrue(
-            any(item.source_kind == EvidenceSourceKind.TOOL_OBSERVATION for item in task_state.observed_evidence)
-        )
+        self.assertEqual(len(task_state.observations), 1)
         self.assertEqual(len(task_state.scratchpad), 4)
         self.assertEqual(len(task_state.step_validations), 2)
         self.assertEqual(len(task_state.governance_history), 3)
@@ -70,17 +77,11 @@ class Layer2RuntimeCoreTests(unittest.TestCase):
         )
 
 
-    def test_task_state_bootstrap_materializes_intake_evidence(self) -> None:
+    def test_task_state_bootstrap_does_not_treat_intake_as_evidence(self) -> None:
         task_state = TaskState.from_intake(_build_external_communication_intake_result_for_governance())
 
-        self.assertGreater(len(task_state.observed_evidence), 0)
-        self.assertTrue(
-            all(item.source_kind == EvidenceSourceKind.INTAKE_PROVIDED for item in task_state.observed_evidence)
-        )
-        self.assertTrue(all(item.source_tool is None for item in task_state.observed_evidence))
-        self.assertTrue(
-            all(item.content_state.value in {"metadata_only", "extracted_full"} for item in task_state.observed_evidence)
-        )
+        self.assertEqual(task_state.observations, [])
+        self.assertTrue(task_state.task_spec.goal)
 
 
     def test_intermediate_output_does_not_complete_step_without_validation(self) -> None:
@@ -101,7 +102,7 @@ class Layer2RuntimeCoreTests(unittest.TestCase):
         self.assertEqual(len(task_state.governance_history), 2)
         self.assertEqual(
             [decision.directive for decision in task_state.governance_history],
-            [GovernanceDirective.CONTINUE, GovernanceDirective.CONTINUE],
+            [GovernanceDirective.REPLAN, GovernanceDirective.CONTINUE],
         )
         self.assertEqual(
             [step.node_name for step in task_state.step_history],
@@ -110,6 +111,7 @@ class Layer2RuntimeCoreTests(unittest.TestCase):
                 "planner",
                 "actor",
                 "governance",
+                "replanner",
                 "actor",
                 "governance",
                 "finalize_bootstrap",
@@ -155,6 +157,40 @@ class Layer2RuntimeCoreTests(unittest.TestCase):
         temp_dir = REPO_ROOT / f"_layer2_runtime_artifacts_test_{run_id}"
         artifact_store = RuntimeArtifactStore(root_path=temp_dir)
         if temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    # A runtime exception preserves the latest checkpoint and a typed diagnostic artifact.
+    def test_run_layer2_flow_persists_failure_artifact(self) -> None:
+        run_id = uuid4().hex
+        thread_id = f"failed-runtime-test-{run_id}"
+        temp_dir = REPO_ROOT / f"_layer2_runtime_failure_test_{run_id}"
+        artifact_store = RuntimeArtifactStore(root_path=temp_dir)
+
+        try:
+            with self.assertRaisesRegex(RuntimeError, "synthetic actor failure"):
+                run_layer2_flow(
+                    raw_task_text="Prepare a test result.",
+                    thread_id=thread_id,
+                    demo_intake_profile="research",
+                    planner_service=StubPlanner(),
+                    actor_service=_CrashingActor(),
+                    tool_gateway_service=StubToolGateway(),
+                    replanner_service=StubReplanner(),
+                    policy_engine_service=StubPolicyEngine(),
+                    artifact_store=artifact_store,
+                    checkpointer=InMemorySaver(serde=build_runtime_serializer()),
+                )
+
+            failure_path = (
+                artifact_store.build_paths(thread_id).thread_dir
+                / "runtime_failure.json"
+            )
+            self.assertTrue(failure_path.exists())
+            payload = json.loads(failure_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["thread_id"], thread_id)
+            self.assertEqual(payload["error_type"], "RuntimeError")
+            self.assertIn("synthetic actor failure", payload["error_message"])
+        finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
         try:

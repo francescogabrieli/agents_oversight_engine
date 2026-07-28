@@ -20,13 +20,11 @@ if str(SRC_ROOT) not in sys.path:
 
 from layer1_intake import (
     BudgetConfig,
-    DomainType,
+    ExecutionIntent,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeResult,
     ParseStatus,
-    RequestedOperation,
-    RequestedOperationType,
     SensitivityLevel,
     StructuredTask,
     TaskSpec,
@@ -35,6 +33,7 @@ from layer2_runtime_governance import (
     ActorResultType,
     ExternalCommunicationDraft,
     ExternalCommunicationPhase,
+    ExternalCommunicationState,
     GovernanceDecision,
     GovernanceDirective,
     GovernanceReasonCode,
@@ -444,6 +443,9 @@ def _build_paused_session(
     task_state.current_plan_step_index = 0
     task_state.last_governance_decision = _governance_decision()
     task_state.last_oversight_assessment = _oversight_assessment()
+    task_state.external_communication = ExternalCommunicationState(
+        phase=ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
+    )
     task_state.external_communication.draft = ExternalCommunicationDraft(
         channel="email",
         recipient="ops@example.com",
@@ -526,17 +528,9 @@ def _intake_result() -> IntakeResult:
                 goal="Prepare a cautious external communication draft.",
                 context="Use deterministic fixtures and keep the draft local.",
                 constraints=["Stay read-only."],
-                domain_type=DomainType.EXTERNAL_COMMUNICATION,
-                domain_label="dashboard_test_external_comm",
+                execution_intent=ExecutionIntent.EXECUTE_AFTER_GOVERNANCE,
                 sensitivity=SensitivityLevel.HIGH,
                 success_criteria=["Expose a typed dashboard snapshot."],
-                requested_operations=[
-                    RequestedOperation(
-                        operation_type=RequestedOperationType.EXTERNAL_COMMUNICATION,
-                        channel="email",
-                        recipient="ops@example.com",
-                    )
-                ],
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.65,

@@ -1,8 +1,10 @@
 from ..domain import (
     PlanStep,
     PlanStepStatus,
+    ReplanCheckpoint,
     RuntimeState,
     TaskState,
+    semantic_plan_signature,
 )
 from ..planning.replanning import ReplannerPort
 
@@ -49,10 +51,31 @@ def replanner(state: TaskState, *, replanner_service: ReplannerPort) -> TaskStat
     state.planner_rationale = decision.rationale
     state.planner_name = decision.replanner_name
     state.planner_prompt_version = decision.prompt_version
+    state.replan_checkpoints.append(
+        ReplanCheckpoint(
+            actor_turn_count=state.actor_turn_count,
+            tool_result_count=len(state.tool_results_history),
+            observation_count=len(state.observations),
+            completed_step_count=len(state.executed_steps),
+            human_review_count=len(state.human_review_history),
+            plan_signature=semantic_plan_signature(state.plan_steps),
+            request_reason=(
+                state.actor_result.blocking_reason
+                if state.actor_result is not None
+                and state.actor_result.blocking_reason is not None
+                else ""
+            ),
+            progress_epoch=state.progress_epoch,
+        )
+    )
     # Replanning replaces the live trajectory, so stale tool execution context must not leak forward.
     state.current_tool_request = None
     state.last_tool_result = None
     state.current_state = RuntimeState.ACTING if replacement_steps else RuntimeState.COMPLETED
+    if replacement_steps:
+        state.progress_epoch += 1
+        state.state_revision += 1
+        state.no_progress_turns = 0
 
     _append_step_record(
         state,

@@ -17,6 +17,55 @@ class ScratchpadEntryType(str, Enum):
     COMPLETION_RATIONALE = "completion_rationale"
 
 
+class ToolDisposition(str, Enum):
+    # This records a local capability decision without conflating it with a backend call.
+    EXECUTED_SUCCESS = "executed_success"
+    EXECUTED_RETRYABLE_FAILURE = "executed_retryable_failure"
+    EXECUTED_TERMINAL_FAILURE = "executed_terminal_failure"
+    CACHE_HIT = "cache_hit"
+    REJECTED_DUPLICATE = "rejected_duplicate"
+    REJECTED_CIRCUIT = "rejected_circuit"
+    REJECTED_BUDGET = "rejected_budget"
+
+
+@dataclass(frozen=True)
+class StepArtifact:
+    # A durable, step-owned result is distinct from the immutable audit trace.
+    artifact_id: str
+    step_id: str
+    content: str
+    evidence_refs: tuple[str, ...] = ()
+    revision: int = 1
+    provenance: str = "actor"
+
+
+@dataclass
+class AgentWorkspace:
+    # The workspace is the operational read model used to continue work across steps.
+    artifacts: list[StepArtifact] = field(default_factory=list)
+    blockers: list[str] = field(default_factory=list)
+    decisions: list[str] = field(default_factory=list)
+    revision: int = 0
+
+
+@dataclass(frozen=True)
+class ToolAttempt:
+    # An attempt is made for every requested capability, including locally rejected work.
+    action_key: str
+    plan_step_id: str
+    progress_epoch: int
+    disposition: ToolDisposition
+
+
+@dataclass(frozen=True)
+class ToolInvocation:
+    # An invocation exists only when the backend was actually called.
+    action_key: str
+    plan_step_id: str
+    progress_epoch: int
+    retryable_failure: bool = False
+
+
 # Canonical domain contract extracted from the legacy state facade.
 # Canonical domain contract extracted from the legacy state facade.
 @dataclass
@@ -51,9 +100,41 @@ class StepValidation:
     residual_uncertainty: str | None = None
 
 
+@dataclass(frozen=True)
+class StepCompletionCandidate:
+    # A completion candidate is immutable until governance accepts its exact result.
+    candidate_id: str
+    step_id: str
+    summary: str
+    output_text: str
+    evidence_refs: tuple[str, ...] = ()
+    external_operation_id: str | None = None
+    external_operation_digest: str | None = None
+
+
+@dataclass(frozen=True)
+class ReplanCheckpoint:
+    # Record the observable boundary after one replacement trajectory is installed.
+    actor_turn_count: int
+    tool_result_count: int
+    observation_count: int
+    completed_step_count: int
+    human_review_count: int
+    plan_signature: str
+    request_reason: str
+    progress_epoch: int = 0
+
+
 __all__ = [
+    "AgentWorkspace",
     "ScratchpadEntryType",
     "ExecutedPlanStep",
+    "ReplanCheckpoint",
     "ScratchpadEntry",
-    "StepValidation"
+    "StepValidation",
+    "StepCompletionCandidate",
+    "StepArtifact",
+    "ToolAttempt",
+    "ToolDisposition",
+    "ToolInvocation",
 ]

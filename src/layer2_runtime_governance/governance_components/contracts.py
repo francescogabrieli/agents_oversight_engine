@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
 
-from layer1_intake import DomainType, SensitivityLevel
+from layer1_intake import SensitivityLevel
 
 from ..actor_contract import ActorResultType, CapabilityAccessMode
 from ..behavioral import BehavioralAssessment
@@ -69,11 +69,9 @@ class GovernanceReasonCode(str, Enum):
     JUDGE_UNCERTAIN = "judge_uncertain"
     PROVIDER_RUNTIME_ACTION_MISSING = "provider_runtime_action_missing"
     INVALID_OR_MISSING_SELECTED_EVIDENCE = "invalid_or_missing_selected_evidence"
-    TWO_NO_PROGRESS_TURNS = "two_no_progress_turns"
-    LOW_CONFIDENCE_NO_PROGRESS = "low_confidence_no_progress"
-    RECOVERY_EXHAUSTED = "recovery_exhausted"
+    ACTOR_REQUESTED_REPLAN = "actor_requested_replan"
+    REPLAN_REQUEST_STALLED = "replan_request_stalled"
     EXTERNAL_LOW_ACTOR_SELF_CONFIDENCE = "external_low_actor_self_confidence"
-    PROVIDER_PROTOCOL_RECOVERY = "provider_protocol_recovery"
     ACTION_REVISION_LIMIT_REACHED = "action_revision_limit_reached"
 
 
@@ -123,8 +121,6 @@ def governance_reason_code_values(
 @dataclass(frozen=True)
 class PolicyEvaluationInput:
     # PolicyEvaluationInput is the compact runtime snapshot sent to governance layers.
-    task_domain_type: DomainType
-    task_domain_label: str
     task_sensitivity: SensitivityLevel
     policy_profile_name: str
     confidence_threshold: float
@@ -144,7 +140,7 @@ class PolicyEvaluationInput:
     tool_has_query: bool
     tool_has_url: bool
     tool_call_count: int
-    observed_evidence_count: int
+    observation_count: int
     actor_turn_count: int
     external_communication_phase: ExternalCommunicationPhase | None
     external_communication_review_ready: bool

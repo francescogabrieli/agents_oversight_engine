@@ -1,18 +1,13 @@
 {
   "policy_config": {
-    "policy_bundle_version": "layer2_governance_v3",
-    "thresholds_version": "layer2_governance_thresholds_v1",
+    "policy_bundle_version": "layer2_governance_v4",
+    "thresholds_version": "layer2_governance_thresholds_v2",
     "thresholds": {
-      "min_actor_confidence": 0.65,
-      "min_evidence_quality": 0.7,
-      "min_trajectory_health": 0.6,
-      "provider_failure_review_count": 3,
       "max_action_revisions_before_review": 3
     },
     "static_policy": {
       "prohibited_destinations": ["blocked@example.com"],
       "prohibited_destination_domains": ["blocked.example"]
-    },
-    "trajectory": { "no_progress_turns_before_replan": 2 }
+    }
   }
 }

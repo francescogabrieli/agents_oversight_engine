@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from llm_retry import llm_retry
 
-from ..contracts import CitationAlignment, EvidenceContentState, Extractability, ToolExecutionResult, ToolRequest, ToolSource
+from ..contracts import ToolExecutionResult, ToolObservation, ToolRequest
 from ..models import OpenAIToolGatewaySettings, ToolDefinition
 from ..results import failure_result
 from ..text import truncate_text
@@ -52,7 +52,10 @@ class OpenAIWebSearchAdapter:
             success=True,
             summary="Web search executed successfully.",
             content=truncate_text(content, definition.max_content_chars) if content else None,
-            sources=extract_web_sources(response),
+            observations=extract_web_observations(
+                response,
+                request_id=tool_request.request_id,
+            ),
         )
 
     # Retry only transient provider failures for stable governed search execution.
@@ -65,26 +68,35 @@ class OpenAIWebSearchAdapter:
         )
 
 
-# Extract citations or source links from a provider response where available.
-def extract_web_sources(response: object) -> tuple[ToolSource, ...]:
-    deduped: dict[str, ToolSource] = {}
+# Extract only source-linked text actually returned by the provider.
+def extract_web_observations(
+    response: object,
+    *,
+    request_id: str,
+) -> tuple[ToolObservation, ...]:
+    deduped: dict[str, str] = {}
     for item in getattr(response, "output", []) or []:
         for content in getattr(item, "content", []) or []:
             for annotation in getattr(content, "annotations", []) or []:
                 url = _annotation_value(annotation, "url")
                 if not url:
                     continue
-                title = _annotation_value(annotation, "title") or url
-                snippet, alignment = _citation_snippet(content=content, annotation=annotation)
-                deduped[url] = ToolSource(
-                    title=title,
-                    locator=url,
-                    snippet=truncate_text(snippet, 300) if snippet else None,
-                    content_state=(EvidenceContentState.PROVIDER_CITED_SUMMARY if snippet else EvidenceContentState.METADATA_ONLY),
-                    extractability=(Extractability.COMPLETE if snippet else Extractability.UNAVAILABLE),
-                    citation_alignment=alignment,
-                )
-    return tuple(deduped.values())
+                snippet = _citation_snippet(content=content, annotation=annotation)
+                if not snippet:
+                    continue
+                normalized_snippet = truncate_text(snippet, 1000)
+                current = deduped.get(url)
+                # Preserve the most informative provider-attributed text for each URL.
+                if current is None or len(normalized_snippet) > len(current):
+                    deduped[url] = normalized_snippet
+    return tuple(
+        ToolObservation(
+            observation_id=f"{request_id}:source:{index}",
+            locator=url,
+            content=snippet,
+        )
+        for index, (url, snippet) in enumerate(deduped.items(), start=1)
+    )
 
 
 # Support both SDK objects and dict-like annotations defensively.
@@ -99,17 +111,29 @@ def _annotation_value(annotation: object, key: str) -> str | None:
 
 
 # Keep only the text actually tied to one citation; never copy the aggregate answer to every URL.
-def _citation_snippet(*, content: object, annotation: object) -> tuple[str | None, CitationAlignment]:
+def _citation_snippet(*, content: object, annotation: object) -> str | None:
     text = _annotation_value(content, "text") or ""
     start = _annotation_int(annotation, "start_index")
     end = _annotation_int(annotation, "end_index")
     if text and start is not None and end is not None and 0 <= start < end <= len(text):
         sentence = _containing_sentence(text=text, start=start, end=end)
-        return sentence, CitationAlignment.EXACT
+        if sentence and not _is_citation_only(sentence):
+            return sentence
     attributed = _annotation_value(annotation, "text")
-    if attributed:
-        return attributed, CitationAlignment.PROVIDER_ATTRIBUTED
-    return None, CitationAlignment.NONE
+    if attributed and not _is_citation_only(attributed):
+        return attributed
+    title = _annotation_value(annotation, "title")
+    if title:
+        return f"Search result title: {title}"
+    return None
+
+
+# Citation markup alone is a locator, not observed factual content.
+def _is_citation_only(value: str) -> bool:
+    compact = "".join(value.split()).lower()
+    if not compact:
+        return True
+    return compact.startswith("([") and "](" in compact and compact.endswith(")")
 
 
 def _annotation_int(annotation: object, key: str) -> int | None:
@@ -128,4 +152,4 @@ def _containing_sentence(*, text: str, start: int, end: int) -> str:
     return text[left:right].strip()
 
 
-__all__ = ["OpenAIWebSearchAdapter", "extract_web_sources"]
+__all__ = ["OpenAIWebSearchAdapter", "extract_web_observations"]

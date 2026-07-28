@@ -20,13 +20,11 @@ if str(SRC_ROOT) not in sys.path:
 
 from layer1_intake import (
     BudgetConfig,
-    DomainType,
+    ExecutionIntent,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeResult,
     ParseStatus,
-    RequestedOperation,
-    RequestedOperationType,
     SensitivityLevel,
     StructuredTask,
     TaskSpec,
@@ -39,6 +37,7 @@ from layer2_runtime_governance import (
     CapabilityAccessMode,
     ExternalCommunicationDraft,
     ExternalCommunicationPhase,
+    ExternalCommunicationState,
     EvidenceQualityAssessment,
     GovernanceDecision,
     GovernanceDirective,
@@ -67,7 +66,7 @@ from layer2_runtime_governance import (
     ToolExecutionResult,
     ToolName,
     ToolRequest,
-    ToolSource,
+    ToolObservation,
     TraceOversightAssessment,
     TraceJudgeAssessment,
     TrajectoryHealthAssessment,
@@ -76,18 +75,17 @@ from layer2_runtime_governance import (
     layer2_trace_to_dict,
     layer2_trace_to_json,
 )
-from layer2_runtime_governance.tool_contract import ObservedEvidence
 from layer2_runtime_governance.signal_services.evidence_service import build_evidence_signal
 from evaluation_service.trace_normalizer import normalize_trace_json
 
 
 class Layer2TraceTests(unittest.TestCase):
-    # A trace emitted directly by observability must satisfy the complete v4 schema.
-    def test_real_runtime_trace_validates_against_v4_schema(self) -> None:
+    # A trace emitted directly by observability must satisfy the complete v5 schema.
+    def test_real_runtime_trace_validates_against_v5_schema(self) -> None:
         state = _complete_task_state()
         payload = layer2_trace_to_dict(
             build_layer2_runtime_trace(
-                thread_id="schema-valid-v4",
+                thread_id="schema-valid-v5",
                 intake_result=state.intake_payload,
                 task_state=state,
             )
@@ -95,7 +93,7 @@ class Layer2TraceTests(unittest.TestCase):
         external_state = _external_communication_task_state()
         external_payload = layer2_trace_to_dict(
             build_layer2_runtime_trace(
-                thread_id="schema-valid-external-v4",
+                thread_id="schema-valid-external-v5",
                 intake_result=external_state.intake_payload,
                 task_state=external_state,
             )
@@ -104,8 +102,8 @@ class Layer2TraceTests(unittest.TestCase):
         _trace_schema_validator().validate(payload)
         _trace_schema_validator().validate(external_payload)
 
-    # The v4 schema must reject a v2 artifact before evaluation normalization.
-    def test_v4_schema_rejects_v2_trace(self) -> None:
+    # The v5 schema must reject a v2 artifact before evaluation normalization.
+    def test_v5_schema_rejects_v2_trace(self) -> None:
         payload = json.loads(
             (REPO_ROOT / "tests" / "fixtures" / "layer2_trace.v2.legacy.json").read_text(
                 encoding="utf-8"
@@ -115,16 +113,16 @@ class Layer2TraceTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             _trace_schema_validator().validate(payload)
 
-    # Retired root governance histories must not coexist with the canonical v4 pass list.
-    def test_v4_schema_rejects_legacy_root_governance_lists(self) -> None:
+    # Retired root governance histories must not coexist with the canonical v5 pass list.
+    def test_v5_schema_rejects_legacy_root_governance_lists(self) -> None:
         payload = _valid_v3_trace_payload()
         payload["governance_decisions"] = deepcopy(payload["governance_passes"])
 
         with self.assertRaises(ValidationError):
             _trace_schema_validator().validate(payload)
 
-    # Closed v4 sections must reject unknown properties and missing required fields.
-    def test_v4_schema_rejects_unknown_and_missing_properties(self) -> None:
+    # Closed v5 sections must reject unknown properties and missing required fields.
+    def test_v5_schema_rejects_unknown_and_missing_properties(self) -> None:
         unknown = _valid_v3_trace_payload()
         unknown["runtime"]["unexpected"] = True
         missing = _valid_v3_trace_payload()
@@ -136,7 +134,7 @@ class Layer2TraceTests(unittest.TestCase):
             _trace_schema_validator().validate(missing)
 
     # Stable enum and scalar contracts must reject values outside the producer vocabulary.
-    def test_v4_schema_rejects_wrong_enum_and_type(self) -> None:
+    def test_v5_schema_rejects_wrong_enum_and_type(self) -> None:
         wrong_enum = _valid_v3_trace_payload()
         wrong_enum["runtime"]["current_state"] = "unknown_state"
         wrong_type = _valid_v3_trace_payload()
@@ -148,7 +146,7 @@ class Layer2TraceTests(unittest.TestCase):
             _trace_schema_validator().validate(wrong_type)
 
     # Every governance pass must explicitly carry a boolean human-review flag.
-    def test_v4_schema_requires_boolean_human_review_flag(self) -> None:
+    def test_v5_schema_requires_boolean_human_review_flag(self) -> None:
         missing = _valid_v3_trace_payload()
         del missing["governance_passes"][0]["requires_human_review"]
         wrong_type = _valid_v3_trace_payload()
@@ -159,8 +157,8 @@ class Layer2TraceTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             _trace_schema_validator().validate(wrong_type)
 
-    # Evaluation is the only boundary allowed to project a legacy trace into valid v4.
-    def test_evaluation_normalized_v2_trace_validates_as_v4(self) -> None:
+    # Evaluation is the only boundary allowed to project a legacy trace into valid v5.
+    def test_evaluation_normalized_v2_trace_validates_as_v5(self) -> None:
         legacy = json.loads(
             (REPO_ROOT / "tests" / "fixtures" / "layer2_trace.v2.legacy.json").read_text(
                 encoding="utf-8"
@@ -169,7 +167,7 @@ class Layer2TraceTests(unittest.TestCase):
 
         normalized = normalize_trace_json(legacy)["trace"]
 
-        self.assertEqual(normalized["trace_version"], "layer2_trace.v4")
+        self.assertEqual(normalized["trace_version"], "layer2_trace.v5")
         _trace_schema_validator().validate(normalized)
 
     def test_runtime_trace_includes_core_sections_and_histories(self) -> None:
@@ -190,10 +188,10 @@ class Layer2TraceTests(unittest.TestCase):
         self.assertEqual(len(trace.tool_calls), 2)
         self.assertEqual(trace.tool_calls[0].tool_name, "mcp.local_test.text_stats")
         self.assertFalse(trace.tool_calls[1].success)
-        self.assertEqual(len(trace.observed_evidence), 1)
-        self.assertEqual(trace.observed_evidence[0].locator, "mcp://local_test/text_stats")
-        self.assertEqual(trace.observed_evidence[0].source_kind, "tool_observation")
-        self.assertEqual(trace.trace_version, "layer2_trace.v4")
+        self.assertEqual(len(trace.observations), 1)
+        self.assertEqual(trace.observations[0].locator, "mcp://local_test/text_stats")
+        self.assertEqual(trace.observations[0].content, '{"words": 3}')
+        self.assertEqual(trace.trace_version, "layer2_trace.v5")
         self.assertEqual(len(trace.governance_passes), 2)
         self.assertEqual(trace.governance_passes[0].directive, "continue_read_only")
         self.assertFalse(trace.governance_passes[0].requires_human_review)
@@ -202,14 +200,11 @@ class Layer2TraceTests(unittest.TestCase):
     # Actor observability and governance facts must expose the same selected evidence.
     def test_actor_trace_and_governance_signal_share_selected_evidence(self) -> None:
         state = _complete_task_state()
-        state.observed_evidence = [
-            ObservedEvidence(
-                evidence_id="step_1:tool:1:source:1",
-                plan_step_id="step_1",
-                title="Discovered source",
+        state.observations = [
+            ToolObservation(
+                observation_id="step_1:tool:1:source:1",
                 locator="https://example.org/source",
-                excerpt="Discovered source metadata. Content has not been extracted.",
-                source_tool=ToolName.WEB_SEARCH,
+                content="Discovered source metadata. Content has not been extracted.",
             )
         ]
         state.actor_result = replace(
@@ -248,7 +243,7 @@ class Layer2TraceTests(unittest.TestCase):
         decoded = json.loads(encoded)
 
         self.assertEqual(payload["runtime"]["current_state"], "completed")
-        self.assertEqual(decoded["trace_version"], "layer2_trace.v4")
+        self.assertEqual(decoded["trace_version"], "layer2_trace.v5")
         self.assertEqual(decoded["governance_passes"][0]["policy_decision"], "allow_read_only")
         self.assertFalse(decoded["governance_passes"][0]["requires_human_review"])
         self.assertNotIn("governance_decisions", decoded)
@@ -257,7 +252,7 @@ class Layer2TraceTests(unittest.TestCase):
         schema = json.loads(
             (REPO_ROOT / "schemas" / "layer2_trace.schema.json").read_text(encoding="utf-8")
         )
-        self.assertEqual(schema["properties"]["trace_version"]["const"], "layer2_trace.v4")
+        self.assertEqual(schema["properties"]["trace_version"]["const"], "layer2_trace.v5")
         self.assertFalse(schema["additionalProperties"])
         self.assertFalse(schema["$defs"]["governancePass"]["additionalProperties"])
 
@@ -298,7 +293,7 @@ class Layer2TraceTests(unittest.TestCase):
             compact["governance_snapshot"]["last_governance_pass"]["directive"],
             "continue",
         )
-        self.assertEqual(compact["tool_snapshot"]["observed_evidence_count"], 1)
+        self.assertEqual(compact["tool_snapshot"]["observation_count"], 1)
         self.assertIsNone(compact["tool_snapshot"]["current_tool_request"])
 
     def test_waiting_review_and_aborted_states_are_explicit(self) -> None:
@@ -382,8 +377,6 @@ def _intake_result() -> IntakeResult:
                 goal="Trace the governed runtime.",
                 context="Use deterministic fixtures.",
                 constraints=["Stay read-only."],
-                domain_type=DomainType.ANALYSIS,
-                domain_label="trace_test",
                 sensitivity=SensitivityLevel.LOW,
                 success_criteria=["Produce an audit-safe trace."],
             ),
@@ -412,17 +405,9 @@ def _external_communication_intake_result() -> IntakeResult:
                 goal="Prepare a governed external communication draft.",
                 context="Use deterministic fixtures.",
                 constraints=["Keep the draft local."],
-                domain_type=DomainType.EXTERNAL_COMMUNICATION,
-                domain_label="trace_external_comm",
+                execution_intent=ExecutionIntent.EXECUTE_AFTER_GOVERNANCE,
                 sensitivity=SensitivityLevel.HIGH,
                 success_criteria=["Expose the typed external communication trace."],
-                requested_operations=[
-                    RequestedOperation(
-                        operation_type=RequestedOperationType.EXTERNAL_COMMUNICATION,
-                        channel="email",
-                        recipient="ops@example.com",
-                    )
-                ],
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.7,
@@ -500,7 +485,7 @@ def _complete_task_state() -> TaskState:
     state.step_validations = [_validation("step_1"), _validation("step_2")]
     state.last_tool_result = _tool_result()
     state.tool_results_history = [_tool_result(), _second_tool_result()]
-    state.observed_evidence = [_evidence()]
+    state.observations = [_observation()]
     state.governance_history = [_governance_read_only(), _governance_continue()]
     state.last_governance_decision = state.governance_history[-1]
     state.static_policy_history = [_static_policy_read_only(), _static_policy_allow()]
@@ -531,6 +516,9 @@ def _external_communication_task_state() -> TaskState:
         )
     ]
     state.current_plan_step_index = 0
+    state.external_communication = ExternalCommunicationState(
+        phase=ExternalCommunicationPhase.DRAFT_IN_PROGRESS
+    )
     state.external_communication.phase = ExternalCommunicationPhase.APPROVED_FOR_EXECUTION
     state.external_communication.draft = ExternalCommunicationDraft(
         channel="email",
@@ -622,11 +610,11 @@ def _tool_result() -> ToolExecutionResult:
         success=True,
         summary="Stats collected.",
         content='{"words": 3}',
-        sources=(
-            ToolSource(
-                title="MCP stats",
+        observations=(
+            ToolObservation(
+                observation_id=f"{request.request_id}:1",
                 locator="mcp://local_test/text_stats",
-                snippet='{"words": 3}',
+                content='{"words": 3}',
             ),
         ),
     )
@@ -648,15 +636,12 @@ def _second_tool_result() -> ToolExecutionResult:
     )
 
 
-# Build one observed evidence item.
-def _evidence() -> ObservedEvidence:
-    return ObservedEvidence(
-        evidence_id="step_1:tool:1:source:1",
-        plan_step_id="step_1",
-        title="MCP stats",
+# Build one concrete tool observation.
+def _observation() -> ToolObservation:
+    return ToolObservation(
+        observation_id="step_1:tool:1:source:1",
         locator="mcp://local_test/text_stats",
-        excerpt='{"words": 3}',
-        source_tool=ToolName.MCP_LOCAL_TEST_TEXT_STATS,
+        content='{"words": 3}',
     )
 
 
@@ -686,7 +671,7 @@ def _governance_continue() -> GovernanceDecision:
         reason_codes=(GovernanceReasonCode.LOCAL_OUTPUT_ALLOWED,),
         summary="Local output allowed.",
         constrains_capability_use=False,
-        evaluated_actor_result_type=ActorResultType.FINAL_OUTPUT,
+        evaluated_actor_result_type=ActorResultType.STEP_COMPLETED,
         evaluated_tool_name=None,
         policy_engine_name="test_policy",
         policy_bundle_version="test_v1",

@@ -1,16 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://local/layer2/layer2_trace.schema.json",
-  "title": "Layer2RuntimeTraceV4",
+  "title": "Layer2RuntimeTraceV5",
   "type": "object",
   "required": [
     "trace_version", "runtime", "intake", "planner_name", "planner_prompt_version",
     "planner_rationale", "planning_source", "plan_steps", "current_plan_step_index",
-    "current_plan_step_id", "actor", "execution", "tool_calls", "observed_evidence",
+    "current_plan_step_id", "actor", "execution", "tool_calls", "observations",
     "governance_passes", "human_review", "external_communication", "external_execution"
   ],
   "properties": {
-    "trace_version": { "const": "layer2_trace.v4" },
+    "trace_version": { "const": "layer2_trace.v5" },
     "runtime": { "$ref": "#/$defs/runtime" },
     "intake": { "$ref": "#/$defs/intake" },
     "planner_name": { "$ref": "#/$defs/nullableString" },
@@ -23,7 +23,7 @@
     "actor": { "$ref": "#/$defs/actor" },
     "execution": { "$ref": "#/$defs/execution" },
     "tool_calls": { "type": "array", "items": { "$ref": "#/$defs/toolCall" }, "maxItems": 1000000 },
-    "observed_evidence": { "type": "array", "items": { "$ref": "#/$defs/observedEvidence" }, "maxItems": 1000000 },
+    "observations": { "type": "array", "items": { "$ref": "#/$defs/toolObservation" }, "maxItems": 1000000 },
     "governance_passes": { "type": "array", "items": { "$ref": "#/$defs/governancePass" }, "maxItems": 1000000 },
     "human_review": { "$ref": "#/$defs/humanReview" },
     "external_communication": {
@@ -34,22 +34,12 @@
   "$defs": {
     "nullableString": { "type": ["string", "null"] },
     "nonEmptyString": { "type": "string", "minLength": 1 },
-    "requestedOperation": {
-      "type": "object",
-      "required": ["operation_type", "channel", "recipient"],
-      "properties": {
-        "operation_type": { "enum": ["external_communication"] },
-        "channel": { "type": ["string", "null"] },
-        "recipient": { "type": ["string", "null"] }
-      },
-      "additionalProperties": false
-    },
     "stringArray": { "type": "array", "items": { "type": "string" }, "maxItems": 1000000 },
     "runtimeState": {
       "enum": ["planning", "acting", "ready_next_step", "ready_tool_execution", "ready_governance", "ready_external_execution", "replanning", "waiting_human_review", "completed", "aborted"]
     },
     "actorResultType": {
-      "enum": ["propose_action", "intermediate_output", "step_completed", "final_output", "ask_clarification", "blocked", "needs_replan"]
+      "enum": ["propose_action", "intermediate_output", "step_completed", "ask_clarification", "blocked", "needs_replan"]
     },
     "governanceReasonCode": {
       "enum": [
@@ -69,8 +59,7 @@
         "prohibited_destination", "judge_required_unavailable",
         "judge_needs_revision", "judge_unsafe", "judge_uncertain",
         "provider_runtime_action_missing", "invalid_or_missing_selected_evidence",
-        "two_no_progress_turns", "low_confidence_no_progress", "recovery_exhausted",
-        "external_low_actor_self_confidence", "provider_protocol_recovery",
+        "actor_requested_replan", "replan_request_stalled", "external_low_actor_self_confidence",
         "action_revision_limit_reached"
       ]
     },
@@ -106,12 +95,10 @@
     },
     "intake": {
       "type": "object",
-      "required": ["goal", "context", "domain_type", "domain_label", "sensitivity", "success_criteria", "constraints", "parse_status", "parser_name", "prompt_version", "schema_version", "policy_profile_name", "confidence_threshold", "max_steps", "max_tool_calls", "read_only_mode", "execution_intent", "requested_operations"],
+      "required": ["goal", "context", "sensitivity", "success_criteria", "constraints", "parse_status", "parser_name", "prompt_version", "schema_version", "policy_profile_name", "confidence_threshold", "max_steps", "max_tool_calls", "read_only_mode", "execution_intent"],
       "properties": {
         "goal": { "$ref": "#/$defs/nonEmptyString" },
         "context": { "type": "string" },
-        "domain_type": { "enum": ["research", "analysis", "summarization", "data_extraction", "content_generation", "external_communication", "customer_support", "productivity", "software_engineering", "other"] },
-        "domain_label": { "$ref": "#/$defs/nonEmptyString" },
         "sensitivity": { "enum": ["low", "medium", "high", "critical"] },
         "success_criteria": { "$ref": "#/$defs/stringArray" },
         "constraints": { "$ref": "#/$defs/stringArray" },
@@ -124,8 +111,7 @@
         "max_steps": { "type": ["integer", "null"], "minimum": 1, "maximum": 1000000 },
         "max_tool_calls": { "type": ["integer", "null"], "minimum": 1, "maximum": 1000000 },
         "read_only_mode": { "type": "boolean" },
-        "execution_intent": { "enum": ["proposal_only", "execute_after_governance"] },
-        "requested_operations": { "type": "array", "items": { "$ref": "#/$defs/requestedOperation" }, "maxItems": 1000 }
+        "execution_intent": { "enum": ["proposal_only", "execute_after_governance"] }
       },
       "additionalProperties": false
     },
@@ -210,8 +196,9 @@
     },
     "toolRequestFields": {
       "type": "object",
-      "required": ["plan_step_id", "tool_name", "reason", "query", "url", "text", "path", "expression", "timezone", "limit", "max_results", "extractive_goal"],
+      "required": ["request_id", "plan_step_id", "tool_name", "reason", "query", "url", "text", "path", "expression", "timezone", "limit", "max_results", "extractive_goal"],
       "properties": {
+        "request_id": { "$ref": "#/$defs/nonEmptyString" },
         "plan_step_id": { "$ref": "#/$defs/nonEmptyString" },
         "tool_name": { "$ref": "#/$defs/nonEmptyString" },
         "reason": { "type": "string" },
@@ -235,7 +222,7 @@
         { "$ref": "#/$defs/toolRequestFields" },
         {
           "type": "object",
-          "required": ["success", "summary", "content", "error_message", "error_code", "truncated", "extractability_limited", "sources"],
+          "required": ["success", "summary", "content", "error_message", "error_code", "truncated", "extractability_limited", "observations"],
           "properties": {
             "success": { "type": ["boolean", "null"] },
             "summary": { "$ref": "#/$defs/nullableString" },
@@ -244,43 +231,19 @@
             "error_code": { "type": ["string", "null"], "enum": ["forbidden", "byte_limit", "bot_challenge", "empty_extraction", "timeout", "circuit_open", "duplicate_request", "unavailable", null] },
             "truncated": { "type": "boolean" },
             "extractability_limited": { "type": "boolean" },
-            "sources": { "type": "array", "items": { "$ref": "#/$defs/toolSource" }, "maxItems": 1000000 }
+            "observations": { "type": "array", "items": { "$ref": "#/$defs/toolObservation" }, "maxItems": 1000000 }
           }
         }
       ],
       "unevaluatedProperties": false
     },
-    "toolSource": {
+    "toolObservation": {
       "type": "object",
-      "required": ["title", "locator", "snippet", "content_state", "source_authority", "document_type", "extractability", "citation_alignment"],
+      "required": ["observation_id", "content", "locator"],
       "properties": {
-        "title": { "type": "string" },
-        "locator": { "type": "string" },
-        "snippet": { "$ref": "#/$defs/nullableString" },
-        "content_state": { "enum": ["metadata_only", "provider_cited_summary", "extracted_partial", "extracted_full"] },
-        "source_authority": { "enum": ["official_primary", "primary", "secondary", "unknown"] },
-        "document_type": { "enum": ["product_announcement", "documentation", "legal_text", "community_post", "unknown"] },
-        "extractability": { "enum": ["complete", "truncated", "forbidden", "empty", "unavailable"] },
-        "citation_alignment": { "enum": ["exact", "provider_attributed", "none"] }
-      },
-      "additionalProperties": false
-    },
-    "observedEvidence": {
-      "type": "object",
-      "required": ["evidence_id", "plan_step_id", "title", "locator", "excerpt", "source_kind", "source_tool", "content_state", "source_authority", "document_type", "extractability", "citation_alignment"],
-      "properties": {
-        "evidence_id": { "$ref": "#/$defs/nonEmptyString" },
-        "plan_step_id": { "$ref": "#/$defs/nonEmptyString" },
-        "title": { "type": "string" },
-        "locator": { "type": "string" },
-        "excerpt": { "type": "string" },
-        "source_kind": { "enum": ["intake_provided", "tool_observation"] },
-        "source_tool": { "$ref": "#/$defs/nullableString" },
-        "content_state": { "enum": ["metadata_only", "provider_cited_summary", "extracted_partial", "extracted_full"] },
-        "source_authority": { "enum": ["official_primary", "primary", "secondary", "unknown"] },
-        "document_type": { "enum": ["product_announcement", "documentation", "legal_text", "community_post", "unknown"] },
-        "extractability": { "enum": ["complete", "truncated", "forbidden", "empty", "unavailable"] },
-        "citation_alignment": { "enum": ["exact", "provider_attributed", "none"] }
+        "observation_id": { "$ref": "#/$defs/nonEmptyString" },
+        "content": { "type": "string", "minLength": 1 },
+        "locator": { "$ref": "#/$defs/nullableString" }
       },
       "additionalProperties": false
     },

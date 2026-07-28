@@ -5,15 +5,22 @@ from typing import Any
 
 from layer2_runtime_governance.domain import TaskState
 from layer2_runtime_governance.external_operations import ExternalOperationProposal
+from layer2_runtime_governance.tool_contract import ToolExecutionResult
 from layer2_runtime_governance.judge import (
     JudgeAssessment,
     JudgeAssessmentStatus,
+    JudgeCompletedStepContext,
     JudgeContext,
     JudgeEvidenceContext,
+    JudgeExternalRevisionContext,
     JudgeOperationStage,
     JudgePlanStepContext,
     JudgeRecommendedDirective,
+    JudgeRuntimeEventContext,
+    JudgeScratchpadContext,
     JudgeSeverity,
+    JudgeToolArgumentContext,
+    JudgeToolExecutionContext,
     JudgeVerdict,
 )
 
@@ -36,7 +43,6 @@ def build_judge_context(
     if step is None:
         raise ValueError("Cannot build JudgeContext without the evaluated actor plan step.")
     validation = task_state.actor_result.step_validation if task_state.actor_result else None
-    selected_refs = set(validation.evidence_refs if validation else ())
     return JudgeContext(
         task_goal=task_state.task_spec.goal,
         task_constraints=tuple(task_state.task_spec.constraints),
@@ -46,6 +52,7 @@ def build_judge_context(
             objective=step.objective,
             rationale=step.rationale,
             expected_outcome=step.expected_outcome,
+            status=step.status.value,
         ),
         external_operation=external_operation,
         # A communication proposal is inspected before its required human approval.
@@ -54,20 +61,15 @@ def build_judge_context(
             if external_operation.operation_family.value == "external_communication"
             else JudgeOperationStage.EXECUTION_CANDIDATE
         ),
-        observed_evidence=tuple(
+        # The Judge receives only selected concrete observations, never the whole tool transcript.
+        observations=tuple(
             JudgeEvidenceContext(
-                evidence_id=item.evidence_id,
-                title=item.title,
+                evidence_id=item.observation_id,
                 locator=item.locator,
-                excerpt=item.excerpt,
-                content_state=item.content_state,
-                source_authority=item.source_authority,
-                document_type=item.document_type,
-                extractability=item.extractability,
-                citation_alignment=item.citation_alignment,
+                content=item.content,
             )
-            for item in task_state.observed_evidence
-            if item.evidence_id in selected_refs
+            for item in task_state.observations
+            if item.observation_id in set(validation.evidence_refs if validation else ())
         ),
         selected_evidence_refs=tuple(validation.evidence_refs if validation else ()),
         actor_self_confidence=(validation.actor_self_confidence if validation else None),
@@ -78,7 +80,104 @@ def build_judge_context(
             f"class={external_operation.target.destination_class.value}",
         ),
         invocation_reason=invocation_reason,
+        task_success_criteria=tuple(task_state.task_spec.success_criteria),
+        execution_intent=task_state.execution_intent.value,
+        full_plan=tuple(
+            JudgePlanStepContext(
+                step_id=item.step_id,
+                objective=item.objective,
+                rationale=item.rationale,
+                expected_outcome=item.expected_outcome,
+                status=item.status.value,
+            )
+            for item in task_state.plan_steps
+            if item.step_id == step.step_id
+        ),
+        completed_steps=tuple(
+            JudgeCompletedStepContext(
+                step_id=item.step_id,
+                objective=item.objective,
+                result_type=item.result_type.value,
+                summary=item.summary,
+                output_text=item.output_text,
+            )
+            for item in task_state.executed_steps
+            if item.step_id == step.step_id
+        ),
+        # Scratchpad, raw tool history, and generic node narration are intentionally excluded.
+        scratchpad_entries=(),
+        tool_executions=(),
+        runtime_events=(),
+        prior_external_revisions=_build_prior_external_revisions(task_state=task_state),
     )
+
+
+# Project one tool result without leaking credentials or provider client state.
+def _build_tool_execution_context(
+    tool_result: ToolExecutionResult,
+) -> JudgeToolExecutionContext:
+    request = tool_result.request
+    arguments = tuple(
+        JudgeToolArgumentContext(name=name, value=str(value))
+        for name, value in (
+            ("query", request.query),
+            ("url", request.url),
+            ("text", request.text),
+            ("path", request.path),
+            ("expression", request.expression),
+            ("timezone", request.timezone),
+            ("limit", request.limit),
+            ("max_results", request.max_results),
+            ("extractive_goal", request.extractive_goal),
+        )
+        if value is not None
+    )
+    return JudgeToolExecutionContext(
+        request_id=request.request_id,
+        plan_step_id=request.plan_step_id,
+        tool_name=request.tool_name.value,
+        reason=request.reason,
+        arguments=arguments,
+        success=tool_result.success,
+        summary=tool_result.summary,
+        content=tool_result.content,
+        observation_ids=tuple(
+            item.observation_id for item in tool_result.observations
+        ),
+        error_code=_enum_or_string_value(tool_result.error_code),
+        error_message=tool_result.error_message,
+    )
+
+
+# Preserve judge context when a legacy checkpoint recovered an enum as its string value.
+def _enum_or_string_value(value: object | None) -> str | None:
+    if value is None:
+        return None
+    return str(getattr(value, "value", value))
+
+
+# Bind prior proposal digests to any revision feedback already produced by governance.
+def _build_prior_external_revisions(
+    *,
+    task_state: TaskState,
+) -> tuple[JudgeExternalRevisionContext, ...]:
+    feedback_by_digest = {
+        item.invalidated_payload_digest: item
+        for item in task_state.governance_action_feedback
+    }
+    revisions: list[JudgeExternalRevisionContext] = []
+    for proposal in task_state.external_operation_history:
+        feedback = feedback_by_digest.get(proposal.payload_digest)
+        revisions.append(
+            JudgeExternalRevisionContext(
+                operation_id=proposal.operation_id,
+                payload_digest=proposal.payload_digest,
+                payload_preview=proposal.payload_preview,
+                finding_codes=feedback.finding_codes if feedback is not None else (),
+                feedback_summary=feedback.summary if feedback is not None else None,
+            )
+        )
+    return tuple(revisions)
 
 
 # Convert the semantic assessment into OPA facts without mapping a runtime directive.

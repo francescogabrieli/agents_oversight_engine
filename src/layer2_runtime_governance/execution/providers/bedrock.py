@@ -19,9 +19,9 @@ from ..settings import BedrockNovaActorSettings
 
 
 class BedrockNovaActor(ActorPort):
-    # Execute the actor role through the approved Nova 2 Lite inference profile.
+    # Execute the actor role through the configured Bedrock Converse model; the public class name is retained.
     actor_name = "bedrock_nova_2_lite_actor"
-    prompt_version = "actor_v7_bedrock_converse_tool_calling"
+    prompt_version = "actor_v9_bedrock_converse_tool_calling"
 
     def __init__(
         self,
@@ -47,7 +47,7 @@ class BedrockNovaActor(ActorPort):
     # Ask Bedrock for one action and normalize it into ActorResult.
     def act(self, *, actor_task: ActorTask) -> ActorResult:
         runtime_tools = select_actor_runtime_tools_for_turn(
-            self._runtime_tools, task_spec=actor_task.task_spec
+            self._runtime_tools, task_spec=actor_task.task_spec, actor_task=actor_task
         )
         allowed_action_names = {str(tool["name"]) for tool in runtime_tools}
         try:

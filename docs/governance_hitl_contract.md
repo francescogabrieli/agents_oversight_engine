@@ -96,26 +96,28 @@ The final deterministic precedence is:
 | Required judge unavailable, invalid, non-invoked, or wrong digest | `wait_human_review` |
 | Required active evidence/trajectory unavailable | `wait_human_review` |
 | Explicit clarification | `ask_user_clarification` |
-| Trajectory stop/repeated provider failure/repeated revision | `stop` or `wait_human_review` according to Rego |
+| Replan request repeated without a new observable basis | `wait_human_review` |
 | Judge `unsafe` or `uncertain` | `wait_human_review`, never hard deny |
 | Judge `needs_revision` | `revise_action` |
 | Evidence gap | `request_more_evidence` |
-| Trajectory degradation | `replan` |
+| Admissible explicit actor replan request | `replan` |
 | Read-only envelope | `continue_read_only` |
 | Active checks satisfied, including judge `safe` when required | `continue` |
 
 `revise_action` returns audit-safe finding codes to the actor, invalidates the
 current proposal and approval, increments the per-run revision counter, and
-returns to `ACTING`. Repeated revisions contribute to trajectory health.
+returns to `ACTING`. Repeated revisions are counted only at this external-action
+boundary and may eventually require human review.
 
 ## Semantic judge contract
 
-OPA, not Python, decides when invocation is required. `JudgeContext` includes
-only the authorized task goal/constraints/context, the step identified by
-`actor_result.plan_step_id`, the exact proposal and digest, relevant evidence
-selected evidence references with concrete provenance attributes, target/destination facts,
-actor self-confidence, residual uncertainty, and invocation reason. The judge never receives
-or compares a universal evidence-support rank.
+OPA, not Python, decides when invocation is required. `JudgeContext` includes the
+authorized task goal, constraints, context, success criteria and execution intent;
+the complete semantic plan; completed steps; audit-safe scratchpad entries; tool
+requests and outcomes; ordered runtime events; every concrete observation; selected
+evidence references; prior external revisions; target/destination facts; actor
+self-confidence and residual uncertainty; and the exact digest-bound proposal.
+The judge never receives or compares a universal evidence-support rank.
 
 The judge returns:
 
@@ -188,11 +190,11 @@ a transport adapter, never policy or authorization.
 
 ## Observability
 
-`layer2_trace.v3` has a closed `external_execution` section with intent, request,
+`layer2_trace.v5` has a closed `external_execution` section with intent, request,
 receipt history, digest, connector metadata, external reference, and attempt count.
 Actor/HITL fields expose the current proposal and digest; governance pillar results expose `active`,
-`shadow`, `not_applicable`, `unavailable`, and `decision_influence`. Legacy v1/v2
-normalization and checkpoint compatibility fields remain supported.
+`shadow`, `not_applicable`, `unavailable`, and `decision_influence`. Historical
+normalization remains confined to the offline evaluation boundary.
 
 Primary implementation locations:
 
@@ -203,3 +205,11 @@ Primary implementation locations:
 - `src/layer2_runtime_governance/runtime/governance_service.py`
 - `src/layer2_runtime_governance/hitl/`
 - `configs/opa/layer2_governance/`
+# Boundary HITL contestuale
+
+Le azioni esposte dal review payload dipendono dal motivo della pausa. Un
+chiarimento consente chiarimento o abort; un approval gate consente approve,
+edit o reject; un finding Judge non risolvibile propone revisione/replan/abort;
+la riconciliazione di una receipt indeterminata espone solo le scelte pertinenti.
+Il digest resta vincolante: ogni edit genera una proposta rinormalizzata e passa
+nuovamente da Judge e OPA.

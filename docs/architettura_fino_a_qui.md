@@ -264,7 +264,7 @@ Il tool system è separato dal resto del runtime.
 
 - `ToolRequest`
 - `ToolExecutionResult`
-- `ObservedEvidence`
+- `ToolObservation`
 
 ### Gateway
 

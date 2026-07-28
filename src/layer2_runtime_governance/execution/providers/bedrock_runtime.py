@@ -20,7 +20,7 @@ except ImportError:  # pragma: no cover - handled at runtime if dependency is mi
     ClientError = Exception
 
 
-_REQUIRED_BEDROCK_MODEL_ID = "eu.amazon.nova-2-lite-v1:0"
+_DEFAULT_BEDROCK_MODEL_ID = "eu.amazon.nova-2-lite-v1:0"
 
 
 class BedrockRuntimeError(RuntimeError):
@@ -32,8 +32,8 @@ class BedrockRuntimeError(RuntimeError):
 
 @dataclass(frozen=True)
 class BedrockRuntimeSettings:
-    # Keep the approved regional inference profile explicit and protected from silent fallback.
-    model_id: str = _REQUIRED_BEDROCK_MODEL_ID
+    # Keep a safe default while allowing the deployment to select another Bedrock Converse model.
+    model_id: str = _DEFAULT_BEDROCK_MODEL_ID
     region_name: str = "eu-central-1"
     profile_name: str | None = None
     access_key_id: str | None = None
@@ -51,7 +51,7 @@ class BedrockRuntimeSettings:
             model_id=os.getenv(
                 "LAYER2_ACTOR_BEDROCK_MODEL_ID",
                 env_file_values.get(
-                    "LAYER2_ACTOR_BEDROCK_MODEL_ID", _REQUIRED_BEDROCK_MODEL_ID
+                    "LAYER2_ACTOR_BEDROCK_MODEL_ID", _DEFAULT_BEDROCK_MODEL_ID
                 ),
             ),
             region_name=os.getenv(
@@ -147,17 +147,15 @@ class BedrockChatClient:
         return _extract_tool_call_payload(response_payload)
 
 
-# Validate the fixed provider envelope before making a network request.
+# Validate only generic Bedrock transport prerequisites before making a network request.
 def _validate_settings(*, settings: BedrockRuntimeSettings) -> None:
-    if settings.model_id.strip() != _REQUIRED_BEDROCK_MODEL_ID:
+    if not settings.model_id or not settings.model_id.strip():
         raise BedrockRuntimeError(
-            "Bedrock actor model must be "
-            f"'{_REQUIRED_BEDROCK_MODEL_ID}', got '{settings.model_id}'."
+            "LAYER2_ACTOR_BEDROCK_MODEL_ID must be a non-empty Bedrock model or inference-profile identifier."
         )
-    if settings.region_name.strip() != "eu-central-1":
+    if not settings.region_name or not settings.region_name.strip():
         raise BedrockRuntimeError(
-            "Bedrock actor region must be 'eu-central-1', "
-            f"got '{settings.region_name}'."
+            "AWS_REGION must be a non-empty AWS region for the selected Bedrock model."
         )
     if (
         not settings.profile_name

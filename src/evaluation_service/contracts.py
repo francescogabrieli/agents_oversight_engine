@@ -105,8 +105,6 @@ class NormalizedRuntime:
 class NormalizedIntake:
     goal: str
     context: str
-    domain_type: str
-    domain_label: str
     sensitivity: str
     success_criteria: tuple[str, ...]
     constraints: tuple[str, ...]
@@ -140,10 +138,12 @@ class NormalizedToolCall:
 
 
 @dataclass(frozen=True)
-class NormalizedObservedEvidence:
-    source_kind: str | None
-    content_state: str
-    extractability: str
+class NormalizedObservation:
+    observation_id: str
+    content: str
+    locator: str | None
+    # Removed evidence taxonomy is retained only for legacy metric compatibility.
+    legacy_content_state: str | None = None
 
 
 @dataclass(frozen=True)
@@ -190,7 +190,7 @@ class NormalizedTracePayload:
     plan_steps: tuple[NormalizedPlanStep, ...]
     current_plan_step_id: str | None
     tool_calls: tuple[NormalizedToolCall, ...]
-    observed_evidence: tuple[NormalizedObservedEvidence, ...]
+    observations: tuple[NormalizedObservation, ...]
     governance_decisions: tuple[NormalizedGovernanceDecision, ...]
     oversight_assessments: tuple[NormalizedOversightAssessment, ...]
     human_review: NormalizedHumanReview
@@ -207,7 +207,7 @@ __all__ = [
     "NormalizedGovernanceDecision",
     "NormalizedHumanReview",
     "NormalizedIntake",
-    "NormalizedObservedEvidence",
+    "NormalizedObservation",
     "NormalizedOversightAssessment",
     "NormalizedOversightSignal",
     "NormalizedPlanStep",

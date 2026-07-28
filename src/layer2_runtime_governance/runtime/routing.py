@@ -4,6 +4,11 @@ from ..domain import RuntimeState
 from .contracts import Layer2GraphState
 
 
+# Every actor turn now reaches an operational boundary; narration has no direct actor edge.
+def route_after_actor(state: Layer2GraphState) -> str:
+    return "governance"
+
+
 # Route a governed actor outcome to the next internal capability.
 def route_after_governance(state: Layer2GraphState) -> str:
     task_state = state["task_state"]
@@ -52,6 +57,7 @@ def route_after_external_execution(state: Layer2GraphState) -> str:
 
 
 __all__ = [
+    "route_after_actor",
     "route_after_external_execution",
     "route_after_governance",
     "route_after_human_review",

@@ -15,7 +15,6 @@ if str(SRC_ROOT) not in sys.path:
 
 from layer1_intake import (
     BudgetConfig,
-    DomainType,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeResult,
@@ -158,8 +157,8 @@ class EvaluationServiceDecouplingTests(unittest.TestCase):
 
 class _AllowPolicyEngine(PolicyEnginePort):
     policy_engine_name = "test_opa_v3_engine"
-    policy_bundle_version = "layer2_governance_v3"
-    policy_config_version = "layer2_governance_thresholds_v1"
+    policy_bundle_version = "layer2_governance_v4"
+    policy_config_version = "layer2_governance_thresholds_v2"
 
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -283,8 +282,6 @@ def _intake_result() -> IntakeResult:
                 goal="Produce a local answer.",
                 context="Use local material only.",
                 constraints=["Stay conservative."],
-                domain_type=DomainType.RESEARCH,
-                domain_label="opa_first_test",
                 sensitivity=SensitivityLevel.LOW,
                 success_criteria=["Return a traceable local result."],
             ),

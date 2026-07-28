@@ -14,9 +14,7 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
 
         task_state = result["task_state"]
         self.assertEqual(len(task_state.executed_steps), 2)
-        self.assertTrue(
-            any(item.source_kind == EvidenceSourceKind.TOOL_OBSERVATION for item in task_state.observed_evidence)
-        )
+        self.assertEqual(len(task_state.observations), 1)
 
         with self.assertRaises(ValueError):
             build_actor_task(task_state=task_state)
@@ -179,7 +177,7 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         decision = replanner.replan(task_state=task_state)
 
         self.assertEqual(decision.replanner_name, "openai_layer2_replanner")
-        self.assertEqual(decision.prompt_version, "replanner_v1")
+        self.assertEqual(decision.prompt_version, "replanner_v3")
         self.assertEqual(len(decision.replacement_steps), 2)
         self.assertEqual(decision.replacement_steps[0].step_id, "replan_step_1")
         self.assertEqual(decision.replacement_steps[0].status, PlanStepStatus.PENDING)
@@ -257,11 +255,14 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         self.assertIn("missing required string argument 'summary'", result.blocking_reason)
 
 
-    def test_planner_prompt_discourages_small_task_over_segmentation(self) -> None:
+    def test_planner_prompt_is_detailed_and_general_purpose(self) -> None:
         prompt = build_planner_system_prompt()
 
-        self.assertIn("prefer 2-3 semantic steps", prompt)
-        self.assertIn('Do not split "down-select sources"', prompt)
+        self.assertIn("complete semantic plan", prompt)
+        self.assertIn("Identify prerequisites and dependencies", prompt)
+        self.assertIn("There is no preferred fixed step count", prompt)
+        self.assertNotIn("email", prompt.lower())
+        self.assertNotIn("research", prompt.lower())
 
 
     def test_planner_does_not_trim_when_step_budget_is_unbounded(self) -> None:
@@ -276,18 +277,24 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         self.assertNotIn("trimmed to the configured", task_state.step_history[0].summary)
 
 
-    def test_planner_compacts_over_decomposed_small_source_summary_task(self) -> None:
+    def test_runtime_preserves_over_decomposed_planner_output_verbatim(self) -> None:
         task_state = TaskState.from_intake(
             _build_research_intake_result(max_steps=None, max_tool_calls=None)
         )
         task_state = planner(task_state, planner_service=OverDecomposedSourceSummaryPlanner())
-        self.assertLessEqual(len(task_state.plan_steps), 2)
-        self.assertIn("normalized to the task scope", task_state.step_history[0].summary)
-        self.assertIn("high-level evidence", task_state.plan_steps[0].objective)
-        self.assertIn("precision supported", task_state.plan_steps[1].objective)
+        self.assertEqual(len(task_state.plan_steps), 3)
+        self.assertEqual(
+            [step.objective for step in task_state.plan_steps],
+            [
+                "Down-select official sources for the short summary.",
+                "Extract factual points from the selected official sources.",
+                "Draft the brief summary.",
+            ],
+        )
+        self.assertNotIn("normalized", task_state.step_history[0].summary.lower())
 
 
-    def test_external_email_plan_compacts_governance_meta_steps(self) -> None:
+    def test_runtime_does_not_rewrite_external_plan(self) -> None:
         task_state = TaskState.from_intake(_build_external_communication_intake_result())
 
         class GenericExternalEmailPlanner:
@@ -334,15 +341,14 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
             for step in planned_state.plan_steps
         ).lower()
 
-        self.assertEqual(len(planned_state.plan_steps), 1)
-        self.assertIn("complete requested external communication draft", plan_text)
-        self.assertIn("channel, recipient, subject, and body", plan_text)
-        self.assertNotIn("human review", plan_text)
+        self.assertEqual(len(planned_state.plan_steps), 4)
+        self.assertIn("draft a customer product update email", plan_text)
+        self.assertIn("human review", plan_text)
         for forbidden in ("60 minutes", "data loss", "delayed processing", "incident"):
             self.assertNotIn(forbidden, plan_text)
 
-    # Compaction must preserve the strongest genuine evidence requirement.
-    def test_external_email_plan_retains_strongest_evidence_step(self) -> None:
+    # Planner-owned semantics remain untouched even when steps could be merged.
+    def test_external_plan_preserves_all_planner_steps(self) -> None:
         task_state = TaskState.from_intake(_build_external_communication_intake_result())
 
         class EvidenceExternalEmailPlanner:
@@ -379,9 +385,10 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
 
         planned_state = planner(task_state, planner_service=EvidenceExternalEmailPlanner())
 
-        self.assertEqual(len(planned_state.plan_steps), 2)
-        self.assertIn("Extract the exact authorized facts", planned_state.plan_steps[0].objective)
-        self.assertIn("typed email proposal", planned_state.plan_steps[1].expected_outcome)
+        self.assertEqual(len(planned_state.plan_steps), 3)
+        self.assertIn("Discover the relevant official source", planned_state.plan_steps[0].objective)
+        self.assertIn("Extract the exact authorized facts", planned_state.plan_steps[1].objective)
+        self.assertEqual("A complete email.", planned_state.plan_steps[2].expected_outcome)
         self.assertEqual(
             set(vars(planned_state.plan_steps[0])),
             {"step_id", "objective", "rationale", "expected_outcome", "status"},

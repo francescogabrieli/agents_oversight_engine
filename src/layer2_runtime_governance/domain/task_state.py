@@ -10,13 +10,12 @@ from layer1_intake import (
     IntakeResult,
     ParseStatus,
     SensitivityLevel,
-    RequestedOperationType,
     TaskSpec,
 )
 
 from ..tool_contract import (
-    ObservedEvidence,
     ToolExecutionResult,
+    ToolObservation,
     ToolRequest,
 )
 
@@ -44,7 +43,16 @@ from .review import (
     HumanReviewDecision,
     HumanReviewRequest,
 )
-from .runtime_records import ExecutedPlanStep, ScratchpadEntry, StepValidation
+from .runtime_records import (
+    ExecutedPlanStep,
+    ReplanCheckpoint,
+    AgentWorkspace,
+    ScratchpadEntry,
+    StepValidation,
+    StepCompletionCandidate,
+    ToolAttempt,
+    ToolInvocation,
+)
 
 
 # Canonical domain contract extracted from the legacy state facade.
@@ -70,6 +78,7 @@ class TaskState:
     planner_rationale: str | None = None
     planner_name: str | None = None
     planner_prompt_version: str | None = None
+    replan_checkpoints: list[ReplanCheckpoint] = field(default_factory=list)
 
     # Actor execution snapshot.
     actor_result: ActorResult | None = None
@@ -78,20 +87,28 @@ class TaskState:
     executed_steps: list[ExecutedPlanStep] = field(default_factory=list)
     final_output_text: str | None = None
     actor_turn_count: int = 0
+    # Local liveness fuse; this is technical control flow, never a policy signal.
+    no_progress_turns: int = 0
+    # Progress changes only when the live problem state materially changes.
+    progress_epoch: int = 0
+    state_revision: int = 0
+    workspace: AgentWorkspace = field(default_factory=AgentWorkspace)
     # Typed runtime recovery fact; never inferred from provider error text.
     consecutive_provider_protocol_failures: int = 0
-    consecutive_no_progress_turns: int = 0
     # Scratchpad is intentionally summarized working memory, safe for audit and HITL display.
     scratchpad: list[ScratchpadEntry] = field(default_factory=list)
     # Step validations are the bridge toward confidence/self-stop logic.
     step_validations: list[StepValidation] = field(default_factory=list)
+    pending_completion_candidate: StepCompletionCandidate | None = None
 
     # Tool loop snapshot.
     current_tool_request: ToolRequest | None = None
     last_tool_result: ToolExecutionResult | None = None
     tool_results_history: list[ToolExecutionResult] = field(default_factory=list)
-    observed_evidence: list[ObservedEvidence] = field(default_factory=list)
+    observations: list[ToolObservation] = field(default_factory=list)
     tool_call_count: int = 0
+    tool_attempts: list[ToolAttempt] = field(default_factory=list)
+    tool_invocations: list[ToolInvocation] = field(default_factory=list)
 
     # Canonical external-operation snapshot derived by runtime normalizers.
     external_operation_proposal: ExternalOperationProposal | None = None
@@ -270,23 +287,6 @@ class TaskState:
                 if current_state == RuntimeState.WAITING_HUMAN_REVIEW
                 else None
             ),
-            external_communication=(
-                ExternalCommunicationState(
-                    phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
-                    last_transition_summary=(
-                        "External communication tasks start in evidence collection until a draft "
-                        "and typed review gate are reached."
-                    ),
-                )
-                if any(
-                    operation.operation_type == RequestedOperationType.EXTERNAL_COMMUNICATION
-                    for operation in intake_result.structured_task.task_spec.requested_operations
-                )
-                else None
-            ),
-            observed_evidence=_build_initial_observed_evidence_from_intake(
-                intake_result.structured_task.task_spec
-            ),
         )
 
 
@@ -301,15 +301,4 @@ def _replace_latest(history: list[Any], value: Any | None) -> None:
         history.append(value)
 
 
-# Canonical domain contract extracted from the legacy state facade.
-def _build_initial_observed_evidence_from_intake(task_spec: TaskSpec) -> list[ObservedEvidence]:
-    # Keep TaskState construction stable while intake evidence owns its own rules.
-    from .intake_evidence import build_initial_observed_evidence
-
-    return build_initial_observed_evidence(task_spec)
-
-
-__all__ = [
-    "TaskState",
-    "_build_initial_observed_evidence_from_intake"
-]
+__all__ = ["TaskState"]

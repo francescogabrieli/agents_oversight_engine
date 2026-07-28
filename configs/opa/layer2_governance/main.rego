@@ -12,19 +12,18 @@ config := data.policy_config
 operation := object.get(input.base_facts, "external_operation", {})
 actor := input.base_facts.actor
 
-default required_pillars := {"require_evidence": false, "require_risk": false, "require_trajectory": true, "require_behavioral": false, "require_judge": false}
+default required_pillars := {"require_evidence": false, "require_risk": false, "require_trajectory": false, "require_behavioral": false, "require_judge": false}
+
+required_pillars := {"require_evidence": false, "require_risk": false, "require_trajectory": false, "require_behavioral": false, "require_judge": false} if {
+    actor.result_type == "propose_action"
+}
 
 required_pillars := {"require_evidence": false, "require_risk": false, "require_trajectory": true, "require_behavioral": false, "require_judge": false} if {
-    actor.result_type == "propose_action"
+    actor.result_type == "needs_replan"
 }
 
 required_pillars := {"require_evidence": true, "require_risk": false, "require_trajectory": true, "require_behavioral": false, "require_judge": false} if {
     actor.result_type == "step_completed"
-    not external_candidate
-}
-
-required_pillars := {"require_evidence": true, "require_risk": false, "require_trajectory": true, "require_behavioral": false, "require_judge": false} if {
-    actor.result_type == "final_output"
     not external_candidate
 }
 
@@ -38,11 +37,15 @@ external_candidate if {
     object.get(operation, "boundary", "local") == "governed_external"
 }
 
-decision := version_mismatch_decision if { input.policy_bundle_version != config.policy_bundle_version } else := version_mismatch_decision if { input.policy_config_version != config.thresholds_version } else := deny_decision if { static_policy.result.hard_deny } else := judge_unavailable_decision if { judge_required_unavailable } else := unavailable_required_pillar_decision if { active_required_pillar_unavailable } else := clarification_decision if { static_policy.result.clarification_signaled } else := hitl_decision("recovery_exhausted", "Recovery is exhausted; human review is required rather than a denial.") if { trajectory.result.recovery_exhausted } else := replan_decision("two_no_progress_turns", "Two consecutive turns produced no progress on the current step.") if { trajectory.result.no_progress_replan } else := replan_decision("low_confidence_no_progress", "Low self-confidence accompanies a recoverable lack of progress.") if { trajectory.result.low_confidence_no_progress } else := replan_decision("provider_protocol_recovery", "Repeated provider protocol failures require a revised trajectory.") if { trajectory.result.provider_protocol_recovery } else := hitl_decision("judge_unsafe", "The semantic judge found the governed external operation unsafe.") if { judge.result.verdict == "unsafe" } else := hitl_decision("judge_uncertain", "The semantic judge could not establish that the governed external operation is safe.") if { input.pillar_requirements.require_judge == true; judge.result.verdict == "uncertain" } else := hitl_decision("action_revision_limit_reached", "The external proposal exhausted its bounded semantic revisions and requires human review.") if { judge.result.verdict == "needs_revision"; trajectory.result.action_revision_limit_reached } else := revise_decision if { judge.result.verdict == "needs_revision" } else := evidence_decision("invalid_or_missing_selected_evidence", "The completion references invalid or missing concrete evidence.") if { input.pillar_requirements.require_evidence == true; evidence.result.evidence_gap } else := external_low_confidence_review if { external_candidate; low_external_confidence } else := read_only_decision if { static_policy.result.read_only_required } else := continue_decision
+decision := version_mismatch_decision if { input.policy_bundle_version != config.policy_bundle_version } else := version_mismatch_decision if { input.policy_config_version != config.thresholds_version } else := deny_decision if { static_policy.result.hard_deny } else := judge_unavailable_decision if { judge_required_unavailable } else := unavailable_required_pillar_decision if { active_required_pillar_unavailable } else := clarification_decision if { static_policy.result.clarification_signaled } else := hitl_decision("replan_request_stalled", "The actor repeated a replan request without a new observable execution basis.") if { trajectory.result.replan_request_stalled } else := replan_decision("actor_requested_replan", "The actor explicitly requested a replacement semantic trajectory from a new observable boundary.") if { trajectory.result.replan_request_admissible } else := hitl_decision("judge_unsafe", "The semantic judge found the governed external operation unsafe.") if { judge.result.verdict == "unsafe" } else := hitl_decision("judge_uncertain", "The semantic judge could not establish that the governed external operation is safe.") if { input.pillar_requirements.require_judge == true; judge.result.verdict == "uncertain" } else := hitl_decision("action_revision_limit_reached", "The external proposal exhausted its bounded semantic revisions and requires human review.") if { judge.result.verdict == "needs_revision"; trajectory.result.action_revision_limit_reached } else := revise_decision if { judge.result.verdict == "needs_revision" } else := evidence_decision("invalid_or_missing_selected_evidence", "The completion references invalid or missing concrete evidence.") if { input.pillar_requirements.require_evidence == true; evidence.result.evidence_gap } else := external_low_confidence_review if { external_candidate; low_external_confidence } else := approval_mode_review if { external_candidate; approval_required } else := read_only_decision if { static_policy.result.read_only_required } else := continue_decision
 
 low_external_confidence if { input.pillars.trajectory.raw_facts.actor_self_confidence != null; input.pillars.trajectory.raw_facts.actor_self_confidence < input.pillars.trajectory.raw_facts.configured_confidence_threshold }
 
 external_low_confidence_review := hitl_decision("external_low_actor_self_confidence", "The governed external proposal remains uncertain and requires human review.")
+approval_required if { operation.approval_mode == "always" }
+approval_required if { operation.approval_mode == "conditional"; input.base_facts.task.sensitivity == "high" }
+approval_required if { operation.approval_mode == "conditional"; input.base_facts.task.sensitivity == "critical" }
+approval_mode_review := hitl_decision("capability_approval_required", "The capability approval mode requires a typed human authorization for this exact payload.")
 active_required_pillar_unavailable if { input.pillar_requirements.require_evidence == true; object.get(input.pillar_unavailable, "evidence", false) == true }
 active_required_pillar_unavailable if { input.pillar_requirements.require_trajectory == true; object.get(input.pillar_unavailable, "trajectory", false) == true }
 judge_required_unavailable if { input.pillar_requirements.require_judge == true; object.get(input.pillar_unavailable, "judge", false) == true }

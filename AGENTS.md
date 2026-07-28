@@ -49,7 +49,7 @@ It already includes:
 - durable local LangGraph checkpoint persistence and per-thread runtime artifacts on disk
 - typed `external_communication` phase tracking for evidence, draft, review/edit, approval, and blocked states
 - the external communication draft body is taken from the latest governed draft output for the branch, while the trace retains the canonical final body, selected evidence references, and provenance diagnostics
-- external communication plan semantics remain planner-owned; runtime compaction must not introduce facts or rewrite the requested communication
+- external communication plan semantics remain planner-owned; runtime compaction is not part of the active architecture
 - typed runtime trace export through `observability/`, surfaced by `src/main_layer2.py`
 - offline trace evaluation and reporting through `evaluation/`, surfaced by `src/main_layer2_evaluation.py`
 
@@ -211,7 +211,7 @@ Current design:
 - `runtime/governance_service.py` applies the OPA-first governance result and persists static, dynamic, behavioral, and judge records before routing
 - `infrastructure/runtime_artifacts.py` configures the local official LangGraph SQLite saver plus the per-thread runtime artifact store; `persistence.py` is import-compatible and `infrastructure/checkpointing.py` can select the official PostgreSQL saver for deployed environments
 - `observability/` defines the typed, JSON-exportable Layer 2 trace models, builders, and compact views used for debugging, thesis evidence, HITL payloads, and evaluation; the retired `trace.py` facade must not be restored
-- `schemas/layer2_trace.schema.json` is the closed Draft 2020-12 contract for runtime-produced `layer2_trace.v3`; only `evaluation_service` may project legacy v1/v2 traces into that v3 read model
+- `schemas/layer2_trace.schema.json` is the closed Draft 2020-12 contract for runtime-produced `layer2_trace.v5`; only `evaluation_service` may project historical traces into that current read model
 - `evaluation/` defines the offline trace evaluation pipeline that reads exported trace JSON and produces JSON and Markdown reports, including typed-vs-heuristic evidence mismatch accounting
 - `hitl_dashboard.py` defines the dashboard-facing snapshot model derived from `TaskState`, governance, oversight, and HITL review payloads
 - `main_layer2_dashboard.py` now acts as a standalone multi-thread HITL control plane backend that serves the React dashboard build, exposes the review inbox/detail/resume API, and resolves resume actions from persisted checkpoints on demand
@@ -219,10 +219,11 @@ Current design:
 - `main_layer2_dashboard.py` rebuilds a persisted thread directly from the configured official LangGraph checkpointer, so the standalone dashboard can resume runs created by a separate `main_layer2.py` process without relying on stale in-memory state or trace artifacts
 - the dashboard review inbox is intentionally action-oriented and now hides pending-review threads whose persisted `updated_at` is older than 2 minutes; old artifacts remain on disk and detail views can still be resolved directly by thread id
 - `frontend/dashboard` contains the standalone React + TypeScript + Tailwind + daisyUI dashboard frontend that is built into static assets and served by `main_layer2_dashboard.py`
-- `configs/opa/layer2_governance/data.json` is the sole source for active evidence/trajectory thresholds, static organizational constraints, and revision/provider-loop limits consumed by OPA
+- `configs/opa/layer2_governance/data.json` is the sole source for static organizational constraints and bounded external-action revision limits consumed by OPA
 - `infrastructure/runtime_warnings.py` centralizes warning suppression needed before importing selected LangGraph/LangChain dependencies
 - `graph.py` contains the current LangGraph wiring for the planner/actor/governance/tool/replanner/human-review/external-execution loop:
-  `START -> bootstrap_from_intake -> planner -> actor -> governance -> { tool_gateway | replanner | human_review | external_execution | finalize_bootstrap }`
+  `START -> bootstrap_from_intake -> planner -> actor -> { actor | governance }`
+  `governance -> { actor | tool_gateway | replanner | human_review | external_execution | finalize_bootstrap }`
   `human_review -> { planner | actor | tool_gateway | replanner | governance | external_execution | finalize_bootstrap }`
   `external_execution -> { external_execution | human_review | finalize_bootstrap }`
   `tool_gateway -> observe_tool_result -> actor`
@@ -359,55 +360,60 @@ Current relevant files:
 ### Layer 2 Rules
 
 - `PlanStep` is now semantic-only: `step_id`, `objective`, `rationale`, `expected_outcome`, and runtime-owned `status`. Evidence levels, precision ceilings, and compliance step kinds are not planner contracts.
-- Observed evidence records orthogonal facts (`content_state`, `source_authority`, `document_type`, `extractability`, and `citation_alignment`); no universal evidence ranking is active in the runtime or OPA.
+- Tool observations record only a stable identifier, concrete observed content, and an optional locator. Source-quality taxonomies are not active runtime contracts.
 - Actor completion selects explicit `evidence_refs` and exposes `actor_self_confidence`. It does not declare evidence sufficiency or route itself; OPA interprets the contextual uncertainty signal.
-- Required OPA pillars are event-sensitive: read-only tool acquisition uses static plus minimal trajectory, progress uses trajectory, completion uses evidence plus trajectory, and governed external candidates require judge. Behavioral and risk remain deferred shadow observations.
-- `TaskSpec.requested_operations` describes requested effects independently of `domain_type`; an email proposal requires an explicit requested external-communication operation and still passes judge, digest binding, HITL, and idempotent execution.
+- Required OPA pillars are event-sensitive: intermediate actor output bypasses governance, read-only tool acquisition uses static policy only, explicit replanning uses trajectory, completion uses evidence plus trajectory, and governed external candidates additionally require the semantic judge. Behavioral and risk remain deferred shadow observations.
+- `TaskSpec` carries only goal, context, constraints, sensitivity, success criteria, and execution intent. It contains no static task taxonomy or duplicate operation manifest.
 
 - `TaskState` is the central runtime contract.
 - New runtime data should be modeled explicitly before being spread through nodes.
 - `graph.py` should not contain business logic beyond routing and LangGraph integration.
 - `runtime/node_adapters.py` must stay thin and must not become a dumping ground for business logic.
 - the current implementation scope covers the current planner/actor/tool/replanner/governance slice
-- the active baseline includes `bootstrap_from_intake -> planner -> actor -> governance -> tool_gateway -> observe_tool_result -> actor`
+- the active baseline includes `bootstrap_from_intake -> planner -> actor -> { actor | governance }`, with governed read-only acquisition continuing through `tool_gateway -> observe_tool_result -> actor`
 - the active baseline also includes the real `replanner` branch triggered by `NEEDS_REPLAN`
 - the active baseline also includes a typed governance branch after `actor` that can continue, replan, escalate, or abort
 - governance sends deterministic static facts, active evidence/trajectory facts, shadow risk/behavioral observations, OPA-requested semantic judge output, and runtime recovery facts; OPA returns the only final directive
 - the OPA decision preserves the static read-only envelope as an explicit trace signal; Python validates and applies the returned directive without running a second final-decision algorithm
 - externality or write compatibility flags alone must never force deny or HITL; static hard deny is deterministic, judge is mandatory for governed-external execution candidates, and risk/behavioral cannot influence the directive
-- governance still evaluates every actor turn, but intermediate local outputs that explicitly remain in recovery (`continue_acting` / `request_more_evidence`) should prefer local continuation over premature human-review escalation unless a hard policy or explicit blocking condition requires review
+- governance evaluates semantic and operational boundaries, not thought boundaries: `INTERMEDIATE_OUTPUT` returns directly to the actor and neither evidence nor trajectory may classify narration length as degradation
 - external communication drafts are explicit runtime state; partial draft assembly does not invoke the judge, while each review-ready execution candidate is projected into a digest-bound `ExternalOperationProposal`
+- `execute_after_governance` is a terminal runtime invariant: a plain local
+  `STEP_COMPLETED` cannot satisfy the task, and `COMPLETED` requires a typed
+  external-operation receipt with status `executed`, or an `indeterminate`
+  receipt explicitly reconciled by a digest-bound human decision
+- audit-safe intermediate outputs may span multiple actor turns, but an exact replay
+  on unchanged state is treated as a recoverable stuck actor protocol rather than progress
 - the planner/executor split should remain aligned with `docs/guidelines/plan-and-execute.ipynb` unless there is a clear thesis-driven reason to diverge
 - planner output must remain semantic and typed
 - planner and replanner output only semantic steps and never introduce compliance, policy-simulation, or human-review meta-steps
 - planner output must not contain concrete tool calls, executable payloads, or framework-specific actions
-- small source-plus-short-summary tasks may be deterministically compacted from an over-decomposed source/extraction/synthesis pipeline into a proportional two-step trajectory
-- actor execution must operate on the current plan step, not on the full task as a second planner
-- actor output must remain typed and compact even when backed by an LLM
-- actor prompts receive concrete observed evidence attributes and explicit evidence identifiers; OPA alone interprets their sufficiency for a completion
-- the current Layer 2 actor backend is Amazon Bedrock with Nova 2 Lite through the fixed `eu.amazon.nova-2-lite-v1:0` inference profile in `eu-central-1`
+- runtime planning services must preserve the planner-owned semantic steps without compaction, compression, insertion, or lexical rewriting
+- actor execution receives the full semantic plan as context but may commit completion only for the current plan step
+- actor output must remain typed and audit-safe even when backed by an LLM; intermediate output may summarize meaningful working progress without being forced into premature completion
+- actor prompts receive concrete observation content, locators, and explicit identifiers; OPA validates selected-reference integrity at completion and the judge evaluates semantic support for governed external candidates
+- the current Layer 2 actor backend defaults to Amazon Bedrock Nova 2 Lite in `eu-central-1`; deployments may override the Bedrock model or inference profile and region through configuration
 - planner and replanner remain OpenAI-backed for now
 - actor provider selection is controlled by `LAYER2_ACTOR_PROVIDER`, with supported values `bedrock` and `openai`; Bedrock is the default
 - malformed provider JSON that omits the runtime action envelope should be recovered only when it is clearly completion-shaped; otherwise it should stop conservatively instead of being treated as normal progress
 - provider failures that return no usable runtime action and no actor output are runtime recovery events; they should route to replanning/retry rather than opening a human-review gate with an empty draft
 - actor execution may produce local outputs, request later capability use, ask clarification, or signal replan
 - actor execution should record audit-safe scratchpad entries rather than hidden chain-of-thought
-- official implementation pages and procedural regulations should be described as procedural sources, not as direct enforcers, unless the source explicitly says so
-- when the actor sees an implementation-oriented DMA source, it should phrase the enforcement description as procedural or procedural-enforcement context rather than direct enforcement unless the source text explicitly supports the stronger claim
+- externally verifiable claims must remain no stronger than the concrete observed content that supports them; task-specific terminology must not be introduced by generic runtime prompts
 - plan steps complete only through the unambiguous `STEP_COMPLETED` or final completion outcome and the resulting OPA directive
-- observed evidence carries orthogonal concrete attributes: content state, source authority, document type, extractability, citation alignment, locator, excerpt, tool, and provenance
-- observed evidence now also carries an explicit provenance kind: `intake_provided` for authoritative Layer 1 task inputs and `tool_observation` for tool-derived runtime evidence; `source_tool` is therefore optional and only set for tool-observed evidence
-- bootstrap materializes authoritative task-provided facts into initial observed evidence without assigning a universal support level
-- when a step is explicitly short, brief, concise, or high-level, the actor should reduce claim precision before requesting more evidence; named obligation examples such as self-preferencing, interoperability, data portability, ranking, non-discriminatory access, or transparent terms should appear only when directly present in observed evidence or specifically requested
+- tool observations carry only `observation_id`, concrete `content`, and an optional `locator`
+- intake fields remain task instructions and are never materialized as tool observations
+- the adapter that performed an action creates its observations; runtime orchestration validates and records them without semantic reclassification
+- when a step is explicitly short, brief, concise, or high-level, the actor should keep claim precision proportional to the requested outcome and the concrete observations
 - governance guardrails must remain proportional and must not create an evidence loop while the actor is asking for the read-only tool needed to acquire evidence
 - source discovery alone is not factual support; simple URL discovery is weaker than extracted content and should not justify detailed factual completion by itself
 - OPA may request more evidence only from concrete completion facts, such as invalid selected references or missing usable selected evidence; Python does not infer semantic precision requirements
-- `INTERMEDIATE_OUTPUT` is progress only and never completes a plan step; `STEP_COMPLETED` is the explicit local completion type
+- `INTERMEDIATE_OUTPUT` is an audit-safe working update that returns directly to the actor and never completes a plan step; `STEP_COMPLETED` is the explicit local completion type
 - executed step history and current plan step cursor must remain explicit in `TaskState`
 - when tools are added, do not rely on a prompt-only tool inventory as the primary mechanism; prefer structured tool binding in the LangGraph/LangChain style
 - prompt text may contain policy, behavioral, and architecture constraints, but should not replace the runtime-level tool contract
 - the current tool surface is read-only and externally conservative
-- read-only capability use is currently explicit and typed through `ToolRequest`, `ToolExecutionResult`, and `ObservedEvidence`
+- read-only capability use is currently explicit and typed through `ToolRequest`, `ToolExecutionResult`, and `ToolObservation`
 - tool availability is governed by the Tool Gateway registry and governance read-only/write policy; Layer 1 no longer passes actor-facing allowed/disallowed tool lists
 - tool observation should preserve source-level provenance without cloning one aggregate tool transcript across multiple returned sources
 - the Tool Gateway supports a configured MCP local test server with read-only tools:
@@ -415,6 +421,7 @@ Current relevant files:
 - MCP tool calls must be server-configured, tool-allowlisted, read-only, and normalized back into `ToolExecutionResult`
 - MCP authentication and per-principal authorization are not implemented yet; credentials and runtime identity must be added above the backend adapter later, not inside actor prompts or `ToolRequest`
 - `replanner` may replace only the current and pending semantic trajectory; completed steps remain immutable history
+- the actor may request `NEEDS_REPLAN` with a non-empty blocking reason; OPA admits the first request or a later request with a new observable execution basis, while repeated churn on an unchanged trajectory routes to HITL
 - `max_steps = null` means the current runtime does not impose a hard semantic step ceiling
 - `max_tool_calls = null` means the current runtime does not impose a hard tool-call ceiling
 - `WAITING_HUMAN_REVIEW` is now the typed pause state that feeds the LangGraph `interrupt / resume` HITL path
@@ -424,8 +431,9 @@ Current relevant files:
 - the default checkpoint file is `artifacts/runtime/checkpoints/layer2_checkpoints.sqlite3`; LangGraph owns its checkpoint schema and serialization, and pending interrupts must never be reconstructed from artifact JSON
 - the runtime persists per-thread artifacts under `artifacts/runtime/<thread_id>/`, including the canonical trace, dashboard snapshot, runtime summary, and pending HITL payload when present
 - the behavioural SQLite store lives under `artifacts/runtime/behavioral/behavioral.sqlite3` by default and must remain a read model rather than the primary runtime source of truth
-- active evidence/trajectory interpretation must remain deterministic, explainable, and implemented only in Rego using `configs/opa/layer2_governance/data.json`; shadow pillars may export diagnostic labels but never directives
-- trajectory-health turn pressure should stay forgiving enough that short source-plus-summary tasks can make a few recovery turns without being forced into replanning
+- active evidence/trajectory interpretation must remain deterministic and explainable; Python exports concrete facts, Rego owns their directive mapping, and shadow pillars may export diagnostic labels but never directives
+- trajectory must use whole-run observable events at semantic boundaries and must never treat a count of narrative turns, elapsed thinking turns, or low confidence alone as degradation
+- the semantic judge is invoked only for a complete governed-external candidate and receives the original task, success criteria, execution intent, full plan, completed steps, audit-safe scratchpad, tool history, ordered runtime events, all observations, selected references, prior revisions, and the exact digest-bound payload
 - runtime trace export must be read-only over `TaskState`; it must not mutate runtime state or become a parallel source of truth
 - `main_layer2.py` may print trace views, but reusable trace construction belongs in `observability/`
 - `resume_layer2_flow` should prefer the direct LangGraph `invoke(Command(resume=...))` result when it contains the canonical `task_state`, because interrupted checkpoints may briefly expose only a partial snapshot wrapper during resume
@@ -583,7 +591,7 @@ Expected Bedrock actor runtime:
 
 - optional overrides:
   - `LAYER2_ACTOR_PROVIDER=bedrock`
-  - `LAYER2_ACTOR_BEDROCK_MODEL_ID=eu.amazon.nova-2-lite-v1:0`
+  - `LAYER2_ACTOR_BEDROCK_MODEL_ID=eu.amazon.nova-2-lite-v1:0` (or another Bedrock Converse-compatible model/inference profile available in `AWS_REGION`)
   - `AWS_REGION=eu-central-1`
   - `AWS_SESSION_TOKEN=` when temporary AWS credentials are used
 

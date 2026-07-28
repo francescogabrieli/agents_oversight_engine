@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 
-from layer1_intake import RequestedOperationType, TaskSpec
+from layer1_intake import TaskSpec
+from ..actor_contract import ActorTask
 from ..tool_contract import ToolName
 from ..tools.models import ToolBackend, ToolGatewayConfig
 from ..tools.registry import load_tool_gateway_config
@@ -59,25 +60,9 @@ def build_actor_runtime_tools(
         if _tool_is_actor_available(config=config, tool_name=tool_name)
     ]
     return capability_actions + [
-        _action(
-            "emit_intermediate_output",
-            "Emit grounded progress without completing the current step.",
-            {
-                "summary": _string(),
-                "output_text": _string(),
-                "progress_note": _string(),
-                "residual_uncertainty": _string(),
-                "confidence": _confidence(),
-            },
-            ("summary", "output_text", "progress_note", "confidence"),
-        ),
         _completion_action(
             "emit_step_completed",
             "Complete the current step after typed self-validation.",
-        ),
-        _completion_action(
-            "emit_final_output",
-            "Emit the final answer after typed self-validation.",
         ),
         _external_communication_draft_action(),
         _database_statement_action(),
@@ -101,18 +86,20 @@ def select_actor_runtime_tools_for_turn(
     runtime_tools: list[dict[str, object]],
     *,
     task_spec: TaskSpec,
+    actor_task: ActorTask | None = None,
 ) -> list[dict[str, object]]:
-    # Capability eligibility is evaluated from requested operation, registry, static policy and HITL;
-    # descriptive domain labels and plan categories never gate actor actions.
-    requested_email = any(
-        operation.operation_type == RequestedOperationType.EXTERNAL_COMMUNICATION
-        and operation.channel == "email"
-        for operation in task_spec.requested_operations
-    )
-    return [
-        tool for tool in runtime_tools
-        if requested_email or tool.get("name") != "emit_external_communication_draft"
-    ]
+    # Keep the provider surface bounded to capabilities still actionable in this turn.
+    del task_spec
+    if actor_task is None or actor_task.last_tool_result is None:
+        return list(runtime_tools)
+    last_name = actor_task.last_tool_result.request.tool_name
+    action_name = _CAPABILITY_ACTIONS.get(last_name, (None,))[0]
+    if action_name is None:
+        return list(runtime_tools)
+    # The result and its observations are already in context; repeating the exact
+    # capability family is not the default next action. The actor can still complete,
+    # replan, clarify, or use another capability.
+    return [tool for tool in runtime_tools if tool.get("name") != action_name]
 
 
 # Build the JSON envelope described to providers without native tool calling.

@@ -12,6 +12,7 @@ if str(SRC_ROOT) not in sys.path:
 
 from layer1_intake import ExecutionIntent
 from layer2_runtime_governance.domain import (
+    ExecutedPlanStep,
     ExternalCommunicationPhase,
     ExternalCommunicationState,
 )
@@ -53,6 +54,11 @@ from layer2_runtime_governance.judge import (
     JudgeVerdict,
 )
 from layer2_runtime_governance.judge.service import _JudgePayload
+from layer2_runtime_governance.judge import (
+    build_judge_system_prompt,
+    build_judge_user_prompt,
+)
+from layer2_runtime_governance.signal_services import build_judge_context
 from layer2_runtime_governance.execution.result_builder import (
     convert_tool_call_to_actor_result,
 )
@@ -426,11 +432,9 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
             "judge_uncertain",
             "provider_runtime_action_missing",
             "invalid_or_missing_selected_evidence",
-            "two_no_progress_turns",
-            "low_confidence_no_progress",
-            "recovery_exhausted",
+            "actor_requested_replan",
+            "replan_request_stalled",
             "external_low_actor_self_confidence",
-            "provider_protocol_recovery",
         }
         python_codes = {code.value for code in GovernanceReasonCode}
         schema = json.loads(
@@ -442,6 +446,88 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
 
         self.assertTrue(active_rego_codes.issubset(python_codes))
         self.assertEqual(schema_codes, python_codes)
+
+    # Judge receives the whole observable path while remaining bound to one exact digest.
+    def test_judge_context_contains_relevant_execution_context_and_exact_external(self) -> None:
+        proposal = _generic_proposal()
+        state = _state_with_proposal(proposal)
+        state.observations = [
+            ToolObservation(
+                observation_id="observation-1",
+                locator="https://example.org/source",
+                content="Concrete observed source content.",
+            )
+        ]
+        state.scratchpad = [
+            ScratchpadEntry(
+                turn_index=1,
+                plan_step_id="step_1",
+                entry_type=ScratchpadEntryType.PROGRESS_NOTE,
+                summary="Compared the requested outcome with the observed source.",
+                evidence_refs=["observation-1"],
+            )
+        ]
+        state.tool_results_history = [
+            ToolExecutionResult(
+                request=ToolRequest(
+                    plan_step_id="step_1",
+                    tool_name=ToolName.WEB_SEARCH,
+                    reason="Acquire a concrete source.",
+                    query="concrete source",
+                ),
+                success=True,
+                summary="Source acquired.",
+                content="Provider result content.",
+                observations=tuple(state.observations),
+            )
+        ]
+        state.executed_steps = [
+            ExecutedPlanStep(
+                step_id="step_1",
+                objective="Prepare the governed external result.",
+                result_type=ActorResultType.STEP_COMPLETED,
+                summary="Prepared the result.",
+                output_text=proposal.payload_preview,
+            )
+        ]
+        state.step_history.append(
+            StepRecord(
+                step_index=1,
+                runtime_state=RuntimeState.ACTING,
+                node_name="actor",
+                summary="Actor produced the external candidate.",
+            )
+        )
+        state.external_operation_history = [proposal]
+        state.actor_result = replace(
+            state.actor_result,
+            result_type=ActorResultType.STEP_COMPLETED,
+            step_validation=StepValidation(
+                plan_step_id="step_1",
+                actor_self_confidence=0.8,
+                evidence_refs=("observation-1",),
+                rationale_summary="The source supports the proposed result.",
+            ),
+        )
+
+        context = build_judge_context(
+            task_state=state,
+            external_operation=proposal,
+            invocation_reason="test_complete_external_candidate",
+        )
+        prompt = build_judge_user_prompt(context=context)
+
+        self.assertEqual(context.external_operation.payload_digest, proposal.payload_digest)
+        self.assertEqual(len(context.full_plan), 1)
+        self.assertEqual(len(context.completed_steps), 1)
+        self.assertEqual(len(context.scratchpad_entries), 0)
+        self.assertEqual(len(context.tool_executions), 0)
+        self.assertEqual(len(context.runtime_events), 0)
+        self.assertEqual(len(context.observations), 1)
+        self.assertEqual(context.selected_evidence_refs, ("observation-1",))
+        self.assertIn('"full_plan"', prompt)
+        self.assertIn(proposal.payload_digest, prompt)
+        self.assertNotIn("release chronology", build_judge_system_prompt())
 
     # A safe assessment for a governed external proposal can continue without forced HITL.
     def test_safe_external_operation_can_continue(self) -> None:
@@ -500,16 +586,12 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
         )
         self.assertNotEqual(result.last_governance_decision.policy_decision, PolicyDecision.DENY)
         self.assertEqual(
-            set(result.pending_human_review_request.allowed_decisions),
-            {
-                HumanReviewDecisionType.APPROVE_CONTINUE,
-                HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY,
+            result.pending_human_review_request.allowed_decisions,
+            (
                 HumanReviewDecisionType.MODIFY_AND_CONTINUE,
-                HumanReviewDecisionType.REQUEST_MORE_EVIDENCE,
                 HumanReviewDecisionType.REPLAN,
-                HumanReviewDecisionType.ASK_CLARIFICATION,
                 HumanReviewDecisionType.ABORT,
-            },
+            ),
         )
         self.assertFalse(result.last_static_policy_assessment.hard_deny)
         self.assertEqual(

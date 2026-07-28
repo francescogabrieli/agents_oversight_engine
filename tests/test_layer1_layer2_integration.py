@@ -16,7 +16,6 @@ if str(SRC_ROOT) not in sys.path:
 
 
 from layer1_intake import (
-    DomainType,
     IntakeService,
     JsonExecutionPolicyRepository,
     ParseStatus,
@@ -39,7 +38,6 @@ from layer2_runtime_governance import (
     CapabilityAccessMode,
     GovernanceDirective,
     GovernanceReasonCode,
-    EvidenceSourceKind,
     PlanStep,
     PlannerDecision,
     PolicyDecision,
@@ -57,7 +55,7 @@ from layer2_runtime_governance import (
     ToolGatewayPort,
     ToolName,
     ToolRequest,
-    ToolSource,
+    ToolObservation,
 )
 from layer2_runtime_governance.infrastructure.checkpointing import (
     build_runtime_serializer,
@@ -118,10 +116,7 @@ class StubActor(ActorPort):
 
     # Drive one deterministic actor/tool/observation loop across two semantic steps.
     def act(self, *, actor_task: ActorTask) -> ActorResult:
-        if actor_task.current_plan_step.step_id == "step_1" and not any(
-            item.source_kind == EvidenceSourceKind.TOOL_OBSERVATION
-            for item in actor_task.observed_evidence
-        ):
+        if actor_task.current_plan_step.step_id == "step_1" and not actor_task.observations:
             return ActorResult(
                 plan_step_id=actor_task.current_plan_step.step_id,
                 result_type=ActorResultType.PROPOSE_ACTION,
@@ -156,12 +151,12 @@ class StubActor(ActorPort):
                     plan_step_id=actor_task.current_plan_step.step_id,
                     entry_type=ScratchpadEntryType.COMPLETION_RATIONALE,
                     summary="The observed source satisfies the evidence collection step.",
-                    evidence_refs=[item.evidence_id for item in actor_task.observed_evidence],
+                    evidence_refs=[item.observation_id for item in actor_task.observations],
                 ),
                 step_validation=StepValidation(
                     plan_step_id=actor_task.current_plan_step.step_id,
                     actor_self_confidence=0.86,
-                    evidence_refs=tuple(item.evidence_id for item in actor_task.observed_evidence),
+                    evidence_refs=tuple(item.observation_id for item in actor_task.observations),
                     rationale_summary="Official evidence was collected for the step objective.",
                 ),
             )
@@ -178,12 +173,12 @@ class StubActor(ActorPort):
                 plan_step_id=actor_task.current_plan_step.step_id,
                 entry_type=ScratchpadEntryType.COMPLETION_RATIONALE,
                 summary="The final synthesis satisfies the remaining plan step.",
-                evidence_refs=[item.evidence_id for item in actor_task.observed_evidence],
+                evidence_refs=[item.observation_id for item in actor_task.observations],
             ),
             step_validation=StepValidation(
                 plan_step_id=actor_task.current_plan_step.step_id,
                 actor_self_confidence=0.84,
-                evidence_refs=tuple(item.evidence_id for item in actor_task.observed_evidence),
+                evidence_refs=tuple(item.observation_id for item in actor_task.observations),
                 rationale_summary="The synthesis uses the collected official evidence.",
             ),
         )
@@ -198,11 +193,11 @@ class StubToolGateway(ToolGatewayPort):
             success=True,
             summary="Stub web search completed successfully.",
             content="Official EU sources describe the Digital Markets Act as a regulation for gatekeeper platforms.",
-            sources=(
-                ToolSource(
-                    title="European Commission - Digital Markets Act",
+            observations=(
+                ToolObservation(
+                    observation_id=f"{tool_request.request_id}:1",
                     locator="https://commission.europa.eu/dma",
-                    snippet=(
+                    content=(
                         "Official EU material describes DMA rules and obligations for "
                         "gatekeepers and core platform services."
                     ),
@@ -213,8 +208,8 @@ class StubToolGateway(ToolGatewayPort):
 
 class StubPolicyEngine(PolicyEnginePort):
     policy_engine_name = "stub_policy_engine"
-    policy_bundle_version = "layer2_governance_v3"
-    policy_config_version = "layer2_governance_thresholds_v1"
+    policy_bundle_version = "layer2_governance_v4"
+    policy_config_version = "layer2_governance_thresholds_v2"
 
     # Select deterministic OPA-first pillars without contacting a policy service.
     def evaluate_required_pillars(self, *, base_facts):
@@ -250,12 +245,9 @@ class StubPolicyEngine(PolicyEnginePort):
         elif (
             actor["result_type"] in {
                 ActorResultType.STEP_COMPLETED.value,
-                ActorResultType.FINAL_OUTPUT.value,
+                ActorResultType.STEP_COMPLETED.value,
             }
-            and (
-                evidence.get("selected_evidence_refs_valid") is False
-                or evidence.get("selected_evidence_ref_count", 0) == 0
-            )
+            and evidence.get("selected_evidence_refs_valid") is False
         ):
             directive = "request_more_evidence"
             reason_code = "invalid_or_missing_selected_evidence"
@@ -405,8 +397,6 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
                     goal="Find official sources about the DMA and summarize them.",
                     context="Prefer official EU sources.",
                     constraints=["Prefer official EU sources."],
-                    domain_type=DomainType.RESEARCH,
-                    domain_label="dma_research",
                     sensitivity=SensitivityLevel.LOW,
                     success_criteria=["Produce a grounded short summary."],
                 )
@@ -456,14 +446,8 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
         self.assertEqual(task_state.actor_result.capability_mode, CapabilityAccessMode.NONE)
         self.assertEqual(len(task_state.executed_steps), 2)
         self.assertEqual(task_state.tool_call_count, 1)
-        self.assertEqual(len(task_state.observed_evidence), 3)
-        self.assertEqual(
-            sum(
-                item.source_kind == EvidenceSourceKind.TOOL_OBSERVATION
-                for item in task_state.observed_evidence
-            ),
-            1,
-        )
+        self.assertEqual(len(task_state.observations), 1)
+        self.assertIn("DMA", task_state.observations[0].content)
         self.assertEqual(len(task_state.scratchpad), 4)
         self.assertEqual(len(task_state.step_validations), 2)
         self.assertEqual(len(task_state.governance_history), 3)
@@ -485,8 +469,6 @@ class Layer1Layer2IntegrationTests(unittest.TestCase):
                     goal="Review this contract and tell me whether I should sign it.",
                     context="Contract review request.",
                     constraints=[],
-                    domain_type=DomainType.ANALYSIS,
-                    domain_label="contract_review",
                     sensitivity=SensitivityLevel.HIGH,
                     success_criteria=[],
                 )

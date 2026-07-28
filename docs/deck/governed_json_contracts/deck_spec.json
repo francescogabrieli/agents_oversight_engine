@@ -3,7 +3,7 @@
   "language": "Italian",
   "goal": "Definire in modo definitivo, leggibile e verificabile i contratti JSON del flusso governato Layer 1 → Layer 2 → Tool Gateway → pilastri → Judge → OPA → HITL → esecuzione → trace.",
   "deck_context": {
-    "source_summary": "Il runtime è stato snellito eliminando ranking universali, precision ceiling e autorità duplicate. Il planner produce solo passi semantici; l'actor opera sul passo corrente; Tool Gateway normalizza risultati ed evidenze; evidence e trajectory forniscono fatti attivi; risk e behavioral sono shadow-only; il Judge valuta semanticamente una proposta esterna legata a un digest; OPA è l'unica autorità della direttiva; HITL approva il digest corrente; l'executor applica l'operazione al massimo una volta.",
+    "source_summary": "Il runtime è stato snellito eliminando ranking universali, precision ceiling e autorità duplicate. Il planner possiede il piano semantico completo; l'actor lo riceve come contesto e committa il passo corrente; gli adapter restituiscono osservazioni concrete; evidence e trajectory forniscono fatti attivi; risk e behavioral sono shadow-only; il Judge valuta semanticamente una proposta esterna legata a un digest; OPA è l'unica autorità della direttiva; HITL approva il digest corrente; l'executor applica l'operazione al massimo una volta.",
     "core_claim": "Controllo forte non significa più metadati: significa contratti piccoli, fatti concreti, responsabilità separate e una sola autorità decisionale.",
     "canonical_terms": [
       "IntakeResult",
@@ -12,7 +12,7 @@
       "ActorResult",
       "ToolRequest",
       "ToolExecutionResult",
-      "ObservedEvidence",
+      "ToolObservation",
       "StepValidation",
       "ExternalOperationProposal",
       "JudgeContext",
@@ -23,12 +23,12 @@
       "HumanReviewDecision",
       "ExternalExecutionRequest",
       "ExternalExecutionReceipt",
-      "layer2_trace.v4"
+      "layer2_trace.v5"
     ],
     "running_example": {
       "goal": "Ricercare gli ultimi modelli AI, preparare una sintesi e inviarla via email a mario.rossi@example.com.",
       "execution_intent": "execute_after_governance",
-      "requested_operation": "external_communication/email",
+      "effect_realized_by_actor": "external_communication/email",
       "final_boundary": "governed_external",
       "final_effect": "send"
     }
@@ -103,11 +103,11 @@
     },
     {
       "number": 5,
-      "title": "Dentro TaskSpec: intenzione e operazione richiesta",
+      "title": "Dentro TaskSpec: obiettivo e intento",
       "role": "contract detail",
-      "intent": "Spiegare tutti i campi che definiscono la task e l'operazione email.",
-      "key_points": ["goal, context, constraints", "domain_type e sensitivity", "success_criteria", "execution_intent", "requested_operations"],
-      "local_context": {"required_background": "TaskSpec fields: goal, context, constraints, domain_type, domain_label, sensitivity, success_criteria, execution_intent, requested_operations. RequestedOperation fields: operation_type, channel, recipient. ExecutionPolicy fields: policy_profile_name, confidence_threshold, budget {max_steps,max_tool_calls}, read_only_mode."},
+      "intent": "Spiegare i campi che definiscono il risultato richiesto senza duplicare il piano.",
+      "key_points": ["goal, context, constraints", "sensitivity", "success_criteria", "execution_intent"],
+      "local_context": {"required_background": "TaskSpec fields: goal, context, constraints, sensitivity, success_criteria, execution_intent. Execution intent records proposal_only or execute_after_governance but grants no authority. ExecutionPolicy fields: policy_profile_name, confidence_threshold, budget {max_steps,max_tool_calls}, read_only_mode."},
       "layout": {"composition": "JSON TaskSpec leggibile a sinistra; legenda campo-significato a destra in due gruppi: intento utente e policy di sistema."},
       "visual_elements": {"main_visual": "Evidenziare execute_after_governance e external_communication/email"},
       "constraints": ["Non superare 11 righe nel JSON", "Usare valori abbreviati ma realistici"]
@@ -118,7 +118,7 @@
       "role": "handoff",
       "intent": "Mostrare ciò che il planner riceve e ciò che resta fuori.",
       "key_points": ["task_spec", "execution_policy", "intake_metadata", "runtime"],
-      "local_context": {"required_background": "Planner input: task_spec {goal,context,constraints,domain_type,domain_label,sensitivity,success_criteria}; execution_policy {policy_profile_name,confidence_threshold,read_only_mode,budget}; intake_metadata {parse_status,warnings,missing_information}; runtime {current_state,runtime_flags,step_index}. requested_operations govern external intent in runtime but planner output must remain semantic."},
+      "local_context": {"required_background": "Planner input: task_spec {goal,context,constraints,sensitivity,success_criteria,execution_intent}; execution_policy {policy_profile_name,confidence_threshold,read_only_mode,budget}; intake_metadata {parse_status,warnings,missing_information}; runtime {current_state,runtime_flags,step_index}. The planner owns the complete semantic trajectory and runtime does not rewrite it."},
       "layout": {"composition": "Quattro pannelli input confluiscono nel Planner; una fascia 'non decide' indica tool call, payload email e governance."},
       "visual_elements": {"main_visual": "Funnel controllato verso il planner"},
       "constraints": ["Nessun JSON completo", "Usare etichette di campo"]
@@ -140,7 +140,7 @@
       "role": "contract map",
       "intent": "Raggruppare il grande contratto actor-facing per responsabilità.",
       "key_points": ["Contesto autorizzato", "Passo corrente", "Memoria audit-safe", "Evidenza e progressi", "Feedback runtime"],
-      "local_context": {"required_background": "ActorTask fields: task_spec, execution_policy, intake_metadata, current_state, runtime_flags, plan_steps, past_steps, observed_evidence, scratchpad, step_validations, last_tool_result, tool_call_count, remaining_tool_calls, actor_turn_count, current_plan_step_index, current_plan_step, planner_rationale, planner_name, planner_prompt_version, governance_feedback."},
+      "local_context": {"required_background": "ActorTask fields: task_spec, execution_policy, intake_metadata, current_state, runtime_flags, plan_steps, past_steps, observations, scratchpad, step_validations, last_tool_result, tool_call_count, remaining_tool_calls, actor_turn_count, current_plan_step_index, current_plan_step, planner_rationale, planner_name, planner_prompt_version, governance_feedback. The actor sees the whole plan but can commit only the current step."},
       "layout": {"composition": "Cinque gruppi ben separati attorno a un Actor centrale; nessun JSON lungo."},
       "visual_elements": {"main_visual": "Mappa dei campi raggruppati per funzione"},
       "constraints": ["Non elencare più di cinque campi per gruppo", "Usare corpo grande"]
@@ -151,8 +151,8 @@
       "role": "state machine",
       "intent": "Mostrare envelope comune e payload condizionali.",
       "key_points": ["result_type guida la forma", "summary e output_text restano compatti", "tool, validation e proposal sono payload tipizzati"],
-      "local_context": {"required_background": "ActorResult fields: plan_step_id, result_type, summary, capability_mode, external_impact, output_text, blocking_reason, provider_protocol_failure, tool_request, scratchpad_entry, step_validation, external_communication_draft, database_statement_draft, external_operation_proposal. Result types: propose_action, intermediate_output, step_completed, final_output, ask_clarification, blocked, needs_replan."},
-      "layout": {"composition": "Envelope ActorResult al centro; sette esiti disposti ad arco; tre payload condizionali in basso."},
+      "local_context": {"required_background": "ActorResult fields: plan_step_id, result_type, summary, capability_mode, external_impact, output_text, blocking_reason, provider_protocol_failure, tool_request, scratchpad_entry, step_validation, external_communication_draft, database_statement_draft, external_operation_proposal. Result types: propose_action, intermediate_output, step_completed, ask_clarification, blocked, needs_replan. The last step uses step_completed like every other step."},
+      "layout": {"composition": "Envelope ActorResult al centro; sei esiti disposti ad arco; tre payload condizionali in basso."},
       "visual_elements": {"main_visual": "Macchina a stati compatta"},
       "constraints": ["Non stampare tutti i campi come JSON", "Evidenziare step_completed e propose_action"]
     },
@@ -162,7 +162,7 @@
       "role": "contract",
       "intent": "Mostrare la richiesta tipizzata e il confine Tool Gateway.",
       "key_points": ["plan_step_id e reason", "tool_name", "parametri capability-specific", "nessun accesso diretto a HTTP o MCP"],
-      "local_context": {"required_background": "ToolRequest fields: plan_step_id, tool_name, reason, query, url, text, path, expression, timezone, limit, max_results, extractive_goal. Only fields relevant to the selected tool are populated."},
+      "local_context": {"required_background": "ToolRequest fields: request_id, plan_step_id, tool_name, reason, query, url, text, path, expression, timezone, limit, max_results, extractive_goal. Only fields relevant to the selected tool are populated."},
       "layout": {"composition": "JSON web_search a sinistra; gateway centrale; tre adapter read-only a destra: OpenAI search, HTTP fetch, MCP."},
       "visual_elements": {"main_visual": "Gateway come unico varco"},
       "constraints": ["JSON massimo 8 righe", "Mostrare max_results ed extractive_goal"]
@@ -171,34 +171,34 @@
       "number": 11,
       "title": "Tool Gateway → runtime: ToolExecutionResult",
       "role": "contract",
-      "intent": "Spiegare output, fonti, truncation ed errori tipizzati.",
-      "key_points": ["request, success, summary", "content e sources", "error_code", "truncated", "extractability_limited"],
-      "local_context": {"required_background": "ToolExecutionResult fields: request, success, summary, content, sources, error_message, error_code, truncated, extractability_limited. Error codes: forbidden, byte_limit, bot_challenge, empty_extraction, timeout, circuit_open, duplicate_request, unavailable."},
+      "intent": "Spiegare output, osservazioni concrete, truncation ed errori tipizzati.",
+      "key_points": ["request, success, summary", "content e observations", "error_code", "truncated", "extractability_limited"],
+      "local_context": {"required_background": "ToolExecutionResult fields: request, success, summary, content, observations, error_message, error_code, truncated, extractability_limited. ToolObservation fields: observation_id, content, locator. Error codes: forbidden, byte_limit, bot_challenge, empty_extraction, timeout, circuit_open, duplicate_request, unavailable."},
       "layout": {"composition": "Due risultati affiancati: ricerca citata riuscita e fetch 403/byte-limit; footer con errori tipizzati."},
       "visual_elements": {"main_visual": "Successo utilizzabile vs extractability limited"},
       "constraints": ["Non presentare 403 come errore terminale", "Massimo quattro error code visibili, gli altri in nota"]
     },
     {
       "number": 12,
-      "title": "Dal risultato a ObservedEvidence",
+      "title": "Dal risultato a ToolObservation",
       "role": "transformation",
-      "intent": "Mostrare come una fonte diventa evidenza atomica e auditabile.",
-      "key_points": ["Una fonte → una evidenza", "excerpt utile, non transcript duplicato", "provenienza intake o tool"],
-      "local_context": {"required_background": "ToolSource fields: title, locator, snippet, content_state, source_authority, document_type, extractability, citation_alignment. ObservedEvidence adds evidence_id, plan_step_id, excerpt, source_kind, source_tool. A provider-cited search answer without per-citation snippets can become provider_cited_summary evidence with URL and short cited context."},
-      "layout": {"composition": "Tool result aggregato a sinistra; separatore/normalizzatore; due card ObservedEvidence a destra."},
-      "visual_elements": {"main_visual": "Scomposizione 1:N senza clonare il transcript"},
-      "constraints": ["Evidenziare source_kind e source_tool", "Usare due sole evidenze di esempio"]
+      "intent": "Mostrare come l'adapter restituisce osservazioni concrete e auditabili.",
+      "key_points": ["Identificatore stabile", "contenuto realmente osservato", "locator opzionale"],
+      "local_context": {"required_background": "ToolObservation fields: observation_id, content, locator. The adapter creates observations from its real result; runtime validates and records them without semantic ranking, quality labels, or keyword-derived taxonomy."},
+      "layout": {"composition": "Risultato backend a sinistra; adapter al centro; due ToolObservation minimali a destra."},
+      "visual_elements": {"main_visual": "Normalizzazione 1:N di contenuti realmente osservati"},
+      "constraints": ["Mostrare solo i tre campi canonici", "Usare due osservazioni di esempio"]
     },
     {
       "number": 13,
-      "title": "Il nuovo modello evidence, senza ranking universale",
-      "role": "taxonomy",
-      "intent": "Spiegare i cinque attributi ortogonali.",
-      "key_points": ["content_state", "source_authority", "document_type", "extractability", "citation_alignment"],
-      "local_context": {"required_background": "content_state: metadata_only, provider_cited_summary, extracted_partial, extracted_full. source_authority: official_primary, primary, secondary, unknown. document_type: product_announcement, documentation, legal_text, community_post, unknown. extractability: complete, truncated, forbidden, empty, unavailable. citation_alignment: exact, provider_attributed, none."},
-      "layout": {"composition": "Cinque assi paralleli, ciascuno con valori enumerati; al centro una singola evidenza composta dai cinque attributi."},
-      "visual_elements": {"main_visual": "Coordinate ortogonali, non scala verticale"},
-      "constraints": ["Nessuna freccia dal debole al forte", "Nessun punteggio o rank"]
+      "title": "Osservazioni minime, interpretazione contestuale",
+      "role": "principle",
+      "intent": "Separare i fatti raccolti dalla loro interpretazione semantica.",
+      "key_points": ["adapter osserva", "runtime registra", "actor usa", "Judge valuta la proposta"],
+      "local_context": {"required_background": "Goal, context, constraints and success criteria are instructions, not observations. Runtime observations come only from concrete capability results. evidence_refs are optional selections; every selected id must resolve. OPA validates reference integrity and Judge evaluates semantic alignment for governed external proposals."},
+      "layout": {"composition": "Catena lineare adapter → runtime → actor → Judge/OPA, con responsabilità distinta sotto ogni blocco."},
+      "visual_elements": {"main_visual": "Fatti minimali che acquistano significato nel contesto della decisione"},
+      "constraints": ["Nessuna tassonomia di qualità", "Nessun punteggio o rank"]
     },
     {
       "number": 14,
@@ -217,7 +217,7 @@
       "role": "pillar map",
       "intent": "Mostrare i fatti attivi e i moduli shadow-only.",
       "key_points": ["Evidence: qualità e riferimenti concreti", "Trajectory: progresso e anti-loop", "Risk e Behavioral: osservazione shadow-only"],
-      "local_context": {"required_background": "Evidence raw facts include evidence_count, selected_evidence_refs_valid, source_locator_present, cited_context_present, extracted_content_present, official_source_present, extraction_truncated, extractability_limited, factual_completion_attempt, external_operation_candidate, actor_self_confidence. Trajectory raw facts include consecutive_no_progress_turns, new_evidence_since_last_turn, tool_call_since_last_turn, plan_step_advanced, draft_digest_changed, equivalent_tool_failures_for_host, consecutive_provider_protocol_failures, replan_budget_remaining, recovery_exhausted, needs_replan_signal."},
+      "local_context": {"required_background": "Evidence is active only at completion boundaries and carries observation/reference integrity facts. Trajectory is active for completion, governed-external candidates, and explicit replan requests; its whole-run facts include actor_turn_count, completed_step_count, tool success/failure counts, observation_count, replan_count, needs_replan_signal, replan_reason_present, first_replan_request, observable_change_since_last_replan, external_action_revision_count, and actor_self_confidence. Narrative turn count never triggers degradation."},
       "layout": {"composition": "Due grandi pilastri attivi con 5 fatti ciascuno; due pilastri shadow più piccoli e grigi; freccia verso OPA."},
       "visual_elements": {"main_visual": "Pillar facts envelopes"},
       "constraints": ["Non mostrare formule o punteggi", "Non più di dieci raw facts visibili"]
@@ -250,7 +250,7 @@
       "role": "contract",
       "intent": "Mostrare l'input semantico e il suo confine.",
       "key_points": ["goal e constraints autorizzati", "step corrente", "proposta esterna esatta", "evidenze selezionate", "confidence e incertezza residua"],
-      "local_context": {"required_background": "JudgeContext fields: task_goal, task_constraints, authorized_context, current_plan_step {step_id,objective,rationale,expected_outcome}, external_operation, selected_evidence_refs, observed_evidence, actor_self_confidence, residual_uncertainty, destination_facts, invocation_reason. It intentionally excludes static policy, risk and behavioral assessments."},
+      "local_context": {"required_background": "JudgeContext fields: task goal/constraints/context/success criteria/execution intent; current step and full plan; completed steps; audit-safe scratchpad; tool executions; ordered runtime events; all observations and selected references; prior external revisions; exact external operation and digest; confidence, uncertainty, destination facts, and invocation reason. It intentionally excludes static policy, risk and behavioral assessments."},
       "layout": {"composition": "Cinque input semantici convergono verso il Judge; un bordo rosso sottile delimita 'non riceve direttive o policy combiner'."},
       "visual_elements": {"main_visual": "Judge come semantic assessor bounded"},
       "constraints": ["Nessun output in questa slide", "Massimo cinque gruppi"]
@@ -290,14 +290,14 @@
     },
     {
       "number": 22,
-      "title": "Trace v4: una proiezione osservabile",
+      "title": "Trace v5: una proiezione osservabile",
       "role": "observability",
       "intent": "Mostrare che il trace registra il flusso senza diventare autorità.",
       "key_points": ["runtime e intake", "plan ed execution", "tool calls ed evidence", "governance e HITL", "external execution"],
-      "local_context": {"required_background": "Layer2RuntimeTrace top fields: trace_version, runtime, intake, planner_name, planner_prompt_version, planner_rationale, planning_source, plan_steps, current_plan_step_index, current_plan_step_id, actor, execution, tool_calls, observed_evidence, governance_passes, human_review, external_communication, external_execution."},
+      "local_context": {"required_background": "Layer2RuntimeTrace top fields: trace_version, runtime, intake, planner_name, planner_prompt_version, planner_rationale, planning_source, plan_steps, current_plan_step_index, current_plan_step_id, actor, execution, tool_calls, observations, governance_passes, human_review, external_communication, external_execution."},
       "layout": {"composition": "Timeline della run in alto; trace JSON top-level sotto diviso in cinque sezioni cromatiche."},
       "visual_elements": {"main_visual": "Trace come proiezione read-only dell'intera traiettoria"},
-      "constraints": ["Non mostrare sotto-campi", "Usare trace_version layer2_trace.v4"]
+      "constraints": ["Non mostrare sotto-campi", "Usare trace_version layer2_trace.v5"]
     },
     {
       "number": 23,
@@ -315,7 +315,7 @@
       "role": "summary",
       "intent": "Chiudere con la mappa di responsabilità produttore-consumatore-decisore.",
       "key_points": ["Layer 1 → IntakeResult", "Planner → PlannerDecision", "Actor/Tools → risultati ed evidence", "Judge → assessment semantico", "OPA → direttiva", "HITL/Executor → autorizzazione e receipt"],
-      "local_context": {"required_background": "Rows: IntakeResult (Layer 1→bootstrap); PlannerDecision (planner→runtime); ActorTask (runtime→actor); ActorResult (actor→governance/tool/replanner); ToolRequest (actor→gateway); ToolExecutionResult and ObservedEvidence (gateway→runtime); StepValidation (actor→pillars/OPA); ExternalOperationProposal (actor/normalizer→Judge/OPA/HITL); JudgeAssessment (Judge→OPA); governance decision input/output (runtime↔OPA); HumanReviewRequest/Decision (runtime↔human); ExternalExecutionRequest/Receipt (runtime↔executor); layer2_trace.v4 (runtime→observability/evaluation)."},
+      "local_context": {"required_background": "Rows: IntakeResult (Layer 1→bootstrap); PlannerDecision (planner→runtime); ActorTask (runtime→actor); ActorResult (actor→governance/tool/replanner); ToolRequest (actor→gateway); ToolExecutionResult and ToolObservation (gateway→runtime); StepValidation (actor→pillars/OPA); ExternalOperationProposal (actor/normalizer→Judge/OPA/HITL); JudgeAssessment (Judge→OPA); governance decision input/output (runtime↔OPA); HumanReviewRequest/Decision (runtime↔human); ExternalExecutionRequest/Receipt (runtime↔executor); layer2_trace.v5 (runtime→observability/evaluation)."},
       "layout": {"composition": "Matrice a quattro colonne: Contratto, Produce, Consuma, Autorità; raggruppata in quattro fasi, con testo grande."},
       "visual_elements": {"main_visual": "Tabella conclusiva con OPA evidenziata come unica riga decisionale"},
       "constraints": ["Se necessario mostrare 8 macro-righe anziché 13 righe singole", "Chiudere con la frase: Contratti piccoli. Fatti concreti. Una sola decisione."]

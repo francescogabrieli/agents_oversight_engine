@@ -15,13 +15,11 @@ if str(SRC_ROOT) not in sys.path:
 
 from layer1_intake import (
     BudgetConfig,
-    DomainType,
+    ExecutionIntent,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeResult,
     ParseStatus,
-    RequestedOperation,
-    RequestedOperationType,
     SensitivityLevel,
     StructuredTask,
     TaskSpec,
@@ -33,6 +31,7 @@ from layer2_runtime_governance import (
     EvidenceQualityAssessment,
     ExternalCommunicationDraft,
     ExternalCommunicationPhase,
+    ExternalCommunicationState,
     GovernanceDecision,
     GovernanceDirective,
     GovernanceHitlDashboardSnapshot,
@@ -132,6 +131,9 @@ class Layer2HitlDashboardTests(unittest.TestCase):
 
     def test_dashboard_snapshot_exposes_external_communication_phase(self) -> None:
         task_state = TaskState.from_intake(_external_communication_intake_result())
+        task_state.external_communication = ExternalCommunicationState(
+            phase=ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
+        )
         task_state.external_communication.phase = ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
         task_state.external_communication.draft = ExternalCommunicationDraft(
             channel="email",
@@ -167,6 +169,9 @@ class Layer2HitlDashboardTests(unittest.TestCase):
 
     def test_dashboard_snapshot_coerces_restored_external_draft_dict(self) -> None:
         task_state = TaskState.from_intake(_external_communication_intake_result())
+        task_state.external_communication = ExternalCommunicationState(
+            phase=ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
+        )
         task_state.external_communication.phase = ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
         task_state.external_communication.draft = {
             "channel": "email",
@@ -190,8 +195,6 @@ def _intake_result() -> IntakeResult:
                 goal="Inspect the HITL dashboard contract.",
                 context="Use deterministic fixtures.",
                 constraints=["Stay read-only."],
-                domain_type=DomainType.ANALYSIS,
-                domain_label="dashboard_test",
                 sensitivity=SensitivityLevel.MEDIUM,
                 success_criteria=["Expose a typed dashboard snapshot."],
             ),
@@ -220,17 +223,9 @@ def _external_communication_intake_result() -> IntakeResult:
                 goal="Prepare a cautious external email draft.",
                 context="Do not send anything automatically.",
                 constraints=["Keep the draft local."],
-                domain_type=DomainType.EXTERNAL_COMMUNICATION,
-                domain_label="external_comm_dashboard_test",
+                execution_intent=ExecutionIntent.EXECUTE_AFTER_GOVERNANCE,
                 sensitivity=SensitivityLevel.HIGH,
                 success_criteria=["Pause before any outward-facing execution."],
-                requested_operations=[
-                    RequestedOperation(
-                        operation_type=RequestedOperationType.EXTERNAL_COMMUNICATION,
-                        channel="email",
-                        recipient="ops@example.com",
-                    )
-                ],
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.75,

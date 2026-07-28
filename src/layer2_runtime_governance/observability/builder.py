@@ -30,7 +30,7 @@ from ..domain import (
     TaskState,
 )
 from ..domain import HumanReviewDecision, HumanReviewRequest
-from ..tool_contract import ObservedEvidence, ToolExecutionResult, ToolRequest, ToolSource
+from ..tool_contract import ToolExecutionResult, ToolObservation, ToolRequest
 from ..external_operations import ExternalExecutionReceipt
 
 
@@ -50,7 +50,7 @@ from .models import (
     TraceHumanReviewSummary,
     TraceIntakeSummary,
     TraceJudgeAssessment,
-    TraceObservedEvidence,
+    TraceToolObservation,
     TraceOversightAssessment,
     TraceOversightSignal,
     TracePlanStep,
@@ -68,7 +68,7 @@ def build_layer2_runtime_trace(
 ) -> Layer2RuntimeTrace:
     task_state = normalize_task_state_serialization(task_state)
     return Layer2RuntimeTrace(
-        trace_version="layer2_trace.v4",
+        trace_version="layer2_trace.v5",
         runtime=_build_runtime_summary(thread_id=thread_id, task_state=task_state),
         intake=_build_intake_summary(intake_result=intake_result),
         planner_name=task_state.planner_name,
@@ -85,8 +85,8 @@ def build_layer2_runtime_trace(
         actor=_build_actor_turn(actor_result=task_state.actor_result, task_state=task_state),
         execution=_build_execution_summary(task_state=task_state),
         tool_calls=_build_tool_calls(task_state=task_state),
-        observed_evidence=tuple(
-            _build_observed_evidence(evidence) for evidence in task_state.observed_evidence
+        observations=tuple(
+            _build_tool_observation(observation) for observation in task_state.observations
         ),
         governance_passes=tuple(
             _build_governance_pass(pass_index=index, decision=decision)
@@ -120,8 +120,6 @@ def _build_intake_summary(*, intake_result: IntakeResult) -> TraceIntakeSummary:
     return TraceIntakeSummary(
         goal=task_spec.goal,
         context=task_spec.context,
-        domain_type=task_spec.domain_type.value,
-        domain_label=task_spec.domain_label,
         sensitivity=task_spec.sensitivity.value,
         success_criteria=tuple(task_spec.success_criteria),
         constraints=tuple(task_spec.constraints),
@@ -135,10 +133,6 @@ def _build_intake_summary(*, intake_result: IntakeResult) -> TraceIntakeSummary:
         max_tool_calls=execution_policy.budget.max_tool_calls,
         read_only_mode=execution_policy.read_only_mode,
         execution_intent=task_spec.execution_intent.value,
-        requested_operations=tuple(
-            {"operation_type": operation.operation_type.value, "channel": operation.channel, "recipient": operation.recipient}
-            for operation in task_spec.requested_operations
-        ),
     )
 
 
@@ -220,11 +214,22 @@ def _build_tool_call_from_result(result: ToolExecutionResult) -> TraceToolCall:
         summary=result.summary,
         content=result.content,
         error_message=result.error_message,
-        error_code=result.error_code.value if result.error_code else None,
+        error_code=_enum_or_string_value(result.error_code),
         truncated=result.truncated,
         extractability_limited=result.extractability_limited,
-        sources=tuple(_build_tool_source(source) for source in result.sources),
+        observations=tuple(
+            _build_tool_observation_dict(observation)
+            for observation in result.observations
+        ),
     )
+
+
+# Preserve compatibility with checkpoints written before an enum was serializer-allowlisted.
+def _enum_or_string_value(value: Any | None) -> str | None:
+    if value is None:
+        return None
+    enum_value = getattr(value, "value", value)
+    return str(enum_value)
 
 
 # Read-only observability component extracted from the trace facade.
@@ -238,13 +243,14 @@ def _build_tool_call_from_request(request: ToolRequest) -> TraceToolCall:
         error_code=None,
         truncated=False,
         extractability_limited=False,
-        sources=(),
+        observations=(),
     )
 
 
 # Read-only observability component extracted from the trace facade.
 def _tool_request_fields(request: ToolRequest) -> dict[str, Any]:
     return {
+        "request_id": request.request_id,
         "plan_step_id": request.plan_step_id,
         "tool_name": request.tool_name.value,
         "reason": request.reason,
@@ -261,34 +267,20 @@ def _tool_request_fields(request: ToolRequest) -> dict[str, Any]:
 
 
 # Read-only observability component extracted from the trace facade.
-def _build_tool_source(source: ToolSource) -> dict[str, Any]:
+def _build_tool_observation_dict(observation: ToolObservation) -> dict[str, Any]:
     return {
-        "title": source.title,
-        "locator": source.locator,
-        "snippet": source.snippet,
-        "content_state": source.content_state.value,
-        "source_authority": source.source_authority.value,
-        "document_type": source.document_type.value,
-        "extractability": source.extractability.value,
-        "citation_alignment": source.citation_alignment.value,
+        "observation_id": observation.observation_id,
+        "content": observation.content,
+        "locator": observation.locator,
     }
 
 
 # Read-only observability component extracted from the trace facade.
-def _build_observed_evidence(evidence: ObservedEvidence) -> TraceObservedEvidence:
-    return TraceObservedEvidence(
-        evidence_id=evidence.evidence_id,
-        plan_step_id=evidence.plan_step_id,
-        title=evidence.title,
-        locator=evidence.locator,
-        excerpt=evidence.excerpt,
-        source_kind=evidence.source_kind.value,
-        source_tool=evidence.source_tool.value if evidence.source_tool is not None else None,
-        content_state=evidence.content_state.value,
-        source_authority=evidence.source_authority.value,
-        document_type=evidence.document_type.value,
-        extractability=evidence.extractability.value,
-        citation_alignment=evidence.citation_alignment.value,
+def _build_tool_observation(observation: ToolObservation) -> TraceToolObservation:
+    return TraceToolObservation(
+        observation_id=observation.observation_id,
+        content=observation.content,
+        locator=observation.locator,
     )
 
 
@@ -704,7 +696,7 @@ __all__ = [
     "_build_tool_call_from_request",
     "_tool_request_fields",
     "_build_tool_source",
-    "_build_observed_evidence",
+    "_build_tool_observation",
     "_build_governance_decision",
     "_build_governance_pass",
     "_build_static_policy_assessment",

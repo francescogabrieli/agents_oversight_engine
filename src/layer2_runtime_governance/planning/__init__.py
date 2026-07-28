@@ -91,32 +91,33 @@ Rules:
 - Stay at the semantic planning level.
 - Do not emit executable tool calls.
 - Do not mention concrete tool names, URLs, function names, query strings, API inputs, shell commands, or payloads.
-- Describe what should be achieved next, not how to invoke external capabilities.
-- The plan must be aligned with the specific nature of the task, not with a generic research workflow.
-- Do not default to evidence collection, extraction, synthesis, and presentation unless that structure is actually appropriate for the task.
-- Adapt the plan to the task domain, constraints, success criteria, and intended output.
-- Produce all materially relevant semantic steps needed to complete the task.
-- Keep the plan concise, but complete.
-- Keep steps concise and operationally meaningful.
-- Prefer direct task steps over meta-steps about formatting, structuring, or validating the answer unless those are materially necessary to complete the task well.
-- Avoid over-decomposing the task into artificial sub-steps when one clear semantic step is enough.
-- For small research tasks that gather sources and produce a short answer, prefer 2-3 semantic steps unless the task genuinely requires more.
-- Merge source selection, fact extraction, and concise synthesis when they are part of one natural semantic step.
-- Do not split "down-select sources", "extract facts", and "write the brief summary" into separate steps unless the user goal or risk profile makes that separation materially necessary.
-- For research or analysis tasks, prefer evidence collection before synthesis.
+- Derive the complete trajectory from the actual goal, context, constraints, success criteria, available material, and runtime state.
+- Identify prerequisites and dependencies before work that relies on them.
+- Distinguish information acquisition, transformation, validation, artifact production, and requested external effects when those are materially separate outcomes.
+- When completion depends on facts not present in the task state, include semantic work that acquires and observes those facts before relying on them.
+- When the task can be completed from existing material, do not add unnecessary acquisition work.
+- Cover every success criterion and constraint through one or more concrete plan outcomes.
+- Make every step independently understandable, executable, and verifiable by its objective and expected outcome.
+- Make the expected outcome a durable result that a later step can use without reconstructing raw observations.
+- Choose the number and granularity of steps from task complexity. There is no preferred fixed step count.
+- Avoid vague umbrella steps that hide materially different prerequisites or outputs.
+- Avoid artificial micro-steps that do not produce a meaningful intermediate state.
+- Do not split formatting, checking, and preparation when they produce the same durable result.
+- Do not add speculative acquisition work that is not required by the goal or an explicit dependency.
+- Preserve requested end results exactly; never replace substantive work with formatting, drafting, or administrative closure.
+- Describe what must be achieved, not the capability invocation used to achieve it.
 - Respect read_only_mode when it is true.
 - Do not include human review as a normal plan step.
 - Do not include compliance, legal classification, policy simulation, or governance as a plan step.
+- Do not add speculative retry, delivery-verification, or failure-recovery steps before
+  such a failure has actually been observed. Runtime execution and replanning handle
+  concrete failures when they occur.
 - Do not pre-judge, reject, sanitize, or rewrite a requested external operation
   merely because it may be risky. Preserve the requested semantic objective and
   let the governance node evaluate the resulting proposal.
-- For an external communication already grounded in intake-provided facts, prefer
-  one semantic drafting step. Use at most two steps when separate evidence
-  collection is genuinely required before drafting.
-- Do not add compliance analysis, tone review, policy simulation, or payload
-  neutralization as planner steps; those responsibilities belong to governance.
 - Do not add generic administrative steps like "finalize task" unless closure itself is materially part of the user goal.
 - If the task still lacks key information, produce the safest semantic next steps you can from the known state.
+- Before returning, review the proposed plan once: remove redundant steps, ensure all success criteria are covered, and preserve exactly one semantic representation of any requested external effect.
 - Do not explain your reasoning outside the schema.
 """.strip()
 
@@ -128,10 +129,9 @@ def build_planner_user_prompt(*, task_state: TaskState) -> str:
             "goal": task_state.task_spec.goal,
             "context": task_state.task_spec.context,
             "constraints": task_state.task_spec.constraints,
-            "domain_type": task_state.task_spec.domain_type.value,
-            "domain_label": task_state.task_spec.domain_label,
             "sensitivity": task_state.task_spec.sensitivity.value,
             "success_criteria": task_state.task_spec.success_criteria,
+            "execution_intent": task_state.task_spec.execution_intent.value,
         },
         "execution_policy": {
             "policy_profile_name": task_state.execution_policy.policy_profile_name,
@@ -162,7 +162,7 @@ def build_planner_user_prompt(*, task_state: TaskState) -> str:
 
 class OpenAIPlanner(PlannerPort):
     planner_name = "openai_layer2_planner"
-    prompt_version = "planner_v2"
+    prompt_version = "planner_v4"
 
     def __init__(self, settings: OpenAIPlannerSettings | None = None) -> None:
         # Validate planner prerequisites once at construction time.

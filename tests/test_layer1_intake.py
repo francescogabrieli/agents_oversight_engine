@@ -17,7 +17,6 @@ if str(SRC_ROOT) not in sys.path:
 from layer1_intake.infrastructure import JsonExecutionPolicyRepository
 from layer1_intake.models import (
     BudgetConfig,
-    DomainType,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeValidationError,
@@ -71,8 +70,6 @@ class Layer1IntakeTests(unittest.TestCase):
                 goal="Review a sensitive request.",
                 context="",
                 constraints=[],
-                domain_type=DomainType.OTHER,
-                domain_label="other",
                 sensitivity=SensitivityLevel.HIGH,
                 success_criteria=[],
             )
@@ -83,7 +80,6 @@ class Layer1IntakeTests(unittest.TestCase):
         self.assertEqual(
             assessment.warnings,
             [
-                "Domain taxonomy fallback OTHER was used.",
                 "High-sensitivity task without explicit constraints.",
                 "No explicit success criteria were extracted.",
                 "Task context is empty.",
@@ -145,8 +141,6 @@ class Layer1IntakeTests(unittest.TestCase):
                 goal="Review a customer contract and judge whether it can be signed.",
                 context="Contract review request.",
                 constraints=[],
-                domain_type=DomainType.ANALYSIS,
-                domain_label="contract_review",
                 sensitivity=SensitivityLevel.HIGH,
                 success_criteria=["Provide a decision."],
             )
@@ -165,8 +159,6 @@ class Layer1IntakeTests(unittest.TestCase):
                 goal="Find official EU sources about the DMA and produce a short summary.",
                 context="The user prefers official EU sources.",
                 constraints=["Prefer official EU sources."],
-                domain_type=DomainType.RESEARCH,
-                domain_label="dma_official_source_research",
                 sensitivity=SensitivityLevel.LOW,
                 success_criteria=[
                     "List official sources.",
@@ -190,7 +182,10 @@ class Layer1IntakeTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(result.structured_task.task_spec.domain_type, DomainType.RESEARCH)
+        self.assertEqual(
+            result.structured_task.task_spec.goal,
+            "Find official EU sources about the DMA and produce a short summary.",
+        )
         self.assertEqual(
             result.structured_task.execution_policy.policy_profile_name,
             "default",
@@ -210,8 +205,6 @@ class Layer1IntakeTests(unittest.TestCase):
                 goal="Find official EU sources about the DMA and produce a short summary.",
                 context="",
                 constraints=["Prefer official EU sources."],
-                domain_type=DomainType.RESEARCH,
-                domain_label="dma_official_source_research",
                 sensitivity=SensitivityLevel.LOW,
                 success_criteria=[
                     "List official sources.",
@@ -238,8 +231,8 @@ class Layer1IntakeTests(unittest.TestCase):
         self.assertIn("Task context is empty.", result.metadata.warnings)
         self.assertNotIn("context", result.metadata.missing_information)
 
-    def test_policy_repository_merges_domain_and_sensitivity_overrides(self) -> None:
-        # Domain and sensitivity overrides should compose into one resolved policy.
+    def test_policy_repository_merges_sensitivity_override(self) -> None:
+        # Sensitivity remains the only task-derived policy override.
         config = {
             "default_policy": {
                 "confidence_threshold": 0.65,
@@ -247,23 +240,11 @@ class Layer1IntakeTests(unittest.TestCase):
                 "read_only_mode": False,
             },
             "named_profiles": {},
-            "domain_overrides": {
-                "external_communication": {
-                    "read_only_mode": True,
-                }
-            },
             "sensitivity_overrides": {
                 "high": {
                     "confidence_threshold": 0.8,
                     "budget": {"max_steps": None, "max_tool_calls": None},
-                }
-            },
-            "domain_sensitivity_overrides": {
-                "external_communication": {
-                    "high": {
-                        "confidence_threshold": 0.9,
-                        "budget": {"max_steps": None, "max_tool_calls": None},
-                    }
+                    "read_only_mode": True,
                 }
             },
         }
@@ -275,7 +256,6 @@ class Layer1IntakeTests(unittest.TestCase):
             repository = JsonExecutionPolicyRepository(config_path=config_path)
             profile = repository.get_policy_profile(
                 profile_name=None,
-                domain_type=DomainType.EXTERNAL_COMMUNICATION,
                 sensitivity=SensitivityLevel.HIGH,
             )
         finally:
@@ -283,7 +263,7 @@ class Layer1IntakeTests(unittest.TestCase):
                 config_path.unlink()
 
         self.assertEqual(profile.name, "default")
-        self.assertEqual(profile.confidence_threshold, 0.9)
+        self.assertEqual(profile.confidence_threshold, 0.8)
         self.assertIsNone(profile.max_steps)
         self.assertIsNone(profile.max_tool_calls)
         self.assertTrue(profile.read_only_mode)
@@ -295,7 +275,6 @@ class _StubPolicyRepository:
         self,
         *,
         profile_name: str | None,
-        domain_type: DomainType,
         sensitivity: SensitivityLevel,
     ) -> PolicyProfile:
         # Always return the same simple default-like profile for tests.
@@ -314,8 +293,6 @@ def _incomplete_sensitive_task_spec() -> TaskSpec:
         goal="Review a sensitive request.",
         context="",
         constraints=[],
-        domain_type=DomainType.OTHER,
-        domain_label="other",
         sensitivity=SensitivityLevel.HIGH,
         success_criteria=[],
     )

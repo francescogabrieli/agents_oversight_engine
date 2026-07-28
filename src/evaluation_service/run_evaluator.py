@@ -8,7 +8,7 @@ from pathlib import Path
 from .contracts import (
     Layer2EvaluationRun,
     NormalizedHumanReview,
-    NormalizedObservedEvidence,
+    NormalizedObservation,
     NormalizedOversightAssessment,
     NormalizedPlanStep,
     NormalizedToolCall,
@@ -27,11 +27,12 @@ def evaluate_normalized_trace(
         _iter_human_review_decision_types(normalized.human_review)
     )
     evidence_support_counts = _count_values(
-        evidence.content_state for evidence in normalized.observed_evidence
+        "with_locator" if observation.locator else "without_locator"
+        for observation in normalized.observations
     )
     typed_mismatches, heuristic_mismatches = _legacy_requirement_mismatch_counts(
         plan_steps=normalized.plan_steps,
-        observed_evidence=normalized.observed_evidence,
+        observations=normalized.observations,
     )
 
     tool_call_count = len(normalized.tool_calls)
@@ -115,12 +116,12 @@ def _count_values(values: Iterable[str]) -> dict[str, int]:
 
 # Preserve historical typed-vs-heuristic mismatch metrics without exposing rank
 # semantics to the canonical runtime or evaluation input contract.
-def _legacy_requirement_mismatch_counts(*, plan_steps, observed_evidence) -> tuple[int, int]:
-    if not observed_evidence:
+def _legacy_requirement_mismatch_counts(*, plan_steps, observations) -> tuple[int, int]:
+    if not observations:
         return 0, 0
     has_weak_content = any(
-        evidence.content_state in {"metadata_only", "provider_cited_summary"}
-        for evidence in observed_evidence
+        observation.legacy_content_state in {"metadata_only", "provider_cited_summary"}
+        for observation in observations
     )
     typed = sum(
         1

@@ -5,7 +5,7 @@ import subprocess
 import time
 from typing import Any
 
-from ..contracts import ToolExecutionResult, ToolName, ToolRequest, ToolSource
+from ..contracts import ToolExecutionResult, ToolName, ToolObservation, ToolRequest
 from ..models import McpServerDefinition, ToolDefinition, ToolExecutionError, ToolGatewayConfig
 from ..results import failure_result
 from ..text import truncate_text
@@ -88,11 +88,11 @@ def normalize_mcp_result(
             else f"MCP tool '{definition.mcp_tool_name}' returned an error."
         ),
         content=content,
-        sources=(
-            ToolSource(
-                title=tool_request.tool_name.value,
+        observations=(
+            ToolObservation(
+                observation_id=f"{tool_request.request_id}:result",
                 locator=f"mcp://{definition.mcp_server_id}/{definition.mcp_tool_name}",
-                snippet=truncate_text(content, 500),
+                content=content,
             ),
         )
         if content

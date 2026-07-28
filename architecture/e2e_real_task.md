@@ -22,28 +22,18 @@ Output rilevante:
 ## 2. Bootstrap Runtime
 
 1. `bootstrap_from_intake` costruisce `TaskState`.
-2. I fatti autorevoli gia presenti nell'intake vengono materializzati come `observed_evidence` iniziale con provenance `intake_provided`.
+2. Goal, contesto, vincoli e criteri di successo restano istruzioni della task e non vengono trasformati in evidenze.
 3. Il thread runtime viene agganciato alla persistenza locale, cosi resume, dashboard e trace leggono la stessa run.
 
 Effetto pratico:
-- il runtime puo gia fare drafting locale prudente senza aver ancora usato tool
-- la trace parte con una base esplicita di evidenza, non da stato vuoto
+- il runtime puo usare il materiale fornito dall'utente come input autorizzato
+- le prove di azioni esterne compaiono solo dopo osservazioni concrete dei tool
 
 ## 3. Planning Del Task Reale
 
-Per un task "fonti ufficiali + short summary", il planner non dovrebbe produrre una pipeline lunga e generica.
-La baseline attuale compatta i casi over-decomposed verso una traiettoria piu proporzionata.
+Il planner produce l'intera traiettoria semantica necessaria alla task. Il suo prompt richiede passi completi, verificabili e proporzionati, senza ricette hardcoded per ricerca, email o altri domini.
 
-Pattern tipico:
-1. raccogliere e verificare fonti ufficiali
-2. produrre un summary breve al livello di precisione supportato
-
-Ogni `PlanStep` puo includere:
-- `step_kind`
-- `evidence_requirement`
-- `claim_precision_ceiling`
-
-Questo evita che l'actor debba inferire tutta la governance dai soli testi naturali del piano.
+Il runtime conserva esattamente i passi restituiti dal planner: non li compatta, non aggiunge meta-step e non sostituisce il piano con una normalizzazione locale. Ogni `PlanStep` contiene soltanto `step_id`, `objective`, `rationale`, `expected_outcome` e lo `status` posseduto dal runtime.
 
 ## 4. Actor, Governance E Tool Loop
 
@@ -62,11 +52,11 @@ tool_gateway
 
 Per il task DMA, il comportamento atteso e:
 
-1. l'actor lavora solo sullo step corrente
+1. l'actor riceve il piano completo e può committare soltanto lo step corrente
 2. se servono fonti ufficiali, emette una `ToolRequest` read-only
 3. `governance` valuta sempre il turn prima del tool
 4. solo dopo una direttiva compatibile il `tool_gateway` esegue davvero il tool
-5. `observe_tool_result` converte il risultato in `ObservedEvidence` con support level esplicito
+5. `observe_tool_result` registra le `ToolObservation` concrete prodotte dall'adapter senza assegnare support level o classificazioni semantiche
 6. l'actor riparte con quella evidenza osservata
 
 Tool tipici in questo scenario:

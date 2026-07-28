@@ -165,6 +165,10 @@ def human_review(state: TaskState, *, thread_id: str) -> TaskState:
     runtime_state.last_human_review_request = pending_request
     runtime_state.pending_human_review_request = None
     runtime_state.human_review_history.append(human_review_decision)
+    # A typed human decision is a concrete state change and resets local liveness recovery.
+    runtime_state.progress_epoch += 1
+    runtime_state.state_revision += 1
+    runtime_state.no_progress_turns = 0
     runtime_state.step_index += 1
     runtime_state.step_history.append(
         StepRecord(
@@ -515,7 +519,6 @@ def _resolve_resume_state(state: TaskState) -> RuntimeState:
 
     if state.actor_result is not None and state.actor_result.result_type in {
         ActorResultType.INTERMEDIATE_OUTPUT,
-        ActorResultType.FINAL_OUTPUT,
     }:
         if state.current_plan_step_index < len(state.plan_steps) - 1:
             return RuntimeState.READY_NEXT_STEP
@@ -567,8 +570,42 @@ def _resolve_allowed_human_review_decisions(
     *,
     state: TaskState,
 ) -> tuple[HumanReviewDecisionType, ...]:
-    # Every HITL exposes one uniform operator contract; edits remain typed at submit time.
-    del state
+    # Choices are intentionally limited to the pause boundary, not a universal control panel.
+    request = state.pending_human_review_request
+    reason_codes = set()
+    if state.last_governance_decision is not None:
+        reason_codes.update(governance_reason_code_values(state.last_governance_decision))
+    if "ask_clarification_required" in reason_codes:
+        return (
+            HumanReviewDecisionType.ASK_CLARIFICATION,
+            HumanReviewDecisionType.ABORT,
+        )
+    if state.last_external_execution_receipt is not None and (
+        state.last_external_execution_receipt.status == ExternalExecutionStatus.INDETERMINATE
+    ):
+        return (
+            HumanReviewDecisionType.APPROVE_CONTINUE,
+            HumanReviewDecisionType.REQUEST_MORE_EVIDENCE,
+            HumanReviewDecisionType.ABORT,
+        )
+    if {
+        "judge_unsafe",
+        "judge_uncertain",
+        "action_revision_limit_reached",
+    } & reason_codes:
+        return (
+            HumanReviewDecisionType.MODIFY_AND_CONTINUE,
+            HumanReviewDecisionType.REPLAN,
+            HumanReviewDecisionType.ABORT,
+        )
+    if "capability_approval_required" in reason_codes:
+        return (
+            HumanReviewDecisionType.APPROVE_CONTINUE,
+            HumanReviewDecisionType.MODIFY_AND_CONTINUE,
+            HumanReviewDecisionType.ABORT,
+        )
+    # Compatibility fallback for legacy checkpoint requests that predate reason-scoped actions.
+    del request
     return (
         HumanReviewDecisionType.APPROVE_CONTINUE,
         HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY,

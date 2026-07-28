@@ -140,6 +140,39 @@ class RuntimeArtifactStore:
 
         return paths
 
+    # Persist a recoverable diagnostic marker without fabricating a successful final state.
+    def persist_failure(
+        self,
+        *,
+        thread_id: str,
+        error: Exception,
+        task_state: TaskState | None,
+    ) -> Path:
+        paths = self.build_paths(thread_id)
+        paths.thread_dir.mkdir(parents=True, exist_ok=True)
+        failure_path = paths.thread_dir / "runtime_failure.json"
+        failure_payload = {
+            "artifact_version": "layer2_runtime_failure_v1",
+            "thread_id": thread_id,
+            "error_type": type(error).__name__,
+            "error_message": str(error),
+            "runtime_state": (
+                task_state.current_state.value if task_state is not None else None
+            ),
+            "actor_turn_count": (
+                task_state.actor_turn_count if task_state is not None else None
+            ),
+            "tool_call_count": (
+                task_state.tool_call_count if task_state is not None else None
+            ),
+            "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+        failure_path.write_text(
+            json.dumps(failure_payload, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return failure_path
+
     # Reconstruct the canonical artifact locations for one thread.
     def build_paths(self, thread_id: str) -> RuntimeArtifactPaths:
         thread_dir = self.root_path / thread_id

@@ -69,7 +69,7 @@ Questo macro-block è implementato come **codice esterno al grafo LangGraph**.
 Responsabilità principali:
 - interpretare il task
 - estrarre goal, contesto e vincoli
-- classificare dominio e sensibilità
+- rilevare la sensibilità senza imporre una tassonomia di dominio
 - derivare criteri di successo
 - associare una `execution_policy` configurata dal sistema
 - produrre metadata di parsing e tracciabilità
@@ -90,10 +90,9 @@ Output canonico:
       "goal": "...",
       "context": "...",
       "constraints": [],
-      "domain_type": "research",
-      "domain_label": "generic_research",
       "sensitivity": "medium",
-      "success_criteria": []
+      "success_criteria": [],
+      "execution_intent": "proposal_only"
     },
     "execution_policy": {
       "confidence_threshold": 0.65,
@@ -266,12 +265,12 @@ Campi iniziali minimi:
 - `intake_metadata = intake_payload.metadata`
 - `step_index = 0`
 - `step_history = []`
-- `collected_evidence = []`
+- `observations = []`
 - `last_tool_result = null`
 - `proposed_action = null`
 - `governance_output = null`
 - `human_decision = null`
-- `final_output = null`
+- `final_output_text = null`
 
 Regole iniziali di bootstrap:
 - `parse_status = complete` -> `current_state = planning`
@@ -334,12 +333,12 @@ Vincoli sull'output di `actor`:
 
 Nota operativa:
 - il completamento di un `current_plan_step` non coincide necessariamente con una singola azione
-- uno stesso `current_plan_step` può richiedere più iterazioni locali `actor -> tool_gateway -> observe_tool_result`
-- il `replanner` viene coinvolto quando il passo è completato, quando le evidenze raccolte invalidano il piano corrente, oppure quando la governance richiede correzione, chiarimento o escalation
+- uno stesso `current_plan_step` può richiedere più iterazioni locali `actor -> actor` e `actor -> governance -> tool_gateway -> observe_tool_result -> actor`
+- il `replanner` viene coinvolto dopo un `NEEDS_REPLAN` esplicito e motivato dell'actor, una recovery tecnica tipizzata o una decisione umana; il completamento normale di un passo non causa replanning
 
 #### Governance Core: OPA-first, operazioni external e pilastri active/shadow
 
-Aggiornamento di refactor: il piano semantico non incorpora livelli di evidenza, precision ceilings o meta-step di compliance. Il PEP invia a OPA fatti osservabili e non ordinati su contenuto, autorità, tipo documento, estraibilità e allineamento della citazione. `actor_self_confidence` è un segnale contestuale di incertezza: da sola non ferma né degrada una run che progredisce; OPA la combina solo con assenza di progresso, recovery esaurito o una proposta governed-external. I pilastri sono richiesti per evento, mentre behavioural e risk sono shadow e campionati fuori dal percorso caldo. Gli effetti richiesti sono espressi esplicitamente nell'intake, quindi una task research può includere una proposta email senza dipendere dal suo `domain_type`; l'esecuzione email continua a richiedere judge, digest esatto e resume HITL.
+Aggiornamento di refactor: il piano semantico non incorpora livelli di evidenza, precision ceilings o meta-step di compliance e il runtime non lo compatta, comprime o riscrive. L’actor riceve il piano completo come contesto, ma può completare soltanto il passo corrente. I tool adapter producono `ToolObservation` minime (`observation_id`, contenuto concreto e locator opzionale); goal, context, vincoli e criteri di successo restano istruzioni, non evidenze. Il PEP invia a OPA soltanto invarianti e fatti osservabili, mentre il judge valuta l’allineamento semantico delle proposte governed-external. `actor_self_confidence` è un segnale contestuale di incertezza: da sola non ferma né degrada una run che progredisce. `execution_intent` conserva l’intenzione di produrre un effetto esterno senza duplicare il piano in un JSON di operazioni richieste; l’effetto concreto nasce dalla proposta tipizzata dell’actor e continua a richiedere judge, digest esatto e resume HITL.
 
 Il nodo LangGraph `governance` è il **Policy Enforcement Point (PEP)**. OPA è il solo **Policy Decision Point (PDP)**: possiede policy statica, soglie, pesi, precedenze, cap, invarianti e direttiva finale. Python non combina più direttive con un decision combiner nel percorso live.
 
@@ -359,17 +358,17 @@ I pillar e la loro autorità sono:
 | Pilastro | Modalità | Producer | Autorità nella decisione OPA |
 | --- | --- | --- | --- |
 | `static_policy` | active | fatti deterministici, execution policy, profili capability | hard deny assorbente soltanto per violazioni specifiche |
-| `evidence` | active | evidenza osservata, validation e precisione del claim | gap e mismatch di precisione |
-| `trajectory` | active | contatori per-step, errori provider/tool, replan, recovery e revisioni | recovery, replan, HITL o stop |
-| `judge` | active quando richiesto | assessment semantico tipizzato dell’esatta proposta external | OPA mappa `safe`, `needs_revision`, `unsafe`, `uncertain` |
+| `evidence` | active al completion boundary | osservazioni concrete e validità dei riferimenti selezionati | richiesta di correzione soltanto per gap strutturali concreti |
+| `trajectory` | active ai confini semantici | storia aggregata, replan espliciti, tool outcome, recovery e revisioni | replan ammesso o churn verso HITL; nessuna pressione sui turni narrativi |
+| `judge` | active per execution candidate | assessment della task, dell’intero percorso osservabile e dell’esatta proposta external | OPA mappa `safe`, `needs_revision`, `unsafe`, `uncertain` |
 | `risk` | shadow | consequence/impact facts da proposta e profilo versionato | nessuna influenza sulla direttiva |
 | `behavioral` | shadow | read model SQLite di similarity, deviation e novelty | nessuna influenza sulla direttiva |
 
 `static_policy` non blocca genericamente `write` o `external`: applica soltanto guardrail deterministici, come `read_only_mode` più effetto mutating, profilo database read-only più statement non-`SELECT`, statement SQL ambiguo/multiplo o destinazione esplicitamente proibita. Una `SELECT` aziendale resta `governed_external`, ma passa lo static e richiede il judge prima di essere candidata all’esecuzione.
 
-La prima passata OPA richiede il judge esclusivamente quando la proposta è `execution_candidate`, il boundary è `governed_external` e lo static non ha già prodotto hard deny. Output locali, draft parziali e letture di evidenza pubblica (`web_search`, `fetch_url_text`) non pagano una chiamata judge. Il judge riceve goal, vincoli, step identificato da `actor_result.plan_step_id`, proposta, digest, target ed evidenza rilevante; non riceve behavioral, dynamic policy o risk e non emette direttive runtime.
+La prima passata OPA richiede il judge esclusivamente quando la proposta è `execution_candidate`, il boundary è `governed_external` e lo static non ha già prodotto hard deny. Output locali, draft parziali e letture di evidenza pubblica (`web_search`, `fetch_url_text`) non pagano una chiamata judge. Il judge riceve task e criteri, piano completo, step conclusi, scratchpad audit-safe, tool history, eventi runtime, tutte le osservazioni, riferimenti selezionati, revisioni precedenti, proposta, digest e target; non riceve behavioral, dynamic policy o risk e non emette direttive runtime.
 
-Per una comunicazione external, il passo di sintesi dell'actor espone soltanto l'azione tipizzata con `channel`, `recipient`, `subject` e `body`, mentre i completion generici restano esclusi da quel turno. Il runtime deriva boundary, effect, destination class e digest senza accettarli dal provider. Il piano viene normalizzato a un solo passo di draft, preceduto al massimo da un passo di evidence realmente necessario: planner e actor non devono anticipare il giudizio semantico né trasformarlo in meta-step di compliance.
+Per una comunicazione external, il passo di sintesi dell'actor espone soltanto l'azione tipizzata con `channel`, `recipient`, `subject` e `body`, mentre i completion generici restano esclusi da quel turno. Il runtime deriva boundary, effect, destination class e digest senza accettarli dal provider. Il runtime preserva il piano semantico del planner senza compattarlo o sostituirlo: planner e actor non devono anticipare il giudizio semantico né trasformarlo in meta-step di compliance.
 
 Le direttive possibili sono `continue`, `continue_read_only`, `request_more_evidence`, `revise_action`, `replan`, `wait_human_review`, `ask_user_clarification` e `stop`. `revise_action` invalida la proposta corrente, restituisce findings audit-safe all’actor e conta nella trajectory; non viene usato né `request_more_evidence` per correggere il tono né `replan` per una semplice revisione del payload.
 
@@ -631,5 +630,18 @@ CLI Python standalone, normalizzatore di trace, client OPA HTTP e report JSON/Ma
 ---
 
 # Use case e protocollo di valutazione
+
+## Completion, recovery e approval boundary
+
+Un output dell'actor non è una transizione di stato per il solo fatto di essere
+narrativo. Un risultato `STEP_COMPLETED` crea un `StepCompletionCandidate`:
+il cursore e la history avanzano soltanto con il commit atomico successivo alla
+direttiva OPA. I failure tecnici (protocollo provider, duplicate, timeout e
+no-state-delta) restano nel recovery runtime prima della governance semantica e
+non diventano evidence né progresso. Il Judge riceve esclusivamente la proposta
+esterna immutabile con digest, evidence selezionate e contesto compatto; il suo
+assessment è riusato per lo stesso digest. Il `approval_mode` del capability
+profile (`always`, `conditional`, `never`) è un fatto inviato a OPA: Python
+applica la direttiva, senza aggiungere gate per tipo di capability.
 
 I casi sperimentali devono coprire almeno: (1) ricerca read-only con evidenza insufficiente recuperabile, (2) degrado di traiettoria o failure provider che richiede replan, (3) proposta external benigna che richiede judge ma può continuare senza HITL, (4) proposta unsafe/uncertain o judge indisponibile che richiede HITL, e (5) revisione con nuovo digest. Ogni caso deve esportare trace, modalità active/shadow e outcome atteso dei pilastri.

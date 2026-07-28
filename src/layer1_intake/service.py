@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .models import (
     BudgetConfig,
-    DomainType,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeResult,
@@ -47,7 +46,6 @@ class ExecutionPolicyRepositoryPort(Protocol):
         self,
         *,
         profile_name: str | None,
-        domain_type: DomainType,
         sensitivity: SensitivityLevel,
     ) -> PolicyProfile: ...
 
@@ -153,7 +151,6 @@ class PolicyResolver:
         # Policy selection is system-controlled and based on task attributes plus optional profile.
         profile = self._repository.get_policy_profile(
             profile_name=profile_name,
-            domain_type=task_spec.domain_type,
             sensitivity=task_spec.sensitivity,
         )
 

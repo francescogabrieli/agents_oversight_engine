@@ -5,7 +5,7 @@ from typing import Callable, Protocol
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
-from ..contracts import DocumentType, EvidenceContentState, Extractability, SourceAuthority, ToolErrorCode, ToolExecutionResult, ToolRequest, ToolSource
+from ..contracts import ToolErrorCode, ToolExecutionResult, ToolObservation, ToolRequest
 from ..eu_legal import try_fetch_specialized_legal_document
 from ..extractors import extract_pdf_text, extract_title, extract_visible_text
 from ..models import ToolDefinition
@@ -85,15 +85,11 @@ class HttpFetchAdapter:
             content=content,
             truncated=truncated,
             extractability_limited=truncated,
-            sources=(
-                ToolSource(
-                    title=title,
+            observations=(
+                ToolObservation(
+                    observation_id=f"{tool_request.request_id}:document",
                     locator=tool_request.url or "",
-                    snippet=truncate_text(content, 500),
-                    content_state=EvidenceContentState.EXTRACTED_PARTIAL if truncated else EvidenceContentState.EXTRACTED_FULL,
-                    source_authority=SourceAuthority.UNKNOWN,
-                    document_type=DocumentType.DOCUMENTATION if content_type == "text/html" else DocumentType.UNKNOWN,
-                    extractability=Extractability.TRUNCATED if truncated else Extractability.COMPLETE,
+                    content=content,
                 ),
             ),
         )

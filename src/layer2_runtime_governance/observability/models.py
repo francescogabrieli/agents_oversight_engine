@@ -24,8 +24,6 @@ class TraceIntakeSummary:
     # TraceIntakeSummary preserves the Layer 1 handoff in compact audit form.
     goal: str
     context: str
-    domain_type: str
-    domain_label: str
     sensitivity: str
     success_criteria: tuple[str, ...]
     constraints: tuple[str, ...]
@@ -39,7 +37,6 @@ class TraceIntakeSummary:
     max_tool_calls: int | None
     read_only_mode: bool
     execution_intent: str
-    requested_operations: tuple[dict[str, str | None], ...]
 
 
 # Read-only observability component extracted from the trace facade.
@@ -76,6 +73,7 @@ class TraceActorTurn:
 @dataclass(frozen=True)
 class TraceToolCall:
     # TraceToolCall records the tool request/result material retained by TaskState.
+    request_id: str
     plan_step_id: str
     tool_name: str
     reason: str
@@ -95,25 +93,16 @@ class TraceToolCall:
     error_code: str | None
     truncated: bool
     extractability_limited: bool
-    sources: tuple[dict[str, Any], ...]
+    observations: tuple[dict[str, Any], ...]
 
 
 # Read-only observability component extracted from the trace facade.
 @dataclass(frozen=True)
-class TraceObservedEvidence:
-    # TraceObservedEvidence is the grounded evidence surface visible to later actor turns.
-    evidence_id: str
-    plan_step_id: str
-    title: str
-    locator: str
-    excerpt: str
-    source_kind: str
-    source_tool: str | None
-    content_state: str
-    source_authority: str
-    document_type: str
-    extractability: str
-    citation_alignment: str
+class TraceToolObservation:
+    # A trace observation is the concrete content returned by one runtime capability.
+    observation_id: str
+    content: str
+    locator: str | None
 
 
 # Read-only canonical governance record; pillar outputs are stored exactly once per pass.
@@ -371,7 +360,7 @@ class Layer2RuntimeTrace:
     actor: TraceActorTurn
     execution: TraceExecutionSummary
     tool_calls: tuple[TraceToolCall, ...]
-    observed_evidence: tuple[TraceObservedEvidence, ...]
+    observations: tuple[TraceToolObservation, ...]
     governance_passes: tuple[TraceGovernancePass, ...]
     human_review: TraceHumanReviewSummary
     external_communication: TraceExternalCommunicationSummary | None
@@ -384,7 +373,7 @@ __all__ = [
     "TracePlanStep",
     "TraceActorTurn",
     "TraceToolCall",
-    "TraceObservedEvidence",
+    "TraceToolObservation",
     "TraceGovernancePass",
     "TraceOversightSignal",
     "TraceOversightAssessment",

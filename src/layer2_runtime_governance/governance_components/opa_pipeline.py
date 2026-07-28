@@ -67,7 +67,7 @@ def evaluate_opa_first_governance(
         getattr(
             policy_engine_service,
             "policy_config_version",
-            "layer2_governance_thresholds_v1",
+            "layer2_governance_thresholds_v2",
         )
     )
     thresholds_version = policy_config_version
@@ -127,15 +127,23 @@ def evaluate_opa_first_governance(
     else:
         pillars["risk"] = _unavailable_pillar("risk", thresholds_version, mode="shadow", decision_influence=False)
 
-    try:
-        pillars["trajectory"] = build_trajectory_signal(
-            task_state=task_state,
-            policy_input=policy_input,
-            thresholds_version=thresholds_version,
+    if pillar_requirements.get("require_trajectory", False):
+        try:
+            pillars["trajectory"] = build_trajectory_signal(
+                task_state=task_state,
+                policy_input=policy_input,
+                thresholds_version=thresholds_version,
+            )
+        except Exception as exc:
+            pillar_errors["trajectory"] = str(exc)
+            pillars["trajectory"] = _unavailable_pillar("trajectory", thresholds_version)
+    else:
+        pillars["trajectory"] = _unavailable_pillar(
+            "trajectory",
+            thresholds_version,
+            mode="inactive",
+            decision_influence=False,
         )
-    except Exception as exc:
-        pillar_errors["trajectory"] = str(exc)
-        pillars["trajectory"] = _unavailable_pillar("trajectory", thresholds_version)
 
     dynamic_assessment = _build_dynamic_assessment_from_signals(pillars=pillars)
 
@@ -172,15 +180,24 @@ def evaluate_opa_first_governance(
         try:
             if external_operation is None:
                 raise ValueError("OPA required judge without a canonical external operation.")
-            resolved_judge = judge_service or build_default_judge()
-            judge_context = build_judge_context(
-                task_state=task_state,
-                external_operation=external_operation,
-                invocation_reason="opa_required_governed_external_execution_candidate",
+            # A digest identifies the immutable exact payload; re-use its valid assessment.
+            judge_assessment = next(
+                (
+                    assessment
+                    for assessment in reversed(task_state.judge_history)
+                    if assessment.evaluated_operation_digest == external_operation.payload_digest
+                    and assessment.status.value == "active"
+                ),
+                None,
             )
-            judge_assessment = resolved_judge.evaluate(
-                context=judge_context,
-            )
+            if judge_assessment is None:
+                resolved_judge = judge_service or build_default_judge()
+                judge_context = build_judge_context(
+                    task_state=task_state,
+                    external_operation=external_operation,
+                    invocation_reason="opa_required_governed_external_execution_candidate",
+                )
+                judge_assessment = resolved_judge.evaluate(context=judge_context)
             judge_assessment = validate_required_judge_assessment(
                 judge_assessment=judge_assessment,
                 expected_operation_digest=external_operation.payload_digest,

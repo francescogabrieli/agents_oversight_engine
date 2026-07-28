@@ -1,14 +1,20 @@
 """Framework-independent public domain view for canonical Layer 2 state."""
 
-from .evidence import CitationAlignment, DocumentType, EvidenceContentState, EvidenceSourceKind, Extractability, ObservedEvidence, SourceAuthority
 from .runtime_records import (
     ExecutedPlanStep,
+    AgentWorkspace,
+    ReplanCheckpoint,
     ScratchpadEntry,
     ScratchpadEntryType,
     StepValidation,
+    StepCompletionCandidate,
+    StepArtifact,
+    ToolAttempt,
+    ToolDisposition,
+    ToolInvocation,
 )
 from .lifecycle import RuntimeFlag, RuntimeState, StepRecord
-from .plan import PlanStep, PlanStepStatus, PlannerDecision
+from .plan import PlanStep, PlanStepStatus, PlannerDecision, semantic_plan_signature
 from .review import (
     ExternalCommunicationDraft,
     ExternalCommunicationPhase,
@@ -40,11 +46,8 @@ def __getattr__(name: str):
 __all__ = [
     "ActorResult",
     "ActorResultType",
+    "AgentWorkspace",
     "CapabilityAccessMode",
-    "EvidenceSourceKind",
-    "CitationAlignment",
-    "DocumentType",
-    "EvidenceContentState",
     "ExecutedPlanStep",
     "ExternalCommunicationDraft",
     "ExternalCommunicationPhase",
@@ -53,21 +56,25 @@ __all__ = [
     "HumanReviewDecisionType",
     "HumanReviewExternalEdit",
     "HumanReviewRequest",
-    "ObservedEvidence",
     "PlanStep",
     "PlanStepStatus",
     "PlannerDecision",
+    "ReplanCheckpoint",
     "RuntimeFlag",
     "RuntimeState",
     "ScratchpadEntry",
     "ScratchpadEntryType",
     "StepRecord",
+    "StepArtifact",
     "StepValidation",
-    "Extractability",
-    "SourceAuthority",
+    "StepCompletionCandidate",
     "TaskState",
+    "ToolAttempt",
+    "ToolDisposition",
+    "ToolInvocation",
     "coerce_external_communication_draft",
     "coerce_external_operation_proposal",
     "coerce_human_review_external_edit",
     "normalize_task_state_serialization",
+    "semantic_plan_signature",
 ]

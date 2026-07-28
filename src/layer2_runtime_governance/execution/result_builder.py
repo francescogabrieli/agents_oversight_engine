@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 
-from layer1_intake import ExecutionIntent, RequestedOperationType
+from layer1_intake import ExecutionIntent
 
 from ..actor_contract import ActorResult, ActorResultType, ActorTask, CapabilityAccessMode
 from ..domain import ScratchpadEntry, ScratchpadEntryType, StepValidation
@@ -157,19 +157,10 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
         )
 
     if tool_name == "emit_intermediate_output":
-        _require_arguments(arguments, "summary", "output_text", "progress_note")
-        # Intermediate output deliberately keeps the current step active.
-        return ActorResult(
-            plan_step_id=plan_step_id,
-            result_type=ActorResultType.INTERMEDIATE_OUTPUT,
-            summary=arguments["summary"],
-            capability_mode=CapabilityAccessMode.NONE,
-            output_text=arguments["output_text"],
-            scratchpad_entry=_build_scratchpad_entry(
-                actor_task=actor_task,
-                entry_type=ScratchpadEntryType.PROGRESS_NOTE,
-                summary=arguments["progress_note"],
-            ),
+        # Accept one legacy provider envelope only as an explicit finite recovery.
+        return build_provider_replan_result(
+            actor_task=actor_task,
+            detail="legacy intermediate output is not an operational actor outcome",
         )
 
     if tool_name == "emit_step_completed":
@@ -203,46 +194,7 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
             ),
         )
 
-    if tool_name == "emit_final_output":
-        _require_arguments(arguments, "output_text")
-        completion_arguments = _ensure_completion_arguments(arguments=arguments)
-        completion_arguments["summary"] = _sanitize_completion_text(
-            str(completion_arguments.get("summary", ""))
-        )
-        completion_arguments["output_text"] = _sanitize_completion_text(
-            str(completion_arguments.get("output_text", ""))
-        )
-        completion_arguments["completion_rationale"] = _sanitize_completion_text(
-            str(completion_arguments.get("completion_rationale", ""))
-        )
-        # Final output is still subject to the same validation contract as normal steps.
-        return ActorResult(
-            plan_step_id=plan_step_id,
-            result_type=ActorResultType.FINAL_OUTPUT,
-            summary=completion_arguments["summary"],
-            capability_mode=CapabilityAccessMode.NONE,
-            output_text=completion_arguments["output_text"],
-            scratchpad_entry=_build_scratchpad_entry(
-                actor_task=actor_task,
-                entry_type=ScratchpadEntryType.COMPLETION_RATIONALE,
-                summary=completion_arguments["completion_rationale"],
-            ),
-            step_validation=_build_step_validation(
-                actor_task=actor_task,
-                arguments=completion_arguments,
-                rationale_key="completion_rationale",
-            ),
-        )
-
     if tool_name == "emit_external_communication_draft":
-        if not any(
-            operation.operation_type == RequestedOperationType.EXTERNAL_COMMUNICATION
-            and operation.channel == "email"
-            for operation in actor_task.task_spec.requested_operations
-        ):
-            raise ActorExecutionError(
-                "emit_external_communication_draft requires an explicit requested email operation."
-            )
         _require_arguments(
             arguments,
             "summary",
@@ -536,7 +488,7 @@ def _build_scratchpad_entry(
         plan_step_id=actor_task.current_plan_step.step_id,
         entry_type=entry_type,
         summary=summary,
-        evidence_refs=[item.evidence_id for item in actor_task.observed_evidence],
+        evidence_refs=[item.observation_id for item in actor_task.observations],
     )
 
 
@@ -575,7 +527,7 @@ def _selected_evidence_refs(*, actor_task: ActorTask, arguments: dict[str, objec
         return ()
     if not isinstance(supplied, list) or not all(isinstance(item, str) for item in supplied):
         raise ActorExecutionError("evidence_refs must be a list of evidence identifiers.")
-    known = {item.evidence_id for item in actor_task.observed_evidence}
+    known = {item.observation_id for item in actor_task.observations}
     unknown = set(supplied) - known
     if unknown:
         raise ActorExecutionError("Actor completion references evidence IDs that do not exist.")

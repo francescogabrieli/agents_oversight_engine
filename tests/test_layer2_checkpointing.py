@@ -5,6 +5,7 @@ import shutil
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -25,7 +26,9 @@ from layer2_runtime_governance.infrastructure.checkpointing import (
     CheckpointBackend,
     CheckpointSettings,
     build_default_checkpointer,
+    build_runtime_serializer,
 )
+from layer2_runtime_governance.tool_contract import ToolErrorCode
 
 
 class _RecordingCheckpointer:
@@ -64,6 +67,15 @@ class Layer2CheckpointingTests(unittest.TestCase):
             if saver is not None:
                 saver.conn.close()
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+    # Every typed tool failure must survive checkpoint serialization as its enum.
+    def test_tool_error_code_is_allowlisted_for_checkpoint_roundtrip(self) -> None:
+        serializer = build_runtime_serializer()
+
+        type_tag, payload = serializer.dumps_typed(ToolErrorCode.DUPLICATE_REQUEST)
+        restored = serializer.loads_typed((type_tag, payload))
+
+        self.assertIs(restored, ToolErrorCode.DUPLICATE_REQUEST)
 
     # Verify the production backend fails clearly before graph construction if no URI exists.
     def test_postgres_backend_requires_connection_uri(self) -> None:
@@ -111,6 +123,16 @@ class Layer2CheckpointingTests(unittest.TestCase):
         self.assertEqual(checkpointer.deleted_thread_ids, ["expired-complete"])
         self.assertEqual(report.deleted_thread_ids, ("expired-complete",))
         self.assertEqual(report.retained_thread_count, 3)
+
+    # Terminal checkpoints default to immediate cleanup after their audit artifacts exist.
+    def test_default_retention_keeps_only_resumable_threads(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"LAYER2_COMPLETED_THREAD_RETENTION_DAYS": "0"},
+        ):
+            settings = CheckpointRetentionSettings.from_env()
+
+        self.assertEqual(settings.completed_thread_days, 0)
 
 
 if __name__ == "__main__":

@@ -15,8 +15,6 @@ def build_policy_evaluation_input(*, task_state: TaskState) -> PolicyEvaluationI
     evaluated_step = _resolve_evaluated_plan_step(task_state=task_state, actor_result=actor_result)
     current_tool_request = task_state.current_tool_request or actor_result.tool_request
     return PolicyEvaluationInput(
-        task_domain_type=task_state.task_spec.domain_type,
-        task_domain_label=task_state.task_spec.domain_label,
         task_sensitivity=task_state.task_spec.sensitivity,
         policy_profile_name=task_state.execution_policy.policy_profile_name,
         confidence_threshold=task_state.execution_policy.confidence_threshold,
@@ -36,7 +34,7 @@ def build_policy_evaluation_input(*, task_state: TaskState) -> PolicyEvaluationI
         tool_has_query=bool(current_tool_request and current_tool_request.query),
         tool_has_url=bool(current_tool_request and current_tool_request.url),
         tool_call_count=task_state.tool_call_count,
-        observed_evidence_count=len(task_state.observed_evidence),
+        observation_count=len(task_state.observations),
         actor_turn_count=task_state.actor_turn_count,
         external_communication_phase=(
             task_state.external_communication.phase if task_state.external_communication is not None else None
@@ -52,8 +50,6 @@ def build_policy_evaluation_input(*, task_state: TaskState) -> PolicyEvaluationI
 def build_opa_input_document(*, policy_input: PolicyEvaluationInput) -> dict[str, Any]:
     return {
         "task": {
-            "domain_type": policy_input.task_domain_type.value,
-            "domain_label": policy_input.task_domain_label,
             "sensitivity": policy_input.task_sensitivity.value,
         },
         "policy": {
@@ -69,7 +65,7 @@ def build_opa_input_document(*, policy_input: PolicyEvaluationInput) -> dict[str
             "state": policy_input.runtime_state.value,
             "flags": [flag.value for flag in policy_input.runtime_flags],
             "tool_call_count": policy_input.tool_call_count,
-            "observed_evidence_count": policy_input.observed_evidence_count,
+            "observation_count": policy_input.observation_count,
             "actor_turn_count": policy_input.actor_turn_count,
         },
         "step": {

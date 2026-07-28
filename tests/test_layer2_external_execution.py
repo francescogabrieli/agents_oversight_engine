@@ -16,7 +16,6 @@ from tests.layer2_runtime_fixtures import (
     ActorResultType,
     BudgetConfig,
     CapabilityAccessMode,
-    DomainType,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeResult,
@@ -40,8 +39,6 @@ from tests.layer2_runtime_fixtures import (
 )
 from layer1_intake import (
     ExecutionIntent,
-    RequestedOperation,
-    RequestedOperationType,
 )
 from layer2_runtime_governance.domain import (
     ExternalCommunicationDraft,
@@ -164,7 +161,7 @@ class ExternalEmailActor(ActorPort):
         )
         return ActorResult(
             plan_step_id=step_id,
-            result_type=ActorResultType.FINAL_OUTPUT,
+            result_type=ActorResultType.STEP_COMPLETED,
             summary="Prepared one exact governed email proposal.",
             capability_mode=CapabilityAccessMode.WRITE,
             external_impact=True,
@@ -175,7 +172,7 @@ class ExternalEmailActor(ActorPort):
                 plan_step_id=step_id,
                 actor_self_confidence=0.99,
                 evidence_refs=tuple(
-                    evidence.evidence_id for evidence in actor_task.observed_evidence
+                    observation.observation_id for observation in actor_task.observations
                 ),
                 rationale_summary="The typed proposal is complete.",
             ),
@@ -212,18 +209,9 @@ def _intake(
                 goal="Send a controlled integration email.",
                 context="The recipient is a local capture transport.",
                 constraints=["Use only the registered capability."],
-                domain_type=DomainType.EXTERNAL_COMMUNICATION,
-                domain_label="email",
                 sensitivity=SensitivityLevel.LOW,
                 success_criteria=["Return a typed receipt."],
                 execution_intent=intent,
-                requested_operations=[
-                    RequestedOperation(
-                        operation_type=RequestedOperationType.EXTERNAL_COMMUNICATION,
-                        channel="email",
-                        recipient="capture@example.test",
-                    )
-                ],
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.7,

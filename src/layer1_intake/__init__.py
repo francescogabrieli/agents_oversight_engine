@@ -9,7 +9,6 @@ from .infrastructure import (
 )
 from .models import (
     BudgetConfig,
-    DomainType,
     ExecutionIntent,
     ExecutionPolicy,
     IntakeDomainError,
@@ -19,8 +18,6 @@ from .models import (
     InvalidExecutionPolicyError,
     InvalidTaskSpecError,
     ParseStatus,
-    RequestedOperation,
-    RequestedOperationType,
     SensitivityLevel,
     StructuredTask,
     TaskCompletenessAssessment,
@@ -44,7 +41,6 @@ from .service import (
 __all__ = [
     "BudgetConfig",
     "ClockPort",
-    "DomainType",
     "ExecutionIntent",
     "ExecutionPolicy",
     "ExecutionPolicyRepositoryPort",
@@ -62,8 +58,6 @@ __all__ = [
     "OpenAIParserSettings",
     "OpenAITaskSpecParser",
     "ParseStatus",
-    "RequestedOperation",
-    "RequestedOperationType",
     "PolicyProfile",
     "PolicyResolver",
     "SensitivityLevel",

@@ -40,6 +40,7 @@ from .review import (
     HumanReviewRequest,
 )
 from .task_state import TaskState
+from .runtime_records import AgentWorkspace
 
 
 # Recover typed external drafts from checkpoints that restored nested dictionaries.
@@ -82,6 +83,19 @@ def coerce_human_review_external_edit(
 # Return a normalized copy so trace and dashboard builders never mutate canonical state.
 def normalize_task_state_serialization(task_state: TaskState) -> TaskState:
     normalized = deepcopy(task_state)
+    # Older checkpoints predate operational workspace and progress fields.
+    if not hasattr(normalized, "workspace"):
+        normalized.workspace = AgentWorkspace()
+    if not hasattr(normalized, "progress_epoch"):
+        normalized.progress_epoch = 0
+    if not hasattr(normalized, "state_revision"):
+        normalized.state_revision = 0
+    if not hasattr(normalized, "no_progress_turns"):
+        normalized.no_progress_turns = 0
+    if not hasattr(normalized, "tool_attempts"):
+        normalized.tool_attempts = []
+    if not hasattr(normalized, "tool_invocations"):
+        normalized.tool_invocations = []
     normalized.execution_intent = _coerce_enum(
         ExecutionIntent,
         getattr(

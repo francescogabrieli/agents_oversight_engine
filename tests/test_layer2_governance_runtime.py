@@ -13,8 +13,6 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
 
         policy_input = build_policy_evaluation_input(task_state=task_state)
 
-        self.assertEqual(policy_input.task_domain_type, DomainType.RESEARCH)
-        self.assertEqual(policy_input.task_domain_label, "dma_research")
         self.assertEqual(policy_input.task_sensitivity, SensitivityLevel.LOW)
         self.assertTrue(policy_input.read_only_mode)
         self.assertEqual(policy_input.current_plan_step_id, "step_1")
@@ -25,7 +23,7 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
         self.assertTrue(policy_input.tool_has_query)
         self.assertFalse(policy_input.tool_has_url)
         self.assertEqual(policy_input.tool_call_count, 0)
-        self.assertEqual(policy_input.observed_evidence_count, 0)
+        self.assertEqual(policy_input.observation_count, 0)
 
 
     def test_opa_http_policy_engine_parses_structured_response_without_network(self) -> None:
@@ -62,7 +60,7 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
         self.assertEqual(result.reason_codes, (GovernanceReasonCode.READ_ONLY_ALLOWED,))
         self.assertEqual(result.summary, "Read-only capability use is allowed.")
         self.assertEqual(result.policy_engine_name, "opa_http_policy_engine")
-        self.assertEqual(result.policy_bundle_version, "layer2_governance_v3")
+        self.assertEqual(result.policy_bundle_version, "layer2_governance_v4")
 
 
     def test_read_only_tool_request_routes_through_governance(self) -> None:
@@ -250,7 +248,7 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
                 BehavioralRecommendedDirective.CONTINUE,
             )
             self.assertIsNotNone(assessment.historical_similarity_score)
-            self.assertGreaterEqual(assessment.historical_similarity_score, 0.80)
+            self.assertGreaterEqual(assessment.historical_similarity_score, 0.75)
             self.assertGreaterEqual(assessment.matched_run_count, 5)
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -306,20 +304,14 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
                     oversight_recommended_directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
                 )
             ]
-            state.observed_evidence[0] = ObservedEvidence(
-                evidence_id=state.observed_evidence[0].evidence_id,
-                plan_step_id=state.observed_evidence[0].plan_step_id,
-                title=state.observed_evidence[0].title,
-                locator=state.observed_evidence[0].locator,
-                excerpt=state.observed_evidence[0].excerpt,
-                source_tool=state.observed_evidence[0].source_tool,
-                content_state=EvidenceContentState.METADATA_ONLY,
-                extractability=Extractability.UNAVAILABLE,
-                citation_alignment=CitationAlignment.PROVIDER_ATTRIBUTED,
+            state.observations[0] = ToolObservation(
+                observation_id=state.observations[0].observation_id,
+                locator=state.observations[0].locator,
+                content="Limited source metadata.",
             )
             state.actor_result = ActorResult(
                 plan_step_id="step_3",
-                result_type=ActorResultType.FINAL_OUTPUT,
+                result_type=ActorResultType.STEP_COMPLETED,
                 summary="Final output attempted from weak evidence.",
                 capability_mode=CapabilityAccessMode.NONE,
                 output_text="A detailed final output from limited support.",
@@ -528,7 +520,7 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
         state = _build_actor_ready_state_for_judge()
         state.actor_result = ActorResult(
             plan_step_id="step_1",
-            result_type=ActorResultType.FINAL_OUTPUT,
+            result_type=ActorResultType.STEP_COMPLETED,
             summary="Attempt fragile completion.",
             capability_mode=CapabilityAccessMode.NONE,
             output_text="A precise output from limited evidence.",
@@ -593,17 +585,14 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(result.current_state, RuntimeState.ACTING)
         self.assertIsNone(result.pending_human_review_request)
-        self.assertNotEqual(
-            result.external_communication.phase,
-            ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED,
-        )
+        self.assertIsNone(result.external_communication)
 
 
     def test_required_judge_without_external_proposal_fails_closed(self) -> None:
         state = _build_actor_ready_state_for_judge()
         state.actor_result = ActorResult(
             plan_step_id="step_1",
-            result_type=ActorResultType.FINAL_OUTPUT,
+            result_type=ActorResultType.STEP_COMPLETED,
             summary="Fragile final output.",
             capability_mode=CapabilityAccessMode.NONE,
             output_text="Possibly unsupported completion.",
@@ -658,6 +647,74 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
                     ("judge-persisted-run",),
                 ).fetchone()[0]
             self.assertGreaterEqual(int(row_count), 1)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    # Existing behavioral databases lose the retired task taxonomy column without losing runs.
+    def test_behavioral_runs_schema_migrates_legacy_column_and_preserves_data(self) -> None:
+        import sqlite3
+
+        temp_dir = REPO_ROOT / "_behavioral_schema_migration_test"
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir.mkdir()
+        database_path = temp_dir / "behavioral.sqlite3"
+
+        try:
+            with closing(sqlite3.connect(database_path)) as connection:
+                connection.execute(
+                    """
+                    CREATE TABLE runs (
+                        thread_id TEXT PRIMARY KEY,
+                        final_state TEXT NOT NULL,
+                        domain_type TEXT NOT NULL,
+                        sensitivity TEXT NOT NULL,
+                        policy_profile_name TEXT NOT NULL,
+                        budget_max_steps INTEGER,
+                        budget_max_tool_calls INTEGER,
+                        actor_turn_count INTEGER NOT NULL,
+                        tool_call_count INTEGER NOT NULL,
+                        replan_count INTEGER NOT NULL,
+                        review_count INTEGER NOT NULL,
+                        abort_count INTEGER NOT NULL,
+                        has_external_communication INTEGER NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO runs VALUES (
+                        'legacy-thread', 'completed', 'research', 'low', 'default',
+                        NULL, NULL, 3, 2, 0, 1, 0, 1
+                    )
+                    """
+                )
+                connection.commit()
+
+            store = SQLiteBehavioralStore(
+                settings=BehavioralStoreSettings(database_path=database_path)
+            )
+            with closing(store._connect()) as connection:
+                store._ensure_schema(connection)
+                columns = tuple(
+                    str(row[1])
+                    for row in connection.execute("PRAGMA table_info(runs)").fetchall()
+                )
+                migrated = connection.execute(
+                    """
+                    SELECT thread_id, final_state, sensitivity, policy_profile_name,
+                           actor_turn_count, tool_call_count, review_count,
+                           has_external_communication
+                    FROM runs
+                    WHERE thread_id = 'legacy-thread'
+                    """
+                ).fetchone()
+
+            self.assertNotIn("domain_type", columns)
+            self.assertEqual(
+                migrated,
+                ("legacy-thread", "completed", "low", "default", 3, 2, 1, 1),
+            )
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 

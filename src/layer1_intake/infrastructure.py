@@ -15,11 +15,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from llm_retry import llm_retry
 
 from .models import (
-    DomainType,
     ExecutionIntent,
     InvalidTaskSpecError,
     SensitivityLevel,
-    RequestedOperation,
     TaskSpec,
 )
 from .service import (
@@ -89,20 +87,13 @@ class _PolicyConfigPayload(BaseModel):
 
     default_policy: _PolicyProfilePayload
     named_profiles: dict[str, _PolicyProfilePayload] = Field(default_factory=dict)
-    domain_overrides: dict[str, _PolicyProfilePayload | dict[str, Any]] = Field(
-        default_factory=dict
-    )
     sensitivity_overrides: dict[str, _PolicyProfilePayload | dict[str, Any]] = Field(
         default_factory=dict
-    )
-    domain_sensitivity_overrides: dict[str, dict[str, _PolicyProfilePayload | dict[str, Any]]] = (
-        Field(default_factory=dict)
     )
 
 
 def build_task_spec_system_prompt() -> str:
     # Build the constrained system prompt used to parse raw requests into TaskSpec.
-    allowed_domains = ", ".join(domain.value for domain in DomainType)
     allowed_sensitivity = ", ".join(level.value for level in SensitivityLevel)
 
     return f"""
@@ -113,34 +104,20 @@ Return a structured object with these fields:
 - goal
 - context
 - constraints
-- domain_type
-- domain_label
 - sensitivity
 - success_criteria
 - execution_intent
-- requested_operations
 
 Rules:
 - Be concise and literal.
 - Infer the main goal from the request.
 - Keep context short and factual.
 - Extract only explicit or strongly implied constraints.
-- Use one domain_type from this exact list: {allowed_domains}.
-- Choose the closest operational category, not a generic one, when the request clearly implies it.
-- Use "research" for finding, gathering, or comparing sources and information.
-- Use "analysis" for evaluation, interpretation, or judgment over existing material.
-- Use "summarization" only when the main task is compressing already available content.
-- Use "data_extraction" only when the main task is extracting fields or structured data.
-- Use "external_communication" when the task drafts or sends messages to external recipients.
 - Set execution_intent to "proposal_only" when the user asks to draft, prepare, preview,
   or generate an operation without carrying it out.
 - Set execution_intent to "execute_after_governance" only when the user explicitly asks
   to send, execute, publish, create, update, delete, or otherwise carry out an external
   operation. This field records requested intent and does not grant authority.
-- requested_operations is an empty list unless an external effect is requested. For email,
-  emit {{"operation_type":"external_communication","channel":"email","recipient":"..."}}.
-- If no category fits well, use domain_type = "other".
-- domain_label can be more specific and free-form.
 - Use one sensitivity from this exact list: {allowed_sensitivity}.
 - If the task looks ordinary and non-sensitive, prefer "medium" or "low".
 - Use "high" or "critical" when the task concerns regulated, personal, contractual, financial, security, or externally impactful actions.
@@ -175,12 +152,9 @@ class TaskSpecExtractionPayload(BaseModel):
     goal: str
     context: str = ""
     constraints: list[str] = Field(default_factory=list)
-    domain_type: DomainType = DomainType.OTHER
-    domain_label: str = "other"
     sensitivity: SensitivityLevel = SensitivityLevel.MEDIUM
     success_criteria: list[str] = Field(default_factory=list)
     execution_intent: ExecutionIntent = ExecutionIntent.PROPOSAL_ONLY
-    requested_operations: list[RequestedOperation] = Field(default_factory=list)
 
 
 class OpenAITaskSpecParser(TaskSpecParserPort):
@@ -258,7 +232,6 @@ class JsonExecutionPolicyRepository(ExecutionPolicyRepositoryPort):
         self,
         *,
         profile_name: str | None,
-        domain_type: DomainType,
         sensitivity: SensitivityLevel,
     ) -> PolicyProfile:
         # Merge default policy with progressively more specific overrides.
@@ -271,23 +244,11 @@ class JsonExecutionPolicyRepository(ExecutionPolicyRepositoryPort):
 
         merged_policy = deepcopy(self._config["default_policy"])
 
-        domain_override = self._config.get("domain_overrides", {}).get(domain_type.value)
-        if domain_override:
-            merged_policy = self._deep_merge(merged_policy, domain_override)
-
         sensitivity_override = self._config.get("sensitivity_overrides", {}).get(
             sensitivity.value
         )
         if sensitivity_override:
             merged_policy = self._deep_merge(merged_policy, sensitivity_override)
-
-        domain_sensitivity_override = (
-            self._config.get("domain_sensitivity_overrides", {})
-            .get(domain_type.value, {})
-            .get(sensitivity.value)
-        )
-        if domain_sensitivity_override:
-            merged_policy = self._deep_merge(merged_policy, domain_sensitivity_override)
 
         return self._to_policy_profile(name="default", data=merged_policy)
 

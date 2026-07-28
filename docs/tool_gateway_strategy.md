@@ -30,7 +30,7 @@ The MCP path is intentionally constrained:
 - no write-like MCP tools are enabled
 - no credentials are present in prompts or `ToolRequest`
 - every MCP result is converted into `ToolExecutionResult`
-- every observed tool result can become `ObservedEvidence`
+- adapters return minimal `ToolObservation` records containing concrete content and an optional locator
 
 ## Authentication Boundary
 

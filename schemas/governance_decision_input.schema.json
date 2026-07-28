@@ -57,7 +57,7 @@
         "operation_id", "plan_step_id", "capability_id", "boundary",
         "operation_family", "normalized_effect", "execution_candidate",
         "target", "payload_digest", "payload_preview", "capability_profile_id",
-        "capability_profile_version", "facts_provenance", "payload"
+        "capability_profile_version", "approval_mode", "facts_provenance", "payload"
       ],
       "properties": {
         "operation_id": { "type": ["string", "null"] },
@@ -86,6 +86,7 @@
         "payload_preview": { "type": ["string", "null"] },
         "capability_profile_id": { "type": ["string", "null"] },
         "capability_profile_version": { "type": ["string", "null"] },
+        "approval_mode": { "enum": ["always", "conditional", "never"] },
         "facts_provenance": { "type": ["object", "null"] },
         "payload": { "type": "object" }
       },

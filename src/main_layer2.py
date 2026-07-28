@@ -13,7 +13,6 @@ from json_serialization import to_jsonable
 
 from layer1_intake import (
     BudgetConfig,
-    DomainType,
     ExecutionPolicy,
     IntakeCommand,
     IntakeMetadata,
@@ -44,7 +43,7 @@ from layer2_runtime_governance.infrastructure.runtime_artifacts import (
 )
 from layer2_runtime_governance.planning import PlannerPort
 from layer2_runtime_governance.planning.replanning import ReplannerPort
-from layer2_runtime_governance.domain import TaskState
+from layer2_runtime_governance.domain import RuntimeState, TaskState
 from layer2_runtime_governance.observability import (
     build_compact_trace_from_runtime_trace,
     build_layer2_runtime_trace,
@@ -99,6 +98,7 @@ def run_layer2_flow(
 
     resolved_thread_id = thread_id or f"layer2-{uuid4()}"
     config = {"configurable": {"thread_id": resolved_thread_id}}
+    _assert_thread_can_bootstrap(runtime_graph=runtime_graph, config=config)
 
     if demo_intake_profile is not None and intake_service is not None:
         raise ValueError(
@@ -125,39 +125,54 @@ def run_layer2_flow(
             )
         )
 
-    if progress_callback is None:
-        runtime_graph.invoke(
-            {"intake_result": intake_result, "thread_id": resolved_thread_id},
-            config=config,
-        )
-        final_result = _build_final_result_from_graph_snapshot(
-            runtime_graph=runtime_graph,
-            config=config,
-        )
-    else:
-        final_result = _stream_runtime_graph_with_progress(
-            runtime_graph=runtime_graph,
-            intake_result=intake_result,
-            thread_id=resolved_thread_id,
-            config=config,
-            progress_callback=progress_callback,
-            live_trace=live_trace,
-        )
+    try:
+        if progress_callback is None:
+            runtime_graph.invoke(
+                {"intake_result": intake_result, "thread_id": resolved_thread_id},
+                config=config,
+            )
+            final_result = _build_final_result_from_graph_snapshot(
+                runtime_graph=runtime_graph,
+                config=config,
+            )
+        else:
+            final_result = _stream_runtime_graph_with_progress(
+                runtime_graph=runtime_graph,
+                intake_result=intake_result,
+                thread_id=resolved_thread_id,
+                config=config,
+                progress_callback=progress_callback,
+                live_trace=live_trace,
+            )
 
-    # Return both layer boundaries so callers can inspect the handoff end to end.
-    trace = {
-        "thread_id": resolved_thread_id,
-        "intake_result": intake_result,
-        "final_result": final_result,
-    }
-    _persist_runtime_artifacts_from_trace(trace, artifact_store=resolved_artifact_store)
-    if uses_default_checkpointer:
-        _prune_expired_checkpoints(
-            checkpointer=resolved_checkpointer,
+        # Return both layer boundaries so callers can inspect the handoff end to end.
+        trace = {
+            "thread_id": resolved_thread_id,
+            "intake_result": intake_result,
+            "final_result": final_result,
+        }
+        _persist_runtime_artifacts_from_trace(
+            trace,
             artifact_store=resolved_artifact_store,
         )
-        close_checkpointer(resolved_checkpointer)
-    return trace
+        return trace
+    except Exception as exc:
+        _persist_failed_runtime_snapshot(
+            thread_id=resolved_thread_id,
+            intake_result=intake_result,
+            runtime_graph=runtime_graph,
+            config=config,
+            artifact_store=resolved_artifact_store,
+            error=exc,
+        )
+        raise
+    finally:
+        if uses_default_checkpointer:
+            _prune_expired_checkpoints(
+                checkpointer=resolved_checkpointer,
+                artifact_store=resolved_artifact_store,
+            )
+            close_checkpointer(resolved_checkpointer)
 
 
 # Resume a paused Layer 2 run using the same thread id and a typed human decision.
@@ -222,6 +237,30 @@ def resume_layer2_flow(
         )
         close_checkpointer(resolved_checkpointer)
     return trace
+
+
+# Keep checkpoint state authoritative: a bootstrap must never overwrite a live or paused thread.
+def _assert_thread_can_bootstrap(*, runtime_graph: Any, config: dict[str, Any]) -> None:
+    snapshot = runtime_graph.get_state(config)
+    values = snapshot.values if snapshot is not None else {}
+    task_state = values.get("task_state") if isinstance(values, dict) else None
+    if not isinstance(task_state, TaskState):
+        return
+    thread_id = config["configurable"]["thread_id"]
+    if task_state.current_state == RuntimeState.WAITING_HUMAN_REVIEW:
+        raise ValueError(
+            f"Thread '{thread_id}' is waiting for human review; use dashboard/resume_layer2_flow instead of a new bootstrap."
+        )
+    if task_state.current_state in {
+        RuntimeState.COMPLETED,
+        RuntimeState.ABORTED,
+    }:
+        raise ValueError(
+            f"Thread '{thread_id}' is terminal; use a new --thread-id for a new task."
+        )
+    raise ValueError(
+        f"Thread '{thread_id}' is already active; use dashboard/resume_layer2_flow or a new --thread-id."
+    )
 
 
 # Keep retention maintenance non-blocking for the live task result.
@@ -456,6 +495,45 @@ def _persist_runtime_artifacts_from_trace(
     )
 
 
+# Preserve the latest canonical checkpoint plus one explicit failure marker.
+def _persist_failed_runtime_snapshot(
+    *,
+    thread_id: str,
+    intake_result: IntakeResult,
+    runtime_graph: Any,
+    config: dict[str, Any],
+    artifact_store: RuntimeArtifactStore,
+    error: Exception,
+) -> None:
+    task_state: TaskState | None = None
+    try:
+        snapshot_result = _build_final_result_from_graph_snapshot(
+            runtime_graph=runtime_graph,
+            config=config,
+        )
+        candidate = snapshot_result.get("task_state")
+        if isinstance(candidate, TaskState):
+            task_state = candidate
+            _persist_runtime_artifacts_from_trace(
+                {
+                    "thread_id": thread_id,
+                    "intake_result": intake_result,
+                    "final_result": snapshot_result,
+                },
+                artifact_store=artifact_store,
+            )
+    except Exception:
+        task_state = None
+    try:
+        artifact_store.persist_failure(
+            thread_id=thread_id,
+            error=error,
+            task_state=task_state,
+        )
+    except Exception:
+        return
+
+
 # Recover the canonical intake payload from the persisted checkpoint snapshot after resume.
 def _load_intake_result_from_checkpoint(
     *,
@@ -496,7 +574,7 @@ def parse_cli_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--context",
-        default="Prefer official EU sources.",
+        default=None,
         help="Optional context hint for Layer 1.",
     )
     parser.add_argument(
@@ -554,8 +632,6 @@ def _build_demo_intake_result(
             goal=normalized_goal,
             context=normalized_context,
             constraints=[],
-            domain_type=DomainType.ANALYSIS,
-            domain_label="demo_clarification_required",
             sensitivity=SensitivityLevel.HIGH,
             success_criteria=[],
         )
@@ -565,8 +641,6 @@ def _build_demo_intake_result(
             goal=normalized_goal,
             context=normalized_context or "Use reliable documentary evidence.",
             constraints=["Use reliable sources."],
-            domain_type=DomainType.RESEARCH,
-            domain_label="demo_research",
             sensitivity=SensitivityLevel.LOW,
             success_criteria=["Return a grounded concise answer."],
         )

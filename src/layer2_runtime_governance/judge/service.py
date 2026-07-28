@@ -86,7 +86,7 @@ class _JudgePayload(BaseModel):
 
 class DisabledJudge(JudgePort):
     judge_name = "disabled_judge"
-    prompt_version = "external_operation_judge_v2_disabled"
+    prompt_version = "external_operation_judge_v4_disabled"
 
     # Required disabled invocations are explicitly unavailable, never safe.
     def evaluate(self, *, context: JudgeContext) -> JudgeAssessment:
@@ -113,7 +113,7 @@ class DisabledJudge(JudgePort):
 
 class OpenAIJudge(JudgePort):
     judge_name = "openai_layer2_external_operation_judge"
-    prompt_version = "external_operation_judge_v3"
+    prompt_version = "external_operation_judge_v4"
 
     def __init__(self, settings: JudgeSettings | None = None) -> None:
         self._settings = settings or JudgeSettings.from_env()

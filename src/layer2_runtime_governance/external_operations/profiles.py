@@ -15,6 +15,8 @@ class CapabilityConsequenceProfile:
     target_criticality: str
     scope: str
     compensation_mechanism: str | None
+    # OPA receives this generic capability fact and decides whether a review gate applies.
+    approval_mode: str = "conditional"
     allowed_statement_classes: tuple[str, ...] = ()
 
 
@@ -46,6 +48,7 @@ def _load_profiles_cached(
                 if profile.get("compensation_mechanism")
                 else None
             ),
+            approval_mode=str(profile.get("approval_mode", "conditional")),
             allowed_statement_classes=tuple(
                 str(item) for item in profile.get("allowed_statement_classes", [])
             ),
