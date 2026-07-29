@@ -177,7 +177,11 @@ def observe_tool_result(state: TaskState) -> TaskState:
         if RuntimeFlag.EXTRACTABILITY_LIMITED not in state.runtime_flags:
             state.runtime_flags.append(RuntimeFlag.EXTRACTABILITY_LIMITED)
     if state.current_state != RuntimeState.REPLANNING:
-        state.current_state = RuntimeState.ACTING
+        if state.pending_tool_requests:
+            state.current_tool_request = state.pending_tool_requests.pop(0)
+            state.current_state = RuntimeState.READY_GOVERNANCE
+        else:
+            state.current_state = RuntimeState.ACTING
     _append_step_record(state, node_name="observe_tool_result", summary="Tool result observations recorded without semantic classification.")
     return state
 

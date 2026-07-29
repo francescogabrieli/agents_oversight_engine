@@ -16,7 +16,7 @@ services:
       - /tmp
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "/opa", "eval", "--fail-defined", "--data", "/policy", "data.layer2.governance.required_pillars"]
+      test: ["CMD", "/opa", "eval", "--fail", "--data", "/policy", "data.layer2.governance.required_pillars"]
       interval: 10s
       timeout: 3s
       retries: 5

@@ -92,10 +92,26 @@ def normalize_task_state_serialization(task_state: TaskState) -> TaskState:
         normalized.state_revision = 0
     if not hasattr(normalized, "no_progress_turns"):
         normalized.no_progress_turns = 0
+    if not hasattr(normalized, "actor_protocol_retry_count"):
+        normalized.actor_protocol_retry_count = 0
+    if not hasattr(normalized, "actor_protocol_retry_progress_epoch"):
+        normalized.actor_protocol_retry_progress_epoch = 0
+    if not hasattr(normalized, "actor_protocol_retry_step_id"):
+        normalized.actor_protocol_retry_step_id = None
+    if not hasattr(normalized, "actor_protocol_feedback"):
+        normalized.actor_protocol_feedback = None
     if not hasattr(normalized, "tool_attempts"):
         normalized.tool_attempts = []
     if not hasattr(normalized, "tool_invocations"):
         normalized.tool_invocations = []
+    if not hasattr(normalized, "pending_tool_requests"):
+        normalized.pending_tool_requests = []
+    normalized.pending_tool_requests = [
+        request for request in (
+            _coerce_tool_request(item)
+            for item in normalized.pending_tool_requests
+        ) if request is not None
+    ]
     normalized.execution_intent = _coerce_enum(
         ExecutionIntent,
         getattr(

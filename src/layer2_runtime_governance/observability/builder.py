@@ -202,6 +202,7 @@ def _build_tool_calls(*, task_state: TaskState) -> tuple[TraceToolCall, ...]:
         calls.append(_build_tool_call_from_result(task_state.last_tool_result))
     if task_state.current_tool_request is not None:
         calls.append(_build_tool_call_from_request(task_state.current_tool_request))
+    calls.extend(_build_tool_call_from_request(request) for request in task_state.pending_tool_requests)
     return tuple(calls)
 
 

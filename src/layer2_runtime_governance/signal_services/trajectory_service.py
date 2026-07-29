@@ -2,7 +2,7 @@ from typing import Any
 
 from layer2_runtime_governance.actor_contract import ActorResultType
 from layer2_runtime_governance.governance_components import PolicyEvaluationInput
-from layer2_runtime_governance.domain import TaskState, semantic_plan_signature
+from layer2_runtime_governance.domain import TaskState
 
 
 # Export whole-run observable facts only at a semantic or operational boundary.
@@ -20,10 +20,15 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
         if task_state.replan_checkpoints
         else None
     )
+    # A new observable basis means new execution events since the checkpoint.
+    # progress_epoch and plan_signature are bumped by the replanner itself, so
+    # comparing them would let every replan self-admit the next one.
     observable_change_since_last_replan = bool(
         last_replan is None
-        or task_state.progress_epoch > getattr(last_replan, "progress_epoch", 0)
-        or semantic_plan_signature(task_state.plan_steps) != last_replan.plan_signature
+        or len(task_state.tool_results_history) > getattr(last_replan, "tool_result_count", 0)
+        or len(task_state.observations) > getattr(last_replan, "observation_count", 0)
+        or len(task_state.executed_steps) > getattr(last_replan, "completed_step_count", 0)
+        or len(task_state.human_review_history) > getattr(last_replan, "human_review_count", 0)
     )
     raw_facts = {
         "actor_turn_count": task_state.actor_turn_count,
@@ -73,6 +78,6 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
         "summary": (
             "Whole-run trajectory facts collected at a semantic or operational boundary."
         ),
-        "score_formula_version": "trajectory_facts_v4",
+        "score_formula_version": "trajectory_facts_v5",
         "thresholds_version": thresholds_version,
     }

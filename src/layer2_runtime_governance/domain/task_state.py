@@ -95,6 +95,10 @@ class TaskState:
     workspace: AgentWorkspace = field(default_factory=AgentWorkspace)
     # Typed runtime recovery fact; never inferred from provider error text.
     consecutive_provider_protocol_failures: int = 0
+    actor_protocol_retry_count: int = 0
+    actor_protocol_retry_progress_epoch: int = 0
+    actor_protocol_retry_step_id: str | None = None
+    actor_protocol_feedback: Any = None
     # Scratchpad is intentionally summarized working memory, safe for audit and HITL display.
     scratchpad: list[ScratchpadEntry] = field(default_factory=list)
     # Step validations are the bridge toward confidence/self-stop logic.
@@ -103,6 +107,8 @@ class TaskState:
 
     # Tool loop snapshot.
     current_tool_request: ToolRequest | None = None
+    # Ordered actor-emitted capability requests awaiting their individual governance boundary.
+    pending_tool_requests: list[ToolRequest] = field(default_factory=list)
     last_tool_result: ToolExecutionResult | None = None
     tool_results_history: list[ToolExecutionResult] = field(default_factory=list)
     observations: list[ToolObservation] = field(default_factory=list)

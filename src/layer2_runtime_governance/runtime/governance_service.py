@@ -34,6 +34,7 @@ from ..domain.step_recovery import restore_actor_step_for_more_evidence
 from ..external_operations import (
     ExternalExecutionAuthorizationSource,
     GovernanceActionFeedback,
+    JudgeFindingSnapshot,
     OperationBoundary,
     build_external_execution_request,
 )
@@ -168,20 +169,25 @@ def _apply_governance_decision(
         )
         state.current_state = RuntimeState.ABORTED
         state.current_tool_request = None
+        state.pending_tool_requests = []
         state.pending_human_review_request = None
         state.human_review_resume_state = None
         return
 
     # A typed provider protocol failure is recoverable runtime state; it must
     # re-enter replanning before any generic review recommendation is applied.
+    # An exhausted local recovery instead arrives as NEEDS_REPLAN and follows the
+    # OPA directive, so repeated requests without a new observable basis reach HITL.
     if (
         state.actor_result is not None
         and state.actor_result.provider_protocol_failure
+        and state.actor_result.result_type != ActorResultType.NEEDS_REPLAN
     ):
         state.pending_human_review_request = None
         state.human_review_resume_state = None
         state.current_state = RuntimeState.REPLANNING
         state.current_tool_request = None
+        state.pending_tool_requests = []
         return
 
     if governance_decision.directive in {
@@ -409,6 +415,30 @@ def _apply_action_revision(
             ),
             summary=governance_decision.summary,
             revision_index=state.external_operation_revision_count,
+            # Preserve the full typed findings so the actor can correct each one.
+            findings=tuple(
+                JudgeFindingSnapshot(
+                    category=str(item.get("category", "other")),
+                    code=str(item.get("code")),
+                    severity=str(item.get("severity", "medium")),
+                    summary=str(item.get("summary", "")),
+                    evidence_refs=tuple(
+                        str(ref) for ref in item.get("evidence_refs", [])
+                    ),
+                )
+                for item in findings
+                if isinstance(item, dict) and item.get("code")
+            ),
+            judge_summary=(
+                str(judge_payload.get("summary"))
+                if isinstance(judge_payload, dict) and judge_payload.get("summary")
+                else None
+            ),
+            judge_rationale=(
+                str(judge_payload.get("rationale"))
+                if isinstance(judge_payload, dict) and judge_payload.get("rationale")
+                else None
+            ),
         )
     )
     state.approved_external_operation_digest = None

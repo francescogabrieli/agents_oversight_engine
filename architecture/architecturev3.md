@@ -633,6 +633,14 @@ CLI Python standalone, normalizzatore di trace, client OPA HTTP e report JSON/Ma
 
 ## Completion, recovery e approval boundary
 
+## Ordered capability batches
+
+Un actor turn può produrre un batch ordinato di capability request. Il runtime non
+analizza dipendenze: esegue una richiesta alla volta, applicando ProgressGuard,
+OPA e Tool Gateway a ogni elemento, e richiama l'actor soltanto quando la coda è
+vuota. Completion, replan, chiarimento e proposte esterne restano outcome singoli
+e non fanno parte di un batch.
+
 Un output dell'actor non è una transizione di stato per il solo fatto di essere
 narrativo. Un risultato `STEP_COMPLETED` crea un `StepCompletionCandidate`:
 il cursore e la history avanzano soltanto con il commit atomico successivo alla

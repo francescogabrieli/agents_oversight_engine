@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 import re
 
 from layer1_intake import ExecutionIntent
 
-from ..actor_contract import ActorResult, ActorResultType, ActorTask, CapabilityAccessMode
+from ..actor_contract import (
+    ActorProtocolFeedback,
+    ActorResult,
+    ActorResultType,
+    ActorTask,
+    CapabilityAccessMode,
+)
 from ..domain import ScratchpadEntry, ScratchpadEntryType, StepValidation
 from ..domain import ExternalCommunicationDraft
 from ..external_operations import (
@@ -35,22 +42,51 @@ def build_provider_blocked_result(*, actor_task: ActorTask, detail: str) -> Acto
     )
 
 
-# Route malformed provider action envelopes into the existing recovery branch, not a graph crash.
-def build_provider_replan_result(*, actor_task: ActorTask, detail: str) -> ActorResult:
+# Route malformed provider action envelopes into protocol failure recovery.
+def build_provider_protocol_failure_result(
+    *,
+    actor_task: ActorTask,
+    detail: str,
+    error: ActorExecutionError | None = None,
+) -> ActorResult:
     blocking_reason = f"Actor provider emitted an unusable runtime action: {detail}"
+    if error is not None and getattr(error, "details", None):
+        details = error.details
+        feedback = ActorProtocolFeedback(
+            error_code=getattr(error, "error_code", "protocol_error"),
+            category=getattr(error, "error_category", "protocol"),
+            summary=str(error),
+            unknown_evidence_ids=tuple(details.get("unknown_evidence_ids", [])),
+            valid_evidence_ids=tuple(details.get("valid_evidence_ids", [])),
+            validation_errors=tuple(details.get("validation_errors", [])),
+            expected_action_schema=details.get("expected_action_schema"),
+        )
+    else:
+        feedback = ActorProtocolFeedback(
+            error_code="malformed_action",
+            category="schema_validation",
+            summary=detail,
+            validation_errors=(detail,),
+        )
     return ActorResult(
         plan_step_id=actor_task.current_plan_step.step_id,
-        result_type=ActorResultType.NEEDS_REPLAN,
+        result_type=ActorResultType.BLOCKED,
         summary="Actor provider emitted an incomplete runtime action.",
         capability_mode=CapabilityAccessMode.NONE,
         blocking_reason=blocking_reason,
         provider_protocol_failure=True,
+        protocol_feedback=feedback,
         scratchpad_entry=_build_scratchpad_entry(
             actor_task=actor_task,
             entry_type=ScratchpadEntryType.UNCERTAINTY,
             summary=blocking_reason,
         ),
     )
+
+
+# Route malformed provider action envelopes into the existing recovery branch, not a graph crash.
+def build_provider_replan_result(*, actor_task: ActorTask, detail: str) -> ActorResult:
+    return build_provider_protocol_failure_result(actor_task=actor_task, detail=detail)
 
 
 # Convert one function tool call into the stable ActorResult domain model.
@@ -376,6 +412,39 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
     raise ActorExecutionError(f"Actor emitted an unknown runtime tool: {tool_name}")
 
 
+# Normalize one or more provider calls without giving control outcomes batch semantics.
+def convert_tool_calls_to_actor_result(*, actor_task: ActorTask, tool_calls: tuple[object, ...]) -> ActorResult:
+    capability_results: list[ActorResult] = []
+    control_results: list[ActorResult] = []
+    malformed: list[str] = []
+    for tool_call in tool_calls:
+        try:
+            result = convert_tool_call_to_actor_result(actor_task=actor_task, tool_call=tool_call)
+        except ActorExecutionError as exc:
+            malformed.append(str(exc))
+            continue
+        if result.result_type == ActorResultType.PROPOSE_ACTION:
+            capability_results.append(result)
+        else:
+            control_results.append(result)
+    if capability_results:
+        requests = tuple(
+            result.tool_request for result in capability_results if result.tool_request is not None
+        )
+        first = capability_results[0]
+        warning = "" if not (control_results or malformed) else " Provider mixed capability calls with control or malformed calls; control outcomes were deferred."
+        return replace(
+            first,
+            summary=f"{first.summary}{warning}",
+            tool_request=requests[0],
+            tool_requests=requests,
+        )
+    if len(control_results) == 1 and not malformed:
+        return control_results[0]
+    detail = "; ".join(malformed) or "Provider emitted multiple incompatible control outcomes."
+    return build_provider_replan_result(actor_task=actor_task, detail=detail)
+
+
 # Recover model confusion between an empty allowlist and unavailable read-only tools.
 def _recover_false_blocked_lookup_as_tool_request(
     *,
@@ -526,11 +595,35 @@ def _selected_evidence_refs(*, actor_task: ActorTask, arguments: dict[str, objec
     if supplied is None:
         return ()
     if not isinstance(supplied, list) or not all(isinstance(item, str) for item in supplied):
-        raise ActorExecutionError("evidence_refs must be a list of evidence identifiers.")
+        raise ActorExecutionError(
+            "evidence_refs must be a list of evidence identifiers.",
+            error_code="malformed_action",
+            error_category="schema_validation",
+            recoverable=True,
+            details={
+                "received_action_type": "emit_step_completed",
+                "expected_action_schema": {"evidence_refs": "list[str]"},
+                "validation_errors": ["evidence_refs must be a list of string identifiers"],
+            },
+        )
     known = {item.observation_id for item in actor_task.observations}
-    unknown = set(supplied) - known
+    unknown = sorted(set(supplied) - known)
     if unknown:
-        raise ActorExecutionError("Actor completion references evidence IDs that do not exist.")
+        # Name the offending IDs so the bounded local retry can correct them precisely.
+        listed = ", ".join(unknown[:10])
+        suffix = f" and {len(unknown) - 10} more" if len(unknown) > 10 else ""
+        valid_list = sorted(known)
+        raise ActorExecutionError(
+            "Actor completion references evidence IDs that do not exist: "
+            f"{listed}{suffix}. Use only observation IDs from the observations section.",
+            error_code="unknown_evidence_reference",
+            error_category="evidence_reference",
+            recoverable=True,
+            details={
+                "unknown_evidence_ids": list(unknown),
+                "valid_evidence_ids": list(valid_list),
+            },
+        )
     return tuple(dict.fromkeys(supplied))
 
 
@@ -539,7 +632,17 @@ def _require_arguments(arguments: dict[str, object], *required_keys: str) -> Non
     for key in required_keys:
         value = arguments.get(key)
         if not isinstance(value, str) or not value.strip():
-            raise ActorExecutionError(f"Actor tool call is missing required string argument '{key}'.")
+            raise ActorExecutionError(
+                f"Actor tool call is missing required string argument '{key}'.",
+                error_code="malformed_action",
+                error_category="schema_validation",
+                recoverable=True,
+                details={
+                    "received_action_type": str(arguments.get("tool_name", "action")),
+                    "expected_action_schema": {"required_fields": list(required_keys)},
+                    "validation_errors": [f"Missing required string argument '{key}'"],
+                },
+            )
 
 
 # Preserve the internal completion contract when provider tool arguments are incomplete.
@@ -596,6 +699,8 @@ def _resolve_search_query(*, actor_task: ActorTask, arguments: dict[str, object]
 
 __all__ = [
     "build_provider_blocked_result",
+    "build_provider_protocol_failure_result",
     "build_provider_replan_result",
     "convert_tool_call_to_actor_result",
+    "convert_tool_calls_to_actor_result",
 ]

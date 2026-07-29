@@ -9,11 +9,12 @@ from ..action_schemas import (
 )
 from ..errors import ActorExecutionError
 from ..prompts import build_actor_system_prompt, build_actor_user_prompt
-from ..response_parser import extract_single_function_call, validate_tool_call_action
+from ..response_parser import extract_function_calls, validate_tool_call_action
 from ...tools import ToolGatewayConfig
 from ..result_builder import (
+    build_provider_protocol_failure_result,
     build_provider_replan_result,
-    convert_tool_call_to_actor_result,
+    convert_tool_calls_to_actor_result,
 )
 from ..settings import OpenAIActorSettings
 
@@ -63,15 +64,18 @@ class OpenAIActor(ActorPort):
         except Exception as exc:  # pragma: no cover - provider errors are normalized.
             raise ActorExecutionError(f"Actor request failed: {exc}") from exc
         try:
-            return convert_tool_call_to_actor_result(
+            return convert_tool_calls_to_actor_result(
                 actor_task=actor_task,
-                tool_call=validate_tool_call_action(
-                    tool_call=extract_single_function_call(response),
-                    allowed_action_names=allowed_action_names,
+                tool_calls=tuple(
+                    validate_tool_call_action(
+                        tool_call=tool_call,
+                        allowed_action_names=allowed_action_names,
+                    )
+                    for tool_call in extract_function_calls(response)
                 ),
             )
         except ActorExecutionError as exc:
-            return build_provider_replan_result(actor_task=actor_task, detail=str(exc))
+            return build_provider_protocol_failure_result(actor_task=actor_task, detail=str(exc), error=exc)
 
     # Retry only transient provider failures for one bounded action request.
     @llm_retry
@@ -90,7 +94,6 @@ class OpenAIActor(ActorPort):
             tools=runtime_tools,
             tool_choice="required",
             parallel_tool_calls=False,
-            max_tool_calls=1,
         )
 
 

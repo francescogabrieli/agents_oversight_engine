@@ -24,7 +24,7 @@
         "max_steps": null,
         "max_tool_calls": null
       },
-      "read_only_mode": true
+      "read_only_mode": false
     },
     "critical": {
       "confidence_threshold": 0.85,

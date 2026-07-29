@@ -1,6 +1,13 @@
 from dataclasses import replace
 
-from ..actor_contract import ActorPort, ActorResult, ActorResultType, build_actor_task
+from ..actor_contract import (
+    ActorPort,
+    ActorProtocolFeedback,
+    ActorResult,
+    ActorResultType,
+    ActorTask,
+    build_actor_task,
+)
 from ..domain import (
     ExecutedPlanStep,
     ExternalCommunicationDraft,
@@ -34,11 +41,61 @@ def actor(state: TaskState, *, actor_service: ActorPort) -> TaskState:
         )
         return state
 
+    current_step_id = state.current_plan_step.step_id
+    if state.actor_protocol_retry_step_id != current_step_id:
+        state.actor_protocol_retry_count = 0
+        state.actor_protocol_retry_step_id = current_step_id
+        state.actor_protocol_feedback = None
+
     state.actor_turn_count += 1
     state.no_progress_turns += 1
 
     actor_task = build_actor_task(task_state=state)
     actor_result = actor_service.act(actor_task=actor_task)
+    if actor_result.provider_protocol_failure:
+        if state.actor_protocol_retry_count < 1:
+            state.actor_protocol_retry_count += 1
+            state.actor_protocol_retry_step_id = current_step_id
+            state.actor_protocol_retry_progress_epoch = state.progress_epoch
+            feedback = actor_result.protocol_feedback or ActorProtocolFeedback(
+                error_code="protocol_error",
+                category="protocol",
+                summary=actor_result.blocking_reason or actor_result.summary,
+            )
+            state.actor_protocol_feedback = feedback
+            actor_result = _retry_actor_protocol_locally(
+                state,
+                actor_service=actor_service,
+                actor_task=actor_task,
+                failed_result=actor_result,
+                feedback=feedback,
+            )
+            if not actor_result.provider_protocol_failure:
+                state.actor_protocol_feedback = None
+            else:
+                # The single local correction did not resolve the protocol error;
+                # escalate one typed recovery event instead of looping.
+                actor_result = _build_runtime_replan_result(
+                    state,
+                    actor_result=actor_result,
+                    summary="Provider recovery exhausted its one local correction.",
+                    blocking_reason=(
+                        "The provider produced a second unusable runtime action on "
+                        "unchanged state; local protocol recovery is exhausted."
+                    ),
+                )
+        else:
+            # Exhausted local retries on the same step without new execution events.
+            actor_result = _build_runtime_replan_result(
+                state,
+                actor_result=actor_result,
+                summary="Provider recovery exhausted its one local correction.",
+                blocking_reason=(
+                    "The provider produced a second unusable runtime action on unchanged state; "
+                    "local protocol recovery is exhausted."
+                ),
+            )
+
     actor_result = _enforce_actor_runtime_contract(
         state,
         actor_result=actor_result,
@@ -56,9 +113,15 @@ def actor(state: TaskState, *, actor_service: ActorPort) -> TaskState:
         state.consecutive_provider_protocol_failures = 0
     state.actor_name = actor_service.actor_name
     state.actor_prompt_version = actor_service.prompt_version
-    state.current_tool_request = (
-        actor_result.tool_request if actor_result.result_type == ActorResultType.PROPOSE_ACTION else None
-    )
+    if actor_result.result_type == ActorResultType.PROPOSE_ACTION:
+        requests = actor_result.tool_requests or ((actor_result.tool_request,) if actor_result.tool_request else ())
+        if not requests:
+            raise ValueError("propose_action requires at least one tool request.")
+        state.current_tool_request = requests[0]
+        state.pending_tool_requests = list(requests[1:])
+    else:
+        state.current_tool_request = None
+        state.pending_tool_requests = []
 
     _record_actor_execution(state, actor_result=actor_result)
     state.current_state = _map_actor_result_to_runtime_state(state, actor_result=actor_result)
@@ -71,7 +134,34 @@ def actor(state: TaskState, *, actor_service: ActorPort) -> TaskState:
     return state
 
 
-# Convert semantic protocol violations into explicit recovery instead of false progress.
+# Give the provider one immediate local correction with the exact protocol error.
+def _retry_actor_protocol_locally(
+    state: TaskState,
+    *,
+    actor_service: ActorPort,
+    actor_task: ActorTask,
+    failed_result: ActorResult,
+    feedback: ActorProtocolFeedback | str,
+) -> ActorResult:
+    # Keep the discarded attempt auditable even when the retry succeeds.
+    if failed_result.scratchpad_entry is not None:
+        state.scratchpad.append(failed_result.scratchpad_entry)
+    _append_step_record(
+        state,
+        node_name="actor",
+        summary=(
+            "Actor retried locally after a provider protocol failure; "
+            "no replanning was triggered."
+        ),
+    )
+    retry_task = replace(
+        actor_task,
+        protocol_retry_feedback=feedback,
+    )
+    retried_result = actor_service.act(actor_task=retry_task)
+    return retried_result
+
+
 def _enforce_actor_runtime_contract(
     state: TaskState,
     *,
@@ -85,16 +175,6 @@ def _enforce_actor_runtime_contract(
             blocking_reason=(
                 "The current trajectory produced four actor turns without a concrete observation, "
                 "durable artifact, completed step, human decision, or changed semantic plan."
-            ),
-        )
-    if actor_result.provider_protocol_failure and state.consecutive_provider_protocol_failures >= 1:
-        return _build_runtime_replan_result(
-            state,
-            actor_result=actor_result,
-            summary="Provider recovery exhausted its one local correction.",
-            blocking_reason=(
-                "The provider produced a second unusable runtime action on unchanged state; "
-                "local protocol recovery is exhausted."
             ),
         )
     if _repeats_identical_intermediate_output(state, actor_result=actor_result):
@@ -252,7 +332,7 @@ def _record_actor_execution(state: TaskState, *, actor_result: ActorResult) -> N
         return
 
     if actor_result.result_type == ActorResultType.PROPOSE_ACTION:
-        if actor_result.tool_request is None:
+        if actor_result.tool_request is None and not actor_result.tool_requests:
             raise ValueError("propose_action requires tool_request.")
         # Tool proposals keep the current semantic step alive until observation returns.
         current_step.status = PlanStepStatus.IN_PROGRESS
@@ -582,6 +662,7 @@ __all__ = [
     "_advance_to_next_plan_step",
     "_map_actor_result_to_runtime_state",
     "_enforce_actor_runtime_contract",
+    "_retry_actor_protocol_locally",
     "_repeats_identical_intermediate_output",
     "_record_workspace_artifact",
     "commit_completion_candidate",

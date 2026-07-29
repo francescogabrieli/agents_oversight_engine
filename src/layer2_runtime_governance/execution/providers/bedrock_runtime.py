@@ -117,7 +117,7 @@ class BedrockChatClient:
 
     # Ask Nova for exactly one typed runtime action using Bedrock's Converse tool contract.
     @llm_retry
-    def complete_tool_call(
+    def complete_tool_calls(
         self,
         *,
         system_prompt: str,
@@ -144,7 +144,14 @@ class BedrockChatClient:
         except (BotoCoreError, TimeoutError) as exc:
             raise BedrockRuntimeError(f"Bedrock runtime request failed: {exc}") from exc
 
-        return _extract_tool_call_payload(response_payload)
+        return _extract_tool_call_payloads(response_payload)
+
+    # Preserve the one-call facade for older direct adapter callers.
+    def complete_tool_call(self, **kwargs) -> dict[str, Any]:
+        payloads = self.complete_tool_calls(**kwargs)
+        if len(payloads) != 1:
+            raise BedrockRuntimeError("Bedrock returned multiple tool uses; use complete_tool_calls.")
+        return payloads[0]
 
 
 # Validate only generic Bedrock transport prerequisites before making a network request.
@@ -204,7 +211,7 @@ def _to_bedrock_tools(tools: list[dict[str, object]]) -> list[dict[str, object]]
 
 
 # Extract one Bedrock toolUse block and normalize it to the existing actor payload shape.
-def _extract_tool_call_payload(response_payload: object) -> dict[str, Any]:
+def _extract_tool_call_payloads(response_payload: object) -> tuple[dict[str, Any], ...]:
     if not isinstance(response_payload, dict):
         raise BedrockRuntimeError("Bedrock returned a malformed Converse response.")
 
@@ -225,17 +232,24 @@ def _extract_tool_call_payload(response_payload: object) -> dict[str, Any]:
     ]
     if not tool_uses:
         raise BedrockRuntimeError("Bedrock returned no tool use.")
-    if len(tool_uses) != 1:
-        raise BedrockRuntimeError(f"Bedrock returned {len(tool_uses)} tool uses; expected exactly one.")
+    payloads: list[dict[str, Any]] = []
+    for tool_use in tool_uses:
+        name = tool_use.get("name")
+        arguments = tool_use.get("input")
+        if not isinstance(name, str) or not name.strip():
+            raise BedrockRuntimeError("Bedrock tool use is missing tool name.")
+        if not isinstance(arguments, dict):
+            raise BedrockRuntimeError("Bedrock tool use input must be an object.")
+        payloads.append({"tool_name": name, "arguments": arguments})
+    return tuple(payloads)
 
-    tool_use = tool_uses[0]
-    name = tool_use.get("name")
-    arguments = tool_use.get("input")
-    if not isinstance(name, str) or not name.strip():
-        raise BedrockRuntimeError("Bedrock tool use is missing tool name.")
-    if not isinstance(arguments, dict):
-        raise BedrockRuntimeError("Bedrock tool use input must be an object.")
-    return {"tool_name": name, "arguments": arguments}
+
+# Preserve the former parser path for direct one-call compatibility.
+def _extract_tool_call_payload(response_payload: object) -> dict[str, Any]:
+    payloads = _extract_tool_call_payloads(response_payload)
+    if len(payloads) != 1:
+        raise BedrockRuntimeError("Bedrock returned multiple tool uses; use _extract_tool_call_payloads.")
+    return payloads[0]
 
 
 # Preserve Bedrock status information so llm_retry can retry throttling and temporary outages.

@@ -26,6 +26,9 @@ from .external_operations.contracts import (
 
 
 # CapabilityAccessMode keeps external-read and external-write intent explicit.
+
+
+# CapabilityAccessMode keeps external-read and external-write intent explicit.
 class CapabilityAccessMode(str, Enum):
     NONE = "none"
     READ_ONLY = "read_only"
@@ -40,6 +43,17 @@ class ActorResultType(str, Enum):
     ASK_CLARIFICATION = "ask_clarification"
     BLOCKED = "blocked"
     NEEDS_REPLAN = "needs_replan"
+
+
+@dataclass(frozen=True)
+class ActorProtocolFeedback:
+    error_code: str
+    category: str
+    summary: str
+    unknown_evidence_ids: tuple[str, ...] = ()
+    valid_evidence_ids: tuple[str, ...] = ()
+    validation_errors: tuple[str, ...] = ()
+    expected_action_schema: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +103,11 @@ class ActorTask:
     workspace: AgentWorkspace | None = None
     progress_epoch: int = 0
     attempted_action_keys: tuple[str, ...] = ()
+    # Set only for the one bounded local retry after a provider protocol failure.
+    protocol_retry_feedback: ActorProtocolFeedback | str | None = None
+    # The current runtime-owned draft, so a revision edits it instead of rewriting blindly.
+    external_communication_draft: ExternalCommunicationDraft | None = None
+    previous_rejected_draft: ExternalCommunicationDraft | None = None
 
 
 @dataclass(frozen=True)
@@ -103,7 +122,10 @@ class ActorResult:
     output_text: str | None = None
     blocking_reason: str | None = None
     provider_protocol_failure: bool = False
+    protocol_feedback: ActorProtocolFeedback | None = None
     tool_request: ToolRequest | None = None
+    # A capability batch is ordered and contains no control outcomes.
+    tool_requests: tuple[ToolRequest, ...] = ()
     # Optional audit-safe memory from the actor turn.
     scratchpad_entry: ScratchpadEntry | None = None
     # Required before local or final outputs can complete a plan step.
@@ -188,6 +210,20 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
         workspace=task_state.workspace,
         progress_epoch=task_state.progress_epoch,
         attempted_action_keys=tuple(item.action_key for item in task_state.tool_attempts),
+        external_communication_draft=(
+            task_state.external_communication.draft
+            if task_state.external_communication is not None
+            else None
+        ),
+        protocol_retry_feedback=task_state.actor_protocol_feedback,
+        previous_rejected_draft=(
+            task_state.external_communication.draft
+            if (
+                task_state.external_communication is not None
+                and task_state.governance_action_feedback
+            )
+            else None
+        ),
     )
 
 
@@ -204,6 +240,7 @@ __all__ = [
     "ActorPastStep",
     "ActorPlanStep",
     "ActorPort",
+    "ActorProtocolFeedback",
     "ActorResult",
     "ActorResultType",
     "ActorTask",

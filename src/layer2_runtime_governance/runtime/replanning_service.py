@@ -14,6 +14,9 @@ from .lifecycle_service import _append_step_record
 
 # Replace only the current and pending semantic trajectory.
 def replanner(state: TaskState, *, replanner_service: ReplannerPort) -> TaskState:
+    # A replacement semantic trajectory invalidates every not-yet-executed capability request.
+    state.current_tool_request = None
+    state.pending_tool_requests = []
     if state.current_state != RuntimeState.REPLANNING:
         _append_step_record(
             state,

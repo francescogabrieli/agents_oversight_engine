@@ -12,8 +12,9 @@ from ..response_parser import convert_json_payload_to_tool_call
 from ...tools import ToolGatewayConfig
 from ..result_builder import (
     build_provider_blocked_result,
+    build_provider_protocol_failure_result,
     build_provider_replan_result,
-    convert_tool_call_to_actor_result,
+    convert_tool_call_to_actor_result, convert_tool_calls_to_actor_result,
 )
 from ..settings import BedrockNovaActorSettings
 
@@ -51,25 +52,33 @@ class BedrockNovaActor(ActorPort):
         )
         allowed_action_names = {str(tool["name"]) for tool in runtime_tools}
         try:
-            payload = self._client.complete_tool_call(
-                system_prompt=build_actor_system_prompt(),
-                user_prompt=build_actor_user_prompt(actor_task=actor_task),
-                tools=runtime_tools,
-            )
+            if hasattr(self._client, "complete_tool_calls"):
+                payloads = self._client.complete_tool_calls(
+                    system_prompt=build_actor_system_prompt(),
+                    user_prompt=build_actor_user_prompt(actor_task=actor_task),
+                    tools=runtime_tools,
+                )
+            else:
+                # Keep test and third-party compatibility clients on the former one-call method.
+                payloads = (self._client.complete_tool_call(
+                    system_prompt=build_actor_system_prompt(),
+                    user_prompt=build_actor_user_prompt(actor_task=actor_task),
+                    tools=runtime_tools,
+                ),)
         except BedrockRuntimeError as exc:
             if "no tool use" in str(exc):
                 return build_provider_blocked_result(actor_task=actor_task, detail=str(exc))
             raise ActorExecutionError(f"Bedrock actor request failed: {exc}") from exc
         try:
-            return convert_tool_call_to_actor_result(
+            return convert_tool_calls_to_actor_result(
                 actor_task=actor_task,
-                tool_call=convert_json_payload_to_tool_call(
-                    payload,
-                    allowed_action_names=allowed_action_names,
+                tool_calls=tuple(
+                    convert_json_payload_to_tool_call(payload, allowed_action_names=allowed_action_names)
+                    for payload in payloads
                 ),
             )
         except ActorExecutionError as exc:
-            return build_provider_replan_result(actor_task=actor_task, detail=str(exc))
+            return build_provider_protocol_failure_result(actor_task=actor_task, detail=str(exc), error=exc)
 
 
 __all__ = ["BedrockNovaActor"]

@@ -219,6 +219,16 @@ class ExternalOperationProposal:
 
 
 @dataclass(frozen=True)
+class JudgeFindingSnapshot:
+    # Audit-safe copy of one semantic judge finding returned to the actor.
+    category: str
+    code: str
+    severity: str
+    summary: str
+    evidence_refs: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class GovernanceActionFeedback:
     # Findings are audit-safe revision instructions, not hidden reasoning.
     operation_id: str
@@ -226,6 +236,10 @@ class GovernanceActionFeedback:
     finding_codes: tuple[str, ...]
     summary: str
     revision_index: int
+    # Full typed findings and judge summary so a revision can correct each finding.
+    findings: tuple[JudgeFindingSnapshot, ...] = ()
+    judge_summary: str | None = None
+    judge_rationale: str | None = None
 
 
 @dataclass(frozen=True)
@@ -356,6 +370,7 @@ __all__ = [
     "GenericExternalOperationPayload",
     "GenericPayloadField",
     "GovernanceActionFeedback",
+    "JudgeFindingSnapshot",
     "OperationBoundary",
     "OperationFactsProvenance",
     "SQLStatementClass",

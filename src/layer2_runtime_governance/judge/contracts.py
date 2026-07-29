@@ -170,6 +170,7 @@ class JudgeContext:
     tool_executions: tuple[JudgeToolExecutionContext, ...] = ()
     runtime_events: tuple[JudgeRuntimeEventContext, ...] = ()
     prior_external_revisions: tuple[JudgeExternalRevisionContext, ...] = ()
+    external_communication_body: str | None = None
 
 
 @dataclass(frozen=True)

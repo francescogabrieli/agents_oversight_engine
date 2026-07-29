@@ -123,8 +123,84 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
         },
         "governance_feedback": [
             {"operation_id": item.operation_id, "invalidated_payload_digest": item.invalidated_payload_digest,
-             "finding_codes": list(item.finding_codes), "summary": item.summary, "revision_index": item.revision_index}
+             "finding_codes": list(item.finding_codes), "summary": item.summary, "revision_index": item.revision_index,
+             "judge_summary": item.judge_summary,
+             "judge_rationale": getattr(item, "judge_rationale", None),
+             "findings": [
+                 {"category": finding.category, "code": finding.code, "severity": finding.severity,
+                  "summary": finding.summary, "evidence_refs": list(finding.evidence_refs)}
+                 for finding in item.findings
+             ]}
             for item in actor_task.governance_feedback
+        ],
+        "external_communication_draft": _project_external_communication_draft(
+            actor_task=actor_task,
+        ),
+        "previous_rejected_draft": _project_previous_rejected_draft(
+            actor_task=actor_task,
+        ),
+        "protocol_correction": _project_protocol_correction(actor_task=actor_task),
+    }
+
+
+# Expose the runtime-owned draft so a revision edits it instead of rewriting blindly.
+def _project_external_communication_draft(*, actor_task: ActorTask) -> dict[str, Any] | None:
+    draft = actor_task.external_communication_draft
+    if draft is None:
+        return None
+    return {
+        "channel": draft.channel,
+        "recipient": draft.recipient,
+        "subject": draft.subject,
+        "body": draft.body,
+        "cc": list(draft.cc),
+        "bcc": list(draft.bcc),
+    }
+
+
+# Expose the previously rejected draft during revision turns.
+def _project_previous_rejected_draft(*, actor_task: ActorTask) -> dict[str, Any] | None:
+    draft = actor_task.previous_rejected_draft
+    if draft is None:
+        return None
+    return {
+        "channel": draft.channel,
+        "recipient": draft.recipient,
+        "subject": draft.subject,
+        "body": draft.body,
+        "cc": list(draft.cc),
+        "bcc": list(draft.bcc),
+    }
+
+
+# Surface the exact protocol violation that discarded the previous provider output.
+def _project_protocol_correction(*, actor_task: ActorTask) -> dict[str, Any] | None:
+    feedback = actor_task.protocol_retry_feedback
+    if not feedback:
+        return None
+    if isinstance(feedback, str):
+        return {
+            "previous_protocol_error": feedback,
+            "instructions": [
+                "Your previous output violated the actor protocol and was discarded.",
+                "Correct exactly that error and emit exactly one valid runtime action for the current step.",
+                "Use only observation IDs listed in the observations section as evidence_refs.",
+                "Do not mix capability requests with control outcomes in one turn.",
+            ],
+        }
+    return {
+        "error_code": feedback.error_code,
+        "category": feedback.category,
+        "summary": feedback.summary,
+        "unknown_evidence_ids": list(feedback.unknown_evidence_ids),
+        "valid_evidence_ids": list(feedback.valid_evidence_ids),
+        "validation_errors": list(feedback.validation_errors),
+        "expected_action_schema": feedback.expected_action_schema,
+        "instructions": [
+            "Your previous output violated the actor protocol and was discarded.",
+            "Correct exactly that error and emit exactly one valid runtime action for the current step.",
+            "Use only observation IDs listed in the observations section as evidence_refs.",
+            "Do not mix capability requests with control outcomes in one turn.",
         ],
     }
 

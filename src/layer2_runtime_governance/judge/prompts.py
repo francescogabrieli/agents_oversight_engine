@@ -34,6 +34,10 @@ Return a structured assessment with:
 - evaluated_operation_digest exactly matching the supplied digest
 
 Evaluation rules:
+- external_operation.payload is the complete authoritative typed payload.
+  payload_preview is only a bounded operator preview and may be truncated; never treat
+  preview truncation as a payload defect, and assess length or content requirements
+  against the full payload fields.
 - Compare the exact external effect, destination, and payload with the original goal,
   context, constraints, success criteria, and execution intent.
 - Check whether the result incorporates the relevant work completed along the full plan
@@ -79,7 +83,9 @@ def build_judge_user_prompt(*, context: JudgeContext) -> str:
     payload = _jsonable(asdict(context))
     return (
         "Assess the exact governed external operation using the complete observable "
-        "execution context below. Preserve the supplied digest exactly.\n\n"
+        "execution context below. Preserve the supplied digest exactly. "
+        "external_operation.payload is the complete payload; payload_preview may be "
+        "truncated and is not the authoritative content.\n\n"
         f"{json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True)}"
     )
 

@@ -28,6 +28,16 @@ def route_after_governance(state: Layer2GraphState) -> str:
     return "finalize_bootstrap"
 
 
+# Continue a persisted batch through the next per-action governance boundary.
+def route_after_observe_tool_result(state: Layer2GraphState) -> str:
+    task_state = state["task_state"]
+    if task_state.current_state == RuntimeState.READY_GOVERNANCE:
+        return "governance"
+    if task_state.current_state == RuntimeState.REPLANNING:
+        return "replanner"
+    return "actor"
+
+
 # Route a typed review decision back into the appropriate runtime capability.
 def route_after_human_review(state: Layer2GraphState) -> str:
     task_state = state["task_state"]
@@ -60,5 +70,6 @@ __all__ = [
     "route_after_actor",
     "route_after_external_execution",
     "route_after_governance",
+    "route_after_observe_tool_result",
     "route_after_human_review",
 ]

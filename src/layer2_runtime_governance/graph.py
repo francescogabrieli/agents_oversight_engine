@@ -35,6 +35,7 @@ from .runtime.routing import (
     route_after_external_execution,
     route_after_governance,
     route_after_human_review,
+    route_after_observe_tool_result,
 )
 from .domain import TaskState
 from .external_operations import (
@@ -163,7 +164,7 @@ def build_runtime_graph(
         },
     )
     builder.add_edge("tool_gateway", "observe_tool_result")
-    builder.add_edge("observe_tool_result", "actor")
+    builder.add_conditional_edges("observe_tool_result", route_after_observe_tool_result, {"governance": "governance", "replanner": "replanner", "actor": "actor"})
     builder.add_edge("replanner", "actor")
     builder.add_edge("finalize_bootstrap", END)
     return builder.compile(checkpointer=checkpointer or build_default_checkpointer())

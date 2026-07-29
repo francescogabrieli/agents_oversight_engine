@@ -160,6 +160,21 @@ def _action(
     }
 
 
+# Evidence selection stays bounded so completions cite direct support, not bulk dumps.
+def _evidence_refs() -> dict[str, object]:
+    return {
+        "type": "array",
+        "items": _string(),
+        "maxItems": 15,
+        "description": (
+            "The smallest set of observation IDs (at most 15) that directly supports the claims "
+            "in this output. Never select observations in bulk. Search-result titles or short snippets "
+            "do not support detailed factual claims unless explicitly contained in the title/snippet. "
+            "Prefer fetched documents and authoritative source content."
+        ),
+    }
+
+
 # Build one validated completion action with the shared completion contract.
 def _completion_action(name: str, description: str) -> dict[str, object]:
     return _action(
@@ -170,7 +185,7 @@ def _completion_action(name: str, description: str) -> dict[str, object]:
             "output_text": _string(),
             "completion_rationale": _string(),
             "actor_self_confidence": _confidence(),
-            "evidence_refs": {"type": "array", "items": _string(), "maxItems": 50},
+            "evidence_refs": _evidence_refs(),
             "residual_uncertainty": _string(),
         },
         (
@@ -201,7 +216,7 @@ def _external_communication_draft_action() -> dict[str, object]:
             "bcc": {"type": "array", "items": _string(), "maxItems": 20},
             "completion_rationale": _string(),
             "actor_self_confidence": _confidence(),
-            "evidence_refs": {"type": "array", "items": _string(), "maxItems": 50},
+            "evidence_refs": _evidence_refs(),
             "residual_uncertainty": _string(),
         },
         (
@@ -237,7 +252,7 @@ def _database_statement_action() -> dict[str, object]:
             },
             "completion_rationale": _string(),
             "actor_self_confidence": _confidence(),
-            "evidence_refs": {"type": "array", "items": _string(), "maxItems": 50},
+            "evidence_refs": _evidence_refs(),
             "residual_uncertainty": _string(),
         },
         (

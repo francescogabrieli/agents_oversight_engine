@@ -12,6 +12,9 @@ from layer2_runtime_governance.tool_contract import ToolErrorCode
 from main_layer2 import parse_cli_args
 from layer2_runtime_governance.runtime.routing import route_after_actor
 from layer2_runtime_governance.execution.action_schemas import build_actor_runtime_tools, select_actor_runtime_tools_for_turn
+from layer2_runtime_governance.execution.providers.bedrock_runtime import _extract_tool_call_payloads
+from layer2_runtime_governance.runtime.tool_service import observe_tool_result
+from layer2_runtime_governance.runtime.routing import route_after_observe_tool_result
 
 
 class _Gateway:
@@ -162,6 +165,39 @@ class Layer2AgentLivenessTests(unittest.TestCase):
         normalized = normalize_task_state_serialization(state)
         self.assertEqual(normalized.progress_epoch, 0)
         self.assertEqual(normalized.workspace.artifacts, [])
+        self.assertEqual(normalized.pending_tool_requests, [])
+
+    # Bedrock preserves all valid toolUse blocks in their original provider order.
+    def test_bedrock_tool_use_batch_preserves_order(self) -> None:
+        payloads = _extract_tool_call_payloads({"output": {"message": {"content": [
+            {"toolUse": {"name": "request_web_search", "input": {"summary": "one"}}},
+            {"toolUse": {"name": "request_fetch_url_text", "input": {"summary": "two"}}},
+            {"toolUse": {"name": "request_mcp_echo", "input": {"summary": "three"}}},
+        ]}}})
+        self.assertEqual(tuple(item["tool_name"] for item in payloads), (
+            "request_web_search", "request_fetch_url_text", "request_mcp_echo",
+        ))
+
+    # The actor materializes only the first request while retaining ordered successors in state.
+    def test_actor_batch_populates_persisted_queue(self) -> None:
+        state = TaskState.from_intake(_build_research_intake_result())
+        state.current_state = RuntimeState.ACTING
+        state.plan_steps = [PlanStep("step_1", "Collect.", "Needed.", "Material.", PlanStepStatus.IN_PROGRESS)]
+        state.current_plan_step_index = 0
+        requests = (
+            ToolRequest("step_1", ToolName.WEB_SEARCH, "One.", query="one"),
+            ToolRequest("step_1", ToolName.WEB_SEARCH, "Two.", query="two"),
+            ToolRequest("step_1", ToolName.WEB_SEARCH, "Three.", query="three"),
+        )
+        result = ActorResult("step_1", ActorResultType.PROPOSE_ACTION, "Batch.", tool_request=requests[0], tool_requests=requests)
+        _record_actor_execution(state, actor_result=result)
+        state.current_tool_request = requests[0]
+        state.pending_tool_requests = list(requests[1:])
+        state.last_tool_result = ToolExecutionResult(requests[0], True, "ok")
+        observed = observe_tool_result(state)
+        self.assertEqual(observed.current_tool_request.query, "two")
+        self.assertEqual([item.query for item in observed.pending_tool_requests], ["three"])
+        self.assertEqual(route_after_observe_tool_result({"task_state": observed}), "governance")
 
     # CLI context is opt-in and does not inject a hidden task instruction.
     def test_cli_context_defaults_to_empty(self) -> None:

@@ -4,7 +4,10 @@ from dataclasses import replace
 from typing import Any
 
 from layer2_runtime_governance.domain import TaskState
-from layer2_runtime_governance.external_operations import ExternalOperationProposal
+from layer2_runtime_governance.external_operations import (
+    CommunicationOperationPayload,
+    ExternalOperationProposal,
+)
 from layer2_runtime_governance.tool_contract import ToolExecutionResult
 from layer2_runtime_governance.judge import (
     JudgeAssessment,
@@ -109,6 +112,11 @@ def build_judge_context(
         tool_executions=(),
         runtime_events=(),
         prior_external_revisions=_build_prior_external_revisions(task_state=task_state),
+        external_communication_body=(
+            external_operation.payload.body
+            if isinstance(external_operation.payload, CommunicationOperationPayload)
+            else None
+        ),
     )
 
 

@@ -95,18 +95,26 @@ def normalize_actor_payload(*, payload: dict[str, Any]) -> dict[str, Any]:
     raise ActorExecutionError("Actor JSON response must include string 'tool_name'.")
 
 
-# Extract exactly one native function tool call from a provider response.
-def extract_single_function_call(response: object) -> object:
+# Extract all native function calls in provider order for the shared actor batch contract.
+def extract_function_calls(response: object) -> tuple[object, ...]:
     function_calls = [
         item
         for item in getattr(response, "output", []) or []
         if getattr(item, "type", None) == "function_call"
     ]
-    if len(function_calls) != 1:
+    if not function_calls:
         raise ActorExecutionError(
-            f"Actor must emit exactly one function tool call, received {len(function_calls)}."
+            "Actor returned no function tool calls."
         )
-    return function_calls[0]
+    return tuple(function_calls)
+
+
+# Preserve the legacy public helper while callers migrate to the batch contract.
+def extract_single_function_call(response: object) -> object:
+    calls = extract_function_calls(response)
+    if len(calls) != 1:
+        raise ActorExecutionError(f"Actor returned {len(calls)} function tool calls; use batch normalization.")
+    return calls[0]
 
 
 # Return the first non-empty string value for known provider fallback keys.
@@ -145,6 +153,7 @@ __all__ = [
     "coerce_provider_confidence",
     "convert_json_payload_to_tool_call",
     "extract_single_function_call",
+    "extract_function_calls",
     "normalize_actor_payload",
     "validate_tool_call_action",
 ]

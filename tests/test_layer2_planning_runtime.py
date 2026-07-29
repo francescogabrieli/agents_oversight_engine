@@ -250,7 +250,7 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
 
         result = actor.act(actor_task=actor_task)
 
-        self.assertEqual(result.result_type, ActorResultType.NEEDS_REPLAN)
+        self.assertTrue(result.provider_protocol_failure)
         self.assertIn("incomplete runtime action", result.summary)
         self.assertIn("missing required string argument 'summary'", result.blocking_reason)
 
