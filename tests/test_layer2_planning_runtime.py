@@ -261,6 +261,8 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         self.assertIn("complete semantic plan", prompt)
         self.assertIn("Identify prerequisites and dependencies", prompt)
         self.assertIn("There is no preferred fixed step count", prompt)
+        self.assertIn("complete execution-ready proposal", prompt)
+        self.assertIn("not additional plan steps", prompt)
         self.assertNotIn("email", prompt.lower())
         self.assertNotIn("research", prompt.lower())
 

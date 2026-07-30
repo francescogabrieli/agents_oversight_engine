@@ -389,8 +389,43 @@ class Layer2ActorExecutionTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "without an executed external-operation receipt",
+            "unsatisfied terminal contract",
         ):
+            finalize_bootstrap(state)
+
+
+    # Finalization rejects a nominal completion that leaves live semantic work behind.
+    def test_finalize_rejects_completed_task_with_unexhausted_plan(self) -> None:
+        state = TaskState.from_intake(_build_research_intake_result())
+        state.execution_intent = ExecutionIntent.PROPOSAL_ONLY
+        state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Prepare the result.",
+                rationale="Required substantive work.",
+                expected_outcome="A prepared result.",
+                status=PlanStepStatus.COMPLETED,
+            ),
+            PlanStep(
+                step_id="step_2",
+                objective="Perform stale residual work.",
+                rationale="Over-decomposed lifecycle work.",
+                expected_outcome="A redundant outcome.",
+                status=PlanStepStatus.IN_PROGRESS,
+            ),
+        ]
+        state.current_plan_step_index = 1
+        state.executed_steps = [
+            ExecutedPlanStep(
+                step_id="step_1",
+                objective="Prepare the result.",
+                result_type=ActorResultType.STEP_COMPLETED,
+                summary="Prepared the result.",
+            )
+        ]
+        state.current_state = RuntimeState.COMPLETED
+
+        with self.assertRaisesRegex(RuntimeError, "unsatisfied terminal contract"):
             finalize_bootstrap(state)
 
 

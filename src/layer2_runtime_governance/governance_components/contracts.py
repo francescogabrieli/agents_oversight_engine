@@ -73,6 +73,7 @@ class GovernanceReasonCode(str, Enum):
     REPLAN_REQUEST_STALLED = "replan_request_stalled"
     EXTERNAL_LOW_ACTOR_SELF_CONFIDENCE = "external_low_actor_self_confidence"
     ACTION_REVISION_LIMIT_REACHED = "action_revision_limit_reached"
+    CAPABILITY_APPROVAL_REQUIRED = "capability_approval_required"
 
 
 # Recover stable audit codes from checkpoints whose newly added enum member decoded as None.

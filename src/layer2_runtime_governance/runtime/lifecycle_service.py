@@ -42,8 +42,9 @@ def finalize_bootstrap(state: TaskState) -> TaskState:
         and not terminal_execution_contract_satisfied(state)
     ):
         raise RuntimeError(
-            "Cannot finalize an execute-after-governance task without an executed "
-            "external-operation receipt."
+            "Cannot finalize a completed task with an unsatisfied terminal contract: "
+            "the plan must be exhausted with only completed or skipped steps, and an "
+            "execute-after-governance task also requires a digest-bound terminal receipt."
         )
     next_state = deepcopy(state)
     next_state.bootstrap_completed = True

@@ -60,7 +60,7 @@
         "judge_needs_revision", "judge_unsafe", "judge_uncertain",
         "provider_runtime_action_missing", "invalid_or_missing_selected_evidence",
         "actor_requested_replan", "replan_request_stalled", "external_low_actor_self_confidence",
-        "action_revision_limit_reached"
+        "action_revision_limit_reached", "capability_approval_required"
       ]
     },
     "runtime": {
@@ -123,7 +123,7 @@
         "objective": { "$ref": "#/$defs/nonEmptyString" },
         "rationale": { "type": "string" },
         "expected_outcome": { "type": "string" },
-        "status": { "enum": ["pending", "in_progress", "completed", "blocked"] }
+        "status": { "enum": ["pending", "in_progress", "completed", "blocked", "skipped"] }
       },
       "additionalProperties": false
     },

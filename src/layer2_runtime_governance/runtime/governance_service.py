@@ -28,7 +28,11 @@ from ..tools import ToolGatewayConfig
 
 # Nodes.py contains the executable Layer 2 business logic.
 # At this stage the runtime performs bootstrap, planning, and the actor/tool loop.
-from .actor_service import _set_external_communication_phase, commit_completion_candidate
+from .actor_service import (
+    _set_external_communication_phase,
+    commit_completion_candidate,
+    commit_terminal_completion_candidate,
+)
 from .lifecycle_service import _append_step_record
 from ..domain.step_recovery import restore_actor_step_for_more_evidence
 from ..external_operations import (
@@ -337,8 +341,13 @@ def _route_authorized_external_operation(
     ):
         return False
     if state.execution_intent == ExecutionIntent.PROPOSAL_ONLY:
-        if state.pending_completion_candidate is not None:
-            commit_completion_candidate(state)
+        commit_terminal_completion_candidate(
+            state,
+            expected_operation_digest=proposal.payload_digest,
+            skip_reason=(
+                "Governance accepted the proposal as the terminal local artifact."
+            ),
+        )
         state.current_external_execution_request = None
         state.current_state = RuntimeState.COMPLETED
         _set_external_communication_phase(

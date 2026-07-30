@@ -3,12 +3,19 @@ from __future__ import annotations
 from layer1_intake import ExecutionIntent
 
 from ..actor_contract import ActorResult
-from ..domain import HumanReviewDecisionType, RuntimeFlag, TaskState
+from ..domain import (
+    HumanReviewDecisionType,
+    PlanStepStatus,
+    RuntimeFlag,
+    TaskState,
+)
 from ..external_operations import ExternalExecutionStatus
 
 
 # Require an execution receipt only when Layer 1 recorded an explicit execution request.
 def terminal_execution_contract_satisfied(state: TaskState) -> bool:
+    if not terminal_plan_contract_satisfied(state):
+        return False
     if state.execution_intent != ExecutionIntent.EXECUTE_AFTER_GOVERNANCE:
         return bool(state.pending_completion_candidate is None and state.executed_steps)
     proposal = state.external_operation_proposal
@@ -23,6 +30,19 @@ def terminal_execution_contract_satisfied(state: TaskState) -> bool:
     ):
         return True
     return _indeterminate_execution_was_human_reconciled(state)
+
+
+# Require every completed runtime to exhaust its cursor and close every semantic step.
+def terminal_plan_contract_satisfied(state: TaskState) -> bool:
+    return bool(
+        state.current_plan_step_index is None
+        and state.pending_completion_candidate is None
+        and state.plan_steps
+        and all(
+            step.status in {PlanStepStatus.COMPLETED, PlanStepStatus.SKIPPED}
+            for step in state.plan_steps
+        )
+    )
 
 
 # Accept unknown connector outcome only after explicit digest-bound human reconciliation.
@@ -62,4 +82,5 @@ def terminal_actor_completion_omits_external_candidate(
 __all__ = [
     "terminal_actor_completion_omits_external_candidate",
     "terminal_execution_contract_satisfied",
+    "terminal_plan_contract_satisfied",
 ]

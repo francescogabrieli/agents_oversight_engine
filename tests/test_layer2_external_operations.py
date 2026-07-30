@@ -1,5 +1,9 @@
+import json
+import re
 import sys
+import unittest
 from dataclasses import asdict, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,6 +19,7 @@ from layer2_runtime_governance.domain import (
     ExecutedPlanStep,
     ExternalCommunicationPhase,
     ExternalCommunicationState,
+    StepCompletionCandidate,
 )
 from layer2_runtime_governance.governance_components import (
     GovernanceDirective,
@@ -34,11 +39,16 @@ from layer2_runtime_governance.external_operations import (
     DestinationClass,
     ExternalOperationEffect,
     ExternalOperationPayloadEdit,
+    ExternalExecutionReceipt,
+    ExternalExecutionStatus,
     OperationBoundary,
     SQLStatementClass,
     normalize_communication_operation,
     normalize_generic_external_operation,
     normalize_sql_operation,
+)
+from layer2_runtime_governance.runtime.external_execution_service import (
+    commit_external_execution_completion,
 )
 from layer2_runtime_governance.external_operations.runtime_projection import (
     prepare_external_operation_proposal,
@@ -411,31 +421,26 @@ class ExternalOperationNormalizerTests(unittest.TestCase):
 class ExternalOperationGovernanceTests(unittest.TestCase):
     # Python enums and the closed trace schema cover every active Rego reason code.
     def test_rego_python_and_trace_reason_codes_are_aligned(self) -> None:
-        active_rego_codes = {
-            "allowed_by_policy",
-            "read_only_allowed",
-            "ask_clarification_required",
-            "trajectory_degraded",
-            "evidence_gap_and_trajectory_degraded",
-            "provider_failures_repeated",
-            "repeated_recovery",
-            "policy_version_mismatch",
-            "required_pillar_unavailable",
-            "static_policy_hard_deny",
-            "read_only_mutation_blocked",
-            "database_profile_mutation_blocked",
-            "sql_ambiguous_or_multiple",
-            "prohibited_destination",
-            "judge_required_unavailable",
-            "judge_needs_revision",
-            "judge_unsafe",
-            "judge_uncertain",
-            "provider_runtime_action_missing",
-            "invalid_or_missing_selected_evidence",
-            "actor_requested_replan",
-            "replan_request_stalled",
-            "external_low_actor_self_confidence",
-        }
+        rego_root = REPO_ROOT / "configs" / "opa" / "layer2_governance"
+        active_rego_codes: set[str] = set()
+        call_site_patterns = (
+            re.compile(r'(?:hitl|replan|evidence)_decision\(\s*"([^"]+)"'),
+            re.compile(
+                r'base_decision\([^;\n]*?\[\s*"([^"]+)"\s*\]',
+            ),
+            re.compile(r'reason_codes\s+contains\s+"([^"]+)"'),
+            re.compile(
+                r'static_deny_reason_codes[^\n]*?else\s*:=\s*\[\s*"([^"]+)"\s*\]',
+            ),
+        )
+        for rego_path in (
+            rego_root / "main.rego",
+            *sorted((rego_root / "pillars").glob("*.rego")),
+        ):
+            source = rego_path.read_text(encoding="utf-8")
+            for pattern in call_site_patterns:
+                active_rego_codes.update(pattern.findall(source))
+
         python_codes = {code.value for code in GovernanceReasonCode}
         schema = json.loads(
             (REPO_ROOT / "schemas" / "layer2_trace.schema.json").read_text(
@@ -444,8 +449,60 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
         )
         schema_codes = set(schema["$defs"]["governanceReasonCode"]["enum"])
 
-        self.assertTrue(active_rego_codes.issubset(python_codes))
+        self.assertTrue(active_rego_codes)
+        self.assertEqual(active_rego_codes - python_codes, set())
         self.assertEqual(schema_codes, python_codes)
+
+    # A successful digest-bound receipt commits its proposal step and skips stale successors.
+    def test_external_receipt_commits_owner_and_skips_residual_plan(self) -> None:
+        proposal = _generic_proposal()
+        state = _state_with_proposal(proposal)
+        state.plan_steps.append(
+            PlanStep(
+                step_id="step_2",
+                objective="Send the already governed operation.",
+                rationale="Legacy over-decomposed lifecycle step.",
+                expected_outcome="A delivery receipt.",
+                status=PlanStepStatus.PENDING,
+            )
+        )
+        state.pending_completion_candidate = StepCompletionCandidate(
+            candidate_id="step_1:candidate:1",
+            step_id="step_1",
+            summary="Prepared the complete governed proposal.",
+            output_text="Governed proposal body.",
+            external_operation_id=proposal.operation_id,
+            external_operation_digest=proposal.payload_digest,
+        )
+        now = datetime.now(timezone.utc)
+        receipt = ExternalExecutionReceipt(
+            operation_id=proposal.operation_id,
+            capability_id=proposal.capability_id,
+            payload_digest=proposal.payload_digest,
+            status=ExternalExecutionStatus.EXECUTED,
+            idempotency_key="receipt-1",
+            started_at=now,
+            completed_at=now,
+        )
+
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            commit_external_execution_completion(
+                state=state,
+                receipt=replace(receipt, payload_digest="0" * 64),
+            )
+        self.assertEqual(state.plan_steps[0].status, PlanStepStatus.IN_PROGRESS)
+
+        commit_external_execution_completion(state=state, receipt=receipt)
+
+        self.assertEqual(state.plan_steps[0].status, PlanStepStatus.COMPLETED)
+        self.assertEqual(state.plan_steps[1].status, PlanStepStatus.SKIPPED)
+        self.assertEqual(
+            [step.step_id for step in state.executed_steps],
+            ["step_1"],
+        )
+        self.assertIsNone(state.pending_completion_candidate)
+        self.assertIsNone(state.current_plan_step_index)
+        self.assertIn("step_2", state.step_history[-1].summary)
 
     # Judge receives the whole observable path while remaining bound to one exact digest.
     def test_judge_context_contains_relevant_execution_context_and_exact_external(self) -> None:
@@ -817,6 +874,7 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
                 status=PlanStepStatus.IN_PROGRESS,
             )
         ]
+        state.current_plan_step_index = 0
         state.actor_result = ActorResult(
             plan_step_id="step_1",
             result_type=ActorResultType.PROPOSE_ACTION,
@@ -830,6 +888,14 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
         )
         self.assertIsNotNone(proposal)
         self.assertTrue(proposal.execution_candidate)
+        state.pending_completion_candidate = StepCompletionCandidate(
+            candidate_id="step_1:candidate:1",
+            step_id="step_1",
+            summary="Drafted dangerous email.",
+            output_text=state.external_communication.draft.body,
+            external_operation_id=proposal.operation_id,
+            external_operation_digest=proposal.payload_digest,
+        )
 
         policy_engine = StubPolicyEngine()
         unsafe_judge = _UnsafeJudge()
@@ -1028,6 +1094,14 @@ def _state_with_proposal(proposal, *, read_only_mode: bool = False):
         external_operation_proposal=proposal,
     )
     state.external_operation_proposal = proposal
+    state.pending_completion_candidate = StepCompletionCandidate(
+        candidate_id=f"{proposal.plan_step_id}:candidate:1",
+        step_id=proposal.plan_step_id,
+        summary="Prepared the governed external proposal.",
+        output_text=proposal.payload_preview,
+        external_operation_id=proposal.operation_id,
+        external_operation_digest=proposal.payload_digest,
+    )
     return state
 
 

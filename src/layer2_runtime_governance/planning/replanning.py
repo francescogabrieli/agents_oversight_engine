@@ -115,6 +115,10 @@ Rules:
   per-claim certification procedures. Use the concrete observations already available
   and plan only the substantive work still required.
 - If the actor needs more evidence, plan semantic evidence acquisition, not a concrete tool invocation.
+- For a task with a governed external effect, the terminal semantic step produces
+  the complete execution-ready proposal. Human approval, capability invocation,
+  delivery or execution receipts, and runtime completion are governed lifecycle
+  transitions, not replacement plan steps.
 - Do not add speculative retry, delivery-verification, or failure-recovery steps before
   such a failure has actually been observed. Runtime execution handles concrete
   failures and may request another replan from the resulting observable state.

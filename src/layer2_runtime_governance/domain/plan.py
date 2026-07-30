@@ -12,6 +12,7 @@ class PlanStepStatus(str, Enum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     BLOCKED = "blocked"
+    SKIPPED = "skipped"
 
 
 # Canonical domain contract extracted from the legacy state facade.

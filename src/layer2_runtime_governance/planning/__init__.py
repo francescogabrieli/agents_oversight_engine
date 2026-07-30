@@ -109,6 +109,10 @@ Rules:
 - Respect read_only_mode when it is true.
 - Do not include human review as a normal plan step.
 - Do not include compliance, legal classification, policy simulation, or governance as a plan step.
+- For a task with a governed external effect, the terminal semantic step produces
+  the complete execution-ready proposal. Human approval, capability invocation,
+  delivery or execution receipts, and runtime completion are governed lifecycle
+  transitions, not additional plan steps.
 - Do not add speculative retry, delivery-verification, or failure-recovery steps before
   such a failure has actually been observed. Runtime execution and replanning handle
   concrete failures when they occur.

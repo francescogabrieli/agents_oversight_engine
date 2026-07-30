@@ -411,6 +411,97 @@ def commit_completion_candidate(state: TaskState) -> None:
     if state.current_plan_step_index is None:
         state.final_output_text = _build_external_communication_draft_body(state) if state.external_communication is not None else candidate.output_text
 
+
+# Commit a terminal governed proposal and make the superseded residual trajectory explicit.
+def commit_terminal_completion_candidate(
+    state: TaskState,
+    *,
+    expected_operation_digest: str,
+    skip_reason: str,
+) -> None:
+    candidate = state.pending_completion_candidate
+    proposal = state.external_operation_proposal
+    if candidate is None:
+        # An idempotent replay may observe the candidate after its original commit.
+        if (
+            proposal is None
+            or proposal.payload_digest != expected_operation_digest
+            or not any(
+                step.step_id == proposal.plan_step_id
+                for step in state.executed_steps
+            )
+        ):
+            raise ValueError(
+                "No committed completion candidate matches the terminal operation."
+            )
+        _skip_residual_plan_steps(
+            state,
+            owner_step_id=proposal.plan_step_id,
+            reason=skip_reason,
+        )
+        return
+
+    if candidate.external_operation_digest != expected_operation_digest:
+        raise ValueError(
+            "The terminal receipt or approval digest does not match the completion candidate."
+        )
+
+    owner_step_id = candidate.step_id
+    terminal_output = candidate.output_text
+    commit_completion_candidate(state)
+    _skip_residual_plan_steps(
+        state,
+        owner_step_id=owner_step_id,
+        reason=skip_reason,
+    )
+    if state.external_communication is not None:
+        state.final_output_text = _build_external_communication_draft_body(
+            state,
+            current_output_text=terminal_output,
+        )
+    else:
+        state.final_output_text = terminal_output
+
+
+# Mark every step after a terminal external effect as superseded, never executable.
+def _skip_residual_plan_steps(
+    state: TaskState,
+    *,
+    owner_step_id: str,
+    reason: str,
+) -> None:
+    owner_index = next(
+        (
+            index
+            for index, step in enumerate(state.plan_steps)
+            if step.step_id == owner_step_id
+        ),
+        None,
+    )
+    if owner_index is None:
+        raise ValueError("The terminal completion owner is absent from the semantic plan.")
+
+    skipped_ids: list[str] = []
+    for step in state.plan_steps[owner_index + 1 :]:
+        if step.status == PlanStepStatus.COMPLETED:
+            raise ValueError(
+                "A completed plan step cannot appear after the terminal external effect."
+            )
+        if step.status != PlanStepStatus.SKIPPED:
+            step.status = PlanStepStatus.SKIPPED
+            skipped_ids.append(step.step_id)
+
+    state.current_plan_step_index = None
+    if skipped_ids:
+        _append_step_record(
+            state,
+            node_name="terminal_plan_completion",
+            summary=(
+                f"{reason} Superseded plan steps were marked skipped: "
+                f"{', '.join(skipped_ids)}."
+            ),
+        )
+
 # Apply actor progress while preserving typed runtime invariants.
 def _update_external_communication_after_actor_result(
     state: TaskState,
@@ -666,4 +757,5 @@ __all__ = [
     "_repeats_identical_intermediate_output",
     "_record_workspace_artifact",
     "commit_completion_candidate",
+    "commit_terminal_completion_candidate",
 ]

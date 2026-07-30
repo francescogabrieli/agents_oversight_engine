@@ -278,12 +278,41 @@ def _apply_human_review_decision(
             pending_request=pending_request,
         )
         if _is_indeterminate_reconciliation(state):
+            # Import after HITL module initialization to avoid the runtime package cycle.
+            from ..runtime.actor_service import commit_terminal_completion_candidate
+
+            receipt = state.last_external_execution_receipt
+            if receipt is None:
+                raise ValueError(
+                    "Indeterminate reconciliation requires a persisted receipt."
+                )
+            commit_terminal_completion_candidate(
+                state,
+                expected_operation_digest=receipt.payload_digest,
+                skip_reason=(
+                    "Human review reconciled the digest-bound indeterminate "
+                    "external execution as terminal."
+                ),
+            )
             state.current_external_execution_request = None
             state.current_state = RuntimeState.COMPLETED
             return
         if _is_governed_external_proposal(state) and (
             state.execution_intent == ExecutionIntent.PROPOSAL_ONLY
         ):
+            # Import after HITL module initialization to avoid the runtime package cycle.
+            from ..runtime.actor_service import commit_terminal_completion_candidate
+
+            proposal = state.external_operation_proposal
+            if proposal is None:
+                raise ValueError("Proposal-only approval requires a governed proposal.")
+            commit_terminal_completion_candidate(
+                state,
+                expected_operation_digest=proposal.payload_digest,
+                skip_reason=(
+                    "Human review accepted the proposal as the terminal local artifact."
+                ),
+            )
             _set_external_communication_phase(
                 state,
                 phase=ExternalCommunicationPhase.APPROVED_DRAFT,

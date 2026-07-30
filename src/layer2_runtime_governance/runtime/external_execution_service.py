@@ -29,7 +29,10 @@ from ..external_operations import (
 )
 from ..governance_components import GovernanceDirective
 from ..hitl import build_human_review_request
-from .actor_service import _set_external_communication_phase
+from .actor_service import (
+    _set_external_communication_phase,
+    commit_terminal_completion_candidate,
+)
 from .lifecycle_service import _append_step_record
 
 
@@ -50,6 +53,7 @@ def external_execution(
     if duplicate is not None:
         state.last_external_execution_receipt = duplicate
         state.current_external_execution_request = None
+        commit_external_execution_completion(state=state, receipt=duplicate)
         state.current_state = RuntimeState.COMPLETED
         _set_external_communication_phase(
             state,
@@ -284,6 +288,7 @@ def _apply_external_execution_outcome(
     hitl_event_callback: Callable[[TaskState], None] | None,
 ) -> None:
     if receipt.status == ExternalExecutionStatus.EXECUTED:
+        commit_external_execution_completion(state=state, receipt=receipt)
         state.current_external_execution_request = None
         state.current_state = RuntimeState.COMPLETED
         _set_external_communication_phase(
@@ -330,6 +335,34 @@ def _apply_external_execution_outcome(
         phase=ExternalCommunicationPhase.EXECUTION_FAILED,
         summary=receipt.summary or "The external connector failed deterministically.",
         review_ready=False,
+    )
+
+
+# Bind the terminal semantic commit to the exact successful connector receipt.
+def commit_external_execution_completion(
+    *,
+    state: TaskState,
+    receipt: ExternalExecutionReceipt,
+) -> None:
+    if receipt.status != ExternalExecutionStatus.EXECUTED:
+        raise ValueError("Only an executed receipt can commit external completion.")
+    proposal = state.external_operation_proposal
+    if (
+        proposal is None
+        or receipt.operation_id != proposal.operation_id
+        or receipt.capability_id != proposal.capability_id
+        or receipt.payload_digest != proposal.payload_digest
+    ):
+        raise ValueError(
+            "The executed receipt does not match the current external proposal."
+        )
+    commit_terminal_completion_candidate(
+        state,
+        expected_operation_digest=receipt.payload_digest,
+        skip_reason=(
+            "The digest-bound external execution completed the task at "
+            f"plan step '{proposal.plan_step_id}'."
+        ),
     )
 
 
@@ -417,4 +450,4 @@ def _rejection_receipt(
     )
 
 
-__all__ = ["external_execution"]
+__all__ = ["commit_external_execution_completion", "external_execution"]
