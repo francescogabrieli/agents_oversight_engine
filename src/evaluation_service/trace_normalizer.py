@@ -15,7 +15,7 @@ def normalize_trace_json(trace_payload: dict[str, Any]) -> dict[str, Any]:
         trace_payload=source_trace,
         governance_decisions=governance_decisions,
     )
-    normalized_trace = normalize_legacy_trace_to_v5(source_trace)
+    normalized_trace = normalize_legacy_trace_to_v6(source_trace)
     return {
         "schema_version": "evaluation_input.v1",
         "trace": normalized_trace,
@@ -30,17 +30,22 @@ def normalize_trace_json(trace_payload: dict[str, Any]) -> dict[str, Any]:
             ),
             "trace_version": trace_version,
             "completeness": completeness,
-            "pillar_results_available": trace_version in {"v2", "v3", "v4", "v5"},
-            "safety_invariants_available": trace_version in {"v2", "v3", "v4", "v5"},
+            "pillar_results_available": trace_version in {"v2", "v3", "v4", "v5", "v6"},
+            "safety_invariants_available": trace_version in {"v2", "v3", "v4", "v5", "v6"},
         },
     }
 
 
-# Project a legacy trace into the closed v5 read model without mutating its source payload.
-def normalize_legacy_trace_to_v5(trace_payload: dict[str, Any]) -> dict[str, Any]:
+# Project a legacy trace into the closed v6 read model without mutating its source payload.
+def normalize_legacy_trace_to_v6(trace_payload: dict[str, Any]) -> dict[str, Any]:
     source = deepcopy(trace_payload)
-    if source.get("trace_version") == "layer2_trace.v5":
-        return _add_current_v5_compatibility_defaults(source)
+    if source.get("trace_version") in {
+        "layer2_trace.v4",
+        "layer2_trace.v5",
+        "layer2_trace.v6",
+    }:
+        source["trace_version"] = "layer2_trace.v6"
+        return _add_current_v6_compatibility_defaults(source)
 
     runtime = _dict_or_empty(source.get("runtime"))
     intake = _dict_or_empty(source.get("intake"))
@@ -49,7 +54,7 @@ def normalize_legacy_trace_to_v5(trace_payload: dict[str, Any]) -> dict[str, Any
     governance_passes = _normalize_governance_passes(source)
 
     return {
-        "trace_version": "layer2_trace.v5",
+        "trace_version": "layer2_trace.v6",
         "runtime": {
             "thread_id": _text_or(runtime.get("thread_id"), "legacy_unknown"),
             "current_state": _text_or(runtime.get("current_state"), "aborted"),
@@ -154,6 +159,11 @@ def normalize_legacy_trace_to_v5(trace_payload: dict[str, Any]) -> dict[str, Any
     }
 
 
+# Preserve the former internal name for evaluation callers during the v6 migration.
+def normalize_legacy_trace_to_v5(trace_payload: dict[str, Any]) -> dict[str, Any]:
+    return normalize_legacy_trace_to_v6(trace_payload)
+
+
 # Normalize one legacy semantic plan step into the v4 contract.
 def _normalize_legacy_plan_step(item: dict[str, Any], *, index: int) -> dict[str, Any]:
     return {
@@ -246,11 +256,12 @@ def _normalize_legacy_governance_pass(
         "selected_reason": _text_or(item.get("selected_reason"), ""),
         "rejected_alternatives": _string_dict(item.get("rejected_alternatives")),
         "safety_invariants": _string_list(item.get("safety_invariants")),
+        "judge_admission": None,
     }
 
 
-# Add conservative defaults when reading current v5 traces at the evaluation boundary.
-def _add_current_v5_compatibility_defaults(
+# Add conservative defaults when reading v4-v6 traces at the evaluation boundary.
+def _add_current_v6_compatibility_defaults(
     source: dict[str, Any],
 ) -> dict[str, Any]:
     intake = _dict_or_empty(source.get("intake"))
@@ -259,6 +270,7 @@ def _add_current_v5_compatibility_defaults(
     source.setdefault("external_execution", _empty_external_execution())
     for governance_pass in _dict_list(source.get("governance_passes")):
         governance_pass.setdefault("evaluated_operation_digest", None)
+        governance_pass.setdefault("judge_admission", None)
     communication = source.get("external_communication")
     if isinstance(communication, dict):
         _add_draft_recipient_defaults(communication.get("draft"))
@@ -460,13 +472,13 @@ def _trace_version_and_completeness(*, trace_payload: dict[str, Any], governance
     decisions = [item for item in governance_decisions if isinstance(item, dict)]
     if not decisions:
         return "unknown", "inconclusive"
-    if trace_payload.get("trace_version") in {"layer2_trace.v4", "layer2_trace.v5"} and all(
+    if trace_payload.get("trace_version") in {"layer2_trace.v4", "layer2_trace.v5", "layer2_trace.v6"} and all(
         isinstance(item.get("pillar_results"), dict)
         and isinstance(item.get("safety_invariants"), list)
         for item in decisions
     ):
         return (
-            "v5" if trace_payload.get("trace_version") == "layer2_trace.v5" else "v4",
+            "v6" if trace_payload.get("trace_version") == "layer2_trace.v6" else ("v5" if trace_payload.get("trace_version") == "layer2_trace.v5" else "v4"),
             "complete",
         )
     is_v2 = all(

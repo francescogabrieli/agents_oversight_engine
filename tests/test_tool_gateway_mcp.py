@@ -289,6 +289,7 @@ class GatewayMCPTests(unittest.TestCase):
                 return_value=(
                     "The purpose of this Regulation is to contribute to the proper "
                     "functioning of the internal market by laying down harmonised rules."
+                    + (" Additional official provision." * 2000)
                 ),
             ):
                 result = gateway.execute(
@@ -304,6 +305,8 @@ class GatewayMCPTests(unittest.TestCase):
                 )
 
         self.assertTrue(result.success)
+        self.assertTrue(result.truncated)
+        self.assertTrue(result.extractability_limited)
         self.assertIn("publication fallback", result.summary)
         self.assertIn("proper functioning of the internal market", result.content or "")
         self.assertEqual(len(result.observations), 1)
@@ -504,6 +507,10 @@ class AllowPolicyEngine(PolicyEnginePort):
             "directive": "continue_read_only" if has_tool else "continue",
             "policy_decision": "allow_read_only" if has_tool else "allow",
             "reason_codes": ["read_only_allowed" if has_tool else "allowed_by_policy"],
+            "judge_admission": {
+                "required": False,
+                "reason": "deterministic_gate_not_admissible",
+            },
             "pillar_results": pillar_results,
             "selected_reason": "Read-only runtime test action is allowed.",
             "rejected_alternatives": {},

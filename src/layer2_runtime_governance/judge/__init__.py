@@ -1,6 +1,8 @@
 from .contracts import (
     JudgeAssessment,
     JudgeAssessmentStatus,
+    JudgeClaimAssessment,
+    JudgeClaimStatus,
     JudgeCompletedStepContext,
     JudgeContext,
     JudgeEvidenceContext,
@@ -27,6 +29,8 @@ __all__ = [
     "DisabledJudge",
     "JudgeAssessment",
     "JudgeAssessmentStatus",
+    "JudgeClaimAssessment",
+    "JudgeClaimStatus",
     "JudgeCompletedStepContext",
     "JudgeContext",
     "JudgeEvidenceContext",

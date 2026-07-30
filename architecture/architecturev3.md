@@ -338,18 +338,19 @@ Nota operativa:
 
 #### Governance Core: OPA-first, operazioni external e pilastri active/shadow
 
-Aggiornamento di refactor: il piano semantico non incorpora livelli di evidenza, precision ceilings o meta-step di compliance e il runtime non lo compatta, comprime o riscrive. L’actor riceve il piano completo come contesto, ma può completare soltanto il passo corrente. I tool adapter producono `ToolObservation` minime (`observation_id`, contenuto concreto e locator opzionale); goal, context, vincoli e criteri di successo restano istruzioni, non evidenze. Il PEP invia a OPA soltanto invarianti e fatti osservabili, mentre il judge valuta l’allineamento semantico delle proposte governed-external. `actor_self_confidence` è un segnale contestuale di incertezza: da sola non ferma né degrada una run che progredisce. `execution_intent` conserva l’intenzione di produrre un effetto esterno senza duplicare il piano in un JSON di operazioni richieste; l’effetto concreto nasce dalla proposta tipizzata dell’actor e continua a richiedere judge, digest esatto e resume HITL.
+Aggiornamento di refactor: il piano semantico non incorpora livelli di evidenza, precision ceilings o meta-step di compliance e il runtime non lo compatta, comprime o riscrive. L’actor riceve il piano completo come contesto, ma può completare soltanto il passo corrente. I tool adapter producono `ToolObservation` minime (`observation_id`, contenuto concreto e locator opzionale); goal, context, vincoli e criteri di successo restano istruzioni, non evidenze. Evidence Integrity & Provenance verifica deterministicamente integrità, lineage e provenienza del manifest, mentre il Governed External Semantic Judge possiede il grounding claim→observation e l’adeguatezza dell’esatto payload. Trajectory Health osserva esclusivamente la dinamica della run; `actor_self_confidence` è un fatto contestuale di incertezza, non una proprietà della trajectory. OPA ammette il judge soltanto dopo i gate deterministici e resta la sola fonte della direttiva finale. Il Judge riceve tutte le osservazioni canoniche disponibili in una rappresentazione tipizzata bounded, con selected refs come dichiarazione di reliance e senza process narration. [Fondamento scientifico e limiti](../docs/governance_pillars_research_basis.md).
 
 Il nodo LangGraph `governance` è il **Policy Enforcement Point (PEP)**. OPA è il solo **Policy Decision Point (PDP)**: possiede policy statica, soglie, pesi, precedenze, cap, invarianti e direttiva finale. Python non combina più direttive con un decision combiner nel percorso live.
 
 Flusso di un turno governato:
 
 1. il PEP costruisce `base_facts` versionati da `TaskState` e `ActorResult`;
-2. interroga OPA `data.layer2.governance.required_pillars` per sapere quali segnali sono obbligatori;
-3. normalizza l’eventuale azione in una `ExternalOperationProposal` immutabile e invoca separatamente i servizi dei pilastri;
-4. valida `GovernanceDecisionInput` e lo invia a OPA `data.layer2.governance.decision`;
-5. valida `GovernanceDecisionOutput`, registra `GovernanceDecisionTrace` e applica la direttiva al grafo;
-6. se OPA, evidence o trajectory non sono disponibili applica fail-closed tracciato; un judge obbligatorio indisponibile o con digest non coincidente porta a `wait_human_review`, mentre failure dei pillar shadow resta solo osservabile.
+2. interroga OPA `data.layer2.governance.required_pillars` per sapere quali segnali deterministici sono obbligatori;
+3. normalizza l’eventuale azione in una `ExternalOperationProposal` immutabile e raccoglie Evidence e Trajectory;
+4. valida un input preliminare e interroga OPA per la `judge_admission` tipizzata;
+5. soltanto se ammesso, invoca il Judge sull’esatto payload e sulla completa base semantica osservata;
+6. valida l’input finale, interroga nuovamente OPA e applica la sola direttiva restituita;
+7. se OPA, Evidence o Trajectory non sono disponibili applica fail-closed tracciato; un Judge obbligatorio indisponibile o non legato ai digest di operation, snapshot e selection porta a `wait_human_review`, mentre failure dei pillar shadow resta solo osservabile.
 
 I servizi di segnale sono moduli locali tipizzati, non PDP separati: possono produrre componenti diagnostiche per trace, ma non scelgono direttive runtime.
 
@@ -358,15 +359,15 @@ I pillar e la loro autorità sono:
 | Pilastro | Modalità | Producer | Autorità nella decisione OPA |
 | --- | --- | --- | --- |
 | `static_policy` | active | fatti deterministici, execution policy, profili capability | hard deny assorbente soltanto per violazioni specifiche |
-| `evidence` | active al completion boundary | osservazioni concrete e validità dei riferimenti selezionati | richiesta di correzione soltanto per gap strutturali concreti |
+| `evidence` | active al completion boundary | osservazioni concrete, lineage, validità dei riferimenti e binding candidate/snapshot/selection | richiesta di correzione soltanto per gap strutturali concreti |
 | `trajectory` | active ai confini semantici | storia aggregata, replan espliciti, tool outcome, recovery e revisioni | replan ammesso o churn verso HITL; nessuna pressione sui turni narrativi |
-| `judge` | active per execution candidate | assessment della task, dell’intero percorso osservabile e dell’esatta proposta external | OPA mappa `safe`, `needs_revision`, `unsafe`, `uncertain` |
+| `judge` | active per execution candidate ammesso | assessment della task, della completa base semantica osservata e dell’esatta proposta external, senza narrazione di processo | OPA mappa `safe`, `needs_revision`, `unsafe`, `uncertain` |
 | `risk` | shadow | consequence/impact facts da proposta e profilo versionato | nessuna influenza sulla direttiva |
 | `behavioral` | shadow | read model SQLite di similarity, deviation e novelty | nessuna influenza sulla direttiva |
 
 `static_policy` non blocca genericamente `write` o `external`: applica soltanto guardrail deterministici, come `read_only_mode` più effetto mutating, profilo database read-only più statement non-`SELECT`, statement SQL ambiguo/multiplo o destinazione esplicitamente proibita. Una `SELECT` aziendale resta `governed_external`, ma passa lo static e richiede il judge prima di essere candidata all’esecuzione.
 
-La prima passata OPA richiede il judge esclusivamente quando la proposta è `execution_candidate`, il boundary è `governed_external` e lo static non ha già prodotto hard deny. Output locali, draft parziali e letture di evidenza pubblica (`web_search`, `fetch_url_text`) non pagano una chiamata judge. Il judge riceve task e criteri, piano completo, step conclusi, scratchpad audit-safe, tool history, eventi runtime, tutte le osservazioni, riferimenti selezionati, revisioni precedenti, proposta, digest e target; non riceve behavioral, dynamic policy o risk e non emette direttive runtime.
+OPA valuta prima static policy, Evidence Integrity & Provenance e Trajectory Health, quindi ammette il Judge esclusivamente per un nuovo `STEP_COMPLETED` che espone un `execution_candidate` governed-external con digest valido e senza blocchi deterministici. Static hard deny, gap strutturali delle evidenze, replan ammissibile, stall o pillar required unavailable evitano la chiamata Judge. Output locali, `PROPOSE_ACTION`, draft parziali e letture read-only (`web_search`, `fetch_url_text`) non la pagano. Il Judge riceve task autoritativo e criteri, piano completo non autoritativo, summary degli step conclusi, tutte le osservazioni canoniche, selected references, revision findings della stessa operation, proposta, digest e target; non riceve scratchpad, tool history/arguments, eventi runtime, retry/replan/counter, behavioral, dynamic policy o risk e non emette direttive runtime.
 
 Per una comunicazione external, il passo di sintesi dell'actor espone soltanto l'azione tipizzata con `channel`, `recipient`, `subject` e `body`, mentre i completion generici restano esclusi da quel turno. Il runtime deriva boundary, effect, destination class e digest senza accettarli dal provider. Il runtime preserva il piano semantico del planner senza compattarlo o sostituirlo: planner e actor non devono anticipare il giudizio semantico né trasformarlo in meta-step di compliance.
 
@@ -376,7 +377,7 @@ Le direttive possibili sono `continue`, `continue_read_only`, `request_more_evid
 
 Il nodo `human_review` chiama `interrupt()` con un payload tipizzato e JSON-safe. La dashboard riceve la decisione umana e riprende lo stesso `thread_id` tramite `Command(resume=...)` sul checkpointer ufficiale LangGraph. Il backend locale è `SqliteSaver`; un deployment multi-worker può selezionare `PostgresSaver`. La dashboard non ricostruisce mai il runtime da trace o artifact.
 
-Azioni umane canoniche, sempre disponibili in ogni HITL: `approve_continue`, `approve_continue_read_only`, `modify_and_continue`, `request_more_evidence`, `replan`, `ask_clarification` e `abort`. `modify_and_continue` richiede comunque un edit tipizzato valido al submit e non può aggirare il contratto della proposta. Approval e judge assessment sono legati al digest esatto; una modifica crea un nuovo digest, invalida approval e assessment precedenti e passa da `READY_GOVERNANCE` prima di qualunque seam esecutivo. `approve_continue_read_only` non può autorizzare una proposta mutating invariata.
+Le azioni umane sono canoniche ma reason-scoped: `judge_unsafe`/`judge_uncertain` espongono modifica, replan o abort; `capability_approval_required` espone approvazione dell’esatto digest, modifica o abort; clarification e riconciliazione di receipt indeterminate espongono soltanto le scelte applicabili. `modify_and_continue` richiede un edit tipizzato valido al submit e non può aggirare il contratto della proposta. Approval, completion candidate, Evidence selection e Judge assessment sono legati ai rispettivi digest; una modifica crea un nuovo digest, aggiorna atomicamente il candidate, invalida approval e assessment precedenti e passa da `READY_GOVERNANCE` prima di qualunque seam esecutivo. `approve_continue_read_only` non può autorizzare una proposta mutating invariata.
 
 Il package `external_operations/` normalizza communication, SQL e generic external. SQL usa AST `sqlglot` e accetta una sola statement; email normalizza campi e destinazione senza giudicare il tono. `ExecutionIntent` distingue `proposal_only` da `execute_after_governance` e recupera checkpoint e payload precedenti conservativamente come `proposal_only`.
 
@@ -646,9 +647,11 @@ narrativo. Un risultato `STEP_COMPLETED` crea un `StepCompletionCandidate`:
 il cursore e la history avanzano soltanto con il commit atomico successivo alla
 direttiva OPA. I failure tecnici (protocollo provider, duplicate, timeout e
 no-state-delta) restano nel recovery runtime prima della governance semantica e
-non diventano evidence né progresso. Il Judge riceve esclusivamente la proposta
-esterna immutabile con digest, evidence selezionate e contesto compatto; il suo
-assessment è riusato per lo stesso digest. Il `approval_mode` del capability
+non diventano evidence né progresso. Il Judge riceve la proposta esterna
+immutabile, la completa base semantica osservata in proiezioni bounded e i selected
+refs come marker di attribution, senza la narrazione di processo. Il suo assessment
+è riusato soltanto se coincidono operation digest, evidence snapshot digest ed
+evidence selection digest. Il `approval_mode` del capability
 profile (`always`, `conditional`, `never`) è un fatto inviato a OPA: Python
 applica la direttiva, senza aggiungere gate per tipo di capability.
 

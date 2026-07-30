@@ -99,7 +99,9 @@ class Layer2OversightRawFactsTests(unittest.TestCase):
             thresholds_version="policy.v1",
         )
 
-        self.assertEqual(signal["raw_facts"]["configured_confidence_threshold"], 0.65)
+        # Point confidence is contextual uncertainty in base_facts, never trajectory.
+        self.assertNotIn("configured_confidence_threshold", signal["raw_facts"])
+        self.assertNotIn("actor_self_confidence", signal["raw_facts"])
         self.assertEqual(signal["raw_facts"]["actor_turn_count"], 3)
         self.assertEqual(signal["raw_facts"]["completed_step_count"], 0)
         self.assertNotIn("consecutive_no_progress_turns", signal["raw_facts"])

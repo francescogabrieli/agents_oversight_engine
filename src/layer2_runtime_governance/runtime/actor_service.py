@@ -20,6 +20,9 @@ from ..domain import (
     StepArtifact,
     StepCompletionCandidate,
     TaskState,
+    build_evidence_selection_digest,
+    build_evidence_snapshot_manifest,
+    digest_json,
 )
 
 # Nodes.py contains the executable Layer 2 business logic.
@@ -356,15 +359,34 @@ def _record_actor_execution(state: TaskState, *, actor_result: ActorResult) -> N
         materialized_output = actor_result.external_operation_proposal.payload_preview
     if not materialized_output or not materialized_output.strip():
         raise ValueError("step_completed requires materialized output_text.")
+    selected_refs = (
+        actor_result.step_validation.evidence_refs
+        if actor_result.step_validation
+        else ()
+    )
+    evidence_snapshot_digest = digest_json(
+        build_evidence_snapshot_manifest(task_state=state)
+    )
+    evidence_selection_digest = build_evidence_selection_digest(
+        selected_refs=selected_refs,
+        evidence_snapshot_digest=evidence_snapshot_digest,
+        external_operation_digest=(
+            actor_result.external_operation_proposal.payload_digest
+            if actor_result.external_operation_proposal
+            else None
+        ),
+    )
     # Candidate creation keeps the semantic cursor stable until the governing boundary accepts it.
     state.pending_completion_candidate = StepCompletionCandidate(
         candidate_id=f"{current_step.step_id}:candidate:{state.actor_turn_count}",
         step_id=current_step.step_id,
         summary=actor_result.summary,
         output_text=materialized_output.strip(),
-        evidence_refs=(actor_result.step_validation.evidence_refs if actor_result.step_validation else ()),
+        evidence_refs=selected_refs,
         external_operation_id=(actor_result.external_operation_proposal.operation_id if actor_result.external_operation_proposal else None),
         external_operation_digest=(actor_result.external_operation_proposal.payload_digest if actor_result.external_operation_proposal else None),
+        evidence_snapshot_digest=evidence_snapshot_digest,
+        evidence_selection_digest=evidence_selection_digest,
     )
     current_step.status = PlanStepStatus.IN_PROGRESS
     state.current_tool_request = None

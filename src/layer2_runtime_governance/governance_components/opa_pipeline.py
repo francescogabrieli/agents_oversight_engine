@@ -16,6 +16,7 @@ from .decision_parser import (
     _build_dynamic_assessment_from_signals,
     _build_governance_trace_from_opa_output,
     _build_static_assessment_from_decision,
+    _validate_governance_decision_output,
 )
 from .fail_closed import (
     _build_fail_closed_governance_result,
@@ -176,43 +177,112 @@ def evaluate_opa_first_governance(
         behavioral_assessment = _unavailable_behavioral_assessment("shadow sampling deferred")
         pillars["behavioral"] = build_behavioral_signal(behavioral_assessment=behavioral_assessment, thresholds_version=thresholds_version)
 
-    if pillar_requirements.get("require_judge", False):
+    evidence_facts = pillars.get("evidence", {}).get("raw_facts", {})
+    expected_evidence_snapshot_digest = evidence_facts.get(
+        "evidence_snapshot_digest"
+    )
+    expected_evidence_selection_digest = evidence_facts.get(
+        "evidence_selection_digest"
+    )
+
+    # Ask OPA for staged judge admission after deterministic signals exist.  This is a
+    # policy query, not a Python decision: its output only controls whether to collect
+    # the optional semantic assessment before the final OPA directive.
+    preliminary_judge = _not_required_judge_assessment()
+    pillars["judge"] = build_judge_signal(
+        judge_assessment=preliminary_judge,
+        required=False,
+        expected_operation_digest=(
+            external_operation.payload_digest if external_operation is not None else None
+        ),
+        expected_evidence_snapshot_digest=expected_evidence_snapshot_digest,
+        expected_evidence_selection_digest=expected_evidence_selection_digest,
+        thresholds_version=thresholds_version,
+    )
+    try:
+        preliminary_input = build_governance_decision_input(
+            base_facts=base_facts,
+            policy_bundle_version=policy_bundle_version,
+            policy_config_version=policy_config_version,
+            pillar_requirements=pillar_requirements,
+            pillars=pillars,
+            pillar_errors=pillar_errors,
+        )
+        validate_governance_decision_input(preliminary_input)
+        preliminary_output = _evaluate_governance_decision_output(
+            policy_engine_service=policy_engine_service,
+            decision_input=preliminary_input,
+        )
+        _validate_governance_decision_output(preliminary_output)
+        judge_required = _parse_judge_admission(preliminary_output)["required"]
+    except Exception as exc:
+        return _build_fail_closed_governance_result(
+            task_state=task_state, policy_input=policy_input,
+            policy_engine_service=policy_engine_service,
+            reason=f"OPA judge admission failed: {exc}", base_facts=base_facts,
+            policy_bundle_version=policy_bundle_version,
+            policy_config_version=policy_config_version,
+            pillar_requirements=pillar_requirements, pillars=pillars,
+            pillar_errors={**pillar_errors, "judge_admission": str(exc)},
+            dynamic_assessment=dynamic_assessment,
+            behavioral_assessment=behavioral_assessment,
+        )
+    pillar_requirements = {**pillar_requirements, "require_judge": judge_required}
+
+    if judge_required:
         try:
             if external_operation is None:
                 raise ValueError("OPA required judge without a canonical external operation.")
-            # A digest identifies the immutable exact payload; re-use its valid assessment.
+            judge_context = build_judge_context(
+                task_state=task_state,
+                external_operation=external_operation,
+                invocation_reason="opa_required_governed_external_execution_candidate",
+            )
+            if (
+                judge_context.evidence_snapshot_digest
+                != expected_evidence_snapshot_digest
+                or judge_context.evidence_selection_digest
+                != expected_evidence_selection_digest
+            ):
+                raise ValueError(
+                    "Judge context does not match the Evidence pillar snapshot binding."
+                )
+            # Reuse only an assessment bound to the exact payload and evidence universe.
             judge_assessment = next(
                 (
                     assessment
                     for assessment in reversed(task_state.judge_history)
                     if assessment.evaluated_operation_digest == external_operation.payload_digest
+                    and assessment.evaluated_evidence_snapshot_digest
+                    == expected_evidence_snapshot_digest
+                    and assessment.evaluated_evidence_selection_digest
+                    == expected_evidence_selection_digest
                     and assessment.status.value == "active"
                 ),
                 None,
             )
             if judge_assessment is None:
                 resolved_judge = judge_service or build_default_judge()
-                judge_context = build_judge_context(
-                    task_state=task_state,
-                    external_operation=external_operation,
-                    invocation_reason="opa_required_governed_external_execution_candidate",
-                )
                 judge_assessment = resolved_judge.evaluate(context=judge_context)
             judge_assessment = validate_required_judge_assessment(
                 judge_assessment=judge_assessment,
                 expected_operation_digest=external_operation.payload_digest,
+                expected_evidence_snapshot_digest=expected_evidence_snapshot_digest,
+                expected_evidence_selection_digest=expected_evidence_selection_digest,
             )
         except Exception as exc:
             pillar_errors["judge"] = str(exc)
             judge_assessment = _unavailable_judge_assessment(str(exc))
     else:
-        judge_assessment = _not_required_judge_assessment()
+        judge_assessment = preliminary_judge
     pillars["judge"] = build_judge_signal(
         judge_assessment=judge_assessment,
-        required=pillar_requirements.get("require_judge", False),
+        required=judge_required,
         expected_operation_digest=(
             external_operation.payload_digest if external_operation is not None else None
         ),
+        expected_evidence_snapshot_digest=expected_evidence_snapshot_digest,
+        expected_evidence_selection_digest=expected_evidence_selection_digest,
         thresholds_version=thresholds_version,
     )
 
@@ -327,8 +397,28 @@ def _evaluate_governance_decision_output(
         raise PolicyEngineExecutionError("OPA decision response must be an object.")
     return result
 
+
+# Validate the policy-owned staged-admission output without truthiness coercion.
+def _parse_judge_admission(raw_output: dict[str, Any]) -> dict[str, Any]:
+    admission = raw_output.get("judge_admission")
+    if (
+        not isinstance(admission, dict)
+        or type(admission.get("required")) is not bool
+        or not isinstance(admission.get("reason"), str)
+        or not admission["reason"].strip()
+    ):
+        raise PolicyEngineExecutionError(
+            "OPA judge_admission must contain boolean required and non-empty reason."
+        )
+    return {
+        "required": admission["required"],
+        "reason": admission["reason"].strip(),
+    }
+
+
 __all__ = [
     "evaluate_opa_first_governance",
     "_evaluate_required_pillars",
-    "_evaluate_governance_decision_output"
+    "_evaluate_governance_decision_output",
+    "_parse_judge_admission",
 ]

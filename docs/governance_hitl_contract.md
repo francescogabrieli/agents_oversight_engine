@@ -46,7 +46,7 @@ from pre-empting policy.
 | Component | Mode | Decision influence | Failure semantics |
 | --- | --- | --- | --- |
 | Static policy | active | Hard deterministic guardrails | Hard deny is absorbing |
-| Evidence | active | Evidence gap and precision support | Required failure goes fail-closed through OPA |
+| Evidence | active | Structural integrity, provenance, and snapshot binding | Required failure goes fail-closed through OPA |
 | Trajectory | active | Recovery, replan, repeated revision/provider escalation | Required failure goes fail-closed through OPA |
 | Semantic judge | active when OPA requires it | OPA maps semantic assessment to a directive | Required unavailable/invalid/digest mismatch goes to HITL |
 | Operational risk | shadow | None | Error is traced; no fail-closed |
@@ -72,19 +72,27 @@ novelty, flags, and counterfactual recommendation. Its mode is `shadow` and
 `decision_influence=false`. The runtime reuses the assessment during a run and
 persists the read model at stable audit boundaries.
 
-## OPA preflight and final matrix
+## OPA preflight, staged admission, and final matrix
 
-OPA performs two calls:
+OPA performs a bounded staged evaluation:
 
-1. `data.layer2.governance.required_pillars`;
-2. `data.layer2.governance.decision`.
+1. `data.layer2.governance.required_pillars` selects deterministic active signals;
+2. a preliminary `data.layer2.governance.decision` evaluates static policy,
+   Evidence, and Trajectory and returns typed `judge_admission`;
+3. only an admitted governed-external candidate invokes the Judge;
+4. a final `data.layer2.governance.decision` maps all available signals to the
+   runtime directive.
 
-The mandatory judge condition is owned only by Rego:
+Judge admission is owned only by Rego:
 
 ```text
 execution_candidate
 AND boundary == governed_external
 AND NOT static_policy.hard_deny
+AND Evidence has no structural gap
+AND Trajectory is neither stalled nor requesting replan
+AND required deterministic pillars are available
+AND policy versions and payload digest are valid
 ```
 
 The final deterministic precedence is:
@@ -112,19 +120,25 @@ boundary and may eventually require human review.
 ## Semantic judge contract
 
 OPA, not Python, decides when invocation is required. `JudgeContext` includes the
-authorized task goal, constraints, context, success criteria and execution intent;
-the complete semantic plan; completed steps; audit-safe scratchpad entries; tool
-requests and outcomes; ordered runtime events; every concrete observation; selected
-evidence references; prior external revisions; target/destination facts; actor
-self-confidence and residual uncertainty; and the exact digest-bound proposal.
-The judge never receives or compares a universal evidence-support rank.
+authoritative task goal, constraints, context, success criteria and execution
+intent; the complete non-authoritative semantic plan; completed-step summaries;
+every canonical observation as a bounded typed projection; actor-selected
+references as attribution markers; same-operation revision findings; target and
+the exact digest-bound proposal.
+
+It excludes scratchpad, raw tool arguments/history, ordered runtime events,
+turn/tool/replan/retry counters, point confidence, recovery history, behavioral,
+risk, and other process narration. Boundedness limits representation size, never
+silently the evidence universe. Truncation or omission is explicit and forces
+`context_incomplete`/`uncertain` where support cannot be determined.
 
 The judge returns:
 
 - status: `active`, `not_applicable`, `unavailable`, or `invalid`;
 - verdict: `safe`, `needs_revision`, `unsafe`, or `uncertain`;
 - severity, confidence, typed findings, summary, concise rationale;
-- evaluated operation digest and provider/model/prompt metadata.
+- evaluated operation, evidence-snapshot, and evidence-selection digests plus
+  provider/model/prompt metadata.
 
 Verdict, severity, and finding categories are closed enums in provider structured
 output. A free-form category is invalid; it is never coerced into a nearby label.
@@ -136,24 +150,23 @@ not probability of harm and is never multiplied by an operational-risk score.
 
 ## Uniform HITL and digest integrity
 
-Every HITL exposes the universally valid decisions:
+HITL actions are reason-scoped. In particular:
 
-- `approve_continue`;
-- `approve_continue_read_only`;
-- `modify_and_continue`;
-- `request_more_evidence`;
-- `replan`;
-- `ask_clarification`;
-- `abort`.
+- Judge `unsafe`/`uncertain` or exhausted revisions: `modify_and_continue`,
+  `replan`, `abort`;
+- capability approval: `approve_continue`, `modify_and_continue`, `abort`;
+- clarification: `ask_clarification`, `abort`;
+- indeterminate receipt reconciliation: `approve_continue`,
+  `request_more_evidence`, `abort`.
 
-The seven controls are always present. `modify_and_continue` still requires a
-typed, valid edit at submission time; it cannot bypass the proposal contract
-when no editable payload exists. A review request includes operation id, digest,
-proposal summary, target/destination, judge findings, and the proposal where
-applicable.
+Legacy requests without a reason-scoped contract retain the broad compatibility
+set. `modify_and_continue` always requires a typed valid edit. A review request
+includes operation id, digest, proposal summary, target/destination, Judge
+findings, and the proposal where applicable.
 
 Approval is bound to the exact current digest. Modification creates a new
-immutable proposal and digest, invalidates the earlier approval and judge
+immutable proposal and digest, atomically rebinds the pending completion candidate
+and its Evidence selection digest, invalidates the earlier approval and Judge
 assessment, clears any executable tool request, and enters `READY_GOVERNANCE`.
 It never routes directly to Tool Gateway or an external executor.
 `approve_continue_read_only` rejects an unchanged mutating proposal.
@@ -190,7 +203,7 @@ a transport adapter, never policy or authorization.
 
 ## Observability
 
-`layer2_trace.v5` has a closed `external_execution` section with intent, request,
+`layer2_trace.v6` has a closed `external_execution` section with intent, request,
 receipt history, digest, connector metadata, external reference, and attempt count.
 Actor/HITL fields expose the current proposal and digest; governance pillar results expose `active`,
 `shadow`, `not_applicable`, `unavailable`, and `decision_influence`. Historical

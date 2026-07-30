@@ -211,7 +211,7 @@ Current design:
 - `runtime/governance_service.py` applies the OPA-first governance result and persists static, dynamic, behavioral, and judge records before routing
 - `infrastructure/runtime_artifacts.py` configures the local official LangGraph SQLite saver plus the per-thread runtime artifact store; `persistence.py` is import-compatible and `infrastructure/checkpointing.py` can select the official PostgreSQL saver for deployed environments
 - `observability/` defines the typed, JSON-exportable Layer 2 trace models, builders, and compact views used for debugging, thesis evidence, HITL payloads, and evaluation; the retired `trace.py` facade must not be restored
-- `schemas/layer2_trace.schema.json` is the closed Draft 2020-12 contract for runtime-produced `layer2_trace.v5`; only `evaluation_service` may project historical traces into that current read model
+- `schemas/layer2_trace.schema.json` is the closed Draft 2020-12 contract for runtime-produced `layer2_trace.v6`; only `evaluation_service` may project historical traces into that current read model
 - `evaluation/` defines the offline trace evaluation pipeline that reads exported trace JSON and produces JSON and Markdown reports, including typed-vs-heuristic evidence mismatch accounting
 - `hitl_dashboard.py` defines the dashboard-facing snapshot model derived from `TaskState`, governance, oversight, and HITL review payloads
 - `main_layer2_dashboard.py` now acts as a standalone multi-thread HITL control plane backend that serves the React dashboard build, exposes the review inbox/detail/resume API, and resolves resume actions from persisted checkpoints on demand
@@ -259,6 +259,7 @@ Current relevant files:
 - `docs/deck/planner_use_cases.html`
 - `docs/deck/confidence_risk_trajectory_deck.html`
 - `docs/governance_hitl_contract.md`
+- `docs/governance_pillars_research_basis.md`
 - `docs/tool_gateway_strategy.md`
 - `docs/flow_details.md`
 - `architecture/e2e_real_task.md`
@@ -408,9 +409,10 @@ Current relevant files:
 - OPA may request more evidence only from concrete completion facts, such as invalid selected references or missing usable selected evidence; Python does not infer semantic precision requirements
 - provider protocol errors (unknown evidence IDs, malformed action JSON, missing required fields) trigger a bounded local retry (max 1 retry attempt on the same step and state, without bumping `progress_epoch` or invoking replanner); upon retry exhaustion, `provider_protocol_failure` persists and OPA evaluates the state directly without Python forced replanning or forced HITL
 - `GovernanceActionFeedback` carries `judge_summary`, `judge_rationale`, and structured `findings`; `prompt_projection.py` projects full judge feedback and `previous_rejected_draft` into the `ActorTask` prompt payload during revision turns; the actor system prompt instructs to revise the existing draft rather than rewriting blindly, to address every finding explicitly, and to never resubmit an unchanged payload or re-assert compliance without substantive correction
-- candidate payload digest matching a previously rejected draft digest sets `payload_unchanged_from_rejected=True` in trajectory facts and skips judge re-evaluation in `opa_pipeline.py`, allowing OPA to evaluate the unchanged candidate
-- evidence selection schema enforces `maxItems: 15` in `action_schemas.py`; `evidence_service.py` computes deterministic facts `selected_ref_ratio` and `search_title_only_ref_count`; the actor system prompt requires selecting the smallest set of observation IDs that directly supports the claims, never bulk-dumping all observations, and treating search-result titles as insufficient support for detailed factual claims
-- `JudgeContext` carries untruncated `external_communication_body`, passed directly into the judge prompt for evaluation; the judge system prompt explicitly marks `external_operation.payload` as the complete authoritative payload and `payload_preview` as a possibly-truncated bounded preview
+- a candidate payload digest matching previously rejected feedback sets `repeated_rejected_payload_digest=true` in Trajectory; OPA refuses a redundant Judge admission and maps the unchanged resubmission through its stall policy
+- every new `StepCompletionCandidate` persists the Evidence snapshot and selection digests; Evidence recomputes and verifies candidate, operation, complete observation manifest, and actor-selected references before Judge admission
+- Evidence Integrity & Provenance deterministically validates references, non-empty observations, same-run tool-result lineage, known-step association, title-only fragility, and selection/snapshot digests; it never performs semantic claim entailment or selects a directive. `selected_ref_ratio` remains diagnostic, not a monotone quality score.
+- JudgeContext carries the full semantic plan, completed-step summaries, and every canonical ToolObservation available at the boundary as a bounded typed projection. Selected refs mark actor-declared reliance only; process narration, tool arguments, counters, retry/replan history and shadow assessments are excluded. Evidence-base omissions/truncation are explicit and lead to `uncertain`, not silently reduced coverage.
 - `INTERMEDIATE_OUTPUT` is an audit-safe working update that returns directly to the actor and never completes a plan step; `STEP_COMPLETED` is the explicit local completion type
 - trace IDs must remain immutable across runtime resumes and retries; `trace_id` represents the semantic run boundary and is generated by `bootstrap_from_intake`
 - trace models must explicitly link `observation_id`, `step_id`, and `evidence_ref` in the canonical JSON structure to ensure reconstruction and observability
@@ -438,8 +440,8 @@ Current relevant files:
 - the runtime persists per-thread artifacts under `artifacts/runtime/<thread_id>/`, including the canonical trace, dashboard snapshot, runtime summary, and pending HITL payload when present
 - the behavioural SQLite store lives under `artifacts/runtime/behavioral/behavioral.sqlite3` by default and must remain a read model rather than the primary runtime source of truth
 - active evidence/trajectory interpretation must remain deterministic and explainable; Python exports concrete facts, Rego owns their directive mapping, and shadow pillars may export diagnostic labels but never directives
-- trajectory must use whole-run observable events at semantic boundaries and must never treat a count of narrative turns, elapsed thinking turns, or low confidence alone as degradation
-- the semantic judge is invoked only for a complete governed-external candidate and receives the original task, success criteria, execution intent, full plan, completed steps, audit-safe scratchpad, tool history, ordered runtime events, all observations, selected references, prior revisions, and the exact digest-bound payload
+- Trajectory Health uses only whole-run observable execution dynamics at semantic boundaries and never treats narrative turns, elapsed thinking, or point confidence alone as degradation.
+- The semantic judge is invoked only after OPA admits a complete governed-external candidate. It receives authoritative task data, full semantic plan, completed-step summaries, all canonical observations and selected references, same-operation revision findings, and the exact digest-bound payload; it never receives scratchpad, raw tool history/arguments, runtime events, counters, retry/replan history, or shadow assessments.
 - runtime trace export must be read-only over `TaskState`; it must not mutate runtime state or become a parallel source of truth
 - `main_layer2.py` may print trace views, but reusable trace construction belongs in `observability/`
 - `resume_layer2_flow` should prefer the direct LangGraph `invoke(Command(resume=...))` result when it contains the canonical `task_state`, because interrupted checkpoints may briefly expose only a partial snapshot wrapper during resume
@@ -452,7 +454,7 @@ Current relevant files:
 
 ### HITL Rules
 
-- Every HITL exposes the same six universally valid base decisions; review modes must not restrict them.
+- HITL decisions are reason-scoped: unsafe/uncertain semantic review exposes modify/replan/abort; capability approval exposes approve/modify/abort; clarification and indeterminate-receipt reconciliation expose only their applicable typed actions.
 - HITL payloads must remain readable, compact, and include exact operation/digest/findings when an external proposal exists.
 - Human decisions should remain canonical and typed.
 - `modify_and_continue` is available for every modifiable external proposal, creates a new digest, invalidates prior approval/judge state, and returns to governance.
@@ -650,4 +652,4 @@ The current most relevant near-term evolution path is:
 4. calibrate active evidence/trajectory and shadow operational consequence facts against exported traces
 5. harden the standalone HITL dashboard and richer operator workflows on top of the existing `interrupt / resume` path
 6. calibrate governed-external judge findings and revision-loop thresholds against real traces before widening the tool surface
-7. strengthen observability and evidence quality assessment before widening the tool surface
+7. strengthen observability and Evidence Integrity & Provenance before widening the tool surface

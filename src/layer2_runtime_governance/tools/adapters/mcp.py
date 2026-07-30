@@ -74,10 +74,9 @@ def normalize_mcp_result(
                 text_chunks.append(str(item.get("text", "")))
     elif isinstance(raw_content, str):
         text_chunks.append(raw_content)
-    content = truncate_text(
-        "\n".join(chunk for chunk in text_chunks if chunk),
-        definition.max_content_chars,
-    )
+    joined_content = "\n".join(chunk for chunk in text_chunks if chunk)
+    content = truncate_text(joined_content, definition.max_content_chars)
+    content_truncated = len(content or "") < len(joined_content)
     is_error = bool(result.get("isError", False))
     return ToolExecutionResult(
         request=tool_request,
@@ -98,6 +97,8 @@ def normalize_mcp_result(
         if content
         else (),
         error_message=content if is_error else None,
+        truncated=content_truncated,
+        extractability_limited=content_truncated,
     )
 
 

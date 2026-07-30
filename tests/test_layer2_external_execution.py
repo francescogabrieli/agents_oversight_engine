@@ -46,6 +46,7 @@ from layer2_runtime_governance.domain import (
     HumanReviewDecision,
     HumanReviewDecisionType,
     RuntimeState,
+    StepCompletionCandidate,
     TaskState,
 )
 from layer2_runtime_governance.external_operations import (
@@ -65,6 +66,7 @@ from layer2_runtime_governance.external_operations import (
     build_external_execution_request,
     normalize_communication_operation,
 )
+from layer2_runtime_governance.governance_components import GovernanceReasonCode
 from layer2_runtime_governance.runtime.external_execution_service import (
     external_execution,
 )
@@ -297,6 +299,23 @@ def _authorized_state(
         execution_candidate=intent == ExecutionIntent.EXECUTE_AFTER_GOVERNANCE,
     )
     authorized_digest = approved_digest or proposal.payload_digest
+    state.plan_steps = [
+        PlanStep(
+            step_id="send_step",
+            objective="Prepare the requested email operation.",
+            rationale="The service fixture begins after governance authorization.",
+            expected_outcome="A typed email proposal.",
+        )
+    ]
+    state.current_plan_step_index = 0
+    state.pending_completion_candidate = StepCompletionCandidate(
+        candidate_id="send_step:candidate:1",
+        step_id="send_step",
+        summary="Prepared one exact governed email proposal.",
+        output_text=draft.body or proposal.payload_preview,
+        external_operation_id=proposal.operation_id,
+        external_operation_digest=proposal.payload_digest,
+    )
     state.external_operation_proposal = proposal
     state.current_external_execution_request = build_external_execution_request(
         proposal=proposal,
@@ -593,6 +612,9 @@ class ExternalExecutionGraphTests(unittest.TestCase):
         )
         first_request = first["task_state"].pending_human_review_request
         first_digest = first_request.operation_payload_digest
+        first_candidate = first["task_state"].pending_completion_candidate
+        self.assertIsNotNone(first_candidate.evidence_snapshot_digest)
+        self.assertIsNotNone(first_candidate.evidence_selection_digest)
         second = graph.invoke(
             Command(
                 resume={
@@ -614,7 +636,25 @@ class ExternalExecutionGraphTests(unittest.TestCase):
             config={"configurable": {"thread_id": thread_id}},
         )
         second_request = second["task_state"].pending_human_review_request
+        second_candidate = second["task_state"].pending_completion_candidate
         self.assertNotEqual(first_digest, second_request.operation_payload_digest)
+        self.assertTrue(second["task_state"].last_judge_assessment.invoked)
+        self.assertNotIn(
+            GovernanceReasonCode.REPLAN_REQUEST_STALLED,
+            second["task_state"].last_governance_decision.reason_codes,
+        )
+        self.assertEqual(
+            first_candidate.evidence_snapshot_digest,
+            second_candidate.evidence_snapshot_digest,
+        )
+        self.assertNotEqual(
+            first_candidate.evidence_selection_digest,
+            second_candidate.evidence_selection_digest,
+        )
+        self.assertEqual(
+            second_candidate.external_operation_digest,
+            second_request.operation_payload_digest,
+        )
         final = graph.invoke(
             Command(
                 resume={

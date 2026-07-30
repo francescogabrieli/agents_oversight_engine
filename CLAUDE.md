@@ -47,10 +47,9 @@ Required in `.env` or `src/.env`:
 
 | Variable | Purpose |
 |---|---|
-| `OPENAI_API_KEY` | Layer 1 parser, Layer 2 planner/replanner, web_search tool |
-| `OPENROUTER_API_KEY` | Layer 2 actor |
-| `LAYER2_ACTOR_PROVIDER` | `openrouter` (default) or `openai` |
-| `LAYER2_ACTOR_OPENROUTER_MODEL` | Default: `openai/gpt-oss-120b:free` |
+| `OPENAI_API_KEY` | Layer 1 parser, Layer 2 planner/replanner, Judge, web_search |
+| `LAYER2_ACTOR_PROVIDER` | `bedrock` (default) or `openai` |
+| AWS/Bedrock configuration | Default actor through the approved Nova 2 Lite EU inference profile |
 
 ## Architecture
 
@@ -63,9 +62,10 @@ Required in `.env` or `src/.env`:
 ### LangGraph Graph Topology
 
 ```
-START → bootstrap_from_intake → planner → actor → governance
-governance → { tool_gateway | replanner | human_review | finalize_bootstrap | actor }
-human_review → { planner | actor | tool_gateway | replanner | finalize_bootstrap }
+START → bootstrap_from_intake → planner → actor → { actor | governance }
+governance → { actor | tool_gateway | replanner | human_review | external_execution | finalize_bootstrap }
+human_review → { planner | actor | tool_gateway | replanner | governance | external_execution | finalize_bootstrap }
+external_execution → { external_execution | human_review | finalize_bootstrap }
 tool_gateway → observe_tool_result → actor
 replanner → actor
 finalize_bootstrap → END
@@ -73,37 +73,35 @@ finalize_bootstrap → END
 
 ### Central State
 
-`TaskState` (dataclass in `state.py`) is the single source of truth passed through every node — it holds intake payload, plan steps, actor result, tool loop state, governance history, HITL state, evidence, scratchpad, and trace data. Every node receives a deepcopy and returns an updated dict.
+`TaskState` (canonical contracts under `domain/`, with `state.py` as a compatibility facade) is the single runtime source of truth. It holds intake, plan, actor/tool state, immutable completion candidates, observations, governance, HITL, and external execution records. Trace and dashboard artifacts are read-only projections.
 
-### Five-Layer Governance (decision_combiner.py integrates all)
+### OPA-first governance and three active pillars
 
-1. **Static policy** (`governance.py`) — OPA HTTP engine; hard denials (`DENY`) are non-negotiable
-2. **Deterministic dynamic policy** (`oversight.py`) — scores evidence quality, operational risk, and trajectory health against thresholds in `configs/layer2_oversight_policy.json`
-3. **Behavioral intelligence** (`behavioral.py`) — SQLite historical read model scoring similarity/deviation/novelty
-4. **Selective LLM judge** (`judge.py`) — invoked only for fragile outputs or risky drafts
-5. **Decision combiner** (`decision_combiner.py`) — Weighted Minimal Safe Intervention; outputs `GovernanceDirective` (`CONTINUE`, `DENY`, `WAIT_HUMAN_REVIEW`, etc.)
+1. **Evidence Integrity & Provenance** — deterministic identity, uniqueness, concrete content, lineage, known-step, title-only fragility, and candidate/snapshot/selection digest binding. It never judges entailment.
+2. **Trajectory Health** — deterministic progress deltas, replan basis, retry/recovery, unchanged resubmission, and revision churn. Point confidence belongs to `base_facts.uncertainty`.
+3. **Governed External Semantic Judge** — after OPA admission, evaluates the exact payload against the complete semantic observation base. It excludes process narration and emits only typed semantic assessments.
+4. **OPA/Rego** — evaluates static policy, stages the Judge after deterministic gates, and returns the only final directive. Operational risk and behavioral intelligence remain shadow-only.
 
 ### Key Patterns
 
 - **Typed planning/acting split**: Planner emits semantic `PlanStep` objects; actor executes one step at a time, emitting typed `ActorResult` with `ActorResultType` enum.
-- **Tool Gateway** (`tool_gateway.py`): Registry-controlled, typed `ToolRequest` → `ToolExecutionResult` → `ObservedEvidence`. Tools: `web_search`, `fetch_url_text`, and four MCP local test tools.
-- **Evidence tracking**: `ObservedEvidence` carries orthogonal content-state, authority, document-type, extractability, citation-alignment, and provenance attributes. Task-provided facts are materialized into initial observed evidence at bootstrap.
-- **HITL** (`hitl.py`): LangGraph `interrupt`/`resume`. `WAITING_HUMAN_REVIEW` pauses the graph; typed `HumanReviewRequest` is persisted; decisions are typed (`APPROVE_CONTINUE`, `MODIFY_AND_CONTINUE`, `ABORT`, etc.).
+- **Tool Gateway** (`tools/`, compatibility facade `tool_gateway.py`): Registry-controlled, typed `ToolRequest` → `ToolExecutionResult` → minimal `ToolObservation`. Tools include `web_search`, `fetch_url_text`, and configured read-only MCP test tools.
+- **Evidence tracking**: observations carry only stable identity, concrete content, and optional locator; provenance is reconstructed from immutable tool results. Task instructions are not observations.
+- **HITL** (`hitl/`): LangGraph `interrupt`/`resume`. Review actions are reason-scoped; unsafe/uncertain Judge verdicts expose modify/replan/abort, while capability approval adds exact-digest approval.
 - **Replanner** (`replanning.py`): Triggered on `NEEDS_REPLAN`; replaces only current + pending steps; completed steps are immutable history.
 - **Persistence** (`persistence.py`): LangGraph checkpoints → `artifacts/runtime/checkpoints/`; per-thread artifacts → `artifacts/runtime/<thread_id>/`; behavioral SQLite → `artifacts/runtime/behavioral/behavioral.sqlite3`.
-- **Traceability** (`trace.py`, `evaluation.py`): `Layer2RuntimeTrace` is a JSON-exportable snapshot used for thesis evidence, HITL payloads, and offline evaluation.
+- **Traceability** (`observability/`, `evaluation_service/`): `layer2_trace.v6` is a JSON-exportable read model used for thesis evidence, HITL payloads, and offline evaluation.
 
 ### Key Files
 
 | Path | Role |
 |---|---|
 | `AGENTS.md` | Authoritative operational contract for all contributors |
-| `src/layer2_runtime_governance/state.py` | Central `TaskState` definition |
+| `src/layer2_runtime_governance/domain/` | Canonical framework-independent runtime contracts |
 | `src/layer2_runtime_governance/graph.py` | LangGraph wiring |
-| `src/layer2_runtime_governance/nodes.py` | All graph node implementations |
-| `src/layer2_runtime_governance/governance.py` | Static policy, OPA integration |
-| `src/layer2_runtime_governance/decision_combiner.py` | Weighted Minimal Safe Intervention combiner |
-| `src/layer2_runtime_governance/oversight.py` | Deterministic dynamic policy scoring |
+| `src/layer2_runtime_governance/runtime/` | Application services and thin graph adapters |
+| `src/layer2_runtime_governance/governance_components/` | OPA input, staged admission, parsing, and fail-closed handling |
+| `src/layer2_runtime_governance/signal_services/` | Evidence, Trajectory, Judge, and shadow fact producers |
+| `configs/opa/layer2_governance/` | Sole final policy/directive logic |
 | `src/layer1_intake/models.py` | Layer 1 Pydantic models |
-| `configs/layer2_oversight_policy.json` | Dynamic policy thresholds/weights |
 | `architecture/architecturev3.md` | Current architecture reference doc |

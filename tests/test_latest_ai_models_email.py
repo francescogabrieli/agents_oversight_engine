@@ -463,6 +463,8 @@ class _SafeDigestJudge(JudgePort):
             verdict=JudgeVerdict.SAFE,
             severity=JudgeSeverity.LOW,
             evaluated_operation_digest=context.external_operation.payload_digest,
+            evaluated_evidence_snapshot_digest=context.evidence_snapshot_digest,
+            evaluated_evidence_selection_digest=context.evidence_selection_digest,
             prompt_version=self.prompt_version,
         )
 

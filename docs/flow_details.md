@@ -270,22 +270,24 @@ Il routing dipende dall'esito actor:
 - `PROPOSE_ACTION` passa dalla static policy prima del Tool Gateway;
 - `NEEDS_REPLAN` attiva trajectory;
 - `STEP_COMPLETED` attiva evidence e trajectory;
-- un `execution_candidate` governed-external attiva anche il Judge.
+- un `execution_candidate` governed-external attiva l’ammissione staged del Judge.
 
 Ai confini governati, Python:
 
 1. costruisce fatti deterministici dal `TaskState`;
-2. raccoglie i pilastri richiesti;
-3. invoca il Judge soltanto quando OPA lo richiede;
-4. invia un documento versionato a OPA;
-5. valida e applica la direttiva restituita.
+2. raccoglie Evidence e Trajectory quando richiesti;
+3. invia un documento preliminare a OPA e legge `judge_admission`;
+4. invoca il Judge soltanto quando i gate deterministici OPA lo ammettono;
+5. invia l’assessment digest-bound nel documento finale;
+6. valida e applica la direttiva restituita da OPA.
 
 Python non possiede un secondo algoritmo di decisione finale.
 
 Pilastri:
 
 - static policy: vincoli deterministici e hard deny;
-- evidence: validità dei riferimenti a osservazioni concrete;
+- evidence: integrità, lineage e binding candidate/snapshot/selection delle
+  osservazioni concrete;
 - trajectory: storia aggregata della run, richieste esplicite di replan, recovery
   tecnica, revisioni e churn osservabile;
 - judge: allineamento semantico dell'esatta proposta esterna;
@@ -362,7 +364,7 @@ artefatti vengono rigenerati dallo stato aggiornato.
 
 ## 11. Trace ed evaluation
 
-Il trace live corrente è `layer2_trace.v5`. Espone:
+Il trace live corrente è `layer2_trace.v6`. Espone:
 
 - runtime e intake;
 - piano completo e cursore;
@@ -386,6 +388,8 @@ Solo l'evaluation offline può normalizzare trace storiche nei contratti corrent
   tipo di azione.
 - OPA è l'unica autorità della direttiva.
 - Il Judge valuta semantica e digest, non instrada il grafo.
+- Il Judge vede l’intera base semantica osservata, non la sola selezione actor,
+  ed esclude narrazione e contatori di processo.
 - HITL autorizza l'esatto effetto esterno.
 - Receipt e osservazioni restano distinti.
 - Trace, dashboard e behavioral memory non sostituiscono `TaskState`.

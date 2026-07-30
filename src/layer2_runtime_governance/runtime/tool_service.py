@@ -168,6 +168,11 @@ def observe_tool_result(state: TaskState) -> TaskState:
         return state
     cached = bool(state.tool_attempts and state.tool_attempts[-1].disposition == ToolDisposition.CACHE_HIT)
     observations = [] if cached else _validated_tool_observations(state=state, tool_result=state.last_tool_result)
+    if not cached and state.last_tool_result.success:
+        _replace_tool_result_observations(
+            state=state,
+            observations=tuple(observations),
+        )
     if observations:
         state.observations.extend(observations)
         state.progress_epoch += 1
@@ -218,6 +223,24 @@ def _validated_tool_observations(*, state: TaskState, tool_result: ToolExecution
         existing_ids.add(observation.observation_id)
     _append_observation(state=state, tool_result=tool_result, evidence_refs=[item.observation_id for item in accepted])
     return accepted
+
+
+# Keep persisted tool-result lineage aligned with collision-normalized observation IDs.
+def _replace_tool_result_observations(
+    *,
+    state: TaskState,
+    observations: tuple[ToolObservation, ...],
+) -> None:
+    result = state.last_tool_result
+    if result is None or result.observations == observations:
+        return
+    canonical_result = replace(result, observations=observations)
+    state.last_tool_result = canonical_result
+    for index in range(len(state.tool_results_history) - 1, -1, -1):
+        candidate = state.tool_results_history[index]
+        if candidate.request.request_id == result.request.request_id:
+            state.tool_results_history[index] = canonical_result
+            break
 
 
 # Create a stable request-scoped suffix instead of failing the whole execution.

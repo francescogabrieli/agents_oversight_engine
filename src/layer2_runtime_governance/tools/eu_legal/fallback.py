@@ -47,6 +47,7 @@ def try_fetch_specialized_legal_document(
         else extract_visible_text(body.decode(charset, errors="replace"))
     )
     content = truncate_text(fallback_text, definition.max_content_chars)
+    content_truncated = len(content or "") < len(fallback_text)
     if not is_meaningful_extracted_text(content):
         return None
     return ToolExecutionResult(
@@ -54,6 +55,8 @@ def try_fetch_specialized_legal_document(
         success=True,
         summary="Official EU legal text fetched through the publication fallback.",
         content=content,
+        truncated=content_truncated,
+        extractability_limited=content_truncated,
         observations=(
             ToolObservation(
                 observation_id=f"{tool_request.request_id}:document",

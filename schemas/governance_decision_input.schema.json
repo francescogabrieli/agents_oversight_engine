@@ -116,8 +116,17 @@
             "severity",
             "confidence",
             "findings",
+            "claim_assessments",
+            "summary",
             "evaluated_operation_digest",
             "expected_operation_digest",
+            "operation_digest_matches",
+            "evaluated_evidence_snapshot_digest",
+            "expected_evidence_snapshot_digest",
+            "evidence_snapshot_matches",
+            "evaluated_evidence_selection_digest",
+            "expected_evidence_selection_digest",
+            "evidence_selection_matches",
             "digest_matches"
           ],
           "properties": {
@@ -158,6 +167,22 @@
                 "additionalProperties": false
               }
             },
+            "claim_assessments": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["claim_summary", "status", "selected_evidence_refs", "supporting_evidence_refs", "contradicting_evidence_refs", "explanation"],
+                "properties": {
+                  "claim_summary": { "type": "string", "minLength": 1 },
+                  "status": { "enum": ["supported_by_selected", "supported_but_not_selected", "unsupported", "contradicted", "context_incomplete"] },
+                  "selected_evidence_refs": { "type": "array", "items": { "type": "string" } },
+                  "supporting_evidence_refs": { "type": "array", "items": { "type": "string" } },
+                  "contradicting_evidence_refs": { "type": "array", "items": { "type": "string" } },
+                  "explanation": { "type": "string" }
+                },
+                "additionalProperties": false
+              }
+            },
             "summary": { "type": "string", "minLength": 1 },
             "evaluated_operation_digest": {
               "anyOf": [
@@ -171,6 +196,33 @@
                 { "type": "null" }
               ]
             },
+            "operation_digest_matches": { "type": "boolean" },
+            "evaluated_evidence_snapshot_digest": {
+              "anyOf": [
+                { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                { "type": "null" }
+              ]
+            },
+            "expected_evidence_snapshot_digest": {
+              "anyOf": [
+                { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                { "type": "null" }
+              ]
+            },
+            "evidence_snapshot_matches": { "type": "boolean" },
+            "evaluated_evidence_selection_digest": {
+              "anyOf": [
+                { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                { "type": "null" }
+              ]
+            },
+            "expected_evidence_selection_digest": {
+              "anyOf": [
+                { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                { "type": "null" }
+              ]
+            },
+            "evidence_selection_matches": { "type": "boolean" },
             "digest_matches": { "type": "boolean" },
             "prompt_version": { "type": ["string", "null"] },
             "model_metadata": { "type": ["object", "null"] }

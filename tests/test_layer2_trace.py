@@ -80,8 +80,8 @@ from evaluation_service.trace_normalizer import normalize_trace_json
 
 
 class Layer2TraceTests(unittest.TestCase):
-    # A trace emitted directly by observability must satisfy the complete v5 schema.
-    def test_real_runtime_trace_validates_against_v5_schema(self) -> None:
+    # A trace emitted directly by observability must satisfy the complete v6 schema.
+    def test_real_runtime_trace_validates_against_v6_schema(self) -> None:
         state = _complete_task_state()
         payload = layer2_trace_to_dict(
             build_layer2_runtime_trace(
@@ -102,8 +102,8 @@ class Layer2TraceTests(unittest.TestCase):
         _trace_schema_validator().validate(payload)
         _trace_schema_validator().validate(external_payload)
 
-    # The v5 schema must reject a v2 artifact before evaluation normalization.
-    def test_v5_schema_rejects_v2_trace(self) -> None:
+    # The v6 schema must reject a v2 artifact before evaluation normalization.
+    def test_v6_schema_rejects_v2_trace(self) -> None:
         payload = json.loads(
             (REPO_ROOT / "tests" / "fixtures" / "layer2_trace.v2.legacy.json").read_text(
                 encoding="utf-8"
@@ -113,16 +113,16 @@ class Layer2TraceTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             _trace_schema_validator().validate(payload)
 
-    # Retired root governance histories must not coexist with the canonical v5 pass list.
-    def test_v5_schema_rejects_legacy_root_governance_lists(self) -> None:
+    # Retired root governance histories must not coexist with the canonical v6 pass list.
+    def test_v6_schema_rejects_legacy_root_governance_lists(self) -> None:
         payload = _valid_v3_trace_payload()
         payload["governance_decisions"] = deepcopy(payload["governance_passes"])
 
         with self.assertRaises(ValidationError):
             _trace_schema_validator().validate(payload)
 
-    # Closed v5 sections must reject unknown properties and missing required fields.
-    def test_v5_schema_rejects_unknown_and_missing_properties(self) -> None:
+    # Closed v6 sections must reject unknown properties and missing required fields.
+    def test_v6_schema_rejects_unknown_and_missing_properties(self) -> None:
         unknown = _valid_v3_trace_payload()
         unknown["runtime"]["unexpected"] = True
         missing = _valid_v3_trace_payload()
@@ -134,7 +134,7 @@ class Layer2TraceTests(unittest.TestCase):
             _trace_schema_validator().validate(missing)
 
     # Stable enum and scalar contracts must reject values outside the producer vocabulary.
-    def test_v5_schema_rejects_wrong_enum_and_type(self) -> None:
+    def test_v6_schema_rejects_wrong_enum_and_type(self) -> None:
         wrong_enum = _valid_v3_trace_payload()
         wrong_enum["runtime"]["current_state"] = "unknown_state"
         wrong_type = _valid_v3_trace_payload()
@@ -146,7 +146,7 @@ class Layer2TraceTests(unittest.TestCase):
             _trace_schema_validator().validate(wrong_type)
 
     # Every governance pass must explicitly carry a boolean human-review flag.
-    def test_v5_schema_requires_boolean_human_review_flag(self) -> None:
+    def test_v6_schema_requires_boolean_human_review_flag(self) -> None:
         missing = _valid_v3_trace_payload()
         del missing["governance_passes"][0]["requires_human_review"]
         wrong_type = _valid_v3_trace_payload()
@@ -158,7 +158,7 @@ class Layer2TraceTests(unittest.TestCase):
             _trace_schema_validator().validate(wrong_type)
 
     # Evaluation is the only boundary allowed to project a legacy trace into valid v5.
-    def test_evaluation_normalized_v2_trace_validates_as_v5(self) -> None:
+    def test_evaluation_normalized_v2_trace_validates_as_v6(self) -> None:
         legacy = json.loads(
             (REPO_ROOT / "tests" / "fixtures" / "layer2_trace.v2.legacy.json").read_text(
                 encoding="utf-8"
@@ -167,7 +167,36 @@ class Layer2TraceTests(unittest.TestCase):
 
         normalized = normalize_trace_json(legacy)["trace"]
 
-        self.assertEqual(normalized["trace_version"], "layer2_trace.v5")
+        self.assertEqual(normalized["trace_version"], "layer2_trace.v6")
+        _trace_schema_validator().validate(normalized)
+
+    # A v5 read keeps all semantic sections while receiving only v6 defaults.
+    def test_evaluation_normalized_v5_trace_preserves_external_sections(self) -> None:
+        state = _external_communication_task_state()
+        legacy = layer2_trace_to_dict(
+            build_layer2_runtime_trace(
+                thread_id="legacy-v5-external",
+                intake_result=state.intake_payload,
+                task_state=state,
+            )
+        )
+        legacy["trace_version"] = "layer2_trace.v5"
+        legacy["external_communication"]["draft"].pop("cc")
+        legacy["external_communication"]["draft"].pop("bcc")
+
+        normalized = normalize_trace_json(legacy)["trace"]
+
+        self.assertEqual(normalized["trace_version"], "layer2_trace.v6")
+        self.assertEqual(
+            normalized["external_communication"]["draft"]["recipient"],
+            "ops@example.com",
+        )
+        self.assertEqual(normalized["external_communication"]["draft"]["cc"], [])
+        self.assertEqual(normalized["external_communication"]["draft"]["bcc"], [])
+        self.assertEqual(
+            normalized["external_execution"],
+            legacy["external_execution"],
+        )
         _trace_schema_validator().validate(normalized)
 
     def test_runtime_trace_includes_core_sections_and_histories(self) -> None:
@@ -191,7 +220,7 @@ class Layer2TraceTests(unittest.TestCase):
         self.assertEqual(len(trace.observations), 1)
         self.assertEqual(trace.observations[0].locator, "mcp://local_test/text_stats")
         self.assertEqual(trace.observations[0].content, '{"words": 3}')
-        self.assertEqual(trace.trace_version, "layer2_trace.v5")
+        self.assertEqual(trace.trace_version, "layer2_trace.v6")
         self.assertEqual(len(trace.governance_passes), 2)
         self.assertEqual(trace.governance_passes[0].directive, "continue_read_only")
         self.assertFalse(trace.governance_passes[0].requires_human_review)
@@ -243,7 +272,7 @@ class Layer2TraceTests(unittest.TestCase):
         decoded = json.loads(encoded)
 
         self.assertEqual(payload["runtime"]["current_state"], "completed")
-        self.assertEqual(decoded["trace_version"], "layer2_trace.v5")
+        self.assertEqual(decoded["trace_version"], "layer2_trace.v6")
         self.assertEqual(decoded["governance_passes"][0]["policy_decision"], "allow_read_only")
         self.assertFalse(decoded["governance_passes"][0]["requires_human_review"])
         self.assertNotIn("governance_decisions", decoded)
@@ -252,7 +281,7 @@ class Layer2TraceTests(unittest.TestCase):
         schema = json.loads(
             (REPO_ROOT / "schemas" / "layer2_trace.schema.json").read_text(encoding="utf-8")
         )
-        self.assertEqual(schema["properties"]["trace_version"]["const"], "layer2_trace.v5")
+        self.assertEqual(schema["properties"]["trace_version"]["const"], "layer2_trace.v6")
         self.assertFalse(schema["additionalProperties"])
         self.assertFalse(schema["$defs"]["governancePass"]["additionalProperties"])
 

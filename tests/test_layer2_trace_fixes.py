@@ -301,6 +301,10 @@ class TraceFixesIntegrationTests(unittest.TestCase):
         )
 
         self.assertEqual(judge_context.external_communication_body, long_body)
+        self.assertEqual(
+            judge_context.operation_stage.value,
+            "communication_draft_review",
+        )
 
         user_prompt = build_judge_user_prompt(context=judge_context)
         self.assertIn("SENTINEL_START_", user_prompt)

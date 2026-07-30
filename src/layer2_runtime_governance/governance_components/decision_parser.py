@@ -17,6 +17,7 @@ from .contracts import (
     GovernanceDecisionTrace,
     GovernanceDirective,
     GovernanceReasonCode,
+    JudgeAdmission,
     PolicyDecision,
     PolicyEngineExecutionError,
     PolicyEnginePort,
@@ -135,6 +136,10 @@ def _build_governance_trace_from_opa_output(
             else None
         ),
         policy_config_version=str(raw_output.get("policy_config_version")),
+        judge_admission=JudgeAdmission(
+            required=raw_output["judge_admission"]["required"],
+            reason=raw_output["judge_admission"]["reason"],
+        ),
     )
 
 # Parse and validate one bounded part of the untrusted OPA response.

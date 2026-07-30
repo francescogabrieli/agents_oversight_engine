@@ -20,6 +20,9 @@ from layer2_runtime_governance.domain import (
     ExternalCommunicationPhase,
     ExternalCommunicationState,
     StepCompletionCandidate,
+    build_evidence_selection_digest,
+    build_evidence_snapshot_manifest,
+    digest_json,
 )
 from layer2_runtime_governance.governance_components import (
     GovernanceDirective,
@@ -60,10 +63,14 @@ from layer2_runtime_governance.hitl.dashboard import (
 from layer2_runtime_governance.judge import (
     DisabledJudge,
     JudgeAssessmentStatus,
+    JudgeExecutionError,
     JudgeSeverity,
     JudgeVerdict,
 )
-from layer2_runtime_governance.judge.service import _JudgePayload
+from layer2_runtime_governance.judge.service import (
+    _JudgePayload,
+    _validate_judge_payload,
+)
 from layer2_runtime_governance.judge import (
     build_judge_system_prompt,
     build_judge_user_prompt,
@@ -95,6 +102,9 @@ class ExternalOperationNormalizerTests(unittest.TestCase):
             "summary": "Unsafe external communication.",
             "rationale": "The content is coercive.",
             "evaluated_operation_digest": "a" * 64,
+            "evaluated_evidence_snapshot_digest": "b" * 64,
+            "evaluated_evidence_selection_digest": "c" * 64,
+            "claim_assessments": [],
         }
 
         with self.assertRaises(ValidationError):
@@ -504,7 +514,7 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
         self.assertIsNone(state.current_plan_step_index)
         self.assertIn("step_2", state.step_history[-1].summary)
 
-    # Judge receives the whole observable path while remaining bound to one exact digest.
+    # Judge receives the complete semantic evidence base without process narration.
     def test_judge_context_contains_relevant_execution_context_and_exact_external(self) -> None:
         proposal = _generic_proposal()
         state = _state_with_proposal(proposal)
@@ -514,6 +524,13 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
                 locator="https://example.org/source",
                 content="Concrete observed source content.",
             )
+        ] + [
+            ToolObservation(
+                observation_id=f"observation-{index}",
+                locator=f"https://example.org/source/{index}",
+                content=f"Concrete observed source content {index}.",
+            )
+            for index in range(2, 56)
         ]
         state.scratchpad = [
             ScratchpadEntry(
@@ -580,11 +597,46 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
         self.assertEqual(len(context.scratchpad_entries), 0)
         self.assertEqual(len(context.tool_executions), 0)
         self.assertEqual(len(context.runtime_events), 0)
-        self.assertEqual(len(context.observations), 1)
+        self.assertEqual(len(context.observations), 55)
         self.assertEqual(context.selected_evidence_refs, ("observation-1",))
+        self.assertEqual(sum(item.selected_by_actor for item in context.observations), 1)
+        self.assertTrue(context.evidence_base_complete)
+        self.assertEqual(context.observation_count, 55)
+        self.assertNotIn("scratchpad_entries", prompt)
+        self.assertNotIn("tool_executions", prompt)
+        self.assertNotIn("runtime_events", prompt)
         self.assertIn('"full_plan"', prompt)
         self.assertIn(proposal.payload_digest, prompt)
         self.assertNotIn("release chronology", build_judge_system_prompt())
+
+        invalid_payload = _JudgePayload.model_validate(
+            {
+                "verdict": "needs_revision",
+                "severity": "medium",
+                "confidence": 0.9,
+                "findings": [],
+                "claim_assessments": [
+                    {
+                        "claim_summary": "One externally verifiable claim.",
+                        "status": "unsupported",
+                        "selected_evidence_refs": [],
+                        "supporting_evidence_refs": ["invented-observation"],
+                        "contradicting_evidence_refs": [],
+                        "explanation": "The model invented a reference.",
+                    }
+                ],
+                "summary": "Revision required.",
+                "rationale": "One claim is not supported.",
+                "evaluated_operation_digest": proposal.payload_digest,
+                "evaluated_evidence_snapshot_digest": context.evidence_snapshot_digest,
+                "evaluated_evidence_selection_digest": context.evidence_selection_digest,
+            }
+        )
+        with self.assertRaises(JudgeExecutionError):
+            _validate_judge_payload(
+                payload=invalid_payload,
+                context=context,
+            )
 
     # A safe assessment for a governed external proposal can continue without forced HITL.
     def test_safe_external_operation_can_continue(self) -> None:
@@ -877,8 +929,15 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
         state.current_plan_step_index = 0
         state.actor_result = ActorResult(
             plan_step_id="step_1",
-            result_type=ActorResultType.PROPOSE_ACTION,
+            result_type=ActorResultType.STEP_COMPLETED,
             summary="Drafted dangerous email.",
+            output_text=state.external_communication.draft.body,
+            step_validation=StepValidation(
+                plan_step_id="step_1",
+                actor_self_confidence=0.8,
+                evidence_refs=(),
+                rationale_summary="The review-ready draft is the exact completion candidate.",
+            ),
             external_impact=True,
         )
 
@@ -888,6 +947,9 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
         )
         self.assertIsNotNone(proposal)
         self.assertTrue(proposal.execution_candidate)
+        evidence_snapshot_digest = digest_json(
+            build_evidence_snapshot_manifest(task_state=state)
+        )
         state.pending_completion_candidate = StepCompletionCandidate(
             candidate_id="step_1:candidate:1",
             step_id="step_1",
@@ -895,6 +957,12 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
             output_text=state.external_communication.draft.body,
             external_operation_id=proposal.operation_id,
             external_operation_digest=proposal.payload_digest,
+            evidence_snapshot_digest=evidence_snapshot_digest,
+            evidence_selection_digest=build_evidence_selection_digest(
+                selected_refs=(),
+                evidence_snapshot_digest=evidence_snapshot_digest,
+                external_operation_digest=proposal.payload_digest,
+            ),
         )
 
         policy_engine = StubPolicyEngine()
@@ -993,6 +1061,8 @@ class _UnsafeJudge(JudgePort):
             verdict=JudgeVerdict.UNSAFE,
             severity=JudgeSeverity.HIGH,
             evaluated_operation_digest=context.external_operation.payload_digest,
+            evaluated_evidence_snapshot_digest=context.evidence_snapshot_digest,
+            evaluated_evidence_selection_digest=context.evidence_selection_digest,
             prompt_version=self.prompt_version,
         )
 
@@ -1054,6 +1124,8 @@ class _WrongDigestJudge(JudgePort):
             assessment,
             evaluated_target=context.external_operation.operation_id,
             evaluated_operation_digest="0" * 64,
+            evaluated_evidence_snapshot_digest=context.evidence_snapshot_digest,
+            evaluated_evidence_selection_digest=context.evidence_selection_digest,
         )
 
 
@@ -1087,20 +1159,38 @@ def _state_with_proposal(proposal, *, read_only_mode: bool = False):
     state.execution_policy = state.execution_policy.model_copy(
         update={"read_only_mode": read_only_mode}
     )
+    selected_refs = ("evidence-1",)
     state.actor_result = ActorResult(
         plan_step_id="step_1",
-        result_type=ActorResultType.PROPOSE_ACTION,
+        result_type=ActorResultType.STEP_COMPLETED,
         summary="Submit the runtime-normalized external operation for governance.",
+        output_text=proposal.payload_preview,
+        step_validation=StepValidation(
+            plan_step_id="step_1",
+            actor_self_confidence=0.8,
+            evidence_refs=selected_refs,
+            rationale_summary="The concrete observation supports the completion.",
+        ),
         external_operation_proposal=proposal,
     )
     state.external_operation_proposal = proposal
+    evidence_snapshot_digest = digest_json(
+        build_evidence_snapshot_manifest(task_state=state)
+    )
     state.pending_completion_candidate = StepCompletionCandidate(
         candidate_id=f"{proposal.plan_step_id}:candidate:1",
         step_id=proposal.plan_step_id,
         summary="Prepared the governed external proposal.",
         output_text=proposal.payload_preview,
+        evidence_refs=selected_refs,
         external_operation_id=proposal.operation_id,
         external_operation_digest=proposal.payload_digest,
+        evidence_snapshot_digest=evidence_snapshot_digest,
+        evidence_selection_digest=build_evidence_selection_digest(
+            selected_refs=selected_refs,
+            evidence_snapshot_digest=evidence_snapshot_digest,
+            external_operation_digest=proposal.payload_digest,
+        ),
     )
     return state
 

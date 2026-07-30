@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://local/layer2/layer2_trace.schema.json",
-  "title": "Layer2RuntimeTraceV5",
+  "title": "Layer2RuntimeTraceV6",
   "type": "object",
   "required": [
     "trace_version", "runtime", "intake", "planner_name", "planner_prompt_version",
@@ -10,7 +10,7 @@
     "governance_passes", "human_review", "external_communication", "external_execution"
   ],
   "properties": {
-    "trace_version": { "const": "layer2_trace.v5" },
+    "trace_version": { "const": "layer2_trace.v6" },
     "runtime": { "$ref": "#/$defs/runtime" },
     "intake": { "$ref": "#/$defs/intake" },
     "planner_name": { "$ref": "#/$defs/nullableString" },
@@ -249,7 +249,7 @@
     },
     "governancePass": {
       "type": "object",
-      "required": ["pass_index", "evaluated_plan_step_id", "evaluated_actor_result_type", "evaluated_tool_name", "evaluated_operation_digest", "governance_input_schema_version", "policy_bundle_version", "policy_config_version", "pillar_requirements", "pillar_results", "pillar_errors", "directive", "policy_decision", "requires_human_review", "reason_codes", "selected_reason", "rejected_alternatives", "safety_invariants"],
+      "required": ["pass_index", "evaluated_plan_step_id", "evaluated_actor_result_type", "evaluated_tool_name", "evaluated_operation_digest", "governance_input_schema_version", "policy_bundle_version", "policy_config_version", "pillar_requirements", "pillar_results", "pillar_errors", "directive", "policy_decision", "requires_human_review", "reason_codes", "selected_reason", "rejected_alternatives", "safety_invariants", "judge_admission"],
       "properties": {
         "pass_index": { "type": "integer", "minimum": 1, "maximum": 1000000 },
         "evaluated_plan_step_id": { "$ref": "#/$defs/nullableString" },
@@ -268,7 +268,21 @@
         "reason_codes": { "type": "array", "items": { "$ref": "#/$defs/governanceReasonCode" }, "maxItems": 1000000 },
         "selected_reason": { "type": "string" },
         "rejected_alternatives": { "type": "object", "additionalProperties": { "type": "string" } },
-        "safety_invariants": { "$ref": "#/$defs/stringArray" }
+        "safety_invariants": { "$ref": "#/$defs/stringArray" },
+        "judge_admission": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["required", "reason"],
+              "properties": {
+                "required": { "type": "boolean" },
+                "reason": { "$ref": "#/$defs/nonEmptyString" }
+              },
+              "additionalProperties": false
+            },
+            { "type": "null" }
+          ]
+        }
       },
       "additionalProperties": false
     },

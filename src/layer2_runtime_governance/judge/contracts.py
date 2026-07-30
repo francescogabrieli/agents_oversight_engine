@@ -29,6 +29,15 @@ class JudgeVerdict(str, Enum):
     UNCERTAIN = "uncertain"
 
 
+class JudgeClaimStatus(str, Enum):
+    # Claim grounding is a typed semantic assessment, not an Evidence-pillar score.
+    SUPPORTED_BY_SELECTED = "supported_by_selected"
+    SUPPORTED_BUT_NOT_SELECTED = "supported_but_not_selected"
+    UNSUPPORTED = "unsupported"
+    CONTRADICTED = "contradicted"
+    CONTEXT_INCOMPLETE = "context_incomplete"
+
+
 class JudgeSeverity(str, Enum):
     LOW = "low"
     MEDIUM = "medium"
@@ -66,6 +75,39 @@ class JudgeFinding:
     summary: str
     evidence_refs: tuple[str, ...] = ()
 
+    # Preserve tuple semantics when checkpoint serializers restore arrays as lists.
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "evidence_refs", tuple(self.evidence_refs))
+
+
+@dataclass(frozen=True)
+class JudgeClaimAssessment:
+    # One concise payload claim and its semantic relation to the complete observation base.
+    claim_summary: str
+    status: JudgeClaimStatus
+    selected_evidence_refs: tuple[str, ...] = ()
+    supporting_evidence_refs: tuple[str, ...] = ()
+    contradicting_evidence_refs: tuple[str, ...] = ()
+    explanation: str = ""
+
+    # Preserve immutable reference collections across checkpoint roundtrips.
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "selected_evidence_refs",
+            tuple(self.selected_evidence_refs),
+        )
+        object.__setattr__(
+            self,
+            "supporting_evidence_refs",
+            tuple(self.supporting_evidence_refs),
+        )
+        object.__setattr__(
+            self,
+            "contradicting_evidence_refs",
+            tuple(self.contradicting_evidence_refs),
+        )
+
 
 @dataclass(frozen=True)
 class JudgePlanStepContext:
@@ -83,6 +125,11 @@ class JudgeEvidenceContext:
     evidence_id: str
     locator: str | None
     content: str
+    plan_step_id: str | None = None
+    selected_by_actor: bool = False
+    content_digest: str | None = None
+    content_truncated: bool = False
+    incomplete_marker: str | None = None
 
 
 @dataclass(frozen=True)
@@ -158,19 +205,28 @@ class JudgeContext:
     operation_stage: JudgeOperationStage
     selected_evidence_refs: tuple[str, ...]
     observations: tuple[JudgeEvidenceContext, ...]
-    actor_self_confidence: float | None
-    residual_uncertainty: str | None
-    destination_facts: tuple[str, ...]
-    invocation_reason: str
+    # These legacy process fields are compatibility-only and are never serialized to the prompt.
+    actor_self_confidence: float | None = None
+    residual_uncertainty: str | None = None
+    destination_facts: tuple[str, ...] = ()
+    invocation_reason: str = "opa_admitted_governed_external_candidate"
     task_success_criteria: tuple[str, ...] = ()
     execution_intent: str = "proposal_only"
     full_plan: tuple[JudgePlanStepContext, ...] = ()
     completed_steps: tuple[JudgeCompletedStepContext, ...] = ()
+    # Compatibility-only process narration remains empty in all new contexts.
     scratchpad_entries: tuple[JudgeScratchpadContext, ...] = ()
     tool_executions: tuple[JudgeToolExecutionContext, ...] = ()
     runtime_events: tuple[JudgeRuntimeEventContext, ...] = ()
     prior_external_revisions: tuple[JudgeExternalRevisionContext, ...] = ()
     external_communication_body: str | None = None
+    evidence_base_complete: bool = True
+    observation_count: int = 0
+    included_observation_count: int = 0
+    omitted_observation_ids: tuple[str, ...] = ()
+    evidence_snapshot_digest: str | None = None
+    evidence_selection_digest: str | None = None
+    serialization_version: str = "judge_context.v3"
 
 
 @dataclass(frozen=True)
@@ -197,9 +253,19 @@ class JudgeAssessment:
     evaluated_operation_digest: str | None = None
     prompt_version: str | None = None
     model_metadata: JudgeModelMetadata | None = None
+    claim_assessments: tuple[JudgeClaimAssessment, ...] = ()
+    evaluated_evidence_snapshot_digest: str | None = None
+    evaluated_evidence_selection_digest: str | None = None
 
     # Recover a semantic verdict for legacy checkpoints without making it authoritative.
     def __post_init__(self) -> None:
+        object.__setattr__(self, "flags", tuple(self.flags))
+        object.__setattr__(self, "findings", tuple(self.findings))
+        object.__setattr__(
+            self,
+            "claim_assessments",
+            tuple(self.claim_assessments),
+        )
         if self.verdict is None:
             object.__setattr__(
                 self,
@@ -230,6 +296,8 @@ class JudgeExecutionError(RuntimeError):
 __all__ = [
     "JudgeAssessment",
     "JudgeAssessmentStatus",
+    "JudgeClaimAssessment",
+    "JudgeClaimStatus",
     "JudgeCompletedStepContext",
     "JudgeContext",
     "JudgeEvidenceContext",

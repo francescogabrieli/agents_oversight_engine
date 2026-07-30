@@ -29,6 +29,11 @@ from layer2_runtime_governance.infrastructure.checkpointing import (
     build_runtime_serializer,
 )
 from layer2_runtime_governance.tool_contract import ToolErrorCode
+from layer2_runtime_governance.governance_components import JudgeAdmission
+from layer2_runtime_governance.judge import (
+    JudgeClaimAssessment,
+    JudgeClaimStatus,
+)
 
 
 class _RecordingCheckpointer:
@@ -76,6 +81,29 @@ class Layer2CheckpointingTests(unittest.TestCase):
         restored = serializer.loads_typed((type_tag, payload))
 
         self.assertIs(restored, ToolErrorCode.DUPLICATE_REQUEST)
+
+    # Staged admission and claim grounding must survive interrupt/resume checkpoints.
+    def test_new_judge_contracts_are_allowlisted_for_checkpoint_roundtrip(self) -> None:
+        serializer = build_runtime_serializer()
+        values = (
+            JudgeAdmission(
+                required=True,
+                reason="governed_external_semantic_candidate",
+            ),
+            JudgeClaimAssessment(
+                claim_summary="The payload contains one grounded claim.",
+                status=JudgeClaimStatus.SUPPORTED_BY_SELECTED,
+                selected_evidence_refs=("observation-1",),
+                supporting_evidence_refs=("observation-1",),
+            ),
+        )
+
+        restored = [
+            serializer.loads_typed(serializer.dumps_typed(value))
+            for value in values
+        ]
+
+        self.assertEqual(restored, list(values))
 
     # Verify the production backend fails clearly before graph construction if no URI exists.
     def test_postgres_backend_requires_connection_uri(self) -> None:

@@ -110,6 +110,8 @@ class StepCompletionCandidate:
     evidence_refs: tuple[str, ...] = ()
     external_operation_id: str | None = None
     external_operation_digest: str | None = None
+    evidence_snapshot_digest: str | None = None
+    evidence_selection_digest: str | None = None
 
 
 @dataclass(frozen=True)

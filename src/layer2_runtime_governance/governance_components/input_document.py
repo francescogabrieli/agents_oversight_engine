@@ -99,6 +99,11 @@ def build_governance_base_facts(
             if validation is not None
             else None
         ),
+        # Point confidence is contextual uncertainty, never a trajectory fact.
+        "uncertainty": {
+            "actor_self_confidence": validation.actor_self_confidence if validation is not None else None,
+            "configured_confidence_threshold": task_state.execution_policy.confidence_threshold,
+        },
     }
 
 

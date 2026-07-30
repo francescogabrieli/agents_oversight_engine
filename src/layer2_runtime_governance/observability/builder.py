@@ -68,7 +68,7 @@ def build_layer2_runtime_trace(
 ) -> Layer2RuntimeTrace:
     task_state = normalize_task_state_serialization(task_state)
     return Layer2RuntimeTrace(
-        trace_version="layer2_trace.v5",
+        trace_version="layer2_trace.v6",
         runtime=_build_runtime_summary(thread_id=thread_id, task_state=task_state),
         intake=_build_intake_summary(intake_result=intake_result),
         planner_name=task_state.planner_name,
@@ -314,6 +314,11 @@ def _build_governance_pass(
         selected_reason=decision.combiner_selected_reason or decision.summary,
         rejected_alternatives=dict(decision.combiner_rejected_alternatives or {}),
         safety_invariants=tuple(decision.combiner_safety_invariants_checked),
+        judge_admission=(
+            to_jsonable(decision.judge_admission)
+            if decision.judge_admission is not None
+            else None
+        ),
     )
 
 

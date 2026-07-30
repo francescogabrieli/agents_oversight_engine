@@ -415,11 +415,7 @@ class StubPolicyEngine(PolicyEnginePort):
             "require_risk": False,
             "require_trajectory": True,
             "require_behavioral": False,
-            "require_judge": (
-                operation.get("execution_candidate") is True
-                and operation.get("boundary") == "governed_external"
-                and not hard_deny
-            ),
+            "require_judge": False,
         }
 
     # Return a schema-valid OPA decision derived from the deterministic graph fixture.
@@ -481,28 +477,31 @@ class JudgeRequiredPolicyEngine(StubPolicyEngine):
 
     # Require the semantic judge only in tests that exercise its OPA input signal.
     def evaluate_required_pillars(self, *, base_facts: dict[str, Any]) -> dict[str, bool]:
-        requirements = super().evaluate_required_pillars(base_facts=base_facts)
-        return {**requirements, "require_judge": True}
+        return super().evaluate_required_pillars(base_facts=base_facts)
 
     # Let the OPA fixture map semantic assessments without delegating directives to the judge.
     def evaluate_decision(self, *, decision_input: dict[str, Any]) -> dict[str, Any]:
         judge_facts = decision_input["pillars"]["judge"]["raw_facts"]
         if (
-            judge_facts.get("pillar_unavailable") is True
-            or judge_facts.get("invoked") is not True
-            or judge_facts.get("digest_matches") is not True
+            judge_facts.get("pillar_unavailable") is not True
+            and judge_facts.get("invoked") is True
+            and judge_facts.get("digest_matches") is True
+            and judge_facts.get("verdict") == "needs_revision"
         ):
-            return super().evaluate_decision(decision_input=decision_input)
-        if judge_facts.get("verdict") == "needs_revision":
-            return _build_stub_opa_decision(
+            output = _build_stub_opa_decision(
                 decision_input=decision_input,
                 policy_engine=self,
                 directive="revise_action",
                 reason_code="judge_needs_revision",
                 summary="The semantic judge requires payload revision.",
             )
-        if judge_facts.get("verdict") in {"unsafe", "uncertain"}:
-            return _build_stub_opa_decision(
+        elif (
+            judge_facts.get("pillar_unavailable") is not True
+            and judge_facts.get("invoked") is True
+            and judge_facts.get("digest_matches") is True
+            and judge_facts.get("verdict") in {"unsafe", "uncertain"}
+        ):
+            output = _build_stub_opa_decision(
                 decision_input=decision_input,
                 policy_engine=self,
                 directive="wait_human_review",
@@ -510,7 +509,15 @@ class JudgeRequiredPolicyEngine(StubPolicyEngine):
                 reason_code=f"judge_{judge_facts['verdict']}",
                 summary="The semantic judge requires full human review.",
             )
-        return super().evaluate_decision(decision_input=decision_input)
+        else:
+            output = super().evaluate_decision(decision_input=decision_input)
+        # This specialized fixture deliberately forces an impossible admission in
+        # local-operation tests so the runtime fail-closed contract remains covered.
+        output["judge_admission"] = {
+            "required": True,
+            "reason": "test_forced_semantic_candidate",
+        }
+        return output
 
 
 class ReviewPolicyEngine(PolicyEnginePort):
@@ -632,6 +639,43 @@ def _build_stub_opa_decision(
 
     judge_facts = pillars.get("judge", {}).get("raw_facts", {})
     judge_required = decision_input.get("pillar_requirements", {}).get("require_judge") is True
+    evidence_facts = pillars.get("evidence", {}).get("raw_facts", {})
+    trajectory_facts = pillars.get("trajectory", {}).get("raw_facts", {})
+    external_candidate = bool(
+        operation.get("execution_candidate") is True
+        and operation.get("boundary") == "governed_external"
+    )
+    evidence_gap = bool(
+        evidence_facts.get("pillar_unavailable") is True
+        or evidence_facts.get("selected_evidence_refs_valid") is False
+        or evidence_facts.get("selected_observations_have_content") is False
+        or evidence_facts.get("observation_ids_unique") is False
+        or evidence_facts.get("selected_observations_belong_to_known_steps") is False
+        or evidence_facts.get("selected_observations_provenance_resolvable") is False
+        or evidence_facts.get("selected_evidence_all_title_only") is True
+        or (
+            actor["result_type"] == ActorResultType.STEP_COMPLETED.value
+            and (
+                evidence_facts.get("candidate_evidence_binding_present") is not True
+                or evidence_facts.get("candidate_evidence_snapshot_matches") is not True
+                or evidence_facts.get("candidate_evidence_selection_matches") is not True
+                or evidence_facts.get("candidate_external_operation_digest_matches")
+                is not True
+            )
+        )
+    )
+    trajectory_blocked = bool(
+        trajectory_facts.get("pillar_unavailable") is True
+        or trajectory_facts.get("replan_request_stalled") is True
+        or trajectory_facts.get("replan_request_admissible") is True
+    )
+    judge_admitted = bool(
+        external_candidate
+        and not hard_deny
+        and actor["result_type"] == ActorResultType.STEP_COMPLETED.value
+        and not evidence_gap
+        and not trajectory_blocked
+    )
     if hard_deny:
         resolved_directive = "stop"
         resolved_policy_decision = "deny"
@@ -690,6 +734,14 @@ def _build_stub_opa_decision(
         "directive": resolved_directive,
         "policy_decision": resolved_policy_decision,
         "reason_codes": [resolved_reason_code],
+        "judge_admission": {
+            "required": judge_admitted,
+            "reason": (
+                "governed_external_semantic_candidate"
+                if judge_admitted
+                else "deterministic_gate_not_admissible"
+            ),
+        },
         "pillar_results": pillars,
         "selected_reason": resolved_summary,
         "rejected_alternatives": {},
@@ -726,6 +778,8 @@ class StaticJudge(JudgePort):
             severity=self._assessment.severity,
             findings=self._assessment.findings,
             evaluated_operation_digest=context.external_operation.payload_digest,
+            evaluated_evidence_snapshot_digest=context.evidence_snapshot_digest,
+            evaluated_evidence_selection_digest=context.evidence_selection_digest,
             prompt_version=self.prompt_version,
         )
 

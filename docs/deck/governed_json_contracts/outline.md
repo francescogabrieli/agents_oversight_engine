@@ -21,6 +21,6 @@
 19. LLM-as-Judge: `JudgeAssessment`
 20. HITL sul digest corrente
 21. Resume ed esecuzione esterna
-22. Trace v5: una proiezione osservabile
+22. Trace v6: una proiezione osservabile
 23. Cosa è stato rimosso e cosa è rimasto
 24. Matrice definitiva dei contratti

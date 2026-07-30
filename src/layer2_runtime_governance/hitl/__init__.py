@@ -23,6 +23,9 @@ from ..domain import (
     RuntimeState,
     StepRecord,
     TaskState,
+    build_evidence_selection_digest,
+    build_evidence_snapshot_manifest,
+    digest_json,
     normalize_task_state_serialization,
 )
 from ..domain.step_recovery import restore_actor_step_for_more_evidence
@@ -964,17 +967,64 @@ def _mark_human_review_normalization(proposal):
     )
 
 
-# Replace the active immutable proposal while retaining both digests in history.
+# Replace the active immutable proposal; the next governance projection records its occurrence.
 def _replace_current_external_proposal(
     state: TaskState,
     *,
     proposal,
 ) -> None:
+    communication_draft = None
+    materialized_output = proposal.payload_preview
+    if isinstance(proposal.payload, CommunicationOperationPayload):
+        existing_metadata = (
+            state.external_communication.draft.metadata
+            if state.external_communication is not None
+            and state.external_communication.draft is not None
+            else {}
+        )
+        communication_draft = ExternalCommunicationDraft(
+            channel=proposal.payload.channel,
+            recipient=proposal.payload.recipient,
+            subject=proposal.payload.subject,
+            body=proposal.payload.body,
+            cc=proposal.payload.cc,
+            bcc=proposal.payload.bcc,
+            metadata=existing_metadata,
+        )
+        materialized_output = proposal.payload.body
+        if state.external_communication is not None:
+            state.external_communication.draft = communication_draft
+
     state.external_operation_proposal = proposal
-    state.external_operation_history.append(proposal)
+    candidate = state.pending_completion_candidate
+    if candidate is not None and candidate.step_id == proposal.plan_step_id:
+        evidence_snapshot_digest = digest_json(
+            build_evidence_snapshot_manifest(task_state=state)
+        )
+        evidence_selection_digest = build_evidence_selection_digest(
+            selected_refs=candidate.evidence_refs,
+            evidence_snapshot_digest=evidence_snapshot_digest,
+            external_operation_digest=proposal.payload_digest,
+        )
+        # A human edit creates a new immutable candidate bound to the new payload,
+        # while preserving the original candidate identity and evidence attribution.
+        state.pending_completion_candidate = replace(
+            candidate,
+            output_text=materialized_output,
+            external_operation_id=proposal.operation_id,
+            external_operation_digest=proposal.payload_digest,
+            evidence_snapshot_digest=evidence_snapshot_digest,
+            evidence_selection_digest=evidence_selection_digest,
+        )
     if state.actor_result is not None:
         state.actor_result = replace(
             state.actor_result,
+            output_text=materialized_output,
+            external_communication_draft=(
+                communication_draft
+                if communication_draft is not None
+                else state.actor_result.external_communication_draft
+            ),
             external_operation_proposal=proposal,
             external_impact=proposal.boundary == OperationBoundary.GOVERNED_EXTERNAL,
         )

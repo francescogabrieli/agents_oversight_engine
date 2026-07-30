@@ -172,6 +172,14 @@ class StaticPolicyAssessment:
     mode: str = "active"
     decision_influence: bool = True
 
+
+# Define the typed OPA-owned result of the deterministic Judge admission stage.
+@dataclass(frozen=True)
+class JudgeAdmission:
+    required: bool
+    reason: str
+
+
 # Define the stable typed vocabulary shared by runtime and policy adapters.
 @dataclass(frozen=True)
 class GovernanceDecisionTrace:
@@ -215,6 +223,7 @@ class GovernanceDecisionTrace:
     pillar_results: dict[str, Any] | None = None
     pillar_errors: dict[str, str] | None = None
     policy_config_version: str | None = None
+    judge_admission: JudgeAdmission | None = None
 
     # Derive the missing legacy value conservatively without overriding new OPA output.
     def __post_init__(self) -> None:
@@ -263,6 +272,7 @@ __all__ = [
     "PolicyEvaluationInput",
     "PolicyEvaluationResult",
     "StaticPolicyAssessment",
+    "JudgeAdmission",
     "GovernanceDecisionTrace",
     "GovernanceEvaluationResult",
     "PolicyEnginePort",

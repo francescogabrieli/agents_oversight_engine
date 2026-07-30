@@ -277,6 +277,10 @@ class StubPolicyEngine(PolicyEnginePort):
             "directive": directive,
             "policy_decision": policy_decision,
             "reason_codes": [reason_code],
+            "judge_admission": {
+                "required": False,
+                "reason": "deterministic_gate_not_admissible",
+            },
             "pillar_results": pillar_results,
             "selected_reason": summary,
             "rejected_alternatives": {},

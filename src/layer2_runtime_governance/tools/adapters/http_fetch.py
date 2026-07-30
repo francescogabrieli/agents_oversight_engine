@@ -67,6 +67,7 @@ class HttpFetchAdapter:
             title = tool_request.url
             extracted_text = decoded_body
         content = truncate_text(extracted_text, definition.max_content_chars)
+        content_truncated = truncated or len(content or "") < len(extracted_text)
         specialized_result = try_fetch_specialized_legal_document(
             tool_request=tool_request,
             definition=definition,
@@ -83,8 +84,8 @@ class HttpFetchAdapter:
             success=True,
             summary="URL text fetched successfully.",
             content=content,
-            truncated=truncated,
-            extractability_limited=truncated,
+            truncated=content_truncated,
+            extractability_limited=content_truncated,
             observations=(
                 ToolObservation(
                     observation_id=f"{tool_request.request_id}:document",

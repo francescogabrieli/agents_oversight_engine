@@ -11,6 +11,8 @@ from ..infrastructure.environment import load_env_file_values
 from .contracts import (
     JudgeAssessment,
     JudgeAssessmentStatus,
+    JudgeClaimAssessment,
+    JudgeClaimStatus,
     JudgeContext,
     JudgeExecutionError,
     JudgeFinding,
@@ -76,17 +78,37 @@ class _JudgePayload(BaseModel):
     severity: JudgeSeverity
     confidence: float = Field(..., ge=0.0, le=1.0)
     findings: list[_JudgeFindingPayload] = Field(default_factory=list)
+    claim_assessments: list["_JudgeClaimAssessmentPayload"] = Field(...)
     summary: str = Field(..., min_length=1)
     rationale: str = Field(..., min_length=1)
     evaluated_operation_digest: str = Field(
         ...,
         pattern=r"^[0-9a-f]{64}$",
     )
+    evaluated_evidence_snapshot_digest: str = Field(
+        ...,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    evaluated_evidence_selection_digest: str = Field(
+        ...,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+
+
+class _JudgeClaimAssessmentPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    claim_summary: str = Field(..., min_length=1)
+    status: JudgeClaimStatus
+    selected_evidence_refs: list[str] = Field(default_factory=list)
+    supporting_evidence_refs: list[str] = Field(default_factory=list)
+    contradicting_evidence_refs: list[str] = Field(default_factory=list)
+    explanation: str = Field(default="")
 
 
 class DisabledJudge(JudgePort):
     judge_name = "disabled_judge"
-    prompt_version = "external_operation_judge_v5_disabled"
+    prompt_version = "external_operation_judge_v6_disabled"
 
     # Required disabled invocations are explicitly unavailable, never safe.
     def evaluate(self, *, context: JudgeContext) -> JudgeAssessment:
@@ -113,7 +135,7 @@ class DisabledJudge(JudgePort):
 
 class OpenAIJudge(JudgePort):
     judge_name = "openai_layer2_external_operation_judge"
-    prompt_version = "external_operation_judge_v5"
+    prompt_version = "external_operation_judge_v6"
 
     def __init__(self, settings: JudgeSettings | None = None) -> None:
         self._settings = settings or JudgeSettings.from_env()
@@ -135,8 +157,10 @@ class OpenAIJudge(JudgePort):
         payload = getattr(response, "output_parsed", None)
         if payload is None:
             raise JudgeExecutionError("Judge returned no structured output.")
-        if payload.evaluated_operation_digest != context.external_operation.payload_digest:
-            raise JudgeExecutionError("Judge evaluated_operation_digest does not match the proposal.")
+        _validate_judge_payload(
+            payload=payload,
+            context=context,
+        )
 
         verdict = payload.verdict
         severity = payload.severity
@@ -151,6 +175,17 @@ class OpenAIJudge(JudgePort):
                 ),
             )
             for item in payload.findings
+        )
+        claim_assessments = tuple(
+            JudgeClaimAssessment(
+                claim_summary=" ".join(item.claim_summary.split()),
+                status=item.status,
+                selected_evidence_refs=tuple(item.selected_evidence_refs),
+                supporting_evidence_refs=tuple(item.supporting_evidence_refs),
+                contradicting_evidence_refs=tuple(item.contradicting_evidence_refs),
+                explanation=" ".join(item.explanation.split()),
+            )
+            for item in payload.claim_assessments
         )
         return JudgeAssessment(
             invoked=True,
@@ -170,6 +205,13 @@ class OpenAIJudge(JudgePort):
                 provider="openai",
                 model=self._settings.model,
                 judge_name=self.judge_name,
+            ),
+            claim_assessments=claim_assessments,
+            evaluated_evidence_snapshot_digest=(
+                payload.evaluated_evidence_snapshot_digest
+            ),
+            evaluated_evidence_selection_digest=(
+                payload.evaluated_evidence_selection_digest
             ),
         )
 
@@ -192,6 +234,81 @@ def build_default_judge() -> JudgePort:
     if settings.provider == "openai":
         return OpenAIJudge(settings=settings)
     return DisabledJudge()
+
+
+# Reject model output that is not bound to the supplied semantic universe.
+def _validate_judge_payload(
+    *,
+    payload: _JudgePayload,
+    context: JudgeContext,
+) -> None:
+    expected_bindings = (
+        (
+            payload.evaluated_operation_digest,
+            context.external_operation.payload_digest,
+            "evaluated_operation_digest",
+        ),
+        (
+            payload.evaluated_evidence_snapshot_digest,
+            context.evidence_snapshot_digest,
+            "evaluated_evidence_snapshot_digest",
+        ),
+        (
+            payload.evaluated_evidence_selection_digest,
+            context.evidence_selection_digest,
+            "evaluated_evidence_selection_digest",
+        ),
+    )
+    for actual, expected, field_name in expected_bindings:
+        if expected is None or actual != expected:
+            raise JudgeExecutionError(
+                f"Judge {field_name} does not match the supplied context."
+            )
+
+    known_evidence_ids = {item.evidence_id for item in context.observations}
+    actor_selected_ids = set(context.selected_evidence_refs)
+    for finding in payload.findings:
+        _require_known_evidence_refs(
+            refs=finding.evidence_refs,
+            known_evidence_ids=known_evidence_ids,
+            field_name="finding.evidence_refs",
+        )
+    for claim in payload.claim_assessments:
+        _require_known_evidence_refs(
+            refs=claim.selected_evidence_refs,
+            known_evidence_ids=known_evidence_ids,
+            field_name="claim.selected_evidence_refs",
+        )
+        if not set(claim.selected_evidence_refs).issubset(actor_selected_ids):
+            raise JudgeExecutionError(
+                "Judge claim selected_evidence_refs contains an observation "
+                "that the actor did not select."
+            )
+        _require_known_evidence_refs(
+            refs=claim.supporting_evidence_refs,
+            known_evidence_ids=known_evidence_ids,
+            field_name="claim.supporting_evidence_refs",
+        )
+        _require_known_evidence_refs(
+            refs=claim.contradicting_evidence_refs,
+            known_evidence_ids=known_evidence_ids,
+            field_name="claim.contradicting_evidence_refs",
+        )
+
+
+# Require every model-produced reference to resolve inside the exact JudgeContext.
+def _require_known_evidence_refs(
+    *,
+    refs: list[str],
+    known_evidence_ids: set[str],
+    field_name: str,
+) -> None:
+    unknown = sorted(set(refs) - known_evidence_ids)
+    if unknown:
+        raise JudgeExecutionError(
+            f"Judge {field_name} contains unknown observation ids: "
+            f"{', '.join(unknown)}."
+        )
 
 
 # Keep finding codes stable for traces and policy.

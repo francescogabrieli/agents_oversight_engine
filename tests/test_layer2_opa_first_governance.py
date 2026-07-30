@@ -178,11 +178,24 @@ class _AllowPolicyEngine(PolicyEnginePort):
     # Return a schema-valid final decision.
     def evaluate_decision(self, *, decision_input):
         self.calls.append("decision")
+        operation = decision_input["base_facts"]["external_operation"]
+        judge_required = bool(
+            operation["execution_candidate"] is True
+            and operation["boundary"] == "governed_external"
+        )
         return {
             "schema_version": "governance_decision_output.v1",
             "directive": "continue",
             "policy_decision": "allow",
             "reason_codes": ["allowed_by_policy"],
+            "judge_admission": {
+                "required": judge_required,
+                "reason": (
+                    "governed_external_semantic_candidate"
+                    if judge_required
+                    else "deterministic_gate_not_admissible"
+                ),
+            },
             "pillar_results": {
                 "static_policy": {
                     "hard_deny": False,

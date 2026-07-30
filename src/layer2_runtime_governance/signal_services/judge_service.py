@@ -3,27 +3,31 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from layer2_runtime_governance.domain import TaskState
+from layer2_runtime_governance.domain import (
+    TaskState,
+    build_evidence_selection_digest,
+    build_evidence_snapshot_manifest,
+    build_observation_lineage,
+    digest_json,
+    digest_text,
+)
 from layer2_runtime_governance.external_operations import (
     CommunicationOperationPayload,
     ExternalOperationProposal,
 )
-from layer2_runtime_governance.tool_contract import ToolExecutionResult
 from layer2_runtime_governance.judge import (
     JudgeAssessment,
     JudgeAssessmentStatus,
+    JudgeClaimAssessment,
     JudgeCompletedStepContext,
     JudgeContext,
     JudgeEvidenceContext,
+    JudgeClaimStatus,
     JudgeExternalRevisionContext,
     JudgeOperationStage,
     JudgePlanStepContext,
     JudgeRecommendedDirective,
-    JudgeRuntimeEventContext,
-    JudgeScratchpadContext,
     JudgeSeverity,
-    JudgeToolArgumentContext,
-    JudgeToolExecutionContext,
     JudgeVerdict,
 )
 
@@ -46,6 +50,23 @@ def build_judge_context(
     if step is None:
         raise ValueError("Cannot build JudgeContext without the evaluated actor plan step.")
     validation = task_state.actor_result.step_validation if task_state.actor_result else None
+    selected_refs = tuple(validation.evidence_refs if validation else ())
+    selected_ref_set = set(selected_refs)
+    observation_lineage = build_observation_lineage(task_state=task_state)
+    snapshot_manifest = build_evidence_snapshot_manifest(
+        task_state=task_state,
+        observation_lineage=observation_lineage,
+    )
+    evidence_snapshot_digest = digest_json(snapshot_manifest)
+    evidence_selection_digest = build_evidence_selection_digest(
+        selected_refs=selected_refs,
+        evidence_snapshot_digest=evidence_snapshot_digest,
+        external_operation_digest=external_operation.payload_digest,
+    )
+    content_truncated = any(
+        item.content_truncated or item.extractability_limited
+        for item in observation_lineage.values()
+    )
     return JudgeContext(
         task_goal=task_state.task_spec.goal,
         task_constraints=tuple(task_state.task_spec.constraints),
@@ -61,20 +82,46 @@ def build_judge_context(
         # A communication proposal is inspected before its required human approval.
         operation_stage=(
             JudgeOperationStage.COMMUNICATION_DRAFT_REVIEW
-            if external_operation.operation_family.value == "external_communication"
+            if isinstance(external_operation.payload, CommunicationOperationPayload)
             else JudgeOperationStage.EXECUTION_CANDIDATE
         ),
-        # The Judge receives only selected concrete observations, never the whole tool transcript.
+        # The complete canonical observation universe is epistemically available to the judge.
         observations=tuple(
             JudgeEvidenceContext(
                 evidence_id=item.observation_id,
                 locator=item.locator,
                 content=item.content,
+                plan_step_id=(
+                    observation_lineage[item.observation_id].plan_step_id
+                    if item.observation_id in observation_lineage
+                    else None
+                ),
+                selected_by_actor=item.observation_id in selected_ref_set,
+                content_digest=digest_text(item.content),
+                content_truncated=bool(
+                    item.observation_id in observation_lineage
+                    and (
+                        observation_lineage[item.observation_id].content_truncated
+                        or observation_lineage[item.observation_id].extractability_limited
+                    )
+                ),
+                incomplete_marker=(
+                    "content_truncated"
+                    if item.observation_id in observation_lineage
+                    and (
+                        observation_lineage[item.observation_id].content_truncated
+                        or observation_lineage[item.observation_id].extractability_limited
+                    )
+                    else (
+                        "lineage_unresolved"
+                        if item.observation_id not in observation_lineage
+                        else None
+                    )
+                ),
             )
             for item in task_state.observations
-            if item.observation_id in set(validation.evidence_refs if validation else ())
         ),
-        selected_evidence_refs=tuple(validation.evidence_refs if validation else ()),
+        selected_evidence_refs=selected_refs,
         actor_self_confidence=(validation.actor_self_confidence if validation else None),
         residual_uncertainty=(validation.residual_uncertainty if validation else None),
         destination_facts=(
@@ -94,7 +141,6 @@ def build_judge_context(
                 status=item.status.value,
             )
             for item in task_state.plan_steps
-            if item.step_id == step.step_id
         ),
         completed_steps=tuple(
             JudgeCompletedStepContext(
@@ -105,69 +151,34 @@ def build_judge_context(
                 output_text=item.output_text,
             )
             for item in task_state.executed_steps
-            if item.step_id == step.step_id
         ),
         # Scratchpad, raw tool history, and generic node narration are intentionally excluded.
         scratchpad_entries=(),
         tool_executions=(),
         runtime_events=(),
-        prior_external_revisions=_build_prior_external_revisions(task_state=task_state),
+        prior_external_revisions=_build_prior_external_revisions(
+            task_state=task_state, operation_id=external_operation.operation_id
+        ),
         external_communication_body=(
             external_operation.payload.body
             if isinstance(external_operation.payload, CommunicationOperationPayload)
             else None
         ),
+        evidence_base_complete=not content_truncated,
+        observation_count=len(task_state.observations),
+        included_observation_count=len(task_state.observations),
+        omitted_observation_ids=(),
+        evidence_snapshot_digest=evidence_snapshot_digest,
+        evidence_selection_digest=evidence_selection_digest,
+        serialization_version="judge_context.v3",
     )
-
-
-# Project one tool result without leaking credentials or provider client state.
-def _build_tool_execution_context(
-    tool_result: ToolExecutionResult,
-) -> JudgeToolExecutionContext:
-    request = tool_result.request
-    arguments = tuple(
-        JudgeToolArgumentContext(name=name, value=str(value))
-        for name, value in (
-            ("query", request.query),
-            ("url", request.url),
-            ("text", request.text),
-            ("path", request.path),
-            ("expression", request.expression),
-            ("timezone", request.timezone),
-            ("limit", request.limit),
-            ("max_results", request.max_results),
-            ("extractive_goal", request.extractive_goal),
-        )
-        if value is not None
-    )
-    return JudgeToolExecutionContext(
-        request_id=request.request_id,
-        plan_step_id=request.plan_step_id,
-        tool_name=request.tool_name.value,
-        reason=request.reason,
-        arguments=arguments,
-        success=tool_result.success,
-        summary=tool_result.summary,
-        content=tool_result.content,
-        observation_ids=tuple(
-            item.observation_id for item in tool_result.observations
-        ),
-        error_code=_enum_or_string_value(tool_result.error_code),
-        error_message=tool_result.error_message,
-    )
-
-
-# Preserve judge context when a legacy checkpoint recovered an enum as its string value.
-def _enum_or_string_value(value: object | None) -> str | None:
-    if value is None:
-        return None
-    return str(getattr(value, "value", value))
 
 
 # Bind prior proposal digests to any revision feedback already produced by governance.
 def _build_prior_external_revisions(
     *,
     task_state: TaskState,
+    operation_id: str,
 ) -> tuple[JudgeExternalRevisionContext, ...]:
     feedback_by_digest = {
         item.invalidated_payload_digest: item
@@ -175,6 +186,8 @@ def _build_prior_external_revisions(
     }
     revisions: list[JudgeExternalRevisionContext] = []
     for proposal in task_state.external_operation_history:
+        if proposal.operation_id != operation_id:
+            continue
         feedback = feedback_by_digest.get(proposal.payload_digest)
         revisions.append(
             JudgeExternalRevisionContext(
@@ -194,13 +207,32 @@ def build_judge_signal(
     judge_assessment: JudgeAssessment | None,
     required: bool,
     expected_operation_digest: str | None,
+    expected_evidence_snapshot_digest: str | None,
+    expected_evidence_selection_digest: str | None,
     thresholds_version: str,
 ) -> dict[str, Any]:
     assessment = judge_assessment
-    digest_matches = bool(
+    operation_digest_matches = bool(
         assessment
         and expected_operation_digest
         and assessment.evaluated_operation_digest == expected_operation_digest
+    )
+    evidence_snapshot_matches = bool(
+        assessment
+        and expected_evidence_snapshot_digest
+        and assessment.evaluated_evidence_snapshot_digest
+        == expected_evidence_snapshot_digest
+    )
+    evidence_selection_matches = bool(
+        assessment
+        and expected_evidence_selection_digest
+        and assessment.evaluated_evidence_selection_digest
+        == expected_evidence_selection_digest
+    )
+    digest_matches = bool(
+        operation_digest_matches
+        and evidence_snapshot_matches
+        and evidence_selection_matches
     )
     usable = bool(
         assessment
@@ -236,11 +268,33 @@ def build_judge_signal(
             }
             for finding in (assessment.findings if assessment else ())
         ],
+        "claim_assessments": [
+            {
+                "claim_summary": item.claim_summary,
+                "status": item.status.value,
+                "selected_evidence_refs": list(item.selected_evidence_refs),
+                "supporting_evidence_refs": list(item.supporting_evidence_refs),
+                "contradicting_evidence_refs": list(item.contradicting_evidence_refs),
+                "explanation": item.explanation,
+            }
+            for item in (assessment.claim_assessments if assessment else ())
+        ],
         "summary": assessment.summary if assessment else "Judge was not invoked.",
         "evaluated_operation_digest": (
             assessment.evaluated_operation_digest if assessment else None
         ),
         "expected_operation_digest": expected_operation_digest,
+        "evaluated_evidence_snapshot_digest": (
+            assessment.evaluated_evidence_snapshot_digest if assessment else None
+        ),
+        "expected_evidence_snapshot_digest": expected_evidence_snapshot_digest,
+        "evidence_snapshot_matches": evidence_snapshot_matches,
+        "evaluated_evidence_selection_digest": (
+            assessment.evaluated_evidence_selection_digest if assessment else None
+        ),
+        "expected_evidence_selection_digest": expected_evidence_selection_digest,
+        "evidence_selection_matches": evidence_selection_matches,
+        "operation_digest_matches": operation_digest_matches,
         "digest_matches": digest_matches,
         "prompt_version": assessment.prompt_version if assessment else None,
         "model_metadata": (
@@ -276,6 +330,8 @@ def validate_required_judge_assessment(
     *,
     judge_assessment: JudgeAssessment,
     expected_operation_digest: str,
+    expected_evidence_snapshot_digest: str,
+    expected_evidence_selection_digest: str,
 ) -> JudgeAssessment:
     if not judge_assessment.invoked:
         return replace(
@@ -287,8 +343,16 @@ def validate_required_judge_assessment(
             severity=JudgeSeverity.HIGH,
             flags=tuple(dict.fromkeys((*judge_assessment.flags, "judge_unavailable"))),
             evaluated_operation_digest=None,
+            evaluated_evidence_snapshot_digest=None,
+            evaluated_evidence_selection_digest=None,
         )
-    if judge_assessment.evaluated_operation_digest != expected_operation_digest:
+    if (
+        judge_assessment.evaluated_operation_digest != expected_operation_digest
+        or judge_assessment.evaluated_evidence_snapshot_digest
+        != expected_evidence_snapshot_digest
+        or judge_assessment.evaluated_evidence_selection_digest
+        != expected_evidence_selection_digest
+    ):
         return replace(
             judge_assessment,
             recommendation=JudgeRecommendedDirective.WAIT_HUMAN_REVIEW,
@@ -296,7 +360,10 @@ def validate_required_judge_assessment(
             verdict=JudgeVerdict.UNCERTAIN,
             severity=JudgeSeverity.HIGH,
             flags=tuple(dict.fromkeys((*judge_assessment.flags, "judge_digest_mismatch"))),
-            summary="Semantic judge assessment is invalid for the current payload digest.",
+            summary=(
+                "Semantic judge assessment is invalid for the current payload "
+                "and evidence snapshot binding."
+            ),
         )
     if judge_assessment.status != JudgeAssessmentStatus.ACTIVE:
         return replace(

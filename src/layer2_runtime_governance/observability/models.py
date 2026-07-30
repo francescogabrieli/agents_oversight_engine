@@ -126,6 +126,7 @@ class TraceGovernancePass:
     selected_reason: str
     rejected_alternatives: dict[str, str]
     safety_invariants: tuple[str, ...]
+    judge_admission: dict[str, Any] | None = None
 
 
 # Read-only observability component extracted from the trace facade.

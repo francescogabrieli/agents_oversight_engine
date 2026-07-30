@@ -66,8 +66,25 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
             if task_state.external_operation_proposal is not None
             and feedback.operation_id == task_state.external_operation_proposal.operation_id
         ),
-        "actor_self_confidence": result.step_validation.actor_self_confidence if result and result.step_validation else None,
-        "configured_confidence_threshold": task_state.execution_policy.confidence_threshold,
+        "repeated_rejected_payload_digest": bool(
+            task_state.external_operation_proposal
+            and any(
+                feedback.invalidated_payload_digest == task_state.external_operation_proposal.payload_digest
+                for feedback in task_state.governance_action_feedback
+            )
+        ),
+        "unchanged_resubmission": bool(
+            task_state.external_operation_proposal
+            and any(
+                proposal.payload_digest == task_state.external_operation_proposal.payload_digest
+                for proposal in task_state.external_operation_history[:-1]
+            )
+        ),
+        "provider_recovery_active": bool(task_state.consecutive_provider_protocol_failures),
+        "provider_protocol_retry_exhausted": bool(
+            task_state.consecutive_provider_protocol_failures
+            and task_state.actor_protocol_retry_count >= 1
+        ),
     }
     return {
         "raw_facts": raw_facts,
@@ -78,6 +95,6 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
         "summary": (
             "Whole-run trajectory facts collected at a semantic or operational boundary."
         ),
-        "score_formula_version": "trajectory_facts_v5",
+        "score_formula_version": "trajectory_health_v1",
         "thresholds_version": thresholds_version,
     }

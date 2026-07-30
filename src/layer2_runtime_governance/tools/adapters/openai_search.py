@@ -47,15 +47,22 @@ class OpenAIWebSearchAdapter:
         except Exception as exc:  # pragma: no cover - provider errors are normalized.
             return failure_result(tool_request, f"Web search failed: {exc}")
         content = getattr(response, "output_text", None)
+        bounded_content = (
+            truncate_text(content, definition.max_content_chars) if content else None
+        )
+        observations, observations_truncated = _extract_web_observation_projection(
+            response,
+            request_id=tool_request.request_id,
+        )
+        content_truncated = bool(content and bounded_content != content)
         return ToolExecutionResult(
             request=tool_request,
             success=True,
             summary="Web search executed successfully.",
-            content=truncate_text(content, definition.max_content_chars) if content else None,
-            observations=extract_web_observations(
-                response,
-                request_id=tool_request.request_id,
-            ),
+            content=bounded_content,
+            observations=observations,
+            truncated=content_truncated or observations_truncated,
+            extractability_limited=content_truncated or observations_truncated,
         )
 
     # Retry only transient provider failures for stable governed search execution.
@@ -74,7 +81,21 @@ def extract_web_observations(
     *,
     request_id: str,
 ) -> tuple[ToolObservation, ...]:
+    observations, _ = _extract_web_observation_projection(
+        response,
+        request_id=request_id,
+    )
+    return observations
+
+
+# Preserve whether provider-attributed source text was bounded during projection.
+def _extract_web_observation_projection(
+    response: object,
+    *,
+    request_id: str,
+) -> tuple[tuple[ToolObservation, ...], bool]:
     deduped: dict[str, str] = {}
+    content_truncated = False
     for item in getattr(response, "output", []) or []:
         for content in getattr(item, "content", []) or []:
             for annotation in getattr(content, "annotations", []) or []:
@@ -85,17 +106,21 @@ def extract_web_observations(
                 if not snippet:
                     continue
                 normalized_snippet = truncate_text(snippet, 1000)
+                content_truncated = content_truncated or normalized_snippet != snippet
                 current = deduped.get(url)
                 # Preserve the most informative provider-attributed text for each URL.
                 if current is None or len(normalized_snippet) > len(current):
                     deduped[url] = normalized_snippet
-    return tuple(
-        ToolObservation(
-            observation_id=f"{request_id}:source:{index}",
-            locator=url,
-            content=snippet,
-        )
-        for index, (url, snippet) in enumerate(deduped.items(), start=1)
+    return (
+        tuple(
+            ToolObservation(
+                observation_id=f"{request_id}:source:{index}",
+                locator=url,
+                content=snippet,
+            )
+            for index, (url, snippet) in enumerate(deduped.items(), start=1)
+        ),
+        content_truncated,
     )
 
 
