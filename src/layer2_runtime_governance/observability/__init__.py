@@ -25,6 +25,7 @@ from .models import (
     TraceToolCall,
 )
 from .serialization import enum_value, to_json, to_jsonable
+from .trace_summary import build_trace_summary_markdown
 from .views import (
     build_compact_trace_from_runtime_trace,
     layer2_trace_to_dict,
@@ -55,6 +56,7 @@ __all__ = [
     "TraceToolCall",
     "build_compact_trace_from_runtime_trace",
     "build_layer2_runtime_trace",
+    "build_trace_summary_markdown",
     "enum_value",
     "layer2_trace_to_dict",
     "layer2_trace_to_json",

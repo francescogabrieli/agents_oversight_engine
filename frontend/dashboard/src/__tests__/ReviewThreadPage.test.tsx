@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
+import { DecisionForm } from "../components/DecisionForm";
+import type { ReviewDetailResponse } from "../types";
 
 describe("ReviewThreadPage", () => {
   beforeEach(() => {
@@ -134,5 +136,58 @@ describe("ReviewThreadPage", () => {
         method: "POST",
       }),
     );
+  });
+
+  it("keeps the selected decision when polling returns an equivalent review payload", async () => {
+    const user = userEvent.setup();
+    const detail: ReviewDetailResponse = {
+      thread_id: "thread-1",
+      dashboard_snapshot: {
+        runtime_state: "waiting_human_review",
+        has_pending_review: true,
+        is_terminal: false,
+        reason_codes: ["human_review_required"],
+        external_execution: {
+          execution_intent: "proposal_only",
+          retryable: false,
+          attempt_count: 0,
+          receipt_count: 0,
+        },
+        human_review: {
+          pending_request: {
+            request_id: "thread-1:hitl",
+            allowed_decisions: ["approve_continue", "replan"],
+          },
+        },
+      },
+    };
+    const { rerender } = render(
+      <DecisionForm detail={detail} onSubmit={vi.fn().mockResolvedValue(undefined)} />,
+    );
+
+    await screen.findByRole("button", { name: "Replan" });
+    await user.click(screen.getByRole("button", { name: "Replan" }));
+    expect(screen.getByRole("button", { name: "Replan" })).toHaveClass("active");
+
+    const pendingRequest = detail.dashboard_snapshot?.human_review?.pending_request;
+    rerender(
+      <DecisionForm
+        detail={{
+          ...detail,
+          dashboard_snapshot: {
+            ...detail.dashboard_snapshot!,
+            human_review: {
+              pending_request: {
+                ...pendingRequest!,
+                allowed_decisions: [...pendingRequest!.allowed_decisions],
+              },
+            },
+          },
+        }}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Replan" })).toHaveClass("active");
   });
 });

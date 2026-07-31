@@ -46,6 +46,7 @@ from layer2_runtime_governance.external_operations import (
     ExternalOperationPayloadEdit,
     ExternalExecutionReceipt,
     ExternalExecutionStatus,
+    GovernanceActionFeedback,
     OperationBoundary,
     SQLStatementClass,
     normalize_communication_operation,
@@ -80,7 +81,10 @@ from layer2_runtime_governance.judge import (
     build_judge_system_prompt,
     build_judge_user_prompt,
 )
-from layer2_runtime_governance.signal_services import build_judge_context
+from layer2_runtime_governance.signal_services import (
+    build_judge_context,
+    build_trajectory_signal,
+)
 from layer2_runtime_governance.infrastructure.runtime_artifacts import (
     RuntimeArtifactStore,
     _persist_current_judge_evidence_bundle,
@@ -181,6 +185,41 @@ class ExternalOperationNormalizerTests(unittest.TestCase):
             proposal.target.destination_class,
             DestinationClass.EXTERNAL,
         )
+
+    # The governed payload must preserve the exact body even when its preview is bounded.
+    def test_long_email_body_is_not_truncated_in_canonical_proposal_or_judge_prompt(self) -> None:
+        body = f"{'A' * 12000}\nFULL-BODY-TAIL"
+        proposal = normalize_communication_operation(
+            operation_id="long-email",
+            plan_step_id="step_1",
+            capability_id="communication.email.send",
+            draft=ExternalCommunicationDraft(
+                channel="email",
+                recipient="recipient@example.com",
+                subject="Long governed payload",
+                body=body,
+            ),
+            execution_candidate=True,
+        )
+        state = _state_with_proposal(proposal)
+        context = build_judge_context(
+            task_state=state,
+            external_operation=proposal,
+            invocation_reason="test_full_long_email_payload",
+        )
+        prompt = build_judge_user_prompt(context=context)
+
+        self.assertEqual(proposal.payload.body, body)
+        self.assertEqual(context.external_communication_body, body)
+        self.assertEqual(len(proposal.payload_preview), 4096)
+        self.assertIn("FULL-BODY-TAIL", prompt)
+        self.assertEqual(prompt.count("FULL-BODY-TAIL"), 1)
+        self.assertNotIn('"external_communication_body"', prompt)
+        self.assertEqual(
+            proposal.facts_provenance.normalizer_version,
+            "external_operation_normalizers.v2",
+        )
+
     # SQL classification must follow the parsed root AST across comments, casing, and CTEs.
     def test_sql_select_variants_are_ast_classified_as_read(self) -> None:
         queries = (
@@ -894,6 +933,126 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
             result.governance_action_feedback[0].invalidated_evidence_selection_digest,
             rejected_selection_digest,
         )
+
+    # Trajectory must reject an exact payload-and-Evidence replay after semantic feedback.
+    def test_trajectory_detects_exact_rejected_candidate_replay(self) -> None:
+        state = _state_with_proposal(_generic_proposal())
+        candidate = state.pending_completion_candidate
+        proposal = state.external_operation_proposal
+        state.governance_action_feedback.append(
+            GovernanceActionFeedback(
+                operation_id=proposal.operation_id,
+                invalidated_payload_digest=proposal.payload_digest,
+                invalidated_evidence_selection_digest=(
+                    candidate.evidence_selection_digest
+                ),
+                finding_codes=("unsupported_claim",),
+                summary="Revise the exact rejected candidate.",
+                revision_index=1,
+            )
+        )
+
+        signal = build_trajectory_signal(
+            task_state=state,
+            policy_input=build_policy_evaluation_input(task_state=state),
+            thresholds_version="policy.v1",
+        )
+
+        self.assertTrue(
+            signal["raw_facts"]["repeated_rejected_payload_digest"]
+        )
+        self.assertEqual(
+            signal["raw_facts"]["external_action_revision_count"],
+            1,
+        )
+
+    # Deterministic replay admission must stop before invoking the semantic Judge.
+    def test_exact_rejected_candidate_replay_bypasses_judge_and_routes_to_hitl(self) -> None:
+        state = _state_with_proposal(_generic_proposal())
+        candidate = state.pending_completion_candidate
+        proposal = state.external_operation_proposal
+        state.governance_action_feedback.append(
+            GovernanceActionFeedback(
+                operation_id=proposal.operation_id,
+                invalidated_payload_digest=proposal.payload_digest,
+                invalidated_evidence_selection_digest=(
+                    candidate.evidence_selection_digest
+                ),
+                finding_codes=("unsupported_claim",),
+                summary="Revise the exact rejected candidate.",
+                revision_index=1,
+            )
+        )
+
+        result = evaluate_opa_first_governance(
+            task_state=state,
+            policy_engine_service=StubPolicyEngine(),
+            judge_service=_ExplodingJudge(),
+        )
+
+        self.assertEqual(
+            result.governance_decision.directive,
+            GovernanceDirective.WAIT_HUMAN_REVIEW,
+        )
+        self.assertIn(
+            GovernanceReasonCode.REJECTED_CANDIDATE_RESUBMITTED,
+            result.governance_decision.reason_codes,
+        )
+        self.assertFalse(result.judge_assessment.invoked)
+
+    # Governance history must identify an unchanged payload-and-Evidence submission.
+    def test_trajectory_detects_exact_governance_binding_replay(self) -> None:
+        state = _state_with_proposal(_generic_proposal())
+        candidate = state.pending_completion_candidate
+        proposal = state.external_operation_proposal
+        state.governance_history.append(
+            SimpleNamespace(
+                evaluated_operation_digest=proposal.payload_digest,
+                pillar_results={
+                    "evidence": {
+                        "raw_facts": {
+                            "evidence_selection_digest": (
+                                candidate.evidence_selection_digest
+                            )
+                        }
+                    }
+                },
+            )
+        )
+
+        signal = build_trajectory_signal(
+            task_state=state,
+            policy_input=build_policy_evaluation_input(task_state=state),
+            thresholds_version="policy.v1",
+        )
+
+        self.assertTrue(signal["raw_facts"]["unchanged_resubmission"])
+
+    # One operation id with a substantively changed binding is a revision, not a replay.
+    def test_trajectory_does_not_collapse_distinct_candidate_bindings(self) -> None:
+        state = _state_with_proposal(_generic_proposal())
+        proposal = state.external_operation_proposal
+        state.governance_action_feedback.append(
+            GovernanceActionFeedback(
+                operation_id=proposal.operation_id,
+                invalidated_payload_digest="f" * 64,
+                invalidated_evidence_selection_digest="e" * 64,
+                finding_codes=("unsupported_claim",),
+                summary="A different candidate was rejected.",
+                revision_index=1,
+            )
+        )
+
+        signal = build_trajectory_signal(
+            task_state=state,
+            policy_input=build_policy_evaluation_input(task_state=state),
+            thresholds_version="policy.v1",
+        )
+
+        self.assertFalse(
+            signal["raw_facts"]["repeated_rejected_payload_digest"]
+        )
+        self.assertFalse(signal["raw_facts"]["unchanged_resubmission"])
 
     # Unsafe semantic findings require full HITL and can never become a hard deny.
     def test_unsafe_external_operation_routes_to_full_hitl(self) -> None:

@@ -230,7 +230,7 @@ Current design:
 - `execution/providers/bedrock_runtime.py` defines the Amazon Bedrock Converse adapter used by the Layer 2 actor with the approved Nova 2 Lite EU inference profile; `bedrock_client.py` is import-compatible
 - `runtime/governance_service.py` applies the OPA-first governance result and persists static, dynamic, behavioral, and judge records before routing
 - `infrastructure/runtime_artifacts.py` configures the local official LangGraph SQLite saver plus the per-thread runtime artifact store; `persistence.py` is import-compatible and `infrastructure/checkpointing.py` can select the official PostgreSQL saver for deployed environments
-- `observability/` defines the typed, JSON-exportable Layer 2 trace models, builders, and compact views used for debugging, thesis evidence, HITL payloads, and evaluation; the retired `trace.py` facade must not be restored
+- `observability/` defines the typed, JSON-exportable Layer 2 trace models, builders, and compact views used for debugging, thesis evidence, HITL payloads, and evaluation; `observability/trace_summary.py` produces a human-readable Markdown summary written alongside the full JSON trace as `trace_summary.md`; the retired `trace.py` facade must not be restored
 - `schemas/layer2_trace.schema.json` is the closed Draft 2020-12 contract for runtime-produced `layer2_trace.v6`; only `evaluation_service` may project historical traces into that current read model
 - `evaluation/` defines the offline trace evaluation pipeline that reads exported trace JSON and produces JSON and Markdown reports, including typed-vs-heuristic evidence mismatch accounting
 - `hitl_dashboard.py` defines the dashboard-facing snapshot model derived from `TaskState`, governance, oversight, and HITL review payloads
@@ -399,6 +399,7 @@ Current relevant files:
 - externality or write compatibility flags alone must never force deny or HITL; static hard deny is deterministic, judge is mandatory for governed-external execution candidates, and risk/behavioral cannot influence the directive
 - governance evaluates semantic and operational boundaries, not thought boundaries: `INTERMEDIATE_OUTPUT` returns directly to the actor and neither evidence nor trajectory may classify narration length as degradation
 - external communication drafts are explicit runtime state; partial draft assembly does not invoke the judge, while each review-ready execution candidate is projected into a digest-bound `ExternalOperationProposal`
+- communication proposal bodies are canonical and complete: normalization may standardize line endings but must never silently truncate semantic content. Only `payload_preview` is bounded; the capability schema rejects bodies above its explicit limit before connector invocation.
 - `execute_after_governance` is a terminal runtime invariant: a plain local
   `STEP_COMPLETED` cannot satisfy the task, and `COMPLETED` requires a typed
   external-operation receipt with status `executed`, or an `indeterminate`
@@ -460,7 +461,7 @@ Current relevant files:
 - Python fact normalization must never reinterpret or relax the OPA decision
 - the default LangGraph checkpointer is the official durable local SQLite saver rather than a process-local in-memory saver; production deployments may select the official PostgreSQL saver
 - the default checkpoint file is `artifacts/runtime/checkpoints/layer2_checkpoints.sqlite3`; LangGraph owns its checkpoint schema and serialization, and pending interrupts must never be reconstructed from artifact JSON
-- the runtime persists per-thread artifacts under `artifacts/runtime/<thread_id>/`, including the canonical trace, dashboard snapshot, runtime summary, and pending HITL payload when present
+- the runtime persists per-thread artifacts under `artifacts/runtime/<thread_id>/`, including the canonical trace, a human-readable `trace_summary.md`, dashboard snapshot, runtime summary, and pending HITL payload when present
 - the behavioural SQLite store lives under `artifacts/runtime/behavioral/behavioral.sqlite3` by default and must remain a read model rather than the primary runtime source of truth
 - active evidence/trajectory interpretation must remain deterministic and explainable; Python exports concrete facts, Rego owns their directive mapping, and shadow pillars may export diagnostic labels but never directives
 - Trajectory Health uses only whole-run observable execution dynamics at semantic boundaries and never treats narrative turns, elapsed thinking, or point confidence alone as degradation.
@@ -505,6 +506,7 @@ Useful breakpoint locations:
 - `src/layer2_runtime_governance/tool_gateway.py`
 - `src/layer2_runtime_governance/oversight/__init__.py`
 - `src/layer2_runtime_governance/observability/builder.py`
+- `src/layer2_runtime_governance/observability/trace_summary.py`
 
 In particular:
 

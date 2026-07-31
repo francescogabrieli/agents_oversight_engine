@@ -134,7 +134,11 @@ def _enabled_registry(
 
 
 # Create one exact email request for adapter parsing and SMTP integration.
-def _email_request(operation_id: str = "email-operation"):
+def _email_request(
+    operation_id: str = "email-operation",
+    *,
+    body: str = "This email must remain in the local capture server.",
+):
     proposal = normalize_communication_operation(
         operation_id=operation_id,
         plan_step_id="email-step",
@@ -143,7 +147,7 @@ def _email_request(operation_id: str = "email-operation"):
             channel="email",
             recipient="recipient@example.test",
             subject="Captured integration",
-            body="This email must remain in the local capture server.",
+            body=body,
         ),
         execution_candidate=True,
     )
@@ -230,6 +234,31 @@ class MCPExternalExecutorUnitTests(unittest.TestCase):
         self.assertEqual(
             receipt.error_code,
             ExternalExecutionErrorCode.TOOL_NOT_ALLOWLISTED,
+        )
+        self.assertEqual(pool.calls, [])
+
+    # Oversized email bodies fail explicitly before any connector invocation.
+    def test_email_body_above_registered_limit_is_rejected_without_truncation(self) -> None:
+        registry = _enabled_registry(
+            self.temp_dir,
+            capability_id="communication.email.send",
+        )
+        pool = _FakePool()
+        executor = MCPExternalOperationExecutor(
+            registry=registry,
+            pool=pool,
+            ledger=ExternalExecutionLedger(path=self.temp_dir / "client.sqlite3"),
+        )
+
+        receipt = executor.execute(_email_request(body="A" * 50001))
+
+        self.assertEqual(
+            receipt.status,
+            ExternalExecutionStatus.REJECTED_BEFORE_EXECUTION,
+        )
+        self.assertEqual(
+            receipt.error_code,
+            ExternalExecutionErrorCode.INPUT_SCHEMA_INVALID,
         )
         self.assertEqual(pool.calls, [])
 
@@ -359,15 +388,20 @@ class MCPExternalExecutorIntegrationTests(unittest.TestCase):
                 path=self.temp_dir / "email-client-ledger.sqlite3"
             ),
         )
+        long_body = f"{'A' * 12000}\nFULL-BODY-TAIL"
         try:
             with patch.dict(os.environ, environment, clear=False):
                 receipt = executor.execute(
-                    _email_request(f"email-operation-{uuid4()}")
+                    _email_request(
+                        f"email-operation-{uuid4()}",
+                        body=long_body,
+                    )
                 )
             self.assertEqual(receipt.status, ExternalExecutionStatus.EXECUTED)
             self.assertTrue(receipt.external_reference)
             self.assertEqual(len(capture.messages), 1)
             self.assertIn(b"Captured integration", capture.messages[0])
+            self.assertIn(b"FULL-BODY-TAIL", capture.messages[0])
         finally:
             executor.close()
             capture.shutdown()

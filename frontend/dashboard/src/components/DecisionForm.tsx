@@ -27,6 +27,8 @@ function prettyMetadata(metadata: Record<string, unknown>) {
 export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
   const pendingRequest = detail.dashboard_snapshot?.human_review?.pending_request;
   const allowedDecisions = pendingRequest?.allowed_decisions ?? [];
+  // Polling recreates the payload array; compare its values so it cannot reset a user's choice.
+  const allowedDecisionsKey = allowedDecisions.join("\u0000");
   const draft = pendingRequest?.external_communication_draft;
   const operationProposal = pendingRequest?.external_operation_proposal;
   const [decisionType, setDecisionType] = useState<string>(
@@ -45,7 +47,7 @@ export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
 
   useEffect(() => {
     setDecisionType(allowedDecisions[0] ?? "approve_continue");
-  }, [allowedDecisions]);
+  }, [allowedDecisionsKey]);
 
   useEffect(() => {
     setDraftBody(draft?.body ?? "");

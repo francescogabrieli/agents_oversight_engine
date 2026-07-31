@@ -30,7 +30,7 @@ from .contracts import (
 if TYPE_CHECKING:
     from ..domain.review import ExternalCommunicationDraft
 
-_NORMALIZER_VERSION = "external_operation_normalizers.v1"
+_NORMALIZER_VERSION = "external_operation_normalizers.v2"
 
 
 # Normalize an external communication without making semantic claims about its tone.
@@ -48,7 +48,7 @@ def normalize_communication_operation(
     channel = _single_line(draft.channel).lower() or "external_communication"
     recipient = _normalize_recipient(draft.recipient)
     subject = _optional_single_line(draft.subject)
-    body = _bounded_body(draft.body or "")
+    body = _canonical_body(draft.body or "")
     cc = tuple(
         address
         for value in draft.cc
@@ -452,10 +452,9 @@ def _optional_single_line(value: str | None) -> str | None:
     return normalized or None
 
 
-# Bound full bodies while preserving paragraph structure for semantic assessment.
-def _bounded_body(value: str) -> str:
-    normalized = re.sub(r"\r\n?", "\n", value).strip()
-    return normalized[:12000]
+# Canonicalize line endings without changing the exact semantic payload.
+def _canonical_body(value: str) -> str:
+    return re.sub(r"\r\n?", "\n", value).strip()
 
 
 # Bound previews separately from the canonical payload used by the digest.

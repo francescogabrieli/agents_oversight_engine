@@ -47,6 +47,7 @@ from layer2_runtime_governance.domain import RuntimeState, TaskState
 from layer2_runtime_governance.observability import (
     build_compact_trace_from_runtime_trace,
     build_layer2_runtime_trace,
+    build_trace_summary_markdown,
     layer2_trace_to_json,
 )
 from layer2_runtime_governance.tool_contract import ToolGatewayPort
@@ -458,6 +459,8 @@ def write_layer2_trace_file(
     runtime_trace = _build_runtime_trace(trace)
     resolved_output_path = Path(output_path)
     resolved_output_path.write_text(layer2_trace_to_json(runtime_trace), encoding="utf-8")
+    summary_path = resolved_output_path.with_suffix(".summary.md")
+    summary_path.write_text(build_trace_summary_markdown(runtime_trace), encoding="utf-8")
     return resolved_output_path
 
 

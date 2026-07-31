@@ -111,6 +111,7 @@ def build_judge_user_prompt(
         "observations", "selected_evidence_refs", "evidence_base_complete",
         "observation_count", "included_observation_count", "omitted_observation_ids",
         "evidence_snapshot_digest", "evidence_selection_digest", "evidence_bundle",
+        "external_communication_body",
     ):
         raw.pop(field_name, None)
     evidence_bundle = context.evidence_bundle or build_judge_evidence_bundle(context=context)

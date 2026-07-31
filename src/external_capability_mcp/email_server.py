@@ -14,6 +14,10 @@ from mcp.server.fastmcp import FastMCP
 from .ledger import ServerIdempotencyLedger
 
 
+# Keep the SMTP defensive bound aligned with communication.email.send.input.v2.
+_MAX_EMAIL_BODY_CHARS = 50_000
+
+
 # Build the communication MCP server with one bounded email capability.
 def build_email_server(
     *,
@@ -76,7 +80,7 @@ def _send_email(
             retryable=False,
             timestamp=started,
         )
-    if len(recipients) > 20 or len(body) > 12000:
+    if len(recipients) > 20 or len(body) > _MAX_EMAIL_BODY_CHARS:
         return _response(
             status="rejected",
             summary="Email payload exceeds the configured defensive bounds.",

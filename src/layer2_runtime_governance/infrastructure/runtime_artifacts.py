@@ -20,6 +20,7 @@ from ..domain import TaskState
 from ..judge import judge_evidence_bundle_to_json
 from ..observability import (
     build_layer2_runtime_trace,
+    build_trace_summary_markdown,
     layer2_trace_to_json,
 )
 
@@ -83,6 +84,9 @@ class RuntimeArtifactStore:
         )
 
         paths.full_trace_path.write_text(layer2_trace_to_json(runtime_trace), encoding="utf-8")
+        paths.trace_summary_path.write_text(
+            build_trace_summary_markdown(runtime_trace), encoding="utf-8"
+        )
         paths.dashboard_snapshot_path.write_text(
             governance_hitl_dashboard_snapshot_to_json(dashboard_snapshot),
             encoding="utf-8",
@@ -193,6 +197,7 @@ class RuntimeArtifactStore:
             thread_dir=thread_dir,
             runtime_summary_path=thread_dir / "runtime_summary.json",
             full_trace_path=thread_dir / "full-trace-2.json",
+            trace_summary_path=thread_dir / "trace_summary.md",
             dashboard_snapshot_path=thread_dir / "dashboard_snapshot.json",
             pending_human_review_path=thread_dir / "pending_human_review.json",
         )

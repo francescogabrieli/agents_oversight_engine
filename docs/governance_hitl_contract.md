@@ -26,6 +26,11 @@ profile version, and fact provenance. Compatibility fields `capability_mode` and
 Payload families are deliberately small:
 
 - communication: channel, recipient, subject, body, destination class;
+
+The communication body in the canonical proposal is complete and digest-bound. Only
+the operator-facing `payload_preview` is truncated for display. Capability size limits
+must reject an oversized payload explicitly before connector invocation and must never
+rewrite the content already assessed by the Judge or approved by a human.
 - database: original and normalized SQL, AST-derived statement class, statement
   count, validity, ambiguity, and database profile;
 - generic: bounded action, target, and typed string fields.

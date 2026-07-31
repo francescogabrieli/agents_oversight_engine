@@ -13,6 +13,11 @@ SDK, SMTP, or database clients.
 For communication synthesis, the actor emits the content through a dedicated typed
 action. The normalizer therefore receives channel, recipient, subject, and body as
 separate fields; the actor cannot supply boundary, effect, destination class, or digest.
+The canonical body is newline-normalized but never length-truncated: Judge, OPA, HITL,
+and the executor bind the same complete payload and digest. Only `payload_preview` is
+bounded for operator-facing display. The email capability schema and SMTP adapter share
+an explicit 50,000-character defensive ceiling; oversized content is rejected rather
+than silently rewritten.
 
 To extend the capability, add a bounded payload dataclass and a capability-specific
 normalizer, map its normalized facts in OPA static policy, register the exact server/tool
