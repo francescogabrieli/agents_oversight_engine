@@ -1,9 +1,16 @@
+from dataclasses import replace
 from typing import Any
 
 from ..behavioral import BehavioralAssessment, BehavioralStorePort
 from ..judge import JudgeAssessment, JudgePort
 from ..oversight.contracts import DynamicPolicyAssessment
-from ..domain import TaskState
+from ..domain import (
+    ActorResultType,
+    TaskState,
+    build_evidence_selection_digest,
+    build_evidence_snapshot_manifest,
+    digest_json,
+)
 from ..tools import ToolGatewayConfig
 
 # PolicyDecision is the deterministic outcome returned by the policy engine.
@@ -60,6 +67,10 @@ def evaluate_opa_first_governance(
     external_operation = prepare_external_operation_proposal(
         task_state=task_state,
         tool_gateway_config=tool_gateway_config,
+    )
+    _bind_late_projected_operation_to_completion_candidate(
+        task_state=task_state,
+        external_operation=external_operation,
     )
     policy_input = build_policy_evaluation_input(task_state=task_state)
     # OPA owns configuration; the PEP only declares the compatible bundle versions.
@@ -414,6 +425,46 @@ def _parse_judge_admission(raw_output: dict[str, Any]) -> dict[str, Any]:
         "required": admission["required"],
         "reason": admission["reason"].strip(),
     }
+
+
+# Seal a proposal that governance projects after the actor created its completion candidate.
+def _bind_late_projected_operation_to_completion_candidate(
+    *,
+    task_state: TaskState,
+    external_operation: Any,
+) -> None:
+    candidate = task_state.pending_completion_candidate
+    actor_result = task_state.actor_result
+    if (
+        external_operation is None
+        or candidate is None
+        or actor_result is None
+        or actor_result.result_type != ActorResultType.STEP_COMPLETED
+        or candidate.step_id != external_operation.plan_step_id
+        or actor_result.plan_step_id != external_operation.plan_step_id
+    ):
+        return
+    # Existing non-empty bindings are immutable; Evidence must reject later drift.
+    if (
+        candidate.external_operation_id is not None
+        or candidate.external_operation_digest is not None
+    ):
+        return
+    snapshot_digest = digest_json(
+        build_evidence_snapshot_manifest(task_state=task_state)
+    )
+    selection_digest = build_evidence_selection_digest(
+        selected_refs=candidate.evidence_refs,
+        evidence_snapshot_digest=snapshot_digest,
+        external_operation_digest=external_operation.payload_digest,
+    )
+    task_state.pending_completion_candidate = replace(
+        candidate,
+        external_operation_id=external_operation.operation_id,
+        external_operation_digest=external_operation.payload_digest,
+        evidence_snapshot_digest=snapshot_digest,
+        evidence_selection_digest=selection_digest,
+    )
 
 
 __all__ = [

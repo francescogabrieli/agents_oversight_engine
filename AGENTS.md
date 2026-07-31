@@ -2,17 +2,26 @@
 
 ## Purpose
 
-This repository contains a thesis-oriented proof of concept for a governed AI agent architecture with strong human oversight.
+This repository contains a Master's thesis proof of concept whose central
+architectural contribution is an **auditable Human Oversight and Human-in-the-Loop
+control engine for autonomous AI agents**.
 
-The project is not a generic chatbot. It is an architectural prototype focused on:
+The autonomous planner/actor/tool runtime is essential: it is the real system being
+supervised and the experimental substrate that makes oversight meaningful. The thesis
+contribution is not the agent alone, but the control architecture that observes its
+execution, evaluates bounded signals, applies policy, escalates at justified
+boundaries, binds human decisions to exact candidates, and preserves replayable
+accountability.
 
-- controlled task intake
-- runtime orchestration
-- governance and policy enforcement
-- human-in-the-loop review
-- evidence tracking and observability
-- future evaluation and continuous improvement
-- autonomous plan execution with audit-safe self-monitoring
+The project is not a generic chatbot. Its priorities, in contribution order, are:
+
+- auditable oversight and policy enforcement;
+- reason-scoped, typed Human-in-the-Loop intervention;
+- uncertainty-aware escalation and bounded external-action governance;
+- evidence, trajectory, semantic assessment, traceability, and replay;
+- evaluation through human-intervention, feedback, and uncertainty metrics;
+- an autonomous plan-and-execute agent runtime as the supervised substrate;
+- controlled task intake and external-capability execution.
 
 The current design references are:
 
@@ -76,12 +85,23 @@ Supporting material lives in:
 ## Architectural Intent
 
 The repository follows the architecture described in `architecture/architecturev3.md`.
-It should also remain aligned with the objectives and design priorities described in `training_plan.md`, especially around:
+It should also remain aligned with the objectives and design priorities described in
+`training_plan.md`. The repository uses the following contribution boundary:
 
-- autonomous agent behavior with strong human oversight
-- uncertainty management and escalation logic
-- traceability, transparency, and organizational accountability
-- observability and evaluation of behavior under uncertainty
+- **supervised system:** an autonomous agent that plans, acts, uses tools, observes
+  results, and progresses without collapsing into a single wrapped LLM call;
+- **central thesis contribution:** the oversight, governance, and HITL engine that
+  determines when autonomy may continue and when correction, escalation, approval,
+  reconciliation, or termination is required;
+- **accountability substrate:** typed state, evidence, decisions, checkpoints, trace,
+  and digest-bound artifacts that make interventions reconstructible;
+- **evaluation objective:** measure not only task effectiveness but also escalation
+  quality, human-intervention rate, feedback quality, policy compliance, and behavior
+  under uncertainty.
+
+Autonomy must therefore remain operationally credible, but new work should not present
+agent sophistication as the sole or primary research contribution. The distinctive
+claim to be evaluated is the effectiveness and auditability of the oversight design.
 
 High-level macro-blocks:
 
@@ -409,10 +429,13 @@ Current relevant files:
 - OPA may request more evidence only from concrete completion facts, such as invalid selected references or missing usable selected evidence; Python does not infer semantic precision requirements
 - provider protocol errors (unknown evidence IDs, malformed action JSON, missing required fields) trigger a bounded local retry (max 1 retry attempt on the same step and state, without bumping `progress_epoch` or invoking replanner); upon retry exhaustion, `provider_protocol_failure` persists and OPA evaluates the state directly without Python forced replanning or forced HITL
 - `GovernanceActionFeedback` carries `judge_summary`, `judge_rationale`, and structured `findings`; `prompt_projection.py` projects full judge feedback and `previous_rejected_draft` into the `ActorTask` prompt payload during revision turns; the actor system prompt instructs to revise the existing draft rather than rewriting blindly, to address every finding explicitly, and to never resubmit an unchanged payload or re-assert compliance without substantive correction
-- a candidate payload digest matching previously rejected feedback sets `repeated_rejected_payload_digest=true` in Trajectory; OPA refuses a redundant Judge admission and maps the unchanged resubmission through its stall policy
+- a candidate payload plus Evidence-selection binding matching previously rejected feedback sets `repeated_rejected_payload_digest=true` in Trajectory; unchanged resubmission likewise requires the same payload and selection digest seen by prior governance. OPA refuses only truly redundant Judge admission and maps rejected or unchanged resubmissions to distinct non-authorizing review reasons, never to `replan_request_stalled`
 - every new `StepCompletionCandidate` persists the Evidence snapshot and selection digests; Evidence recomputes and verifies candidate, operation, complete observation manifest, and actor-selected references before Judge admission
+- when governance first materializes a review-ready communication proposal after actor completion, it atomically seals that operation id/digest and the recomputed Evidence selection digest into the still-unbound completion candidate before Evidence and Judge run; an already-bound candidate is immutable and drift fails closed
+- human approval may authorize a new `execute_after_governance` request only for the exact digest of a `capability_approval_required` gate; Judge, trajectory, recovery, unavailable-pillar, unknown, and legacy external pauses are non-authorizing
+- external execution revalidates the completion candidate, operation digest, Evidence snapshot/selection and terminal plan owner before connector invocation; a mismatched/untyped connector receipt or connector exception after invocation becomes `indeterminate` reconciliation state instead of raising after a possible external effect
 - Evidence Integrity & Provenance deterministically validates references, non-empty observations, same-run tool-result lineage, known-step association, title-only fragility, and selection/snapshot digests; it never performs semantic claim entailment or selects a directive. `selected_ref_ratio` remains diagnostic, not a monotone quality score.
-- JudgeContext carries the full semantic plan, completed-step summaries, and every canonical ToolObservation available at the boundary as a bounded typed projection. Selected refs mark actor-declared reliance only; process narration, tool arguments, counters, retry/replan history and shadow assessments are excluded. Evidence-base omissions/truncation are explicit and lead to `uncertain`, not silently reduced coverage.
+- JudgeContext carries the full semantic plan, completed-step summaries, and every canonical ToolObservation available at the boundary through a deterministic, digest-bound `judge_evidence_bundle.v1` that is embedded in the request and persisted in run artifacts. The model never searches the run and can cite only bundle-listed `evidence_id` values; content digests remain runtime-only metadata. Selected refs mark actor-declared reliance only; process narration, tool arguments, counters, retry/replan history and shadow assessments are excluded. Evidence-base omissions/truncation are explicit and lead to `uncertain`, not silently reduced coverage.
 - `INTERMEDIATE_OUTPUT` is an audit-safe working update that returns directly to the actor and never completes a plan step; `STEP_COMPLETED` is the explicit local completion type
 - trace IDs must remain immutable across runtime resumes and retries; `trace_id` represents the semantic run boundary and is generated by `bootstrap_from_intake`
 - trace models must explicitly link `observation_id`, `step_id`, and `evidence_ref` in the canonical JSON structure to ensure reconstruction and observability

@@ -48,6 +48,8 @@ judge_admission := {"required": true, "reason": "governed_external_semantic_cand
 	not evidence.result.evidence_gap
 	not trajectory.result.replan_request_stalled
 	not trajectory.result.replan_request_admissible
+	not trajectory.result.unchanged_resubmission
+	not trajectory.result.repeated_rejected_payload_digest
 	regex.match("^[0-9a-f]{64}$", object.get(operation, "payload_digest", ""))
 }
 
@@ -70,6 +72,10 @@ else := unavailable_required_pillar_decision if active_required_pillar_unavailab
 else := clarification_decision if static_policy.result.clarification_signaled
 
 else := hitl_decision("replan_request_stalled", "The actor repeated a replan request without a new observable execution basis.") if trajectory.result.replan_request_stalled
+
+else := hitl_decision("rejected_candidate_resubmitted", "The actor resubmitted a payload digest already rejected by semantic governance.") if trajectory.result.repeated_rejected_payload_digest
+
+else := hitl_decision("unchanged_candidate_resubmission", "The actor resubmitted the same external candidate without a substantive state or payload change.") if trajectory.result.unchanged_resubmission
 
 else := replan_decision("actor_requested_replan", "The actor explicitly requested a replacement semantic trajectory from a new observable boundary.") if trajectory.result.replan_request_admissible
 

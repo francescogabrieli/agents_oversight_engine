@@ -33,9 +33,6 @@ replan_request_stalled if {
 	not replan_request_admissible
 }
 
-replan_request_stalled if unchanged_resubmission
-replan_request_stalled if repeated_rejected_payload_digest
-
 default action_revision_limit_reached := false
 
 action_revision_limit_reached if {
@@ -49,6 +46,10 @@ result := {
 	"action_revision_limit_reached": action_revision_limit_reached,
 	"unchanged_resubmission": unchanged_resubmission,
 	"repeated_rejected_payload_digest": repeated_rejected_payload_digest,
+	"diagnostic_score": object.get(object.get(input.pillars, "trajectory", {}), "diagnostic_score", null),
+	"diagnostic_level": object.get(object.get(input.pillars, "trajectory", {}), "diagnostic_level", "observed"),
+	"reason_facts": object.get(object.get(input.pillars, "trajectory", {}), "reason_facts", []),
+	"summary": object.get(object.get(input.pillars, "trajectory", {}), "summary", "Trajectory health observed."),
 	"raw_facts": facts,
 	"score_components": object.get(object.get(input.pillars, "trajectory", {}), "score_components", {}),
 	"score_formula_version": object.get(object.get(input.pillars, "trajectory", {}), "score_formula_version", "trajectory_health_v1"),

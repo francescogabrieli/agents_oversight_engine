@@ -4,6 +4,11 @@ Questo documento descrive il percorso live del Layer 2. Il contratto di riferime
 resta `architecture/architecturev3.md`; qui l'obiettivo è mostrare come i componenti
 collaborano durante una run.
 
+Il percorso è descritto dalla prospettiva del contributo centrale della tesi: un
+motore auditabile di Human Oversight e HITL applicato a un runtime agentico autonomo.
+Planner, actor e Tool Gateway formano il sistema supervisionato; pillar, OPA, HITL,
+checkpoint e trace costituiscono il control plane e il substrato di accountability.
+
 ## 1. Flusso completo
 
 ```text
@@ -388,9 +393,12 @@ Solo l'evaluation offline può normalizzare trace storiche nei contratti corrent
   tipo di azione.
 - OPA è l'unica autorità della direttiva.
 - Il Judge valuta semantica e digest, non instrada il grafo.
-- Il Judge vede l’intera base semantica osservata, non la sola selezione actor,
-  ed esclude narrazione e contatori di processo.
-- HITL autorizza l'esatto effetto esterno.
+- Il Judge vede l’intera base semantica osservata attraverso il JSON deterministico
+  e persistito `judge_evidence_bundle.v1`, non ricerca autonomamente la run, può
+  citare soltanto gli `evidence_id` ammessi e non è limitato alla selezione actor;
+  narrazione, contatori di processo e content digest citabili restano esclusi.
+- HITL autorizza un nuovo effetto esterno soltanto quando OPA ha aperto
+  `capability_approval_required`; gli altri gate restano correttivi o abortivi.
 - Receipt e osservazioni restano distinti.
 - Trace, dashboard e behavioral memory non sostituiscono `TaskState`.
 # Completion candidate e commit
@@ -401,3 +409,12 @@ proprio: se non contiene un'azione, artifact, completion, replan o una pausa
 bloccante viene gestita dal recovery. Evidence deriva solo da input autorevoli
 o capability eseguite; rejection e circuit-open sono eventi osservabili ma non
 evidence.
+
+Per le comunicazioni la proposta esatta può essere materializzata dal runtime
+all'ingresso di governance, dopo che l'actor ha creato il candidate. In quel
+singolo boundary governance sigilla atomicamente operation id/digest e digest
+della selezione Evidence nel candidate ancora unbound; non riscrive binding già
+presenti. Prima del connector, `external_execution` ricontrolla candidate,
+snapshot, selezione e owner step. Una receipt connector non coerente viene
+persistita come `indeterminate` e instradata alla riconciliazione, non lasciata
+esplodere dopo un possibile effetto esterno.

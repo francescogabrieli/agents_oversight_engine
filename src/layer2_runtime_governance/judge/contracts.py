@@ -127,9 +127,32 @@ class JudgeEvidenceContext:
     content: str
     plan_step_id: str | None = None
     selected_by_actor: bool = False
-    content_digest: str | None = None
     content_truncated: bool = False
     incomplete_marker: str | None = None
+
+
+@dataclass(frozen=True)
+class JudgeEvidenceBundle:
+    # This is the exact, canonical evidence pool exposed to one Judge invocation.
+    artifact_version: str
+    bundle_digest: str
+    external_operation_digest: str
+    evidence_snapshot_digest: str
+    evidence_selection_digest: str
+    evidence_base_complete: bool
+    observation_count: int
+    included_observation_count: int
+    omitted_observation_ids: tuple[str, ...]
+    selected_evidence_refs: tuple[str, ...]
+    allowed_evidence_ids: tuple[str, ...]
+    observations: tuple[JudgeEvidenceContext, ...]
+
+    # Preserve immutable collections after checkpoint or JSON restoration.
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "omitted_observation_ids", tuple(self.omitted_observation_ids))
+        object.__setattr__(self, "selected_evidence_refs", tuple(self.selected_evidence_refs))
+        object.__setattr__(self, "allowed_evidence_ids", tuple(self.allowed_evidence_ids))
+        object.__setattr__(self, "observations", tuple(self.observations))
 
 
 @dataclass(frozen=True)
@@ -226,7 +249,9 @@ class JudgeContext:
     omitted_observation_ids: tuple[str, ...] = ()
     evidence_snapshot_digest: str | None = None
     evidence_selection_digest: str | None = None
-    serialization_version: str = "judge_context.v3"
+    serialization_version: str = "judge_context.v4"
+    # Built deterministically from the fields above and used as the sole model-visible pool.
+    evidence_bundle: JudgeEvidenceBundle | None = None
 
 
 @dataclass(frozen=True)
@@ -300,6 +325,7 @@ __all__ = [
     "JudgeClaimStatus",
     "JudgeCompletedStepContext",
     "JudgeContext",
+    "JudgeEvidenceBundle",
     "JudgeEvidenceContext",
     "JudgeExecutionError",
     "JudgeExternalRevisionContext",

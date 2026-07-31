@@ -59,7 +59,9 @@
         "prohibited_destination", "judge_required_unavailable",
         "judge_needs_revision", "judge_unsafe", "judge_uncertain",
         "provider_runtime_action_missing", "invalid_or_missing_selected_evidence",
-        "actor_requested_replan", "replan_request_stalled", "external_low_actor_self_confidence",
+        "actor_requested_replan", "replan_request_stalled",
+        "unchanged_candidate_resubmission", "rejected_candidate_resubmitted",
+        "external_low_actor_self_confidence",
         "action_revision_limit_reached", "capability_approval_required"
       ]
     },

@@ -57,6 +57,13 @@ test_local_completion_requires_evidence_and_trajectory if {
 	result.require_judge == false
 }
 
+# Active deterministic pillars retain their non-scored diagnostic levels for the dashboard.
+test_active_diagnostic_levels_are_projected if {
+	result := decision with input as base_input
+	result.pillar_results.evidence.diagnostic_level == "unscored"
+	result.pillar_results.trajectory.diagnostic_level == "observed"
+}
+
 test_governed_external_candidate_defers_judge_to_staged_admission if {
 	facts := object.union(base_facts, {"external_operation": governed_operation})
 	result := required_pillars with input as {"base_facts": facts}
@@ -144,6 +151,36 @@ test_repeated_replan_without_new_observable_basis_requires_review if {
 	result := decision with input as candidate
 	result.directive == "wait_human_review"
 	"replan_request_stalled" in result.reason_codes
+}
+
+test_unchanged_external_candidate_does_not_admit_judge if {
+	trajectory := object.union(facts_trajectory, {"raw_facts": object.union(facts_trajectory.raw_facts, {"external_candidate": true, "unchanged_resubmission": true})})
+	candidate := object.union(base_input, {"base_facts": object.union(base_facts, {"external_operation": governed_operation}), "pillars": object.union(base_input.pillars, {"trajectory": trajectory})})
+	result := judge_admission with input as candidate
+	result.required == false
+}
+
+test_unchanged_external_candidate_requires_non_authorizing_review if {
+	trajectory := object.union(facts_trajectory, {"raw_facts": object.union(facts_trajectory.raw_facts, {"external_candidate": true, "unchanged_resubmission": true})})
+	candidate := object.union(base_input, {"base_facts": object.union(base_facts, {"external_operation": governed_operation}), "pillars": object.union(base_input.pillars, {"trajectory": trajectory})})
+	result := decision with input as candidate
+	result.directive == "wait_human_review"
+	"unchanged_candidate_resubmission" in result.reason_codes
+}
+
+test_rejected_external_candidate_does_not_admit_judge if {
+	trajectory := object.union(facts_trajectory, {"raw_facts": object.union(facts_trajectory.raw_facts, {"external_candidate": true, "repeated_rejected_payload_digest": true})})
+	candidate := object.union(base_input, {"base_facts": object.union(base_facts, {"external_operation": governed_operation}), "pillars": object.union(base_input.pillars, {"trajectory": trajectory})})
+	result := judge_admission with input as candidate
+	result.required == false
+}
+
+test_rejected_external_candidate_requires_non_authorizing_review if {
+	trajectory := object.union(facts_trajectory, {"raw_facts": object.union(facts_trajectory.raw_facts, {"external_candidate": true, "repeated_rejected_payload_digest": true})})
+	candidate := object.union(base_input, {"base_facts": object.union(base_facts, {"external_operation": governed_operation}), "pillars": object.union(base_input.pillars, {"trajectory": trajectory})})
+	result := decision with input as candidate
+	result.directive == "wait_human_review"
+	"rejected_candidate_resubmitted" in result.reason_codes
 }
 
 test_action_revision_limit_requires_review_not_another_revision if {

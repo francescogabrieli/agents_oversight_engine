@@ -126,6 +126,14 @@ every canonical observation as a bounded typed projection; actor-selected
 references as attribution markers; same-operation revision findings; target and
 the exact digest-bound proposal.
 
+The observation projection is materialized deterministically as
+`judge_evidence_bundle.v1`, embedded directly in the provider request and persisted
+content-addressed in the run artifacts. The Judge never searches the run or chooses
+which evidence to load. Model-visible observations expose only `evidence_id` as a
+reference identifier; content hashes remain runtime binding metadata. Every returned
+reference must match `allowed_evidence_ids`, and one invalid structured response gets
+one local protocol correction before the pillar becomes unavailable fail-closed.
+
 It excludes scratchpad, raw tool arguments/history, ordered runtime events,
 turn/tool/replan/retry counters, point confidence, recovery history, behavioral,
 risk, and other process narration. Boundedness limits representation size, never
@@ -148,19 +156,21 @@ immutable proposal.
 The judge cannot choose runtime directives. Confidence is assessment confidence,
 not probability of harm and is never multiplied by an operational-risk score.
 
-## Uniform HITL and digest integrity
+## Reason-scoped HITL and digest integrity
 
 HITL actions are reason-scoped. In particular:
 
 - Judge `unsafe`/`uncertain` or exhausted revisions: `modify_and_continue`,
   `replan`, `abort`;
+- unchanged or previously rejected candidate resubmission:
+  `modify_and_continue`, `replan`, `abort`;
 - capability approval: `approve_continue`, `modify_and_continue`, `abort`;
 - clarification: `ask_clarification`, `abort`;
 - indeterminate receipt reconciliation: `approve_continue`,
   `request_more_evidence`, `abort`.
 
-Legacy requests without a reason-scoped contract retain the broad compatibility
-set. `modify_and_continue` always requires a typed valid edit. A review request
+Legacy or unknown external review requests fail closed to correction, replanning,
+or abort and never expose approval. `modify_and_continue` always requires a typed valid edit. A review request
 includes operation id, digest, proposal summary, target/destination, Judge
 findings, and the proposal where applicable.
 
@@ -170,6 +180,10 @@ and its Evidence selection digest, invalidates the earlier approval and Judge
 assessment, clears any executable tool request, and enters `READY_GOVERNANCE`.
 It never routes directly to Tool Gateway or an external executor.
 `approve_continue_read_only` rejects an unchanged mutating proposal.
+For `execute_after_governance`, only a review opened with
+`capability_approval_required` may create a new human-authorized execution
+request. Approval submitted against Judge, stall, recovery, or compatibility
+gates is rejected server-side even if a stale client attempts it.
 
 LangGraph `interrupt()` and `Command(resume=...)` remain the only pause/resume
 mechanism. Official LangGraph checkpoints are authoritative; trace, dashboard
@@ -188,14 +202,21 @@ For `execute_after_governance`, exact OPA continue or HITL approval creates
 `ExternalExecutionRequest` and enters `READY_EXTERNAL_EXECUTION`.
 
 The `external_execution` service checks proposal, execution candidate,
-authorization source, exact digest, registry entry, server/tool allowlist,
-read-only envelope, idempotency key, and prior receipt before calling
-`ExternalOperationExecutorPort`. It cannot change the payload or decide policy.
+authorization source, exact digest, the completion candidate's operation,
+Evidence snapshot and Evidence selection binding, the current terminal plan step,
+registry entry, server/tool allowlist, read-only envelope, idempotency key, and
+prior receipt before calling `ExternalOperationExecutorPort`. It cannot change
+the payload or decide policy.
 
 Receipts distinguish `executed`, `rejected_before_execution`, `failed`, and
 `indeterminate`. Only deterministic retryable failure may receive one configured
 retry with a new stable attempt scope. `indeterminate` prohibits automatic retry
-and opens HITL reconciliation.
+and opens HITL reconciliation. A connector receipt whose operation, capability,
+payload digest, or idempotency key does not match the authorized request is
+normalized to `indeterminate`, so it is checkpointable and cannot crash the
+terminal commit after an external effect. The same rule applies when the
+connector raises or fails to return a typed receipt after invocation: absence of
+a response is not treated as proof that no effect occurred.
 
 `MCPExternalOperationExecutor` is selected whenever configuration enables a real
 capability. `DeferredExternalOperationExecutor` remains fail-closed only. MCP is

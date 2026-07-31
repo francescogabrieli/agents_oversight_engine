@@ -668,6 +668,8 @@ def _build_stub_opa_decision(
         trajectory_facts.get("pillar_unavailable") is True
         or trajectory_facts.get("replan_request_stalled") is True
         or trajectory_facts.get("replan_request_admissible") is True
+        or trajectory_facts.get("unchanged_resubmission") is True
+        or trajectory_facts.get("repeated_rejected_payload_digest") is True
     )
     judge_admitted = bool(
         external_candidate
@@ -681,6 +683,16 @@ def _build_stub_opa_decision(
         resolved_policy_decision = "deny"
         resolved_reason_code = static_reason_codes[0] if static_reason_codes else "static_deny"
         resolved_summary = "The static policy forbids the operation."
+    elif trajectory_facts.get("repeated_rejected_payload_digest") is True:
+        resolved_directive = "wait_human_review"
+        resolved_policy_decision = "require_human_review"
+        resolved_reason_code = "rejected_candidate_resubmitted"
+        resolved_summary = "A previously rejected external payload was resubmitted."
+    elif trajectory_facts.get("unchanged_resubmission") is True:
+        resolved_directive = "wait_human_review"
+        resolved_policy_decision = "require_human_review"
+        resolved_reason_code = "unchanged_candidate_resubmission"
+        resolved_summary = "The external candidate was resubmitted without change."
     elif judge_required and (
         judge_facts.get("pillar_unavailable") is True
         or judge_facts.get("invoked") is not True

@@ -79,6 +79,10 @@ evidence_gap if {
 
 result := {
 	"evidence_gap": evidence_gap,
+	"diagnostic_score": object.get(object.get(input.pillars, "evidence", {}), "diagnostic_score", null),
+	"diagnostic_level": object.get(object.get(input.pillars, "evidence", {}), "diagnostic_level", "unscored"),
+	"reason_facts": object.get(object.get(input.pillars, "evidence", {}), "reason_facts", []),
+	"summary": object.get(object.get(input.pillars, "evidence", {}), "summary", "Evidence integrity and provenance observed."),
 	"raw_facts": facts,
 	"score_components": object.get(object.get(input.pillars, "evidence", {}), "score_components", {}),
 	"score_formula_version": object.get(object.get(input.pillars, "evidence", {}), "score_formula_version", "evidence_integrity_provenance_v1"),

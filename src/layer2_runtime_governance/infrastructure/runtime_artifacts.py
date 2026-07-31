@@ -17,6 +17,7 @@ from ..hitl.dashboard import (
 )
 from .ports import RuntimeArtifactPaths, RuntimeArtifactStorePort
 from ..domain import TaskState
+from ..judge import judge_evidence_bundle_to_json
 from ..observability import (
     build_layer2_runtime_trace,
     layer2_trace_to_json,
@@ -76,6 +77,10 @@ class RuntimeArtifactStore:
             task_state=task_state,
         )
         dashboard_snapshot = build_governance_hitl_dashboard_snapshot(task_state)
+        judge_bundle_artifact = _persist_current_judge_evidence_bundle(
+            paths=paths,
+            task_state=task_state,
+        )
 
         paths.full_trace_path.write_text(layer2_trace_to_json(runtime_trace), encoding="utf-8")
         paths.dashboard_snapshot_path.write_text(
@@ -128,6 +133,14 @@ class RuntimeArtifactStore:
                     "external_execution_reference": (
                         task_state.last_external_execution_receipt.external_reference
                         if task_state.last_external_execution_receipt is not None
+                        else None
+                    ),
+                    "judge_evidence_bundle": (
+                        {
+                            "bundle_digest": judge_bundle_artifact[0],
+                            "path": judge_bundle_artifact[1],
+                        }
+                        if judge_bundle_artifact is not None
                         else None
                     ),
                     "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -188,6 +201,7 @@ class RuntimeArtifactStore:
     def exists(self, thread_id: str) -> bool:
         return self.build_paths(thread_id).thread_dir.exists()
 
+
     # List thread ids that already have a persisted artifact directory.
     def list_thread_ids(self) -> list[str]:
         if not self.root_path.exists():
@@ -215,6 +229,41 @@ class RuntimeArtifactStore:
         except (OSError, json.JSONDecodeError):
             return None
         return payload if isinstance(payload, dict) else None
+
+
+# Persist the exact deterministic evidence pool used at the current Judge boundary.
+def _persist_current_judge_evidence_bundle(
+    *,
+    paths: RuntimeArtifactPaths,
+    task_state: TaskState,
+) -> tuple[str, str] | None:
+    proposal = task_state.external_operation_proposal
+    if proposal is None:
+        return None
+    try:
+        # Import locally so infrastructure persistence does not widen package startup.
+        from ..signal_services.judge_service import build_judge_context
+
+        context = build_judge_context(
+            task_state=task_state,
+            external_operation=proposal,
+            invocation_reason="runtime_artifact_replay_projection",
+        )
+    except (AttributeError, TypeError, ValueError):
+        return None
+    bundle = context.evidence_bundle
+    if bundle is None:
+        return None
+
+    bundle_dir = paths.thread_dir / "judge_evidence_bundles"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    content_addressed_path = bundle_dir / f"{bundle.bundle_digest}.json"
+    serialized = judge_evidence_bundle_to_json(bundle)
+    content_addressed_path.write_text(serialized, encoding="utf-8")
+    # The stable pointer is convenient for operators; the digest file preserves revisions.
+    current_path = paths.thread_dir / "judge_evidence_bundle.json"
+    current_path.write_text(serialized, encoding="utf-8")
+    return bundle.bundle_digest, str(current_path.relative_to(paths.thread_dir))
 
 
 # Persist the current runtime artifacts through the default local store.

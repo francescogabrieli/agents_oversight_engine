@@ -10,6 +10,34 @@
 
 ---
 
+## Focus della tesi e confine del contributo
+
+Questa architettura è il proof of concept di un **motore auditabile di Human
+Oversight e Human-in-the-Loop per agenti AI autonomi**. L'agente plan-and-execute è
+una parte essenziale della tesi: costituisce il sistema realmente operativo che viene
+supervisionato e rende osservabili pianificazione, azione, uso dei tool, incertezza,
+progresso e possibili effetti esterni. Non è però presentato come unico contributo
+scientifico.
+
+Il contributo architetturale centrale è il control plane che:
+
+- osserva l'esecuzione senza sostituirsi all'actor;
+- separa integrità delle evidenze, salute della traiettoria e adeguatezza semantica;
+- lascia a OPA la sola direttiva finale;
+- decide ai confini governati quando l'autonomia può continuare e quando occorre
+  correggere, ripianificare, chiedere chiarimenti, coinvolgere un supervisore o fermare;
+- rende ogni gate umano reason-scoped e ogni autorizzazione legata all'esatto digest;
+- conserva stato, decisioni, evidenze, interventi e receipt in forme tipizzate,
+  riproducibili e utilizzabili per audit ed evaluation.
+
+La tesi valuta quindi l'oversight su un agente autenticamente autonomo. L'autonomia è
+il necessario substrato sperimentale; Human Oversight, HITL, auditabilità e qualità
+dell'escalation costituiscono il contributo distintivo da dimostrare. Il termine
+"innovativo" descrive l'ipotesi progettuale e deve essere sostenuto dai risultati
+sperimentali, non assunto come conclusione a priori.
+
+---
+
 ## Macro Architecture
 
 ### Macro-Blocks
@@ -20,13 +48,13 @@ L'architettura viene compressa in cinque macro-blocchi:
    Punto di ingresso controllato del sistema. Trasforma una richiesta libera in un payload strutturato e validato.
 
 2. `Runtime & Governance`
-   Cuore live del sistema. Gestisce orchestrazione del task, controllo di policy, valutazione del rischio e human review.
+   Cuore live del sistema supervisionato e del motore di oversight. Separa esecuzione autonoma, produzione dei segnali, decisione OPA, escalation e human review.
 
 3. `Tool Bus / External Capabilities`
    Strato di esecuzione delle capacità esterne. Valida, controlla e invoca i tool.
 
 4. `State, Evidence & Observability`
-   Strato di persistenza operativa. Mantiene stato, evidenze, eventi e materiali utili al replay e alla valutazione.
+   Substrato di accountability. Mantiene stato, evidenze, decisioni, interventi umani, eventi e materiali utili ad audit, replay e valutazione.
 
 5. `Evaluation & Continuous Improvement`
    Strato post-run. Misura come si è comportato il sistema e produce aggiornamenti di prompt, policy, soglie e configurazioni.
@@ -38,8 +66,8 @@ L'architettura viene compressa in cinque macro-blocchi:
 - il `Runtime & Governance` inizializza il `TaskState` e avvia il ciclo operativo
 - il `Runtime Core` adotta un pattern **plan-and-execute**: il `planner` costruisce il piano semantico del task e l'`actor` esegue il passo corrente con una logica **ReAct-like** locale
 - il runtime propone azioni e, quando necessario, invoca il `Tool Bus`
-- il blocco di governance valuta policy, rischio, qualità delle evidenze, coerenza semantica e possibile escalation
-- se necessario, il sistema entra in `human review`
+- il motore di oversight raccoglie i pillar applicabili e OPA restituisce l'unica direttiva
+- se la ragione del gate lo richiede, il sistema entra in una `human review` tipizzata e circoscritta
 - durante tutta la run, stato, evidenze ed eventi vengono persistiti
 - a fine run, i dati vengono letti dallo strato di evaluation e improvement
 - il risultato del post-run aggiorna configurazioni, prompt, soglie o regole
@@ -135,8 +163,9 @@ Responsabilità principali:
 - pianificare la traiettoria operativa completa del task
 - proporre azioni operative
 - eseguire il task in autonomia finché resta entro i vincoli di governance
-- decidere se eseguire, limitare, ripianificare o fermare
-- attivare human review solo quando necessario
+- produrre fatti e segnali tipizzati senza attribuire all'actor autorità di governance
+- applicare la direttiva OPA su continuazione, limitazione, correzione, replan, review o stop
+- attivare human review soltanto con una ragione esplicita e un insieme di decisioni ammesse
 - chiudere il task con stato `completed` o `aborted`
 
 Componenti interni principali:
@@ -338,7 +367,7 @@ Nota operativa:
 
 #### Governance Core: OPA-first, operazioni external e pilastri active/shadow
 
-Aggiornamento di refactor: il piano semantico non incorpora livelli di evidenza, precision ceilings o meta-step di compliance e il runtime non lo compatta, comprime o riscrive. L’actor riceve il piano completo come contesto, ma può completare soltanto il passo corrente. I tool adapter producono `ToolObservation` minime (`observation_id`, contenuto concreto e locator opzionale); goal, context, vincoli e criteri di successo restano istruzioni, non evidenze. Evidence Integrity & Provenance verifica deterministicamente integrità, lineage e provenienza del manifest, mentre il Governed External Semantic Judge possiede il grounding claim→observation e l’adeguatezza dell’esatto payload. Trajectory Health osserva esclusivamente la dinamica della run; `actor_self_confidence` è un fatto contestuale di incertezza, non una proprietà della trajectory. OPA ammette il judge soltanto dopo i gate deterministici e resta la sola fonte della direttiva finale. Il Judge riceve tutte le osservazioni canoniche disponibili in una rappresentazione tipizzata bounded, con selected refs come dichiarazione di reliance e senza process narration. [Fondamento scientifico e limiti](../docs/governance_pillars_research_basis.md).
+Aggiornamento di refactor: il piano semantico non incorpora livelli di evidenza, precision ceilings o meta-step di compliance e il runtime non lo compatta, comprime o riscrive. L’actor riceve il piano completo come contesto, ma può completare soltanto il passo corrente. I tool adapter producono `ToolObservation` minime (`observation_id`, contenuto concreto e locator opzionale); goal, context, vincoli e criteri di successo restano istruzioni, non evidenze. Evidence Integrity & Provenance verifica deterministicamente integrità, lineage e provenienza del manifest, mentre il Governed External Semantic Judge possiede il grounding claim→observation e l’adeguatezza dell’esatto payload. Trajectory Health osserva esclusivamente la dinamica della run; `actor_self_confidence` è un fatto contestuale di incertezza, non una proprietà della trajectory. OPA ammette il judge soltanto dopo i gate deterministici e resta la sola fonte della direttiva finale. Il Judge riceve tutte le osservazioni canoniche disponibili attraverso `judge_evidence_bundle.v1`, una proiezione JSON deterministica e digest-bound incorporata nella request e persistita negli artefatti della run. La selezione actor resta un marker di reliance, il modello non ricerca autonomamente la run e può citare soltanto gli `evidence_id` elencati nel bundle; content digest e process narration non sono esposti come identificatori citabili. [Fondamento scientifico e limiti](../docs/governance_pillars_research_basis.md).
 
 Il nodo LangGraph `governance` è il **Policy Enforcement Point (PEP)**. OPA è il solo **Policy Decision Point (PDP)**: possiede policy statica, soglie, pesi, precedenze, cap, invarianti e direttiva finale. Python non combina più direttive con un decision combiner nel percorso live.
 
@@ -377,11 +406,11 @@ Le direttive possibili sono `continue`, `continue_read_only`, `request_more_evid
 
 Il nodo `human_review` chiama `interrupt()` con un payload tipizzato e JSON-safe. La dashboard riceve la decisione umana e riprende lo stesso `thread_id` tramite `Command(resume=...)` sul checkpointer ufficiale LangGraph. Il backend locale è `SqliteSaver`; un deployment multi-worker può selezionare `PostgresSaver`. La dashboard non ricostruisce mai il runtime da trace o artifact.
 
-Le azioni umane sono canoniche ma reason-scoped: `judge_unsafe`/`judge_uncertain` espongono modifica, replan o abort; `capability_approval_required` espone approvazione dell’esatto digest, modifica o abort; clarification e riconciliazione di receipt indeterminate espongono soltanto le scelte applicabili. `modify_and_continue` richiede un edit tipizzato valido al submit e non può aggirare il contratto della proposta. Approval, completion candidate, Evidence selection e Judge assessment sono legati ai rispettivi digest; una modifica crea un nuovo digest, aggiorna atomicamente il candidate, invalida approval e assessment precedenti e passa da `READY_GOVERNANCE` prima di qualunque seam esecutivo. `approve_continue_read_only` non può autorizzare una proposta mutating invariata.
+Le azioni umane sono canoniche ma reason-scoped: `judge_unsafe`/`judge_uncertain` e le resubmission invariate o già respinte espongono modifica, replan o abort; l'identità di resubmission comprende payload digest ed Evidence-selection digest, quindi una correzione reale dell'attribution non è churn. `capability_approval_required` espone approvazione dell’esatto digest, modifica o abort; clarification e riconciliazione di receipt indeterminate espongono soltanto le scelte applicabili. Nessun altro gate, inclusi checkpoint legacy o reason sconosciute, può autorizzare una nuova esecuzione esterna. `modify_and_continue` richiede un edit tipizzato valido al submit e non può aggirare il contratto della proposta. Approval, completion candidate, Evidence selection e Judge assessment sono legati ai rispettivi digest; la prima proiezione governance di una comunicazione review-ready sigilla atomicamente operation id/digest e selection digest nel candidate ancora privo di binding, mentre una modifica crea un nuovo digest, aggiorna atomicamente il candidate, invalida approval e assessment precedenti e passa da `READY_GOVERNANCE` prima di qualunque seam esecutivo. `approve_continue_read_only` non può autorizzare una proposta mutating invariata.
 
 Il package `external_operations/` normalizza communication, SQL e generic external. SQL usa AST `sqlglot` e accetta una sola statement; email normalizza campi e destinazione senza giudicare il tono. `ExecutionIntent` distingue `proposal_only` da `execute_after_governance` e recupera checkpoint e payload precedenti conservativamente come `proposal_only`.
 
-Il nodo applicativo `external_execution` riceve soltanto una `ExternalExecutionRequest` già autorizzata sul digest esatto. Verifica proposta, intent, execution candidate, authorization source, digest, capability registry, server/tool allowlist, read-only envelope, idempotency key e ricevute precedenti. Non interpreta testo libero, non modifica payload, non sceglie policy e non espone shell o codice. Il port è implementato da `MCPExternalOperationExecutor`; il fallback deferred resta fail-closed soltanto quando nessuna capability reale è abilitata.
+Il nodo applicativo `external_execution` riceve soltanto una `ExternalExecutionRequest` già autorizzata sul digest esatto. Prima del connector verifica proposta, intent, execution candidate, authorization source, digest, binding del completion candidate a operation/Evidence snapshot/Evidence selection, owner step terminale, capability registry, server/tool allowlist, read-only envelope, idempotency key e ricevute precedenti. Non interpreta testo libero, non modifica payload, non sceglie policy e non espone shell o codice. Una receipt non coerente con operation, capability, digest o idempotency key, una risposta non tipizzata o un'eccezione dopo l'ingresso nel connector vengono normalizzate a `indeterminate` e checkpointate per riconciliazione: l'assenza di risposta non prova l'assenza dell'effetto. Il port è implementato da `MCPExternalOperationExecutor`; il fallback deferred resta fail-closed soltanto quando nessuna capability reale è abilitata.
 
 Il registry external è distinto dal Tool Gateway actor-facing. Le prime capability reali, disabilitate di default, sono `communication.email.send` verso SMTP configurato e `database.statement.execute` verso SQLite selezionato esclusivamente tramite profile id registrato. Server, sessioni, rete, processi, DSN e credenziali restano infrastruttura.
 
@@ -605,6 +634,12 @@ Metriche minime consigliate:
 - compliance alle policy
 - numero di escalation
 - numero di interventi umani
+- precisione e appropriatezza delle escalation
+- tasso di escalation evitabile e tasso di mancata escalation
+- distribuzione delle decisioni umane per ragione del gate
+- validità del binding tra decisione umana, candidato e digest
+- completezza e replayability dell'audit trail
+- qualità e utilizzabilità del feedback umano
 - sufficienza delle evidenze
 - comportamento in condizioni di incertezza
 

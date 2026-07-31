@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Any, Callable
 
 from layer1_intake import ExecutionIntent
 
@@ -12,6 +12,9 @@ from ..domain import (
     RuntimeFlag,
     RuntimeState,
     TaskState,
+    build_evidence_selection_digest,
+    build_evidence_snapshot_manifest,
+    digest_json,
 )
 from ..external_operations import (
     ExternalCapabilityDefinition,
@@ -28,7 +31,10 @@ from ..external_operations import (
     build_external_execution_request,
 )
 from ..governance_components import GovernanceDirective
-from ..hitl import build_human_review_request
+from ..hitl import (
+    build_human_review_request,
+    human_review_reasons_authorize_external_execution,
+)
 from .actor_service import (
     _set_external_communication_phase,
     commit_terminal_completion_candidate,
@@ -95,7 +101,19 @@ def external_execution(
         raise RuntimeError("External execution preflight returned an incomplete result.")
 
     state.external_execution_attempt_count += 1
-    receipt = executor_service.execute(request)
+    connector_error_type: str | None = None
+    try:
+        raw_receipt: Any = executor_service.execute(request)
+    except Exception as exc:
+        # Once the connector is entered, an exception cannot prove no effect occurred.
+        raw_receipt = None
+        connector_error_type = type(exc).__name__
+    receipt = _normalize_executor_receipt_binding(
+        request=request,
+        receipt=raw_receipt,
+        attempt_number=state.external_execution_attempt_count,
+        connector_error_type=connector_error_type,
+    )
     _record_external_execution_receipt(state, receipt=receipt)
     _apply_external_execution_outcome(
         state=state,
@@ -144,12 +162,12 @@ def _preflight_external_execution(
             code=ExternalExecutionErrorCode.NOT_EXECUTION_CANDIDATE,
             summary="The current proposal is not an execution candidate.",
         ), None
-    if request is None or not _has_exact_authorization(state=state, request=request):
+    if request is None:
         return _rejection_receipt(
             request=request,
             state=state,
             code=ExternalExecutionErrorCode.AUTHORIZATION_MISSING,
-            summary="No valid digest-bound authorization exists for this request.",
+            summary="No digest-bound external execution request exists.",
         ), None
     if (
         request.proposal != proposal
@@ -161,6 +179,67 @@ def _preflight_external_execution(
             state=state,
             code=ExternalExecutionErrorCode.DIGEST_MISMATCH,
             summary="The authorized digest does not match the current payload.",
+        ), None
+    if not _has_exact_authorization(state=state, request=request):
+        return _rejection_receipt(
+            request=request,
+            state=state,
+            code=ExternalExecutionErrorCode.AUTHORIZATION_MISSING,
+            summary="No valid digest-bound authorization exists for this request.",
+        ), None
+    candidate = state.pending_completion_candidate
+    snapshot_digest = digest_json(
+        build_evidence_snapshot_manifest(task_state=state)
+    )
+    selection_digest = build_evidence_selection_digest(
+        selected_refs=candidate.evidence_refs if candidate is not None else (),
+        evidence_snapshot_digest=snapshot_digest,
+        external_operation_digest=proposal.payload_digest,
+    )
+    if (
+        candidate is None
+        or candidate.step_id != proposal.plan_step_id
+        or candidate.external_operation_id != proposal.operation_id
+        or candidate.external_operation_digest != proposal.payload_digest
+        or candidate.evidence_snapshot_digest != snapshot_digest
+        or candidate.evidence_selection_digest != selection_digest
+    ):
+        return _rejection_receipt(
+            request=request,
+            state=state,
+            code=ExternalExecutionErrorCode.DIGEST_MISMATCH,
+            summary=(
+                "The completion candidate is not atomically bound to the current "
+                "operation, evidence snapshot, and evidence selection."
+            ),
+        ), None
+    current_step = state.current_plan_step
+    owner_index = next(
+        (
+            index
+            for index, step in enumerate(state.plan_steps)
+            if step.step_id == proposal.plan_step_id
+        ),
+        None,
+    )
+    if (
+        current_step is None
+        or current_step.step_id != proposal.plan_step_id
+        or current_step.status.value in {"completed", "skipped"}
+        or owner_index is None
+        or any(
+            step.status.value == "completed"
+            for step in state.plan_steps[owner_index + 1 :]
+        )
+    ):
+        return _rejection_receipt(
+            request=request,
+            state=state,
+            code=ExternalExecutionErrorCode.DIGEST_MISMATCH,
+            summary=(
+                "The terminal completion owner is not the current plan step or "
+                "the residual plan is not safely committable."
+            ),
         ), None
 
     configured = capability_registry.capabilities.get(request.capability_id)
@@ -266,8 +345,16 @@ def _has_exact_authorization(
         )
     if request.authorization_source == ExternalExecutionAuthorizationSource.HUMAN_REVIEW:
         decision = state.last_human_review_decision
+        review_request = state.last_human_review_request
         return bool(
             decision is not None
+            and review_request is not None
+            and human_review_reasons_authorize_external_execution(
+                review_request.reason_codes
+            )
+            and decision.request_id == review_request.request_id
+            and review_request.operation_payload_digest
+            == request.authorized_payload_digest
             and decision.decision_type
             in {
                 HumanReviewDecisionType.APPROVE_CONTINUE,
@@ -276,6 +363,91 @@ def _has_exact_authorization(
             and decision.approved_operation_digest == request.authorized_payload_digest
         )
     return False
+
+
+# Convert an untrusted connector receipt mismatch into reconciliation, never a crash.
+def _normalize_executor_receipt_binding(
+    *,
+    request: ExternalExecutionRequest,
+    receipt: Any,
+    attempt_number: int,
+    connector_error_type: str | None = None,
+) -> ExternalExecutionReceipt:
+    if isinstance(receipt, ExternalExecutionReceipt) and (
+        receipt.operation_id == request.operation_id
+        and receipt.capability_id == request.capability_id
+        and receipt.payload_digest == request.current_payload_digest
+        and receipt.idempotency_key == request.idempotency_key
+        and isinstance(receipt.status, ExternalExecutionStatus)
+        and isinstance(receipt.error_code, ExternalExecutionErrorCode)
+        and isinstance(receipt.started_at, datetime)
+        and isinstance(receipt.completed_at, datetime)
+        and isinstance(receipt.retryable, bool)
+    ):
+        return receipt
+    now = datetime.now(timezone.utc)
+    typed_receipt = (
+        receipt if isinstance(receipt, ExternalExecutionReceipt) else None
+    )
+    failure_detail = (
+        f" The connector raised {connector_error_type}."
+        if connector_error_type is not None
+        else ""
+    )
+    return ExternalExecutionReceipt(
+        operation_id=request.operation_id,
+        capability_id=request.capability_id,
+        payload_digest=request.current_payload_digest,
+        status=ExternalExecutionStatus.INDETERMINATE,
+        idempotency_key=request.idempotency_key,
+        started_at=(
+            typed_receipt.started_at
+            if typed_receipt is not None
+            and isinstance(typed_receipt.started_at, datetime)
+            else now
+        ),
+        completed_at=now,
+        external_reference=(
+            typed_receipt.external_reference
+            if typed_receipt is not None
+            and isinstance(typed_receipt.external_reference, str)
+            else None
+        ),
+        summary=(
+            "The connector returned a receipt that was not bound to the exact "
+            "authorized request, or did not return a typed receipt; the external "
+            f"outcome requires reconciliation.{failure_detail}"
+        ),
+        error_code=ExternalExecutionErrorCode.OUTCOME_INDETERMINATE,
+        retryable=False,
+        connector_kind=(
+            typed_receipt.connector_kind
+            if typed_receipt is not None
+            and isinstance(typed_receipt.connector_kind, str)
+            else None
+        ),
+        connector_id=(
+            typed_receipt.connector_id
+            if typed_receipt is not None
+            and isinstance(typed_receipt.connector_id, str)
+            else None
+        ),
+        server_id=(
+            typed_receipt.server_id
+            if typed_receipt is not None
+            and isinstance(typed_receipt.server_id, str)
+            else None
+        ),
+        tool_name=(
+            typed_receipt.tool_name
+            if typed_receipt is not None
+            and isinstance(typed_receipt.tool_name, str)
+            else None
+        ),
+        # Invalid connector metadata is never propagated into the canonical receipt.
+        connector_metadata=(),
+        attempt_number=max(1, attempt_number),
+    )
 
 
 # Apply one connector receipt without treating adapter output as policy authority.

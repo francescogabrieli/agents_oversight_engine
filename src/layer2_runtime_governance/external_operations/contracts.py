@@ -236,6 +236,7 @@ class GovernanceActionFeedback:
     finding_codes: tuple[str, ...]
     summary: str
     revision_index: int
+    invalidated_evidence_selection_digest: str | None = None
     # Full typed findings and judge summary so a revision can correct each finding.
     findings: tuple[JudgeFindingSnapshot, ...] = ()
     judge_summary: str | None = None

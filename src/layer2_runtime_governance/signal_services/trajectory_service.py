@@ -70,14 +70,26 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
             task_state.external_operation_proposal
             and any(
                 feedback.invalidated_payload_digest == task_state.external_operation_proposal.payload_digest
+                and (
+                    feedback.invalidated_evidence_selection_digest is None
+                    or (
+                        task_state.pending_completion_candidate is not None
+                        and feedback.invalidated_evidence_selection_digest
+                        == task_state.pending_completion_candidate.evidence_selection_digest
+                    )
+                )
                 for feedback in task_state.governance_action_feedback
             )
         ),
         "unchanged_resubmission": bool(
             task_state.external_operation_proposal
-            and any(
-                proposal.payload_digest == task_state.external_operation_proposal.payload_digest
-                for proposal in task_state.external_operation_history[:-1]
+            and task_state.pending_completion_candidate is not None
+            and _candidate_binding_seen_in_governance(
+                task_state=task_state,
+                payload_digest=task_state.external_operation_proposal.payload_digest,
+                evidence_selection_digest=(
+                    task_state.pending_completion_candidate.evidence_selection_digest
+                ),
             )
         ),
         "provider_recovery_active": bool(task_state.consecutive_provider_protocol_failures),
@@ -98,3 +110,28 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
         "score_formula_version": "trajectory_health_v1",
         "thresholds_version": thresholds_version,
     }
+
+
+# Match a resubmission on both payload and Evidence reliance, not payload alone.
+def _candidate_binding_seen_in_governance(
+    *,
+    task_state: TaskState,
+    payload_digest: str,
+    evidence_selection_digest: str | None,
+) -> bool:
+    if evidence_selection_digest is None:
+        return False
+    for decision in task_state.governance_history:
+        if decision.evaluated_operation_digest != payload_digest:
+            continue
+        evidence = (decision.pillar_results or {}).get("evidence", {})
+        if not isinstance(evidence, dict):
+            continue
+        raw_facts = evidence.get("raw_facts", evidence)
+        if (
+            isinstance(raw_facts, dict)
+            and raw_facts.get("evidence_selection_digest")
+            == evidence_selection_digest
+        ):
+            return True
+    return False

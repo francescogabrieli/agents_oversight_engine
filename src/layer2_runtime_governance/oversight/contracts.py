@@ -17,6 +17,8 @@ OversightRecommendedDirective = DynamicPolicyRecommendedDirective
 
 
 class OversightSignalLevel(str, Enum):
+    UNSCORED = "unscored"
+    OBSERVED = "observed"
     WEAK = "weak"
     MODERATE = "moderate"
     STRONG = "strong"

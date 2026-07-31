@@ -274,7 +274,17 @@ def _apply_human_review_decision(
     if human_review_decision.request_id != pending_request.request_id:
         raise ValueError("Human review decision request_id does not match the pending request.")
 
+    # Enforce the immutable request allowlist inside the domain transition as well as the UI adapter.
+    if human_review_decision.decision_type not in pending_request.allowed_decisions:
+        raise ValueError(
+            "This review request cannot authorize the supplied human decision."
+        )
+
     if human_review_decision.decision_type == HumanReviewDecisionType.APPROVE_CONTINUE:
+        _validate_approval_scope(
+            state=state,
+            pending_request=pending_request,
+        )
         _validate_digest_bound_approval(
             state=state,
             decision=human_review_decision,
@@ -351,6 +361,10 @@ def _apply_human_review_decision(
         return
 
     if human_review_decision.decision_type == HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY:
+        _validate_approval_scope(
+            state=state,
+            pending_request=pending_request,
+        )
         _validate_digest_bound_approval(
             state=state,
             decision=human_review_decision,
@@ -593,7 +607,11 @@ def _build_review_summary(
             normalized_parts,
             "The external communication draft can be modified and submitted in this review step.",
         )
-    _append_unique_review_part(parts, normalized_parts, f"Approval would resume to '{resume_state.value}'.")
+    _append_unique_review_part(
+        parts,
+        normalized_parts,
+        f"A permitted review decision would resume to '{resume_state.value}'.",
+    )
     return " ".join(parts) if parts else None
 
 
@@ -604,10 +622,11 @@ def _resolve_allowed_human_review_decisions(
 ) -> tuple[HumanReviewDecisionType, ...]:
     # Choices are intentionally limited to the pause boundary, not a universal control panel.
     request = state.pending_human_review_request
-    reason_codes = set()
-    if state.last_governance_decision is not None:
-        reason_codes.update(governance_reason_code_values(state.last_governance_decision))
-    if "ask_clarification_required" in reason_codes:
+    reason_codes = _review_reason_codes(state=state, request=request)
+    if (
+        "ask_clarification_required" in reason_codes
+        or RuntimeFlag.CLARIFICATION_REQUIRED in state.runtime_flags
+    ):
         return (
             HumanReviewDecisionType.ASK_CLARIFICATION,
             HumanReviewDecisionType.ABORT,
@@ -624,28 +643,110 @@ def _resolve_allowed_human_review_decisions(
         "judge_unsafe",
         "judge_uncertain",
         "action_revision_limit_reached",
+        "unchanged_candidate_resubmission",
+        "rejected_candidate_resubmitted",
+        "external_low_actor_self_confidence",
     } & reason_codes:
         return (
             HumanReviewDecisionType.MODIFY_AND_CONTINUE,
             HumanReviewDecisionType.REPLAN,
             HumanReviewDecisionType.ABORT,
         )
-    if "capability_approval_required" in reason_codes:
+    if human_review_reasons_authorize_external_execution(reason_codes):
         return (
             HumanReviewDecisionType.APPROVE_CONTINUE,
             HumanReviewDecisionType.MODIFY_AND_CONTINUE,
             HumanReviewDecisionType.ABORT,
         )
-    # Compatibility fallback for legacy checkpoint requests that predate reason-scoped actions.
-    del request
+    if "replan_request_stalled" in reason_codes:
+        return (
+            HumanReviewDecisionType.REPLAN,
+            HumanReviewDecisionType.ABORT,
+        )
+    if {
+        "policy_version_mismatch",
+        "required_pillar_unavailable",
+        "judge_required_unavailable",
+        "opa_failure_fail_closed",
+        "provider_failures_repeated",
+        "repeated_recovery",
+    } & reason_codes:
+        return (
+            HumanReviewDecisionType.REPLAN,
+            HumanReviewDecisionType.ABORT,
+        )
+    # Unknown and legacy external pauses remain non-authorizing by default.
+    if _is_governed_external_proposal(state):
+        return (
+            HumanReviewDecisionType.MODIFY_AND_CONTINUE,
+            HumanReviewDecisionType.REPLAN,
+            HumanReviewDecisionType.ABORT,
+        )
     return (
         HumanReviewDecisionType.APPROVE_CONTINUE,
         HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY,
-        HumanReviewDecisionType.MODIFY_AND_CONTINUE,
-        HumanReviewDecisionType.REQUEST_MORE_EVIDENCE,
         HumanReviewDecisionType.REPLAN,
-        HumanReviewDecisionType.ASK_CLARIFICATION,
         HumanReviewDecisionType.ABORT,
+    )
+
+
+# Reject forged or legacy approval choices that do not carry explicit approval authority.
+def _validate_approval_scope(
+    *,
+    state: TaskState,
+    pending_request: HumanReviewRequest,
+) -> None:
+    if _is_indeterminate_reconciliation(state):
+        return
+    if not _is_governed_external_proposal(state):
+        return
+    if state.execution_intent == ExecutionIntent.PROPOSAL_ONLY:
+        return
+    reason_codes = _review_reason_codes(state=state, request=pending_request)
+    if not human_review_reasons_authorize_external_execution(reason_codes):
+        raise ValueError(
+            "This review reason cannot authorize an external operation. "
+            "Only capability_approval_required may approve the exact digest."
+        )
+
+
+# Resolve reason codes from both canonical governance state and the immutable review request.
+def _review_reason_codes(
+    *,
+    state: TaskState,
+    request: HumanReviewRequest | None,
+) -> set[str]:
+    reason_codes = set(request.reason_codes if request is not None else ())
+    if state.last_governance_decision is not None:
+        reason_codes.update(
+            governance_reason_code_values(state.last_governance_decision)
+        )
+    return reason_codes
+
+
+# Grant execution authority only to an uncontaminated capability-approval gate.
+def human_review_reasons_authorize_external_execution(
+    reason_codes: set[str] | tuple[str, ...],
+) -> bool:
+    reasons = set(reason_codes)
+    blocking_reasons = {
+        "judge_unsafe",
+        "judge_uncertain",
+        "action_revision_limit_reached",
+        "unchanged_candidate_resubmission",
+        "rejected_candidate_resubmitted",
+        "external_low_actor_self_confidence",
+        "replan_request_stalled",
+        "policy_version_mismatch",
+        "required_pillar_unavailable",
+        "judge_required_unavailable",
+        "opa_failure_fail_closed",
+        "provider_failures_repeated",
+        "repeated_recovery",
+    }
+    return (
+        "capability_approval_required" in reasons
+        and not reasons.intersection(blocking_reasons)
     )
 
 

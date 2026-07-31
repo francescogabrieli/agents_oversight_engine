@@ -5,6 +5,7 @@ import unittest
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
 from pydantic import ValidationError
@@ -23,6 +24,7 @@ from layer2_runtime_governance.domain import (
     build_evidence_selection_digest,
     build_evidence_snapshot_manifest,
     digest_json,
+    digest_text,
 )
 from layer2_runtime_governance.governance_components import (
     GovernanceDirective,
@@ -66,6 +68,9 @@ from layer2_runtime_governance.judge import (
     JudgeExecutionError,
     JudgeSeverity,
     JudgeVerdict,
+    JudgeSettings,
+    OpenAIJudge,
+    judge_evidence_bundle_to_json,
 )
 from layer2_runtime_governance.judge.service import (
     _JudgePayload,
@@ -76,6 +81,10 @@ from layer2_runtime_governance.judge import (
     build_judge_user_prompt,
 )
 from layer2_runtime_governance.signal_services import build_judge_context
+from layer2_runtime_governance.infrastructure.runtime_artifacts import (
+    RuntimeArtifactStore,
+    _persist_current_judge_evidence_bundle,
+)
 from layer2_runtime_governance.execution.result_builder import (
     convert_tool_call_to_actor_result,
 )
@@ -350,6 +359,73 @@ class ExternalOperationNormalizerTests(unittest.TestCase):
         self.assertNotEqual(first_proposal.payload_digest, second_proposal.payload_digest)
         self.assertIn(first_proposal, state.external_operation_history)
 
+    # Governance atomically seals a late-projected communication proposal into its candidate.
+    def test_late_projected_communication_rebinds_completion_candidate_before_evidence(self) -> None:
+        state = _build_actor_ready_state_for_judge()
+        selected_refs = ("evidence-1",)
+        snapshot_digest = digest_json(
+            build_evidence_snapshot_manifest(task_state=state)
+        )
+        state.external_communication = ExternalCommunicationState(
+            phase=ExternalCommunicationPhase.DRAFT_PROPOSAL,
+            draft=ExternalCommunicationDraft(
+                channel="email",
+                recipient="ops@example.com",
+                subject="Bound candidate",
+                body="This exact draft must be governed and approved.",
+            ),
+            review_ready=True,
+        )
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.STEP_COMPLETED,
+            summary="Prepared the complete external communication.",
+            output_text=state.external_communication.draft.body,
+            step_validation=StepValidation(
+                plan_step_id="step_1",
+                actor_self_confidence=0.9,
+                evidence_refs=selected_refs,
+                rationale_summary="The selected observation supports the draft.",
+            ),
+        )
+        state.pending_completion_candidate = StepCompletionCandidate(
+            candidate_id="step_1:candidate:late-projection",
+            step_id="step_1",
+            summary=state.actor_result.summary,
+            output_text=state.actor_result.output_text,
+            evidence_refs=selected_refs,
+            evidence_snapshot_digest=snapshot_digest,
+            evidence_selection_digest=build_evidence_selection_digest(
+                selected_refs=selected_refs,
+                evidence_snapshot_digest=snapshot_digest,
+                external_operation_digest=None,
+            ),
+        )
+
+        result = evaluate_opa_first_governance(
+            task_state=state,
+            policy_engine_service=JudgeRequiredPolicyEngine(),
+            judge_service=StaticJudge(_safe_judge_assessment()),
+        )
+
+        proposal = state.external_operation_proposal
+        candidate = state.pending_completion_candidate
+        self.assertIsNotNone(proposal)
+        self.assertEqual(candidate.external_operation_id, proposal.operation_id)
+        self.assertEqual(candidate.external_operation_digest, proposal.payload_digest)
+        self.assertEqual(
+            candidate.evidence_selection_digest,
+            build_evidence_selection_digest(
+                selected_refs=selected_refs,
+                evidence_snapshot_digest=snapshot_digest,
+                external_operation_digest=proposal.payload_digest,
+            ),
+        )
+        evidence_facts = result.decision_input["pillars"]["evidence"]["raw_facts"]
+        self.assertTrue(evidence_facts["candidate_evidence_selection_matches"])
+        self.assertTrue(evidence_facts["candidate_external_operation_digest_matches"])
+        self.assertTrue(result.judge_assessment.invoked)
+
     # Repeated identical proposals remain separate audit occurrences.
     def test_repeated_proposal_digest_is_preserved_in_history(self) -> None:
         state = _state_with_proposal(_generic_proposal())
@@ -399,7 +475,7 @@ class ExternalOperationNormalizerTests(unittest.TestCase):
             state.external_operation_proposal,
         )
 
-    # Uniform HITL controls do not weaken a proposal's non-modifiable contract.
+    # A non-authorizing external pause permits correction but never implicit approval.
     def test_modify_rejects_non_modifiable_external_proposal(self) -> None:
         proposal = replace(_generic_proposal(), modifiable=False)
         state = _state_with_proposal(proposal)
@@ -600,12 +676,26 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
         self.assertEqual(len(context.observations), 55)
         self.assertEqual(context.selected_evidence_refs, ("observation-1",))
         self.assertEqual(sum(item.selected_by_actor for item in context.observations), 1)
+        self.assertIsNotNone(context.evidence_bundle)
+        self.assertEqual(
+            context.evidence_bundle.allowed_evidence_ids,
+            tuple(f"observation-{index}" for index in range(1, 56)),
+        )
         self.assertTrue(context.evidence_base_complete)
         self.assertEqual(context.observation_count, 55)
         self.assertNotIn("scratchpad_entries", prompt)
         self.assertNotIn("tool_executions", prompt)
         self.assertNotIn("runtime_events", prompt)
         self.assertIn('"full_plan"', prompt)
+        self.assertIn('"allowed_evidence_ids"', prompt)
+        self.assertNotIn('"content_digest"', prompt)
+        serialized_bundle = json.loads(
+            judge_evidence_bundle_to_json(context.evidence_bundle)
+        )
+        self.assertEqual(
+            serialized_bundle["allowed_evidence_ids"],
+            list(context.evidence_bundle.allowed_evidence_ids),
+        )
         self.assertIn(proposal.payload_digest, prompt)
         self.assertNotIn("release chronology", build_judge_system_prompt())
 
@@ -638,6 +728,126 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
                 context=context,
             )
 
+    # An invalid model reference receives one local correction using the same bundle.
+    def test_judge_retries_once_when_model_uses_a_content_digest_as_evidence_ref(self) -> None:
+        proposal = _generic_proposal()
+        state = _state_with_proposal(proposal)
+        state.observations = [
+            ToolObservation(
+                observation_id="observation-1",
+                locator="https://example.org/source",
+                content="Concrete observed source content.",
+            )
+        ]
+        state.actor_result = replace(
+            state.actor_result,
+            step_validation=StepValidation(
+                plan_step_id="step_1",
+                actor_self_confidence=0.8,
+                evidence_refs=("observation-1",),
+                rationale_summary="The source supports the proposal.",
+            ),
+        )
+        context = build_judge_context(
+            task_state=state,
+            external_operation=proposal,
+            invocation_reason="test_protocol_retry",
+        )
+
+        # Produce one otherwise-valid response with a caller-selected reference.
+        def payload_with_ref(reference: str) -> _JudgePayload:
+            return _JudgePayload.model_validate(
+                {
+                    "verdict": "needs_revision",
+                    "severity": "medium",
+                    "confidence": 0.8,
+                    "findings": [
+                        {
+                            "category": "factual_support",
+                            "code": "support_check",
+                            "severity": "medium",
+                            "summary": "Review the cited support.",
+                            "evidence_refs": [reference],
+                        }
+                    ],
+                    "claim_assessments": [],
+                    "summary": "Revision required.",
+                    "rationale": "One claim needs correction.",
+                    "evaluated_operation_digest": proposal.payload_digest,
+                    "evaluated_evidence_snapshot_digest": context.evidence_snapshot_digest,
+                    "evaluated_evidence_selection_digest": context.evidence_selection_digest,
+                }
+            )
+
+        class RetryingJudge(OpenAIJudge):
+            # Avoid a real provider client while exercising the adapter recovery path.
+            # Keep construction local so no network client is created by the test.
+            def __init__(self) -> None:
+                self._settings = JudgeSettings(model="test-judge", api_key="test")
+                self.responses = [
+                    payload_with_ref(digest_text(state.observations[0].content)),
+                    payload_with_ref("observation-1"),
+                ]
+                self.corrections: list[str | None] = []
+
+            # Return the two deterministic structured provider responses in order.
+            def _request_judge_response(
+                self,
+                *,
+                context,
+                protocol_correction: str | None = None,
+            ):
+                self.corrections.append(protocol_correction)
+                return SimpleNamespace(output_parsed=self.responses.pop(0))
+
+        judge = RetryingJudge()
+        assessment = judge.evaluate(context=context)
+
+        self.assertEqual(assessment.status, JudgeAssessmentStatus.ACTIVE)
+        self.assertEqual(assessment.findings[0].evidence_refs, ("observation-1",))
+        self.assertEqual(len(judge.corrections), 2)
+        self.assertIsNone(judge.corrections[0])
+        self.assertIn("unknown observation ids", judge.corrections[1])
+
+    # Run artifacts preserve the exact content-addressed pool supplied to the Judge.
+    def test_judge_evidence_bundle_is_persisted_as_exact_run_json(self) -> None:
+        proposal = _generic_proposal()
+        state = _state_with_proposal(proposal)
+        context = build_judge_context(
+            task_state=state,
+            external_operation=proposal,
+            invocation_reason="test_artifact_projection",
+        )
+
+        with TemporaryDirectory(dir=REPO_ROOT) as temp_dir:
+            store = RuntimeArtifactStore(root_path=Path(temp_dir))
+            paths = store.build_paths("judge-bundle-artifact")
+            paths.thread_dir.mkdir(parents=True, exist_ok=True)
+            artifact = _persist_current_judge_evidence_bundle(
+                paths=paths,
+                task_state=state,
+            )
+
+            self.assertIsNotNone(artifact)
+            self.assertEqual(artifact[0], context.evidence_bundle.bundle_digest)
+            current_payload = json.loads(
+                (paths.thread_dir / "judge_evidence_bundle.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            immutable_payload = json.loads(
+                (
+                    paths.thread_dir
+                    / "judge_evidence_bundles"
+                    / f"{artifact[0]}.json"
+                ).read_text(encoding="utf-8")
+            )
+            expected_payload = json.loads(
+                judge_evidence_bundle_to_json(context.evidence_bundle)
+            )
+            self.assertEqual(current_payload, expected_payload)
+            self.assertEqual(immutable_payload, expected_payload)
+
     # A safe assessment for a governed external proposal can continue without forced HITL.
     def test_safe_external_operation_can_continue(self) -> None:
         state = _state_with_proposal(_sql_proposal("SELECT id FROM accounts"))
@@ -661,6 +871,9 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
     # Semantic revision is distinct from evidence recovery and invalidates the proposal.
     def test_needs_revision_returns_to_actor_with_typed_feedback(self) -> None:
         state = _state_with_proposal(_generic_proposal())
+        rejected_selection_digest = (
+            state.pending_completion_candidate.evidence_selection_digest
+        )
 
         result = governance(
             state,
@@ -677,6 +890,10 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
         self.assertIsNone(result.external_operation_proposal)
         self.assertEqual(result.external_operation_revision_count, 1)
         self.assertEqual(len(result.governance_action_feedback), 1)
+        self.assertEqual(
+            result.governance_action_feedback[0].invalidated_evidence_selection_digest,
+            rejected_selection_digest,
+        )
 
     # Unsafe semantic findings require full HITL and can never become a hard deny.
     def test_unsafe_external_operation_routes_to_full_hitl(self) -> None:
@@ -702,6 +919,17 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
                 HumanReviewDecisionType.ABORT,
             ),
         )
+        with self.assertRaisesRegex(ValueError, "cannot authorize"):
+            _apply_human_review_decision(
+                result,
+                HumanReviewDecision(
+                    request_id=result.pending_human_review_request.request_id,
+                    decision_type=HumanReviewDecisionType.APPROVE_CONTINUE,
+                    approved_operation_digest=(
+                        result.pending_human_review_request.operation_payload_digest
+                    ),
+                ),
+            )
         self.assertFalse(result.last_static_policy_assessment.hard_deny)
         self.assertEqual(
             result.last_static_policy_assessment.policy_directive,
@@ -980,23 +1208,22 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
         self.assertIsNotNone(res_state.pending_human_review_request)
         self.assertIn(GovernanceReasonCode.JUDGE_UNSAFE, res_state.last_governance_decision.reason_codes)
 
-        # Resuming with Approve on a proposal_only intent must complete as APPROVED_DRAFT without external execution.
-        _apply_human_review_decision(
-            res_state,
-            HumanReviewDecision(
-                request_id=res_state.pending_human_review_request.request_id,
-                decision_type=HumanReviewDecisionType.APPROVE_CONTINUE,
-                approved_operation_digest=res_state.pending_human_review_request.operation_payload_digest,
-            ),
-        )
-        final_state = res_state
+        # Judge-unsafe remains corrective even for proposal-only drafts; it cannot be approved.
+        with self.assertRaisesRegex(ValueError, "cannot authorize"):
+            _apply_human_review_decision(
+                res_state,
+                HumanReviewDecision(
+                    request_id=res_state.pending_human_review_request.request_id,
+                    decision_type=HumanReviewDecisionType.APPROVE_CONTINUE,
+                    approved_operation_digest=(
+                        res_state.pending_human_review_request.operation_payload_digest
+                    ),
+                ),
+            )
 
-        self.assertEqual(final_state.current_state, RuntimeState.COMPLETED)
-        self.assertEqual(
-            final_state.external_communication.phase,
-            ExternalCommunicationPhase.APPROVED_DRAFT,
-        )
-        self.assertIsNone(final_state.current_external_execution_request)
+        self.assertEqual(res_state.current_state, RuntimeState.WAITING_HUMAN_REVIEW)
+        self.assertIsNone(res_state.current_external_execution_request)
+        self.assertIsNone(res_state.last_external_execution_receipt)
 
     # CC/BCC recipients must be evaluated by destination classification and static policy.
     def test_bcc_prohibited_destination_classified_as_prohibited_and_denied_by_static(self) -> None:

@@ -45,9 +45,13 @@ from layer2_runtime_governance.domain import (
     ExternalCommunicationPhase,
     HumanReviewDecision,
     HumanReviewDecisionType,
+    RuntimeFlag,
     RuntimeState,
     StepCompletionCandidate,
     TaskState,
+    build_evidence_selection_digest,
+    build_evidence_snapshot_manifest,
+    digest_json,
 )
 from layer2_runtime_governance.external_operations import (
     ExternalCapabilityDefinition,
@@ -67,6 +71,7 @@ from layer2_runtime_governance.external_operations import (
     normalize_communication_operation,
 )
 from layer2_runtime_governance.governance_components import GovernanceReasonCode
+from layer2_runtime_governance.hitl import build_human_review_request
 from layer2_runtime_governance.runtime.external_execution_service import (
     external_execution,
 )
@@ -115,6 +120,20 @@ class RecordingExternalExecutor:
             server_id="communication",
             tool_name="send_email",
         )
+
+
+class MismatchedReceiptExecutor(RecordingExternalExecutor):
+    # Simulate a connector returning a receipt for the wrong request binding.
+    def execute(self, request):
+        receipt = super().execute(request)
+        return replace(receipt, payload_digest="f" * 64)
+
+
+class RaisingExternalExecutor(RecordingExternalExecutor):
+    # Simulate a transport failure after the connector boundary was entered.
+    def execute(self, request):
+        self.calls.append(request)
+        raise RuntimeError("fixture connector lost its response")
 
 
 class OneStepExternalPlanner:
@@ -193,7 +212,7 @@ class ExternalReviewPolicy(StubPolicyEngine):
                 policy_engine=self,
                 directive="wait_human_review",
                 policy_decision="require_human_review",
-                reason_code="human_review_required",
+                reason_code="capability_approval_required",
                 summary="The external proposal requires human authorization.",
             )
         return super().evaluate_decision(decision_input=decision_input)
@@ -308,6 +327,9 @@ def _authorized_state(
         )
     ]
     state.current_plan_step_index = 0
+    evidence_snapshot_digest = digest_json(
+        build_evidence_snapshot_manifest(task_state=state)
+    )
     state.pending_completion_candidate = StepCompletionCandidate(
         candidate_id="send_step:candidate:1",
         step_id="send_step",
@@ -315,6 +337,12 @@ def _authorized_state(
         output_text=draft.body or proposal.payload_preview,
         external_operation_id=proposal.operation_id,
         external_operation_digest=proposal.payload_digest,
+        evidence_snapshot_digest=evidence_snapshot_digest,
+        evidence_selection_digest=build_evidence_selection_digest(
+            selected_refs=(),
+            evidence_snapshot_digest=evidence_snapshot_digest,
+            external_operation_digest=proposal.payload_digest,
+        ),
     )
     state.external_operation_proposal = proposal
     state.current_external_execution_request = build_external_execution_request(
@@ -325,9 +353,21 @@ def _authorized_state(
         reviewer_id="reviewer-1",
     )
     if approved:
+        state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        review_request = replace(
+            build_human_review_request(state=state, thread_id="service-fixture"),
+            request_id="review-1",
+            reason_codes=("capability_approval_required",),
+            allowed_decisions=(
+                HumanReviewDecisionType.APPROVE_CONTINUE,
+                HumanReviewDecisionType.MODIFY_AND_CONTINUE,
+                HumanReviewDecisionType.ABORT,
+            ),
+        )
+        state.last_human_review_request = review_request
         state.human_review_history.append(
             HumanReviewDecision(
-                request_id="review-1",
+                request_id=review_request.request_id,
                 decision_type=HumanReviewDecisionType.APPROVE_CONTINUE,
                 reviewer_id="reviewer-1",
                 approved_operation_digest=authorized_digest,
@@ -391,6 +431,73 @@ class ExternalExecutionServiceTests(unittest.TestCase):
         )
         self.assertEqual(result.last_external_execution_receipt.error_code, ExternalExecutionErrorCode.DIGEST_MISMATCH)
         self.assertEqual(executor.calls, [])
+
+    # A proposal cannot reach the connector with an unsealed completion candidate.
+    def test_unbound_completion_candidate_is_rejected_before_execution(self) -> None:
+        state = _authorized_state()
+        state.pending_completion_candidate = replace(
+            state.pending_completion_candidate,
+            external_operation_id=None,
+            external_operation_digest=None,
+        )
+        executor = RecordingExternalExecutor()
+
+        result = external_execution(
+            state,
+            executor_service=executor,
+            capability_registry=_registry(),
+            thread_id="service-unbound-candidate",
+        )
+
+        self.assertEqual(
+            result.last_external_execution_receipt.error_code,
+            ExternalExecutionErrorCode.DIGEST_MISMATCH,
+        )
+        self.assertEqual(executor.calls, [])
+
+    # A malformed post-call receipt becomes indeterminate instead of crashing state commit.
+    def test_mismatched_connector_receipt_routes_to_reconciliation(self) -> None:
+        state = _authorized_state()
+        executor = MismatchedReceiptExecutor()
+
+        result = external_execution(
+            state,
+            executor_service=executor,
+            capability_registry=_registry(),
+            thread_id="service-mismatched-receipt",
+        )
+
+        self.assertEqual(
+            result.last_external_execution_receipt.status,
+            ExternalExecutionStatus.INDETERMINATE,
+        )
+        self.assertEqual(
+            result.current_state,
+            RuntimeState.WAITING_HUMAN_REVIEW,
+        )
+        self.assertIn(
+            RuntimeFlag.EXTERNAL_EXECUTION_RECONCILIATION_REQUIRED,
+            result.runtime_flags,
+        )
+
+    # A connector exception after invocation is an unknown outcome, never a lost checkpoint.
+    def test_connector_exception_routes_to_reconciliation(self) -> None:
+        state = _authorized_state()
+        executor = RaisingExternalExecutor()
+
+        result = external_execution(
+            state,
+            executor_service=executor,
+            capability_registry=_registry(),
+            thread_id="service-connector-exception",
+        )
+
+        self.assertEqual(
+            result.last_external_execution_receipt.status,
+            ExternalExecutionStatus.INDETERMINATE,
+        )
+        self.assertEqual(result.current_state, RuntimeState.WAITING_HUMAN_REVIEW)
+        self.assertEqual(len(executor.calls), 1)
 
     # A request without an approve decision never invokes the adapter.
     def test_missing_approval_is_rejected(self) -> None:

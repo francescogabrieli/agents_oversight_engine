@@ -424,6 +424,11 @@ def _apply_action_revision(
             ),
             summary=governance_decision.summary,
             revision_index=state.external_operation_revision_count,
+            invalidated_evidence_selection_digest=(
+                state.pending_completion_candidate.evidence_selection_digest
+                if state.pending_completion_candidate is not None
+                else None
+            ),
             # Preserve the full typed findings so the actor can correct each one.
             findings=tuple(
                 JudgeFindingSnapshot(

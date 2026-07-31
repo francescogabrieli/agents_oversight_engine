@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from tests.layer2_runtime_fixtures import *
 from layer2_runtime_governance.infrastructure.checkpointing import (
     build_default_checkpointer,
@@ -7,8 +9,8 @@ from layer2_runtime_governance.infrastructure.checkpointing import (
 
 
 class Layer2HumanReviewRuntimeTests(unittest.TestCase):
-    # The operator receives the same complete action set for every HITL reason.
-    def test_human_review_always_exposes_all_seven_decisions(self) -> None:
+    # HITL actions are scoped to the exact reason that opened the gate.
+    def test_clarification_review_exposes_only_clarify_or_abort(self) -> None:
         task_state = TaskState.from_intake(_build_clarification_intake_result())
         task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
         task_state.human_review_resume_state = RuntimeState.ACTING
@@ -21,11 +23,6 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
         self.assertEqual(
             request.allowed_decisions,
             (
-                HumanReviewDecisionType.APPROVE_CONTINUE,
-                HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY,
-                HumanReviewDecisionType.MODIFY_AND_CONTINUE,
-                HumanReviewDecisionType.REQUEST_MORE_EVIDENCE,
-                HumanReviewDecisionType.REPLAN,
                 HumanReviewDecisionType.ASK_CLARIFICATION,
                 HumanReviewDecisionType.ABORT,
             ),
@@ -526,14 +523,15 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
         assert pending_request is not None
 
         evidence_state = deepcopy(task_state)
-        _apply_human_review_decision(
-            evidence_state,
-            HumanReviewDecision(
-                request_id=pending_request.request_id,
-                decision_type=HumanReviewDecisionType.REQUEST_MORE_EVIDENCE,
-            ),
-        )
-        self.assertEqual(evidence_state.current_state, RuntimeState.ACTING)
+        with self.assertRaisesRegex(ValueError, "cannot authorize"):
+            _apply_human_review_decision(
+                evidence_state,
+                HumanReviewDecision(
+                    request_id=pending_request.request_id,
+                    decision_type=HumanReviewDecisionType.REQUEST_MORE_EVIDENCE,
+                ),
+            )
+        self.assertEqual(evidence_state.current_state, RuntimeState.WAITING_HUMAN_REVIEW)
 
         replan_state = deepcopy(task_state)
         _apply_human_review_decision(
@@ -595,6 +593,15 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
             metadata={"priority": "high"},
         )
         pending_request = build_human_review_request(state=task_state, thread_id="external-edit")
+        # Exercise edit application under an explicit correction-gate allowlist.
+        pending_request = replace(
+            pending_request,
+            allowed_decisions=(
+                HumanReviewDecisionType.MODIFY_AND_CONTINUE,
+                HumanReviewDecisionType.REPLAN,
+                HumanReviewDecisionType.ABORT,
+            ),
+        )
         task_state.pending_human_review_request = pending_request
 
         self.assertIn(
@@ -713,6 +720,15 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
         pending_request = build_human_review_request(
             state=task_state,
             thread_id="external-edit-node",
+        )
+        # Exercise the node adapter with a request that explicitly authorizes edits.
+        pending_request = replace(
+            pending_request,
+            allowed_decisions=(
+                HumanReviewDecisionType.MODIFY_AND_CONTINUE,
+                HumanReviewDecisionType.REPLAN,
+                HumanReviewDecisionType.ABORT,
+            ),
         )
         task_state.pending_human_review_request = pending_request
 

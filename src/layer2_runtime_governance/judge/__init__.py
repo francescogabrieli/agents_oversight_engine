@@ -5,6 +5,7 @@ from .contracts import (
     JudgeClaimStatus,
     JudgeCompletedStepContext,
     JudgeContext,
+    JudgeEvidenceBundle,
     JudgeEvidenceContext,
     JudgeExecutionError,
     JudgeExternalRevisionContext,
@@ -22,6 +23,11 @@ from .contracts import (
     JudgeToolExecutionContext,
     JudgeVerdict,
 )
+from .evidence_bundle import (
+    build_judge_evidence_bundle,
+    judge_evidence_bundle_to_dict,
+    judge_evidence_bundle_to_json,
+)
 from .prompts import build_judge_system_prompt, build_judge_user_prompt
 from .service import DisabledJudge, JudgeSettings, OpenAIJudge, build_default_judge
 
@@ -33,6 +39,7 @@ __all__ = [
     "JudgeClaimStatus",
     "JudgeCompletedStepContext",
     "JudgeContext",
+    "JudgeEvidenceBundle",
     "JudgeEvidenceContext",
     "JudgeExecutionError",
     "JudgeExternalRevisionContext",
@@ -52,6 +59,9 @@ __all__ = [
     "JudgeVerdict",
     "OpenAIJudge",
     "build_default_judge",
+    "build_judge_evidence_bundle",
     "build_judge_system_prompt",
     "build_judge_user_prompt",
+    "judge_evidence_bundle_to_dict",
+    "judge_evidence_bundle_to_json",
 ]

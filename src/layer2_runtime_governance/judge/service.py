@@ -68,7 +68,10 @@ class _JudgeFindingPayload(BaseModel):
     code: str = Field(..., min_length=1)
     severity: JudgeSeverity
     summary: str = Field(..., min_length=1)
-    evidence_refs: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(
+        default_factory=list,
+        description="Exact evidence_id values copied from evidence_bundle.allowed_evidence_ids.",
+    )
 
 
 class _JudgePayload(BaseModel):
@@ -100,15 +103,24 @@ class _JudgeClaimAssessmentPayload(BaseModel):
 
     claim_summary: str = Field(..., min_length=1)
     status: JudgeClaimStatus
-    selected_evidence_refs: list[str] = Field(default_factory=list)
-    supporting_evidence_refs: list[str] = Field(default_factory=list)
-    contradicting_evidence_refs: list[str] = Field(default_factory=list)
+    selected_evidence_refs: list[str] = Field(
+        default_factory=list,
+        description="Exact IDs present in both allowed_evidence_ids and selected_evidence_refs.",
+    )
+    supporting_evidence_refs: list[str] = Field(
+        default_factory=list,
+        description="Exact evidence_id values copied from evidence_bundle.allowed_evidence_ids.",
+    )
+    contradicting_evidence_refs: list[str] = Field(
+        default_factory=list,
+        description="Exact evidence_id values copied from evidence_bundle.allowed_evidence_ids.",
+    )
     explanation: str = Field(default="")
 
 
 class DisabledJudge(JudgePort):
     judge_name = "disabled_judge"
-    prompt_version = "external_operation_judge_v6_disabled"
+    prompt_version = "external_operation_judge_v7_disabled"
 
     # Required disabled invocations are explicitly unavailable, never safe.
     def evaluate(self, *, context: JudgeContext) -> JudgeAssessment:
@@ -135,7 +147,7 @@ class DisabledJudge(JudgePort):
 
 class OpenAIJudge(JudgePort):
     judge_name = "openai_layer2_external_operation_judge"
-    prompt_version = "external_operation_judge_v6"
+    prompt_version = "external_operation_judge_v7"
 
     def __init__(self, settings: JudgeSettings | None = None) -> None:
         self._settings = settings or JudgeSettings.from_env()
@@ -157,10 +169,28 @@ class OpenAIJudge(JudgePort):
         payload = getattr(response, "output_parsed", None)
         if payload is None:
             raise JudgeExecutionError("Judge returned no structured output.")
-        _validate_judge_payload(
-            payload=payload,
-            context=context,
-        )
+        try:
+            _validate_judge_payload(payload=payload, context=context)
+        except JudgeExecutionError as protocol_error:
+            # One immediate correction keeps schema mistakes local to the Judge adapter.
+            try:
+                response = self._request_judge_response(
+                    context=context,
+                    protocol_correction=str(protocol_error),
+                )
+            except Exception as exc:  # pragma: no cover - provider/network failures
+                raise JudgeExecutionError(f"Judge protocol retry failed: {exc}") from exc
+            payload = getattr(response, "output_parsed", None)
+            if payload is None:
+                raise JudgeExecutionError(
+                    "Judge protocol retry returned no structured output."
+                )
+            try:
+                _validate_judge_payload(payload=payload, context=context)
+            except JudgeExecutionError as retry_error:
+                raise JudgeExecutionError(
+                    f"Judge protocol retry exhausted: {retry_error}"
+                ) from retry_error
 
         verdict = payload.verdict
         severity = payload.severity
@@ -217,12 +247,23 @@ class OpenAIJudge(JudgePort):
 
     # Retry only transient provider failures around one typed semantic request.
     @llm_retry
-    def _request_judge_response(self, *, context: JudgeContext) -> object:
+    def _request_judge_response(
+        self,
+        *,
+        context: JudgeContext,
+        protocol_correction: str | None = None,
+    ) -> object:
         return self._client.responses.parse(
             model=self._settings.model,
             input=[
                 {"role": "system", "content": build_judge_system_prompt()},
-                {"role": "user", "content": build_judge_user_prompt(context=context)},
+                {
+                    "role": "user",
+                    "content": build_judge_user_prompt(
+                        context=context,
+                        protocol_correction=protocol_correction,
+                    ),
+                },
             ],
             text_format=_JudgePayload,
         )

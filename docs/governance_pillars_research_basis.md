@@ -2,7 +2,13 @@
 
 ## 1. Purpose and scope
 
-This note records the theoretical and experimental basis for Evidence Integrity & Provenance, Trajectory Health, the Governed External Semantic Judge, and the separation between signal production and OPA-owned final decision. It distinguishes reported literature results, repository design inferences, and hypotheses still to be tested in this proof of concept. The literature does not prove this architecture.
+This note records the theoretical and experimental basis for the thesis's central
+architectural contribution: an auditable Human Oversight and HITL engine applied to an
+autonomous agent runtime. It focuses on Evidence Integrity & Provenance, Trajectory
+Health, the Governed External Semantic Judge, reason-scoped human intervention, and the
+separation between signal production and OPA-owned final decision. It distinguishes
+reported literature results, repository design inferences, and hypotheses still to be
+tested in this proof of concept. The literature does not prove this architecture.
 
 ## 2. Architectural separation
 
@@ -33,13 +39,13 @@ structural gaps; the Judge owns claim support.
 
 TRAJECT-Bench distinguishes final accuracy from tool-use trajectory quality, including tool selection, parameterization, order and dependencies. [He et al. (2025)](https://arxiv.org/abs/2510.04550) Agent-as-a-Judge likewise motivates attention to step-wise agent behaviour rather than final outcome alone. [Zhuge et al. (2024)](https://arxiv.org/abs/2410.10934) We infer deterministic observations of replan basis, state delta, recovery and revision churn. High turn count is not degradation without an absent observable delta. Neither work specifies our liveness policy, Rego thresholds, or deterministic implementation.
 
-Concrete translation: [trajectory_service.py](../src/layer2_runtime_governance/signal_services/trajectory_service.py) does not contain point confidence; [trajectory.rego](../configs/opa/layer2_governance/pillars/trajectory.rego) handles stalled/repeated submissions before Judge admission.
+Concrete translation: [trajectory_service.py](../src/layer2_runtime_governance/signal_services/trajectory_service.py) does not contain point confidence and identifies resubmission on the pair payload digest + Evidence-selection digest, so corrected attribution is not mislabeled as unchanged payload churn. [trajectory.rego](../configs/opa/layer2_governance/pillars/trajectory.rego) distinguishes an actual stalled replan request from unchanged or previously rejected candidate resubmission. All three can block Judge admission, but OPA exposes separate reasons and none grants execution authority.
 
 ## 5. Governed External Semantic Judge
 
 G-Eval studies explicit criteria and structured LLM evaluation and reports stronger human alignment than its evaluated baselines, while position/repetition research cautions that LLM judges can be biased or unstable. [Liu et al. (2023)](https://aclanthology.org/2023.emnlp-main.153), [Shi et al. (2025)](https://aclanthology.org/2025.ijcnlp-long.18/) We infer a narrow, typed, digest-bound rubric, prompt/model metadata, a real `uncertain` verdict, and no direct authorization. These papers do not establish that one judge is sufficient for high-stakes governance; transfer to this runtime remains an evaluation hypothesis.
 
-The context separates authoritative task data, non-authoritative plan/step summaries, and complete bounded typed observations. It excludes process dynamics. `unsafe` is for materially harmful/deceptive/coercive/unauthorized effects; normal unsupported claims are `needs_revision`, and incomplete evidence is `uncertain`.
+The context separates authoritative task data, non-authoritative plan/step summaries, and complete bounded typed observations. It excludes process dynamics. Completeness describes coverage of the canonical observation universe, while truncation/extractability remains an item-level limitation; the latter must not silently relabel the entire evidence base as omitted. `unsafe` is for materially harmful/deceptive/coercive/unauthorized effects; normal unsupported claims are `needs_revision`, and genuinely incomplete relevant context is `uncertain`.
 
 ## 6. Governance, accountability and human oversight
 

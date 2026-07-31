@@ -10,6 +10,15 @@ available at the evaluated boundary. Observations are bounded typed projections,
 tool transcripts. `selected_by_actor` records declared reliance but never limits the
 evidence the Judge can examine. Process narration and execution counters are excluded.
 
+The runtime deterministically materializes those observations as a typed
+`judge_evidence_bundle.v1`. The same JSON object is embedded in the Judge request and
+persisted under the run artifacts for audit and replay. The model never searches the run
+or chooses its own evidence perimeter. Each model-visible observation exposes one
+citable identifier, `evidence_id`; content digests remain runtime-only binding metadata.
+All structured reference fields are validated against the bundle's
+`allowed_evidence_ids`. One invalid structured response receives a single local protocol
+correction; retry exhaustion remains unavailable and fails closed through OPA.
+
 It returns status, `safe|needs_revision|unsafe|uncertain`, severity, confidence,
 typed findings, claim-level grounding (`supported_by_selected`,
 `supported_but_not_selected`, `unsupported`, `contradicted`, `context_incomplete`),
@@ -29,4 +38,8 @@ HITL.
 
 Evidence-base completeness is explicit: serialization cannot silently change the
 epistemic perimeter. An incomplete base leads to `uncertain`, not invented unsupported
-claims. See [the research basis](../../../docs/governance_pillars_research_basis.md).
+claims. Base completeness means that every canonical observation at the boundary is
+represented; it is not made false merely because one represented observation reports
+bounded extraction or truncated content. Per-observation incompleteness remains explicit
+and can make the affected claim `context_incomplete`/`uncertain`. See
+[the research basis](../../../docs/governance_pillars_research_basis.md).

@@ -4,7 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Context
 
-This is a Master's Thesis proof-of-concept for a **governed AI agent architecture** with human oversight. It demonstrates controlled task intake, runtime planning/execution, multi-layer governance enforcement, and Human-in-the-Loop (HITL) review. The primary reference is `AGENTS.md` — treat it as the authoritative operational contract.
+This is a Master's Thesis proof of concept for an **auditable Human Oversight and
+Human-in-the-Loop control engine for autonomous AI agents**. The autonomous
+planner/actor/tool runtime is the necessary supervised system; the central thesis
+contribution is the evidence-aware, trajectory-aware, policy-driven, and digest-bound
+control architecture that governs its external effects and human escalation. The
+repository demonstrates controlled intake, real plan execution, OPA-owned governance,
+reason-scoped HITL, replayable traceability, and offline evaluation. The primary
+reference is `AGENTS.md` - treat it as the authoritative operational contract.
 
 ## Commands
 
@@ -53,7 +60,7 @@ Required in `.env` or `src/.env`:
 
 ## Architecture
 
-### Two-Layer System
+### Oversight-centered Two-Layer System
 
 **Layer 1 — Task Intake** (`src/layer1_intake/`): Parses raw user task text via OpenAI LLM into a canonical `IntakeResult` (Pydantic). Resolves an `ExecutionPolicy` from `configs/layer1_execution_policies.json` based on domain type and sensitivity. Its output bootstraps Layer 2.
 
@@ -78,8 +85,8 @@ finalize_bootstrap → END
 ### OPA-first governance and three active pillars
 
 1. **Evidence Integrity & Provenance** — deterministic identity, uniqueness, concrete content, lineage, known-step, title-only fragility, and candidate/snapshot/selection digest binding. It never judges entailment.
-2. **Trajectory Health** — deterministic progress deltas, replan basis, retry/recovery, unchanged resubmission, and revision churn. Point confidence belongs to `base_facts.uncertainty`.
-3. **Governed External Semantic Judge** — after OPA admission, evaluates the exact payload against the complete semantic observation base. It excludes process narration and emits only typed semantic assessments.
+2. **Trajectory Health** — deterministic progress deltas, replan basis, retry/recovery, unchanged/rejected resubmission, and revision churn. Replan stall and candidate resubmission remain distinct signals. Point confidence belongs to `base_facts.uncertainty`.
+3. **Governed External Semantic Judge** — after OPA admission, evaluates the exact payload against the complete semantic observation base supplied as the deterministic, persisted `judge_evidence_bundle.v1`. It never searches the run, can cite only bundle-listed `evidence_id` values, excludes process narration, and emits only typed semantic assessments.
 4. **OPA/Rego** — evaluates static policy, stages the Judge after deterministic gates, and returns the only final directive. Operational risk and behavioral intelligence remain shadow-only.
 
 ### Key Patterns
@@ -87,7 +94,8 @@ finalize_bootstrap → END
 - **Typed planning/acting split**: Planner emits semantic `PlanStep` objects; actor executes one step at a time, emitting typed `ActorResult` with `ActorResultType` enum.
 - **Tool Gateway** (`tools/`, compatibility facade `tool_gateway.py`): Registry-controlled, typed `ToolRequest` → `ToolExecutionResult` → minimal `ToolObservation`. Tools include `web_search`, `fetch_url_text`, and configured read-only MCP test tools.
 - **Evidence tracking**: observations carry only stable identity, concrete content, and optional locator; provenance is reconstructed from immutable tool results. Task instructions are not observations.
-- **HITL** (`hitl/`): LangGraph `interrupt`/`resume`. Review actions are reason-scoped; unsafe/uncertain Judge verdicts expose modify/replan/abort, while capability approval adds exact-digest approval.
+- **HITL** (`hitl/`): LangGraph `interrupt`/`resume`. Review actions are reason-scoped; unsafe/uncertain Judge verdicts and unchanged/rejected candidates expose modify/replan/abort. Only an uncontaminated `capability_approval_required` gate can add exact-digest execution approval; unknown and legacy external pauses cannot.
+- **External execution**: the connector is entered only after candidate/operation/Evidence/terminal-step preflight. Connector exceptions and mismatched or untyped receipts become checkpointable `indeterminate` reconciliation records.
 - **Replanner** (`replanning.py`): Triggered on `NEEDS_REPLAN`; replaces only current + pending steps; completed steps are immutable history.
 - **Persistence** (`persistence.py`): LangGraph checkpoints → `artifacts/runtime/checkpoints/`; per-thread artifacts → `artifacts/runtime/<thread_id>/`; behavioral SQLite → `artifacts/runtime/behavioral/behavioral.sqlite3`.
 - **Traceability** (`observability/`, `evaluation_service/`): `layer2_trace.v6` is a JSON-exportable read model used for thesis evidence, HITL payloads, and offline evaluation.

@@ -71,6 +71,8 @@ class GovernanceReasonCode(str, Enum):
     INVALID_OR_MISSING_SELECTED_EVIDENCE = "invalid_or_missing_selected_evidence"
     ACTOR_REQUESTED_REPLAN = "actor_requested_replan"
     REPLAN_REQUEST_STALLED = "replan_request_stalled"
+    UNCHANGED_CANDIDATE_RESUBMISSION = "unchanged_candidate_resubmission"
+    REJECTED_CANDIDATE_RESUBMITTED = "rejected_candidate_resubmitted"
     EXTERNAL_LOW_ACTOR_SELF_CONFIDENCE = "external_low_actor_self_confidence"
     ACTION_REVISION_LIMIT_REACHED = "action_revision_limit_reached"
     CAPABILITY_APPROVAL_REQUIRED = "capability_approval_required"

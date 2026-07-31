@@ -9,7 +9,6 @@ from layer2_runtime_governance.domain import (
     build_evidence_snapshot_manifest,
     build_observation_lineage,
     digest_json,
-    digest_text,
 )
 from layer2_runtime_governance.external_operations import (
     CommunicationOperationPayload,
@@ -29,6 +28,7 @@ from layer2_runtime_governance.judge import (
     JudgeRecommendedDirective,
     JudgeSeverity,
     JudgeVerdict,
+    build_judge_evidence_bundle,
 )
 
 
@@ -63,11 +63,7 @@ def build_judge_context(
         evidence_snapshot_digest=evidence_snapshot_digest,
         external_operation_digest=external_operation.payload_digest,
     )
-    content_truncated = any(
-        item.content_truncated or item.extractability_limited
-        for item in observation_lineage.values()
-    )
-    return JudgeContext(
+    context = JudgeContext(
         task_goal=task_state.task_spec.goal,
         task_constraints=tuple(task_state.task_spec.constraints),
         authorized_context=task_state.task_spec.context,
@@ -97,7 +93,6 @@ def build_judge_context(
                     else None
                 ),
                 selected_by_actor=item.observation_id in selected_ref_set,
-                content_digest=digest_text(item.content),
                 content_truncated=bool(
                     item.observation_id in observation_lineage
                     and (
@@ -164,13 +159,20 @@ def build_judge_context(
             if isinstance(external_operation.payload, CommunicationOperationPayload)
             else None
         ),
-        evidence_base_complete=not content_truncated,
+        # Coverage and per-observation extractability are separate contracts.
+        # Every canonical observation is represented even when one item reports
+        # bounded or incomplete extracted content.
+        evidence_base_complete=True,
         observation_count=len(task_state.observations),
         included_observation_count=len(task_state.observations),
         omitted_observation_ids=(),
         evidence_snapshot_digest=evidence_snapshot_digest,
         evidence_selection_digest=evidence_selection_digest,
-        serialization_version="judge_context.v3",
+        serialization_version="judge_context.v4",
+    )
+    return replace(
+        context,
+        evidence_bundle=build_judge_evidence_bundle(context=context),
     )
 
 
