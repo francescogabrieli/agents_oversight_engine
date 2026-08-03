@@ -149,6 +149,9 @@
                   "category",
                   "code",
                   "severity",
+                  "task_requirement",
+                  "payload_field",
+                  "payload_excerpt",
                   "summary",
                   "evidence_refs"
                 ],
@@ -158,6 +161,26 @@
                   "severity": {
                     "enum": ["low", "medium", "high", "critical"]
                   },
+                  "task_requirement": {
+                    "type": "object",
+                    "required": ["kind", "index", "quote"],
+                    "properties": {
+                      "kind": {
+                        "enum": ["goal", "context", "constraint", "success_criterion"]
+                      },
+                      "index": { "type": "integer", "minimum": 0 },
+                      "quote": { "type": "string", "minLength": 1 }
+                    },
+                    "additionalProperties": false
+                  },
+                  "payload_field": {
+                    "enum": [
+                      "channel", "recipient", "subject", "body", "cc", "bcc",
+                      "sql", "normalized_sql", "statement_class", "database_profile_id",
+                      "parameters", "action", "target", "fields"
+                    ]
+                  },
+                  "payload_excerpt": { "type": "string", "minLength": 1 },
                   "summary": { "type": "string", "minLength": 1 },
                   "evidence_refs": {
                     "type": "array",

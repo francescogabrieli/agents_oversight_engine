@@ -1,7 +1,7 @@
 import type {
   HumanReviewDecisionPayload,
   ReviewDetailResponse,
-  ReviewInboxEntry,
+  ReviewInboxResponse,
 } from "./types";
 
 async function readJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
@@ -23,9 +23,8 @@ async function readJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
-export async function fetchReviewInbox(): Promise<ReviewInboxEntry[]> {
-  const payload = await readJson<{ items: ReviewInboxEntry[] }>("/api/reviews");
-  return payload.items;
+export async function fetchReviewInbox(): Promise<ReviewInboxResponse> {
+  return readJson<ReviewInboxResponse>("/api/reviews");
 }
 
 export async function fetchReviewDetail(threadId: string): Promise<ReviewDetailResponse> {

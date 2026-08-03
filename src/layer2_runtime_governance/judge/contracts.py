@@ -66,6 +66,40 @@ class JudgeFindingCategory(str, Enum):
     OTHER = "other"
 
 
+class JudgeTaskRequirementKind(str, Enum):
+    # The four authoritative task surfaces available to a finding anchor.
+    GOAL = "goal"
+    CONTEXT = "context"
+    CONSTRAINT = "constraint"
+    SUCCESS_CRITERION = "success_criterion"
+
+
+class JudgePayloadField(str, Enum):
+    # Closed payload fields prevent a finding from naming an invented review surface.
+    CHANNEL = "channel"
+    RECIPIENT = "recipient"
+    SUBJECT = "subject"
+    BODY = "body"
+    CC = "cc"
+    BCC = "bcc"
+    SQL = "sql"
+    NORMALIZED_SQL = "normalized_sql"
+    STATEMENT_CLASS = "statement_class"
+    DATABASE_PROFILE_ID = "database_profile_id"
+    PARAMETERS = "parameters"
+    ACTION = "action"
+    TARGET = "target"
+    FIELDS = "fields"
+
+
+@dataclass(frozen=True)
+class JudgeTaskRequirement:
+    # This exact task quote makes a semantic finding replayable and falsifiable.
+    kind: JudgeTaskRequirementKind
+    index: int
+    quote: str
+
+
 @dataclass(frozen=True)
 class JudgeFinding:
     # Findings are concise semantic observations, never runtime directives.
@@ -74,6 +108,9 @@ class JudgeFinding:
     severity: JudgeSeverity
     summary: str
     evidence_refs: tuple[str, ...] = ()
+    task_requirement: JudgeTaskRequirement | None = None
+    payload_field: JudgePayloadField | None = None
+    payload_excerpt: str | None = None
 
     # Preserve tuple semantics when checkpoint serializers restore arrays as lists.
     def __post_init__(self) -> None:
@@ -218,6 +255,19 @@ class JudgeExternalRevisionContext:
 
 
 @dataclass(frozen=True)
+class JudgeStageContract:
+    # Stage-local lifecycle facts are model-visible data rather than remote prose.
+    stage: JudgeOperationStage
+    side_effect_expected: bool
+    completeness_definition: str
+    out_of_scope_checks: tuple[str, ...] = ()
+
+    # Preserve the closed check list through checkpoint restoration.
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "out_of_scope_checks", tuple(self.out_of_scope_checks))
+
+
+@dataclass(frozen=True)
 class JudgeContext:
     # JudgeContext intentionally excludes static, dynamic, risk, and behavioral assessments.
     task_goal: str
@@ -226,6 +276,7 @@ class JudgeContext:
     current_plan_step: JudgePlanStepContext
     external_operation: ExternalOperationProposal
     operation_stage: JudgeOperationStage
+    stage_contract: JudgeStageContract
     selected_evidence_refs: tuple[str, ...]
     observations: tuple[JudgeEvidenceContext, ...]
     # These legacy process fields are compatibility-only and are never serialized to the prompt.
@@ -249,7 +300,7 @@ class JudgeContext:
     omitted_observation_ids: tuple[str, ...] = ()
     evidence_snapshot_digest: str | None = None
     evidence_selection_digest: str | None = None
-    serialization_version: str = "judge_context.v4"
+    serialization_version: str = "judge_context.v5"
     # Built deterministically from the fields above and used as the sole model-visible pool.
     evidence_bundle: JudgeEvidenceBundle | None = None
 
@@ -333,12 +384,16 @@ __all__ = [
     "JudgeFindingCategory",
     "JudgeModelMetadata",
     "JudgeOperationStage",
+    "JudgePayloadField",
     "JudgePlanStepContext",
     "JudgePort",
     "JudgeRecommendedDirective",
     "JudgeRuntimeEventContext",
     "JudgeScratchpadContext",
     "JudgeSeverity",
+    "JudgeStageContract",
+    "JudgeTaskRequirement",
+    "JudgeTaskRequirementKind",
     "JudgeToolArgumentContext",
     "JudgeToolExecutionContext",
     "JudgeVerdict",

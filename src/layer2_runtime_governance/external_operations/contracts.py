@@ -226,6 +226,11 @@ class JudgeFindingSnapshot:
     severity: str
     summary: str
     evidence_refs: tuple[str, ...] = ()
+    task_requirement_kind: str | None = None
+    task_requirement_index: int | None = None
+    task_requirement_quote: str | None = None
+    payload_field: str | None = None
+    payload_excerpt: str | None = None
 
 
 @dataclass(frozen=True)

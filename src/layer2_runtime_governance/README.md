@@ -59,6 +59,16 @@ LangGraph checkpoints are the only resumable memory for `interrupt()` / `Command
 Trace JSON, dashboard snapshots, and the behavioural database are read models and must never
 be used to reconstruct an interrupted graph.
 
+The standalone dashboard validates and writes typed, request-bound decisions to a durable
+decision inbox. It never invokes the graph. The original leased runtime owner claims each
+decision and resumes the official checkpoint in the same process; the inbox records delivery
+state but is not resumable workflow memory.
+
+The runtime heartbeats its lease during resume and supports explicit interrupted-thread
+recovery through `main_layer2.py --attach-thread <thread_id>`. Recovery is permitted only
+for the exact request still present in the canonical checkpoint. The bundled inbox adapter
+is local SQLite; multi-host composition requires a shared implementation of its port.
+
 ## Governance authority
 
 OPA/Rego is the sole directive authority. Static policy contains only deterministic

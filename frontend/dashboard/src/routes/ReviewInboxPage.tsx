@@ -1,11 +1,12 @@
-import { Link } from "react-router-dom";
+import { useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { fetchReviewInbox } from "../api";
 import { usePolledResource } from "../hooks";
 import type { ReviewInboxEntry } from "../types";
 
 function statusClass(runtimeState: string | null) {
   if (runtimeState === "waiting_human_review") return "inbox-row-status inbox-row-status-waiting";
-  if (runtimeState === "completed") return "inbox-row-status inbox-row-status-completed";
+  if (runtimeState === "completed" || runtimeState === "review_completed") return "inbox-row-status inbox-row-status-completed";
   if (runtimeState === "aborted") return "inbox-row-status inbox-row-status-aborted";
   return "inbox-row-status inbox-row-status-default";
 }
@@ -16,7 +17,7 @@ function statusIcon(runtimeState: string | null) {
       <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
     </svg>
   );
-  if (runtimeState === "completed") return (
+  if (runtimeState === "completed" || runtimeState === "review_completed") return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="20 6 9 17 4 12"/>
     </svg>
@@ -35,7 +36,7 @@ function statusIcon(runtimeState: string | null) {
 
 function badgeClass(runtimeState: string | null) {
   if (runtimeState === "waiting_human_review") return "badge badge-waiting";
-  if (runtimeState === "completed") return "badge badge-completed";
+  if (runtimeState === "completed" || runtimeState === "review_completed") return "badge badge-completed";
   if (runtimeState === "aborted") return "badge badge-aborted";
   return "badge badge-default";
 }
@@ -52,12 +53,9 @@ function formatTimestamp(value: string | null) {
   }).format(ts);
 }
 
-function InboxRow({ item }: { item: ReviewInboxEntry }) {
-  return (
-    <Link
-      to={`/threads/${encodeURIComponent(item.thread_id)}`}
-      className="inbox-row"
-    >
+function InboxRow({ item, interactive = true }: { item: ReviewInboxEntry; interactive?: boolean }) {
+  const content = (
+    <>
       <div className={statusClass(item.runtime_state)}>
         {statusIcon(item.runtime_state)}
       </div>
@@ -75,6 +73,12 @@ function InboxRow({ item }: { item: ReviewInboxEntry }) {
             ) : null}
             {item.external_execution_status ? (
               <span className="badge badge-info">{item.external_execution_status}</span>
+            ) : null}
+            {item.decision_type ? (
+              <span className="badge badge-completed">{item.decision_type}</span>
+            ) : null}
+            {item.delivery_status ? (
+              <span className="badge badge-neutral">{item.delivery_status}</span>
             ) : null}
             <p className="inbox-row-title">{item.task_goal ?? "Untitled task"}</p>
           </div>
@@ -94,13 +98,35 @@ function InboxRow({ item }: { item: ReviewInboxEntry }) {
           </div>
         ) : null}
       </div>
+    </>
+  );
+  if (!interactive) {
+    return <div className="inbox-row inbox-row-resolved" aria-disabled="true">{content}</div>;
+  }
+  return (
+    <Link to={`/threads/${encodeURIComponent(item.thread_id)}`} className="inbox-row">
+      {content}
     </Link>
   );
 }
 
 export function ReviewInboxPage() {
   const { data, error, loading } = usePolledResource(fetchReviewInbox, []);
-  const items = data ?? [];
+  const items = data?.items ?? [];
+  const completedItems = data?.completed_items ?? [];
+  const location = useLocation();
+  const navigate = useNavigate();
+  const locationFeedback = (
+    location.state as { decisionFeedback?: string } | null
+  )?.decisionFeedback;
+  const [decisionFeedback, setDecisionFeedback] = useState<string | null>(
+    locationFeedback ?? null,
+  );
+
+  const closeDecisionModal = () => {
+    setDecisionFeedback(null);
+    navigate("/", { replace: true, state: null });
+  };
 
   return (
     <div style={{ display: "grid", gap: 20 }}>
@@ -153,6 +179,43 @@ export function ReviewInboxPage() {
           </div>
         </div>
       </div>
+
+      {completedItems.length > 0 ? (
+        <div className="card completed-reviews-card">
+          <div className="card-header">
+            <div>
+              <h2 className="card-title">Completate</h2>
+              <p className="card-caption">Decisioni inviate negli ultimi due minuti.</p>
+            </div>
+            <span className="badge badge-completed">{completedItems.length} risolte</span>
+          </div>
+          <div className="card-body">
+            <div className="inbox-list">
+              {completedItems.map((item) => (
+                <InboxRow key={`${item.request_id}-${item.updated_at}`} item={item} interactive={false} />
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {decisionFeedback ? (
+        <div className="modal-backdrop" role="presentation">
+          <section
+            className="decision-success-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="decision-success-title"
+          >
+            <div className="decision-success-icon" aria-hidden="true">✓</div>
+            <h2 id="decision-success-title">Decisione inviata correttamente</h2>
+            <p>{decisionFeedback}</p>
+            <button className="btn btn-primary" type="button" onClick={closeDecisionModal}>
+              Chiudi
+            </button>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -234,10 +234,10 @@ Current design:
 - `schemas/layer2_trace.schema.json` is the closed Draft 2020-12 contract for runtime-produced `layer2_trace.v6`; only `evaluation_service` may project historical traces into that current read model
 - `evaluation/` defines the offline trace evaluation pipeline that reads exported trace JSON and produces JSON and Markdown reports, including typed-vs-heuristic evidence mismatch accounting
 - `hitl_dashboard.py` defines the dashboard-facing snapshot model derived from `TaskState`, governance, oversight, and HITL review payloads
-- `main_layer2_dashboard.py` now acts as a standalone multi-thread HITL control plane backend that serves the React dashboard build, exposes the review inbox/detail/resume API, and resolves resume actions from persisted checkpoints on demand
-- `main_layer2_dashboard.py` now also persists post-resume artifacts through the same runtime artifact store used by the dashboard inbox/detail API, so HITL decisions immediately refresh the observed thread state after agent continuation
-- `main_layer2_dashboard.py` rebuilds a persisted thread directly from the configured official LangGraph checkpointer, so the standalone dashboard can resume runs created by a separate `main_layer2.py` process without relying on stale in-memory state or trace artifacts
-- the dashboard review inbox is intentionally action-oriented and now hides pending-review threads whose persisted `updated_at` is older than 2 minutes; old artifacts remain on disk and detail views can still be resolved directly by thread id
+- `main_layer2_dashboard.py` acts as a standalone multi-thread HITL control plane backend that serves the React dashboard build and exposes review inbox, detail, and typed decision-submission APIs; it validates and durably enqueues decisions but never executes or resumes the LangGraph runtime
+- `infrastructure/review_decision_inbox.py` is the durable control-plane transport between the dashboard and the runtime owner; it provides idempotent request-bound submissions, atomic claiming, delivery status, and a single-owner lease, but it is not runtime state and cannot reconstruct a graph
+- the original `main_layer2.py` process remains the execution owner while a thread is interrupted, consumes the queued decision, and applies `Command(resume=...)` through the official checkpointer while streaming continuation progress in the same terminal
+- the dashboard removes a submitted request from active approvals immediately, exposes it as a non-interactive completed-review item for 2 minutes, and then removes that transient acknowledgement; canonical run completion remains distinct from review completion
 - `frontend/dashboard` contains the standalone React + TypeScript + Tailwind + daisyUI dashboard frontend that is built into static assets and served by `main_layer2_dashboard.py`
 - `configs/opa/layer2_governance/data.json` is the sole source for static organizational constraints and bounded external-action revision limits consumed by OPA
 - `infrastructure/runtime_warnings.py` centralizes warning suppression needed before importing selected LangGraph/LangChain dependencies
@@ -305,6 +305,7 @@ Current relevant files:
 - `tests/test_layer2_hitl_dashboard.py`
 - `tests/test_hitl_control_plane.py`
 - `tests/test_main_layer2_dashboard.py`
+- `tests/test_review_decision_inbox.py`
 - `tests/test_layer2_oversight.py`
 - `tests/test_layer2_trace.py`
 - `tests/test_tool_gateway_mcp.py`
@@ -468,11 +469,13 @@ Current relevant files:
 - The semantic judge is invoked only after OPA admits a complete governed-external candidate. It receives authoritative task data, full semantic plan, completed-step summaries, all canonical observations and selected references, same-operation revision findings, and the exact digest-bound payload; it never receives scratchpad, raw tool history/arguments, runtime events, counters, retry/replan history, or shadow assessments.
 - runtime trace export must be read-only over `TaskState`; it must not mutate runtime state or become a parallel source of truth
 - `main_layer2.py` may print trace views, but reusable trace construction belongs in `observability/`
-- `resume_layer2_flow` should prefer the direct LangGraph `invoke(Command(resume=...))` result when it contains the canonical `task_state`, because interrupted checkpoints may briefly expose only a partial snapshot wrapper during resume
+- `resume_layer2_flow` should prefer the direct LangGraph `invoke(Command(resume=...))` result when it contains the canonical `task_state`, because interrupted checkpoints may briefly expose only a partial snapshot wrapper during resume; the CLI-owned HITL path may stream the same command to keep node progress visible in the original terminal
 - `main_layer2_evaluation.py` is the offline, trace-only evaluation entrypoint and must stay decoupled from the live runtime CLI
 - `ABORTED` is the hard-denial runtime state for governance decisions that must not be conflated with review
 - HITL is wired as `interrupt / resume`; governance now pauses in typed states and resumes from typed human decisions
-- the local Layer 2 CLI no longer auto-launches the HITL control plane; the standalone dashboard process discovers new `WAITING_HUMAN_REVIEW` threads by polling persisted runtime artifacts
+- the local Layer 2 CLI no longer auto-launches the HITL control plane; while a thread is in `WAITING_HUMAN_REVIEW`, the original CLI remains alive as its leased runtime owner and polls the durable decision inbox, while the standalone dashboard discovers pending reviews from persisted runtime artifacts and only submits decisions
+- owner leases must be heartbeated while a resumed provider/tool call is in flight; after owner loss, `--attach-thread <thread_id>` may recover only a checkpoint that is still waiting for the exact request, and the inbox may reclaim that same request-bound command from `claimed` or `failed` delivery state
+- the current proof-of-concept inbox adapter is local SQLite; any multi-host deployment must bind `ReviewDecisionInboxPort` to shared transactional storage rather than combining PostgreSQL checkpoints with host-local inbox files
 - `runtime_summary.json` is now inbox-oriented and includes `task_goal`, `review_summary`, `pending_request_id`, `allowed_decisions`, `external_communication_phase`, `has_pending_human_review`, and `updated_at`
 - the dashboard snapshot is the sole artifact DTO for pending-review data; the standalone dashboard may read legacy `pending_human_review.json` files but never writes new ones
 
@@ -564,6 +567,12 @@ Run the standalone local HITL control plane dashboard:
 
 ```powershell
 .\.venv\Scripts\python.exe src\main_layer2_dashboard.py --open-browser
+```
+
+Recover an interrupted thread whose original runtime owner is no longer alive:
+
+```powershell
+.\.venv\Scripts\python.exe src\main_layer2.py --attach-thread <thread_id>
 ```
 
 

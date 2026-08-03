@@ -9,6 +9,14 @@ export type ReviewInboxEntry = {
   external_communication_phase: string | null;
   execution_intent?: string | null;
   external_execution_status?: string | null;
+  decision_type?: string | null;
+  delivery_status?: string | null;
+  owner_available?: boolean;
+};
+
+export type ReviewInboxResponse = {
+  items: ReviewInboxEntry[];
+  completed_items: ReviewInboxEntry[];
 };
 
 export type DashboardPlanStep = {
@@ -90,6 +98,17 @@ export type ReviewDetailResponse = {
   runtime_summary?: Record<string, unknown> | null;
   dashboard_snapshot?: DashboardSnapshot | null;
   operator_feedback?: string;
+  decision_submission?: {
+    submission_id: string;
+    thread_id: string;
+    request_id: string;
+    decision_type: string;
+    reviewer_id?: string | null;
+    submitted_at: string;
+    delivery_status: string;
+    owner_available: boolean;
+    error?: string | null;
+  };
 };
 
 export type HumanReviewDecisionPayload = {

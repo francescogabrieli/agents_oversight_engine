@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import json
 import mimetypes
@@ -10,8 +11,10 @@ from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import urlparse
+
+from json_serialization import to_jsonable
 
 from layer1_intake import IntakeResult
 from layer2_runtime_governance import (
@@ -29,6 +32,13 @@ from layer2_runtime_governance import (
     coerce_human_review_decision_payload,
 )
 from layer2_runtime_governance.infrastructure.runtime_artifacts import RuntimeArtifactStore
+from layer2_runtime_governance.hitl.decision_inbox import (
+    ReviewDecisionInboxPort,
+    ReviewDecisionSubmission,
+)
+from layer2_runtime_governance.infrastructure.review_decision_inbox import (
+    SQLiteReviewDecisionInbox,
+)
 from layer2_runtime_governance.domain import (
     TaskState,
     coerce_external_operation_proposal,
@@ -38,9 +48,6 @@ from layer2_runtime_governance.composition import (
     Layer2RuntimeDependencies,
     compose_layer2_runtime,
 )
-
-from main_layer2 import resume_layer2_flow
-
 
 # Keep the local dashboard bound to loopback by default.
 DEFAULT_HOST = "127.0.0.1"
@@ -54,23 +61,22 @@ DEFAULT_PORT = 8022
 REVIEW_INBOX_CUTOFF = timedelta(minutes=2)
 
 
+# Keep recently submitted review actions visible but non-actionable for two minutes.
+REVIEW_COMPLETED_CUTOFF = timedelta(minutes=2)
+
+
 # Resolve the built React application relative to the repo root.
 DEFAULT_STATIC_ROOT = Path(__file__).resolve().parents[1] / "frontend" / "dashboard" / "dist"
 
 
-# DashboardRunner is the callable used to resume a paused Layer 2 run.
-DashboardRunner = Callable[..., dict[str, Any]]
-
-
 @dataclass
 class DashboardSession:
-    # Keep the typed session shape available for checkpoint-backed resume flows.
+    # Keep the typed session shape available for checkpoint-backed validation.
     thread_id: str
     intake_result: IntakeResult | None
     final_result: dict[str, Any]
     checkpointer: Any
     artifact_store: RuntimeArtifactStore
-    resume_flow: DashboardRunner = resume_layer2_flow
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
 
@@ -79,14 +85,21 @@ class DashboardServerContext:
     # Group the server dependencies so the request handler can stay stateless.
     artifact_store: RuntimeArtifactStore
     checkpointer: Any
-    resume_flow: DashboardRunner
+    decision_inbox: ReviewDecisionInboxPort
     static_root: Path
 
 
 class Layer2DashboardHTTPServer(ThreadingHTTPServer):
-    # Own and release only the checkpointer created by the dashboard server factory.
-    def __init__(self, *args, owned_checkpointer: Any | None = None, **kwargs) -> None:
+    # Own and release infrastructure created by the dashboard server factory.
+    def __init__(
+        self,
+        *args,
+        owned_checkpointer: Any | None = None,
+        owned_decision_inbox: ReviewDecisionInboxPort | None = None,
+        **kwargs,
+    ) -> None:
         self._owned_checkpointer = owned_checkpointer
+        self._owned_decision_inbox = owned_decision_inbox
         super().__init__(*args, **kwargs)
 
     # Close the saver connection or pool together with the HTTP server.
@@ -97,6 +110,9 @@ class Layer2DashboardHTTPServer(ThreadingHTTPServer):
             if self._owned_checkpointer is not None:
                 close_checkpointer(self._owned_checkpointer)
                 self._owned_checkpointer = None
+            if self._owned_decision_inbox is not None:
+                self._owned_decision_inbox.close()
+                self._owned_decision_inbox = None
 
 
 # Rebuild a checkpoint-backed dashboard session from an in-memory trace payload.
@@ -105,7 +121,6 @@ def build_dashboard_session_from_trace(
     *,
     checkpointer: Any,
     artifact_store: RuntimeArtifactStore | None = None,
-    resume_flow: DashboardRunner = resume_layer2_flow,
 ) -> DashboardSession:
     return DashboardSession(
         thread_id=trace["thread_id"],
@@ -113,7 +128,6 @@ def build_dashboard_session_from_trace(
         final_result=trace["final_result"],
         checkpointer=checkpointer,
         artifact_store=artifact_store or RuntimeArtifactStore(),
-        resume_flow=resume_flow,
     )
 
 
@@ -123,7 +137,6 @@ def build_dashboard_session_from_thread_id(
     *,
     checkpointer: Any | None = None,
     artifact_store: RuntimeArtifactStore | None = None,
-    resume_flow: DashboardRunner = resume_layer2_flow,
 ) -> DashboardSession:
     resolved_checkpointer = checkpointer or build_default_checkpointer()
     resolved_artifact_store = artifact_store or RuntimeArtifactStore()
@@ -143,28 +156,10 @@ def build_dashboard_session_from_thread_id(
             final_result=dict(snapshot_values),
             checkpointer=resolved_checkpointer,
             artifact_store=resolved_artifact_store,
-            resume_flow=resume_flow,
         )
 
     # A trace artifact is read-only observability data, never a source for LangGraph resume.
     raise ValueError(f"Persisted thread '{thread_id}' does not contain a canonical LangGraph checkpoint.")
-
-
-# Resume one checkpoint-backed session with a typed human review decision.
-def resume_dashboard_session(
-    session: DashboardSession,
-    human_review_decision: HumanReviewDecision,
-) -> dict[str, Any]:
-    with session.lock:
-        # Persist resume artifacts through the same store the dashboard is reading from.
-        final_result = session.resume_flow(
-            thread_id=session.thread_id,
-            human_review_decision=human_review_decision,
-            checkpointer=session.checkpointer,
-            artifact_store=session.artifact_store,
-        )
-        session.final_result = final_result["final_result"]
-        return final_result
 
 
 # Return the canonical TaskState held by a checkpoint-backed session.
@@ -487,18 +482,62 @@ def _coerce_external_communication_draft(payload: Any) -> ExternalCommunicationD
 # Build a compact operator feedback message aligned with the typed decision semantics.
 def _build_operator_feedback_message(decision: HumanReviewDecision) -> str:
     if decision.decision_type == HumanReviewDecisionType.MODIFY_AND_CONTINUE:
-        return "The edited external proposal received a new digest and returned to governance."
+        return "Decision submitted successfully. The runtime owner will apply the edited proposal."
     if decision.decision_type == HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY:
-        return "The runtime resumed under the approved read-only envelope."
+        return "Decision submitted successfully. The runtime owner will continue read-only."
     if decision.decision_type == HumanReviewDecisionType.APPROVE_CONTINUE:
-        return "The runtime resumed on the approved execution path."
+        return "Decision submitted successfully. The runtime owner will continue the approved path."
     if decision.decision_type == HumanReviewDecisionType.REQUEST_MORE_EVIDENCE:
-        return "The runtime resumed in a more conservative evidence-gathering path."
+        return "Decision submitted successfully. The runtime owner will gather more evidence."
     if decision.decision_type == HumanReviewDecisionType.REPLAN:
-        return "The runtime resumed by invalidating the current path and entering replanning."
+        return "Decision submitted successfully. The runtime owner will enter replanning."
     if decision.decision_type == HumanReviewDecisionType.ASK_CLARIFICATION:
-        return "The clarification request was accepted and the run remains paused for resolution."
-    return "The abort decision was accepted and the run is now stopped."
+        return "Decision submitted successfully. The clarification request is queued for the runtime owner."
+    return "Decision submitted successfully. The runtime owner will apply the abort decision."
+
+
+# Persist one validated decision for the sole runtime owner instead of invoking the graph here.
+def submit_dashboard_decision(
+    session: DashboardSession,
+    decision: HumanReviewDecision,
+    *,
+    decision_inbox: ReviewDecisionInboxPort,
+) -> ReviewDecisionSubmission:
+    pending_request = get_dashboard_pending_review_request(session)
+    payload = to_jsonable(decision)
+    if not isinstance(payload, dict):
+        raise ValueError("The validated human review decision is not JSON-serializable.")
+    task_goal = None
+    if session.intake_result is not None:
+        task_goal = session.intake_result.structured_task.task_spec.goal
+    return decision_inbox.submit(
+        thread_id=session.thread_id,
+        request_id=decision.request_id,
+        decision_type=decision.decision_type.value,
+        decision_payload=payload,
+        reviewer_id=decision.reviewer_id,
+        task_goal=task_goal,
+        review_summary=pending_request.review_summary,
+    )
+
+
+# Serialize one decision-delivery record for dashboard diagnostics.
+def _decision_submission_to_dict(
+    submission: ReviewDecisionSubmission,
+    *,
+    owner_available: bool,
+) -> dict[str, Any]:
+    return {
+        "submission_id": submission.submission_id,
+        "thread_id": submission.thread_id,
+        "request_id": submission.request_id,
+        "decision_type": submission.decision_type,
+        "reviewer_id": submission.reviewer_id,
+        "submitted_at": submission.submitted_at,
+        "delivery_status": submission.status.value,
+        "owner_available": owner_available,
+        "error": submission.error,
+    }
 
 
 # Read one JSON request body and keep validation errors user-facing.
@@ -519,6 +558,7 @@ def _load_review_detail(
     thread_id: str,
     *,
     artifact_store: RuntimeArtifactStore,
+    decision_inbox: ReviewDecisionInboxPort | None = None,
 ) -> dict[str, Any] | None:
     runtime_summary = artifact_store.read_runtime_summary(thread_id)
     dashboard_snapshot = artifact_store.read_dashboard_snapshot(thread_id)
@@ -531,11 +571,52 @@ def _load_review_detail(
         human_review = dict(dashboard_snapshot.get("human_review") or {})
         human_review.setdefault("pending_request", legacy_pending_review)
         dashboard_snapshot["human_review"] = human_review
-    return {
+    detail = {
         "thread_id": thread_id,
         "runtime_summary": runtime_summary,
         "dashboard_snapshot": dashboard_snapshot,
     }
+    if decision_inbox is None or not isinstance(dashboard_snapshot, dict):
+        return detail
+
+    human_review = dashboard_snapshot.get("human_review")
+    pending_request = (
+        human_review.get("pending_request")
+        if isinstance(human_review, dict)
+        else None
+    )
+    request_id = (
+        pending_request.get("request_id")
+        if isinstance(pending_request, dict)
+        else None
+    )
+    if not isinstance(request_id, str):
+        return detail
+    submission = decision_inbox.get_for_request(
+        thread_id=thread_id,
+        request_id=request_id,
+    )
+    if submission is None:
+        return detail
+
+    # Mask only dashboard actionability; the persisted TaskState remains authoritative.
+    projected_snapshot = deepcopy(dashboard_snapshot)
+    projected_human_review = dict(projected_snapshot.get("human_review") or {})
+    projected_human_review["pending_request"] = None
+    projected_human_review["allowed_decisions"] = []
+    projected_snapshot["human_review"] = projected_human_review
+    projected_snapshot["has_pending_review"] = False
+    projected_summary = deepcopy(runtime_summary) if isinstance(runtime_summary, dict) else None
+    if isinstance(projected_summary, dict):
+        projected_summary["has_pending_human_review"] = False
+        projected_summary["allowed_decisions"] = []
+    detail["runtime_summary"] = projected_summary
+    detail["dashboard_snapshot"] = projected_snapshot
+    detail["decision_submission"] = _decision_submission_to_dict(
+        submission,
+        owner_available=decision_inbox.get_live_owner(thread_id=thread_id) is not None,
+    )
+    return detail
 
 
 # Normalize one runtime summary into the compact inbox entry rendered by React.
@@ -661,10 +742,18 @@ def _is_review_inbox_entry_stale(updated_at: datetime) -> bool:
 
 
 # Load the pending-review inbox by scanning persisted runtime artifact directories.
-def _list_pending_reviews(*, artifact_store: RuntimeArtifactStore) -> list[dict[str, Any]]:
+def _list_pending_reviews(
+    *,
+    artifact_store: RuntimeArtifactStore,
+    decision_inbox: ReviewDecisionInboxPort,
+) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     for thread_id in artifact_store.list_thread_ids():
-        detail = _load_review_detail(thread_id, artifact_store=artifact_store)
+        detail = _load_review_detail(
+            thread_id,
+            artifact_store=artifact_store,
+            decision_inbox=decision_inbox,
+        )
         if detail is None:
             continue
         entry = _build_review_inbox_entry(
@@ -676,6 +765,52 @@ def _list_pending_reviews(*, artifact_store: RuntimeArtifactStore) -> list[dict[
         if entry is not None:
             entries.append(entry)
     return sorted(entries, key=lambda item: item.get("updated_at") or "", reverse=True)
+
+
+# Project one recently submitted review as completed control-plane work, not a terminal run.
+def _build_completed_review_entry(
+    submission: ReviewDecisionSubmission,
+    *,
+    decision_inbox: ReviewDecisionInboxPort,
+) -> dict[str, Any]:
+    return {
+        "thread_id": submission.thread_id,
+        "runtime_state": "review_completed",
+        "updated_at": submission.submitted_at,
+        "task_goal": submission.task_goal,
+        "review_summary": submission.review_summary,
+        "allowed_decisions": [],
+        "request_id": submission.request_id,
+        "external_communication_phase": None,
+        "execution_intent": None,
+        "external_execution_status": None,
+        "decision_type": submission.decision_type,
+        "delivery_status": submission.status.value,
+        "owner_available": (
+            decision_inbox.get_live_owner(thread_id=submission.thread_id) is not None
+        ),
+    }
+
+
+# Return active and recently completed review actions as distinct dashboard sections.
+def _list_review_inbox(
+    *,
+    artifact_store: RuntimeArtifactStore,
+    decision_inbox: ReviewDecisionInboxPort,
+) -> dict[str, list[dict[str, Any]]]:
+    recent = decision_inbox.list_recent(
+        within_seconds=int(REVIEW_COMPLETED_CUTOFF.total_seconds())
+    )
+    return {
+        "items": _list_pending_reviews(
+            artifact_store=artifact_store,
+            decision_inbox=decision_inbox,
+        ),
+        "completed_items": [
+            _build_completed_review_entry(item, decision_inbox=decision_inbox)
+            for item in recent
+        ],
+    }
 
 
 # Resolve one static file path while keeping reads inside the built frontend root.
@@ -695,7 +830,7 @@ def serve_dashboard(
     port: int = DEFAULT_PORT,
     artifact_store: RuntimeArtifactStore | None = None,
     checkpointer: Any | None = None,
-    resume_flow: DashboardRunner = resume_layer2_flow,
+    decision_inbox: ReviewDecisionInboxPort | None = None,
     static_root: Path = DEFAULT_STATIC_ROOT,
     open_browser: bool = False,
 ) -> None:
@@ -704,7 +839,7 @@ def serve_dashboard(
         port=port,
         artifact_store=artifact_store,
         checkpointer=checkpointer,
-        resume_flow=resume_flow,
+        decision_inbox=decision_inbox,
         static_root=static_root,
     )
     url = f"http://{host}:{port}"
@@ -728,21 +863,26 @@ def build_dashboard_httpd(
     port: int = DEFAULT_PORT,
     artifact_store: RuntimeArtifactStore | None = None,
     checkpointer: Any | None = None,
-    resume_flow: DashboardRunner = resume_layer2_flow,
+    decision_inbox: ReviewDecisionInboxPort | None = None,
     static_root: Path = DEFAULT_STATIC_ROOT,
 ) -> ThreadingHTTPServer:
     owns_checkpointer = checkpointer is None
+    owns_decision_inbox = decision_inbox is None
     resolved_checkpointer = checkpointer or build_default_checkpointer()
+    resolved_decision_inbox = decision_inbox or SQLiteReviewDecisionInbox()
     context = DashboardServerContext(
         artifact_store=artifact_store or RuntimeArtifactStore(),
         checkpointer=resolved_checkpointer,
-        resume_flow=resume_flow,
+        decision_inbox=resolved_decision_inbox,
         static_root=static_root,
     )
     return Layer2DashboardHTTPServer(
         (host, port),
         _build_request_handler(context=context),
         owned_checkpointer=resolved_checkpointer if owns_checkpointer else None,
+        owned_decision_inbox=(
+            resolved_decision_inbox if owns_decision_inbox else None
+        ),
     )
 
 
@@ -758,7 +898,12 @@ def _build_request_handler(*, context: DashboardServerContext):
                 self._write_json({"status": "ok"})
                 return
             if parsed.path == "/api/reviews":
-                self._write_json({"items": _list_pending_reviews(artifact_store=self.server_context.artifact_store)})
+                self._write_json(
+                    _list_review_inbox(
+                        artifact_store=self.server_context.artifact_store,
+                        decision_inbox=self.server_context.decision_inbox,
+                    )
+                )
                 return
             if parsed.path.startswith("/api/reviews/"):
                 self._handle_review_detail(parsed.path)
@@ -783,7 +928,11 @@ def _build_request_handler(*, context: DashboardServerContext):
             if not thread_id or "/" in thread_id:
                 self.send_error(HTTPStatus.NOT_FOUND, "Unknown dashboard route")
                 return
-            detail = _load_review_detail(thread_id, artifact_store=self.server_context.artifact_store)
+            detail = _load_review_detail(
+                thread_id,
+                artifact_store=self.server_context.artifact_store,
+                decision_inbox=self.server_context.decision_inbox,
+            )
             if detail is None:
                 self.send_error(HTTPStatus.NOT_FOUND, "No persisted review thread was found.")
                 return
@@ -801,12 +950,19 @@ def _build_request_handler(*, context: DashboardServerContext):
                     thread_id,
                     checkpointer=self.server_context.checkpointer,
                     artifact_store=self.server_context.artifact_store,
-                    resume_flow=self.server_context.resume_flow,
                 )
                 payload = _read_json_request(self)
                 decision = _parse_human_review_decision(payload, session=session)
-                resume_dashboard_session(session, decision)
-                detail = _load_review_detail(thread_id, artifact_store=self.server_context.artifact_store)
+                submission = submit_dashboard_decision(
+                    session,
+                    decision,
+                    decision_inbox=self.server_context.decision_inbox,
+                )
+                detail = _load_review_detail(
+                    thread_id,
+                    artifact_store=self.server_context.artifact_store,
+                    decision_inbox=self.server_context.decision_inbox,
+                )
                 if detail is None:
                     task_state = get_dashboard_task_state(session)
                     detail = {
@@ -819,13 +975,22 @@ def _build_request_handler(*, context: DashboardServerContext):
                         "dashboard_snapshot": None,
                     }
                 detail["operator_feedback"] = _build_operator_feedback_message(decision)
+                detail["decision_submission"] = _decision_submission_to_dict(
+                    submission,
+                    owner_available=(
+                        self.server_context.decision_inbox.get_live_owner(
+                            thread_id=thread_id
+                        )
+                        is not None
+                    ),
+                )
                 self._write_json(detail)
             except ValueError as exc:
                 self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
             except Exception as exc:  # pragma: no cover - protects the HTTP boundary.
                 # Keep backend failures visible to the operator instead of dropping the connection.
                 self._write_json(
-                    {"error": f"Unable to resume the LangGraph runtime: {exc}"},
+                    {"error": f"Unable to submit the human review decision: {exc}"},
                     status=HTTPStatus.INTERNAL_SERVER_ERROR,
                 )
 

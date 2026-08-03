@@ -81,24 +81,22 @@ describe("ReviewThreadPage", () => {
               external_communication: {},
             },
             operator_feedback: "The runtime resumed on the approved execution path.",
+            decision_submission: {
+              submission_id: "submission-1",
+              thread_id: "thread-1",
+              request_id: "thread-1:hitl",
+              decision_type: "approve_continue",
+              submitted_at: "2026-08-03T10:00:00+00:00",
+              delivery_status: "pending",
+              owner_available: true,
+            },
           }),
         })
         .mockResolvedValue({
           ok: true,
           json: async () => ({
-            thread_id: "thread-1",
-            runtime_summary: {
-              task_goal: "Inspect a governed draft.",
-            },
-            dashboard_snapshot: {
-              runtime_state: "acting",
-              has_pending_review: false,
-              is_terminal: false,
-              reason_codes: [],
-              governance: {},
-              oversight: {},
-              external_communication: {},
-            },
+            items: [],
+            completed_items: [],
           }),
         }),
     );
@@ -136,6 +134,10 @@ describe("ReviewThreadPage", () => {
         method: "POST",
       }),
     );
+    expect(
+      await screen.findByRole("dialog", { name: "Decisione inviata correttamente" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Submit decision" })).not.toBeInTheDocument();
   });
 
   it("keeps the selected decision when polling returns an equivalent review payload", async () => {

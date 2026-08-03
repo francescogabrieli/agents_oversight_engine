@@ -68,6 +68,7 @@ export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
     : operationProposal?.modifiable === true;
 
   const submit = async () => {
+    if (submitting) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -138,6 +139,7 @@ export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
             <button
               key={decision}
               type="button"
+              disabled={submitting}
               onClick={() => setDecisionType(decision)}
               className={[
                 "btn-decision",

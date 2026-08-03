@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { fetchReviewDetail, resumeReviewThread } from "../api";
 import { DecisionForm } from "../components/DecisionForm";
 import { KeyValueGrid } from "../components/KeyValueGrid";
@@ -21,10 +21,10 @@ function stateClass(state: string) {
 
 export function ReviewThreadPage() {
   const { threadId = "" } = useParams();
+  const navigate = useNavigate();
   const decodedThreadId = decodeURIComponent(threadId);
   const resource = usePolledResource(() => fetchReviewDetail(decodedThreadId), [decodedThreadId]);
   const [detailOverride, setDetailOverride] = useState<ReviewDetailResponse | null>(null);
-  const [operatorFeedback, setOperatorFeedback] = useState<string | null>(null);
 
   useEffect(() => {
     setDetailOverride(resource.data);
@@ -66,7 +66,6 @@ export function ReviewThreadPage() {
       </section>
 
       {resource.error ? <div className="alert alert-error">{resource.error}</div> : null}
-      {operatorFeedback ? <div className="alert alert-success">{operatorFeedback}</div> : null}
       {resource.loading && !detail ? <div className="skeleton" style={{ height: 120 }} /> : null}
 
       {detail && snapshot ? (
@@ -90,9 +89,13 @@ export function ReviewThreadPage() {
               detail={detail}
               onSubmit={async (payload) => {
                 const nextDetail = await resumeReviewThread(decodedThreadId, payload);
-                setDetailOverride(nextDetail);
-                setOperatorFeedback(nextDetail.operator_feedback ?? null);
-                await resource.refresh();
+                navigate("/", {
+                  replace: true,
+                  state: {
+                    decisionFeedback:
+                      nextDetail.operator_feedback ?? "Decision submitted successfully.",
+                  },
+                });
               }}
             />
           ) : (

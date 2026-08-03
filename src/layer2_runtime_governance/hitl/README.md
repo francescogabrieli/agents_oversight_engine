@@ -1,8 +1,18 @@
 # Human-in-the-loop capability
 
-This package owns typed review requests, `interrupt()` / `Command(resume=...)`
-handling, and dashboard-facing read models. LangGraph checkpoints remain the
-only source for resuming an interrupted execution.
+This package owns typed review requests, the durable decision-inbox port,
+`interrupt()` / `Command(resume=...)` handling, and dashboard-facing read models.
+The dashboard is decision ingress only: it validates and enqueues a request-bound
+command. The leased runtime owner consumes that command and resumes the graph in
+its original process. LangGraph checkpoints remain the only source for resuming
+an interrupted execution; the inbox is transport and delivery audit, not graph
+state.
+
+The CLI heartbeats its owner lease while resume work is in flight. A replacement
+terminal may use `--attach-thread` to recover only a checkpoint still waiting on
+the exact request and reclaim the same command after an interrupted delivery. The
+included SQLite adapter is local-PoC infrastructure; multi-host deployments must
+provide a shared transactional adapter for `ReviewDecisionInboxPort`.
 
 Dashboard projections live in `hitl.dashboard`; the root `hitl_dashboard.py`
 module remains a compatibility facade for existing callers.

@@ -58,13 +58,16 @@ from layer2_runtime_governance.infrastructure.runtime_artifacts import (
     RuntimeArtifactStore,
     persist_runtime_artifacts,
 )
+from layer2_runtime_governance.infrastructure.review_decision_inbox import (
+    SQLiteReviewDecisionInbox,
+)
 from main_layer2_dashboard import (
     DashboardSession,
     _build_response_headers,
     _parse_human_review_decision,
     build_dashboard_session_from_thread_id,
     build_dashboard_httpd,
-    resume_dashboard_session,
+    submit_dashboard_decision,
 )
 
 
@@ -82,9 +85,13 @@ class MainLayer2DashboardTests(unittest.TestCase):
             encoding="utf-8",
         )
         self.artifact_store = RuntimeArtifactStore(root_path=self.temp_root)
+        self.decision_inbox = SQLiteReviewDecisionInbox(
+            storage_path=self.temp_root / "review_decisions.sqlite3"
+        )
 
     # Clean up test artifacts and stop any leftover dashboard server.
     def tearDown(self) -> None:
+        self.decision_inbox.close()
         shutil.rmtree(self.temp_root, ignore_errors=True)
         shutil.rmtree(self.static_root, ignore_errors=True)
 
@@ -284,38 +291,21 @@ class MainLayer2DashboardTests(unittest.TestCase):
                 artifact_store=self.artifact_store,
             )
 
-    # Verify resume applies a typed decision and returns the refreshed persisted thread state.
-    def test_api_resume_returns_refreshed_thread(self) -> None:
+    # Verify the API queues one decision and immediately makes the review non-actionable.
+    def test_api_resume_queues_decision_for_runtime_owner(self) -> None:
         _persist_review_artifacts(self.artifact_store, thread_id="thread-resume", updated_at="2026-06-05T10:00:00+00:00")
         session = _build_paused_session(thread_id="thread-resume")
-
-        def _fake_resume_dashboard_session(
-            session: DashboardSession,
-            human_review_decision: HumanReviewDecision,
-        ) -> dict[str, object]:
-            task_state = session.final_result["task_state"]
-            task_state.current_state = RuntimeState.ACTING
-            task_state.pending_human_review_request = None
-            task_state.human_review_resume_state = RuntimeState.ACTING
-            task_state.external_communication.phase = ExternalCommunicationPhase.DRAFT_IN_PROGRESS
-            persist_runtime_artifacts(
-                thread_id=session.thread_id,
-                intake_result=session.intake_result,
-                task_state=task_state,
-                artifact_store=self.artifact_store,
-            )
-            return {
-                "thread_id": session.thread_id,
-                "final_result": {"task_state": task_state},
-                "decision": human_review_decision,
-            }
+        self.decision_inbox.acquire_owner(
+            thread_id="thread-resume",
+            owner_id="cli-owner",
+            process_id=100,
+            terminal_label="test-terminal",
+            status="waiting_human_review",
+        )
 
         with mock.patch(
             "main_layer2_dashboard.build_dashboard_session_from_thread_id",
             return_value=session,
-        ), mock.patch(
-            "main_layer2_dashboard.resume_dashboard_session",
-            side_effect=_fake_resume_dashboard_session,
         ):
             payload = self._request_json(
                 "/api/reviews/thread-resume/resume",
@@ -328,22 +318,38 @@ class MainLayer2DashboardTests(unittest.TestCase):
                 },
             )
 
-        self.assertEqual(payload["runtime_summary"]["runtime_state"], "acting")
+        self.assertEqual(payload["runtime_summary"]["runtime_state"], "waiting_human_review")
+        self.assertFalse(payload["dashboard_snapshot"]["has_pending_review"])
         self.assertEqual(
             payload["operator_feedback"],
-            "The runtime resumed on the approved execution path.",
+            "Decision submitted successfully. The runtime owner will continue the approved path.",
+        )
+        self.assertEqual(payload["decision_submission"]["delivery_status"], "pending")
+        self.assertTrue(payload["decision_submission"]["owner_available"])
+        self.assertEqual(
+            session.final_result["task_state"].current_state,
+            RuntimeState.WAITING_HUMAN_REVIEW,
         )
 
         inbox = self._request_json("/api/reviews")
         self.assertEqual(inbox["items"], [])
+        self.assertEqual(len(inbox["completed_items"]), 1)
+        self.assertEqual(inbox["completed_items"][0]["decision_type"], "approve_continue")
 
-    # Verify the dashboard forwards resume persistence through its bound artifact store.
-    def test_resume_dashboard_session_uses_session_artifact_store(self) -> None:
+        claimed = self.decision_inbox.claim_next(
+            thread_id="thread-resume",
+            request_id="thread-resume:hitl",
+            owner_id="cli-owner",
+        )
+        self.assertIsNotNone(claimed)
+        self.assertEqual(claimed.decision_payload["request_id"], "thread-resume:hitl")
+
+    # Verify submission persists the typed decision without invoking the runtime graph.
+    def test_submit_dashboard_decision_uses_decision_inbox(self) -> None:
         session = _build_paused_session(
             thread_id="thread-forward-store",
             artifact_store=self.artifact_store,
         )
-        captured: dict[str, object] = {}
         pending_request = session.final_result["task_state"].pending_human_review_request
         assert pending_request is not None
         decision = HumanReviewDecision(
@@ -351,21 +357,16 @@ class MainLayer2DashboardTests(unittest.TestCase):
             decision_type=HumanReviewDecisionType.APPROVE_CONTINUE,
             reviewer_id="operator-1",
         )
+        submission = submit_dashboard_decision(
+            session,
+            decision,
+            decision_inbox=self.decision_inbox,
+        )
 
-        def _resume_flow(**kwargs):
-            captured.update(kwargs)
-            return {
-                "thread_id": session.thread_id,
-                "final_result": {"task_state": session.final_result["task_state"]},
-            }
-
-        session.resume_flow = _resume_flow
-
-        resume_dashboard_session(session, decision)
-
-        self.assertIs(captured["artifact_store"], self.artifact_store)
-        self.assertEqual(captured["thread_id"], "thread-forward-store")
-        self.assertEqual(captured["human_review_decision"], decision)
+        self.assertEqual(submission.thread_id, "thread-forward-store")
+        self.assertEqual(submission.request_id, pending_request.request_id)
+        self.assertEqual(submission.decision_type, "approve_continue")
+        self.assertEqual(submission.decision_payload["reviewer_id"], "operator-1")
 
     # Verify the static React entrypoint is served with the no-cache headers.
     def test_static_index_is_served_with_no_cache_headers(self) -> None:
@@ -400,6 +401,7 @@ class MainLayer2DashboardTests(unittest.TestCase):
             port=0,
             artifact_store=self.artifact_store,
             checkpointer=object(),
+            decision_inbox=self.decision_inbox,
             static_root=self.static_root,
         )
         server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)

@@ -439,6 +439,34 @@ def _apply_action_revision(
                     evidence_refs=tuple(
                         str(ref) for ref in item.get("evidence_refs", [])
                     ),
+                    task_requirement_kind=(
+                        str(item["task_requirement"].get("kind"))
+                        if isinstance(item.get("task_requirement"), dict)
+                        and item["task_requirement"].get("kind")
+                        else None
+                    ),
+                    task_requirement_index=(
+                        int(item["task_requirement"]["index"])
+                        if isinstance(item.get("task_requirement"), dict)
+                        and isinstance(item["task_requirement"].get("index"), int)
+                        else None
+                    ),
+                    task_requirement_quote=(
+                        str(item["task_requirement"].get("quote"))
+                        if isinstance(item.get("task_requirement"), dict)
+                        and item["task_requirement"].get("quote")
+                        else None
+                    ),
+                    payload_field=(
+                        str(item.get("payload_field"))
+                        if item.get("payload_field")
+                        else None
+                    ),
+                    payload_excerpt=(
+                        str(item.get("payload_excerpt"))
+                        if item.get("payload_excerpt")
+                        else None
+                    ),
                 )
                 for item in findings
                 if isinstance(item, dict) and item.get("code")

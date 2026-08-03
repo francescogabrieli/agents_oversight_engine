@@ -27,6 +27,7 @@ from layer2_runtime_governance.judge import (
     JudgePlanStepContext,
     JudgeRecommendedDirective,
     JudgeSeverity,
+    JudgeStageContract,
     JudgeVerdict,
     build_judge_evidence_bundle,
 )
@@ -81,6 +82,7 @@ def build_judge_context(
             if isinstance(external_operation.payload, CommunicationOperationPayload)
             else JudgeOperationStage.EXECUTION_CANDIDATE
         ),
+        stage_contract=_build_judge_stage_contract(external_operation=external_operation),
         # The complete canonical observation universe is epistemically available to the judge.
         observations=tuple(
             JudgeEvidenceContext(
@@ -168,11 +170,30 @@ def build_judge_context(
         omitted_observation_ids=(),
         evidence_snapshot_digest=evidence_snapshot_digest,
         evidence_selection_digest=evidence_selection_digest,
-        serialization_version="judge_context.v4",
+        serialization_version="judge_context.v5",
     )
     return replace(
         context,
         evidence_bundle=build_judge_evidence_bundle(context=context),
+    )
+
+
+# Make lifecycle scope a local typed fact in the same payload as the proposal.
+def _build_judge_stage_contract(
+    *,
+    external_operation: ExternalOperationProposal,
+) -> JudgeStageContract:
+    if isinstance(external_operation.payload, CommunicationOperationPayload):
+        return JudgeStageContract(
+            stage=JudgeOperationStage.COMMUNICATION_DRAFT_REVIEW,
+            side_effect_expected=False,
+            completeness_definition="recipient+subject+body",
+            out_of_scope_checks=("proof_of_send", "finalization_markers"),
+        )
+    return JudgeStageContract(
+        stage=JudgeOperationStage.EXECUTION_CANDIDATE,
+        side_effect_expected=True,
+        completeness_definition="complete_typed_payload",
     )
 
 
@@ -267,6 +288,21 @@ def build_judge_signal(
                 "severity": finding.severity.value,
                 "summary": finding.summary,
                 "evidence_refs": list(finding.evidence_refs),
+                "task_requirement": (
+                    {
+                        "kind": finding.task_requirement.kind.value,
+                        "index": finding.task_requirement.index,
+                        "quote": finding.task_requirement.quote,
+                    }
+                    if finding.task_requirement is not None
+                    else None
+                ),
+                "payload_field": (
+                    finding.payload_field.value
+                    if finding.payload_field is not None
+                    else None
+                ),
+                "payload_excerpt": finding.payload_excerpt,
             }
             for finding in (assessment.findings if assessment else ())
         ],

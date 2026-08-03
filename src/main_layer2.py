@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
@@ -40,6 +43,13 @@ from layer2_runtime_governance.judge import JudgePort
 from layer2_runtime_governance.infrastructure.runtime_artifacts import (
     RuntimeArtifactStore,
     persist_runtime_artifacts,
+)
+from layer2_runtime_governance.hitl.decision_inbox import (
+    ReviewDecisionInboxPort,
+    ReviewDecisionSubmission,
+)
+from layer2_runtime_governance.infrastructure.review_decision_inbox import (
+    SQLiteReviewDecisionInbox,
 )
 from layer2_runtime_governance.planning import PlannerPort
 from layer2_runtime_governance.planning.replanning import ReplannerPort
@@ -190,6 +200,8 @@ def resume_layer2_flow(
     behavioral_store_service: BehavioralStorePort | None = None,
     checkpointer: Any | None = None,
     artifact_store: RuntimeArtifactStore | None = None,
+    progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
+    live_trace: bool = False,
 ) -> dict[str, Any]:
     uses_default_checkpointer = checkpointer is None
     resolved_checkpointer = checkpointer or build_default_checkpointer()
@@ -208,8 +220,21 @@ def resume_layer2_flow(
     )
 
     config = {"configurable": {"thread_id": thread_id}}
-    # Prefer the direct invoke result because interrupted checkpoints can expose a partial snapshot view.
-    resume_result = runtime_graph.invoke(Command(resume=human_review_decision), config=config)
+    # Stream owner-side resume updates when the calling terminal requested progress.
+    if progress_callback is None:
+        resume_result = runtime_graph.invoke(
+            Command(resume=human_review_decision),
+            config=config,
+        )
+    else:
+        resume_result = _stream_runtime_graph_resume_with_progress(
+            runtime_graph=runtime_graph,
+            human_review_decision=human_review_decision,
+            thread_id=thread_id,
+            config=config,
+            progress_callback=progress_callback,
+            live_trace=live_trace,
+        )
     snapshot_result = _build_final_result_from_graph_snapshot(
         runtime_graph=runtime_graph,
         config=config,
@@ -331,6 +356,45 @@ def _stream_runtime_graph_with_progress(
     if snapshot is not None and getattr(snapshot, "interrupts", None):
         final_result["__interrupt__"] = list(snapshot.interrupts)
 
+    return final_result
+
+
+# Stream a dashboard-submitted decision in the same terminal that owns the run.
+def _stream_runtime_graph_resume_with_progress(
+    *,
+    runtime_graph: Any,
+    human_review_decision: dict[str, Any] | HumanReviewDecision,
+    thread_id: str,
+    config: dict[str, Any],
+    progress_callback: Callable[[str, dict[str, Any]], None],
+    live_trace: bool,
+) -> dict[str, Any]:
+    final_result: dict[str, Any] = {}
+    for chunk in runtime_graph.stream(
+        Command(resume=human_review_decision),
+        config=config,
+        stream_mode="updates",
+    ):
+        if not isinstance(chunk, dict):
+            continue
+        for node_name, update in chunk.items():
+            node_update = update if isinstance(update, dict) else {}
+            progress_callback(str(node_name), node_update)
+            final_result.update(node_update)
+        if live_trace:
+            _print_live_trace_snapshot(
+                runtime_graph=runtime_graph,
+                config=config,
+                thread_id=thread_id,
+                tag="resume_chunk",
+            )
+
+    snapshot = runtime_graph.get_state(config)
+    snapshot_values = snapshot.values if snapshot is not None else {}
+    if isinstance(snapshot_values, dict):
+        final_result = dict(snapshot_values)
+    if snapshot is not None and getattr(snapshot, "interrupts", None):
+        final_result["__interrupt__"] = list(snapshot.interrupts)
     return final_result
 
 
@@ -591,6 +655,11 @@ def parse_cli_args() -> argparse.Namespace:
         help="Optional LangGraph thread identifier.",
     )
     parser.add_argument(
+        "--attach-thread",
+        default=None,
+        help="Recover ownership of an existing thread paused for human review.",
+    )
+    parser.add_argument(
         "--full-trace",
         action="store_true",
         help="Print the full trace instead of the compact summary.",
@@ -674,25 +743,256 @@ def _build_demo_intake_result(
     )
 
 
+# Return the canonical runtime state carried by one Layer 2 trace.
+def _trace_task_state(trace: dict[str, Any]) -> TaskState:
+    final_result = trace.get("final_result")
+    task_state = final_result.get("task_state") if isinstance(final_result, dict) else None
+    if not isinstance(task_state, TaskState):
+        raise ValueError("Layer 2 trace does not contain a canonical task_state.")
+    return task_state
+
+
+# Rebuild only canonical interrupted state so a replacement terminal can own it.
+def _load_interrupted_trace_from_checkpoint(
+    *,
+    thread_id: str,
+    checkpointer: Any,
+) -> dict[str, Any]:
+    runtime_graph = compose_layer2_runtime(
+        Layer2RuntimeDependencies(checkpointer=checkpointer)
+    )
+    final_result = _build_final_result_from_graph_snapshot(
+        runtime_graph=runtime_graph,
+        config={"configurable": {"thread_id": thread_id}},
+    )
+    task_state = final_result.get("task_state")
+    if not isinstance(task_state, TaskState):
+        raise ValueError(f"Thread '{thread_id}' has no canonical LangGraph checkpoint.")
+    if task_state.current_state != RuntimeState.WAITING_HUMAN_REVIEW:
+        raise ValueError(
+            f"Thread '{thread_id}' is not waiting for human review and cannot be attached."
+        )
+    return {
+        "thread_id": thread_id,
+        "intake_result": task_state.intake_payload,
+        "final_result": final_result,
+    }
+
+
+# Keep the execution owner alive until the dashboard submits the exact pending decision.
+def _wait_for_dashboard_decision(
+    *,
+    thread_id: str,
+    request_id: str,
+    owner_id: str,
+    decision_inbox: ReviewDecisionInboxPort,
+    poll_interval_seconds: float = 0.5,
+) -> ReviewDecisionSubmission:
+    while True:
+        decision_inbox.heartbeat_owner(
+            thread_id=thread_id,
+            owner_id=owner_id,
+            status="waiting_human_review",
+        )
+        submission = decision_inbox.claim_next(
+            thread_id=thread_id,
+            request_id=request_id,
+            owner_id=owner_id,
+        )
+        if submission is not None:
+            return submission
+        time.sleep(poll_interval_seconds)
+
+
+# Renew the owner lease while providers or tools block between streamed node updates.
+def _resume_with_owner_heartbeat(
+    *,
+    thread_id: str,
+    owner_id: str,
+    submission: ReviewDecisionSubmission,
+    checkpointer: Any,
+    artifact_store: RuntimeArtifactStore,
+    decision_inbox: ReviewDecisionInboxPort,
+    progress_callback: Callable[[str, dict[str, Any]], None] | None,
+    live_trace: bool,
+    heartbeat_interval_seconds: float = 2.0,
+) -> dict[str, Any]:
+    stop_heartbeat = threading.Event()
+    heartbeat_failures: list[Exception] = []
+
+    # Keep the lease live independently from provider response latency.
+    def heartbeat_loop() -> None:
+        while not stop_heartbeat.wait(heartbeat_interval_seconds):
+            try:
+                decision_inbox.heartbeat_owner(
+                    thread_id=thread_id,
+                    owner_id=owner_id,
+                    status="resuming",
+                )
+            except Exception as exc:  # pragma: no cover - infrastructure failure path.
+                heartbeat_failures.append(exc)
+                return
+
+    heartbeat_thread = threading.Thread(
+        target=heartbeat_loop,
+        name=f"layer2-owner-heartbeat-{thread_id}",
+        daemon=True,
+    )
+    heartbeat_thread.start()
+    try:
+        trace = resume_layer2_flow(
+            thread_id=thread_id,
+            human_review_decision=submission.decision_payload,
+            checkpointer=checkpointer,
+            artifact_store=artifact_store,
+            progress_callback=progress_callback,
+            live_trace=live_trace,
+        )
+    finally:
+        stop_heartbeat.set()
+        heartbeat_thread.join(timeout=max(heartbeat_interval_seconds * 2, 1.0))
+
+    if heartbeat_failures:
+        live_owner = decision_inbox.get_live_owner(thread_id=thread_id)
+        if live_owner is None or live_owner.owner_id != owner_id:
+            raise RuntimeError("Runtime ownership was lost while applying the human decision.")
+    return trace
+
+
+# Run every HITL continuation in the terminal process that owns the original execution.
+def _run_owned_cli_session(
+    *,
+    args: argparse.Namespace,
+    checkpointer: Any,
+    artifact_store: RuntimeArtifactStore,
+    decision_inbox: ReviewDecisionInboxPort,
+) -> dict[str, Any]:
+    attach_thread = getattr(args, "attach_thread", None)
+    if attach_thread and getattr(args, "thread_id", None):
+        raise ValueError("--attach-thread and --thread-id cannot be used together.")
+    thread_id = attach_thread or args.thread_id or f"layer2-{uuid4()}"
+    progress_callback = None if args.quiet else _print_progress
+    if attach_thread:
+        trace = _load_interrupted_trace_from_checkpoint(
+            thread_id=thread_id,
+            checkpointer=checkpointer,
+        )
+        print(
+            f"[Layer 2] attached to interrupted runtime | thread={thread_id}",
+            file=sys.stderr,
+            flush=True,
+        )
+    else:
+        trace = run_layer2_flow(
+            raw_task_text=args.task,
+            context_hint=args.context,
+            policy_profile=args.policy_profile,
+            thread_id=thread_id,
+            demo_intake_profile=args.demo_intake_profile,
+            checkpointer=checkpointer,
+            artifact_store=artifact_store,
+            progress_callback=progress_callback,
+            live_trace=args.live_trace,
+        )
+
+    owner_id = f"cli-{os.getpid()}-{uuid4()}"
+    owner_acquired = False
+    try:
+        while _trace_task_state(trace).current_state == RuntimeState.WAITING_HUMAN_REVIEW:
+            if not owner_acquired:
+                decision_inbox.acquire_owner(
+                    thread_id=thread_id,
+                    owner_id=owner_id,
+                    process_id=os.getpid(),
+                    terminal_label=f"terminal-pid-{os.getpid()}",
+                    status="waiting_human_review",
+                )
+                owner_acquired = True
+            else:
+                decision_inbox.heartbeat_owner(
+                    thread_id=thread_id,
+                    owner_id=owner_id,
+                    status="waiting_human_review",
+                )
+
+            pending_request = _trace_task_state(trace).pending_human_review_request
+            request_id = pending_request.request_id if pending_request is not None else "unknown"
+            print(
+                f"[Layer 2] waiting for dashboard decision | thread={thread_id} | request={request_id}",
+                file=sys.stderr,
+                flush=True,
+            )
+            submission = _wait_for_dashboard_decision(
+                thread_id=thread_id,
+                request_id=request_id,
+                owner_id=owner_id,
+                decision_inbox=decision_inbox,
+            )
+            print(
+                f"[Layer 2] dashboard decision received | decision={submission.decision_type}",
+                file=sys.stderr,
+                flush=True,
+            )
+            decision_inbox.heartbeat_owner(
+                thread_id=thread_id,
+                owner_id=owner_id,
+                status="resuming",
+            )
+            try:
+                trace = _resume_with_owner_heartbeat(
+                    thread_id=thread_id,
+                    owner_id=owner_id,
+                    submission=submission,
+                    checkpointer=checkpointer,
+                    artifact_store=artifact_store,
+                    decision_inbox=decision_inbox,
+                    progress_callback=progress_callback,
+                    live_trace=args.live_trace,
+                )
+            except Exception as exc:
+                decision_inbox.mark_failed(
+                    submission_id=submission.submission_id,
+                    owner_id=owner_id,
+                    error=str(exc),
+                )
+                raise
+            decision_inbox.mark_consumed(
+                submission_id=submission.submission_id,
+                owner_id=owner_id,
+            )
+        return trace
+    finally:
+        if owner_acquired:
+            decision_inbox.release_owner(thread_id=thread_id, owner_id=owner_id)
+
+
 def main() -> None:
     # Run the current Layer 2 slice from the command line.
     args = parse_cli_args()
-    trace = run_layer2_flow(
-        raw_task_text=args.task,
-        context_hint=args.context,
-        policy_profile=args.policy_profile,
-        thread_id=args.thread_id,
-        demo_intake_profile=args.demo_intake_profile,
-        progress_callback=None if args.quiet else _print_progress,
-        live_trace=args.live_trace,
-    )
-    if args.trace_file is not None:
-        write_layer2_trace_file(trace, output_path=args.trace_file)
+    checkpointer = build_default_checkpointer()
+    artifact_store = RuntimeArtifactStore()
+    decision_inbox = SQLiteReviewDecisionInbox()
+    try:
+        trace = _run_owned_cli_session(
+            args=args,
+            checkpointer=checkpointer,
+            artifact_store=artifact_store,
+            decision_inbox=decision_inbox,
+        )
+        if args.trace_file is not None:
+            write_layer2_trace_file(trace, output_path=args.trace_file)
 
-    if args.full_trace:
-        print_layer2_trace(trace)
-    else:
-        print_layer2_summary(trace)
+        if args.full_trace:
+            print_layer2_trace(trace)
+        else:
+            print_layer2_summary(trace)
+    finally:
+        _prune_expired_checkpoints(
+            checkpointer=checkpointer,
+            artifact_store=artifact_store,
+        )
+        decision_inbox.close()
+        close_checkpointer(checkpointer)
 
 
 if __name__ == "__main__":

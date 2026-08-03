@@ -77,7 +77,7 @@ L'architettura viene compressa in cinque macro-blocchi:
 - `Task Intake`: codice esterno al grafo. Prepara il payload iniziale prima dell'avvio del runtime.
 - `Runtime & Governance`: implementato principalmente come nodi e subgraph LangGraph.
 - `Governance PDP`: OPA (Open Policy Agent) è il policy decision point esterno; il nodo LangGraph `governance` è il policy enforcement point che costruisce fatti, invoca OPA e applica la direttiva restituita.
-- `HITL Gateway`: nodo LangGraph con `interrupt()` più control plane di review standalone servito da `src/main_layer2_dashboard.py`, che riprende esclusivamente checkpoint ufficiali LangGraph con `Command(resume=...)` (`SqliteSaver` locale, `PostgresSaver` in produzione); gli artifact runtime sono osservabilità, non stato ripristinabile.
+- `HITL Gateway`: nodo LangGraph con `interrupt()` più control plane di review standalone servito da `src/main_layer2_dashboard.py`. La dashboard valida e deposita la decisione tipizzata in una inbox durabile; il processo runtime originario, unico owner della run, la consuma e applica `Command(resume=...)` sul checkpoint ufficiale LangGraph (`SqliteSaver` locale, `PostgresSaver` in produzione). La inbox è solo trasporto control-plane e gli artifact runtime sono osservabilità: nessuno dei due è stato ripristinabile.
 - `Tool Bus / External Capabilities`: componente esterno al grafo, invocato dal nodo `tool_gateway`.
 - `State, Evidence & Observability`: componente ibrido che fonde gli artefatti nativi prodotti da LangGraph, come stato runtime, checkpoint, thread history, task metadata e interrupt, con il tracciamento custom dell'architettura, come evidenze semantiche, output di governance, rationale, score e audit trail.
 - `Evaluation & Continuous Improvement`: codice esterno, eseguito fuori dal ciclo live del task.
@@ -404,7 +404,11 @@ Le direttive possibili sono `continue`, `continue_read_only`, `request_more_evid
 
 #### HITL Gateway
 
-Il nodo `human_review` chiama `interrupt()` con un payload tipizzato e JSON-safe. La dashboard riceve la decisione umana e riprende lo stesso `thread_id` tramite `Command(resume=...)` sul checkpointer ufficiale LangGraph. Il backend locale è `SqliteSaver`; un deployment multi-worker può selezionare `PostgresSaver`. La dashboard non ricostruisce mai il runtime da trace o artifact.
+Il nodo `human_review` chiama `interrupt()` con un payload tipizzato e JSON-safe. La dashboard valida la decisione umana e la registra in una inbox durabile, idempotente rispetto a `thread_id` e `request_id`; non invoca il grafo. Il processo runtime che possiede la lease del thread reclama la decisione e riprende lo stesso `thread_id` tramite `Command(resume=...)` sul checkpointer ufficiale LangGraph, rendendo visibile la continuazione nello stesso terminale. La lease viene rinnovata anche durante attese lunghe di provider o tool. Se l'owner muore, un terminale sostitutivo può usare `--attach-thread` soltanto quando il checkpoint canonico è ancora fermo sulla stessa richiesta; il comando `claimed` o `failed` viene allora reclamato in base all'esatto `request_id`.
+
+Il proof of concept locale usa `SqliteSaver` e una decision inbox SQLite separata. Un deployment multi-host può selezionare `PostgresSaver`, ma deve anche fornire a `ReviewDecisionInboxPort` un adapter transazionale condiviso: una inbox SQLite locale al singolo host non è un trasporto multi-worker valido. La dashboard non ricostruisce mai il runtime da trace o artifact.
+
+Dopo il submit, la richiesta scompare immediatamente dalla coda attiva e compare per due minuti in una proiezione `review_completed` non interattiva. Questo stato indica soltanto che la decisione è stata accettata dal control plane: non equivale alla conclusione della run né autorizza un secondo submit. Gli stati `pending`, `claimed`, `consumed` e `failed` della inbox rendono auditabile la consegna senza sostituire lo stato canonico di `TaskState`.
 
 Le azioni umane sono canoniche ma reason-scoped: `judge_unsafe`/`judge_uncertain` e le resubmission invariate o già respinte espongono modifica, replan o abort; l'identità di resubmission comprende payload digest ed Evidence-selection digest, quindi una correzione reale dell'attribution non è churn. `capability_approval_required` espone approvazione dell’esatto digest, modifica o abort; clarification e riconciliazione di receipt indeterminate espongono soltanto le scelte applicabili. Nessun altro gate, inclusi checkpoint legacy o reason sconosciute, può autorizzare una nuova esecuzione esterna. `modify_and_continue` richiede un edit tipizzato valido al submit e non può aggirare il contratto della proposta. Approval, completion candidate, Evidence selection e Judge assessment sono legati ai rispettivi digest; la prima proiezione governance di una comunicazione review-ready sigilla atomicamente operation id/digest e selection digest nel candidate ancora privo di binding, mentre una modifica crea un nuovo digest, aggiorna atomicamente il candidate, invalida approval e assessment precedenti e passa da `READY_GOVERNANCE` prima di qualunque seam esecutivo. `approve_continue_read_only` non può autorizzare una proposta mutating invariata.
 
@@ -555,7 +559,7 @@ Responsabilità:
 - supporto a pause e resume
 - stato minimo necessario al workflow live
 
-Il checkpointer LangGraph è l'unica fonte autorevole per `interrupt / resume`. Le trace JSON e gli snapshot dashboard non devono essere usati per ricostruire o continuare una run.
+Il checkpointer LangGraph è l'unica fonte autorevole dello stato necessario a `interrupt / resume`. La decision inbox trasporta soltanto comandi umani digest/request-bound tra control plane e runtime owner; trace JSON, snapshot dashboard e inbox non devono essere usati per ricostruire una run.
 
 #### Custom Evidence Layer
 

@@ -24,11 +24,12 @@ describe("ReviewInboxPage", () => {
                 external_communication_phase: "human_review_required",
               },
             ],
+            completed_items: [],
           }),
         })
         .mockResolvedValue({
           ok: true,
-          json: async () => ({ items: [] }),
+          json: async () => ({ items: [], completed_items: [] }),
         }),
     );
   });
@@ -45,5 +46,44 @@ describe("ReviewInboxPage", () => {
 
     expect(await screen.findByText("Inspect a governed draft.")).toBeInTheDocument();
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2), { timeout: 3500 });
+  });
+
+  it("renders recently completed reviews as non-interactive", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          items: [],
+          completed_items: [
+            {
+              thread_id: "thread-completed",
+              runtime_state: "review_completed",
+              updated_at: "2026-08-03T10:00:00+00:00",
+              task_goal: "Resume the governed task.",
+              review_summary: "The operator approved the exact candidate.",
+              allowed_decisions: [],
+              request_id: "thread-completed:hitl",
+              external_communication_phase: null,
+              decision_type: "approve_continue",
+              delivery_status: "pending",
+            },
+          ],
+        }),
+      }),
+    );
+
+    render(
+      <MemoryRouter
+        initialEntries={["/"]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Completate")).toBeInTheDocument();
+    expect(screen.getByText("Resume the governed task.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Resume the governed task/i })).not.toBeInTheDocument();
   });
 });

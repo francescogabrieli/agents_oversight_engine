@@ -29,6 +29,9 @@ reference is `AGENTS.md` - treat it as the authoritative operational contract.
 # Start HITL dashboard backend (serves React frontend + REST API)
 .\.venv\Scripts\python.exe src\main_layer2_dashboard.py --open-browser
 
+# Recover an interrupted thread after its original terminal owner exited
+.\.venv\Scripts\python.exe src\main_layer2.py --attach-thread <thread_id>
+
 # Offline trace evaluation
 .\.venv\Scripts\python.exe src\main_layer2_evaluation.py
 
@@ -94,10 +97,10 @@ finalize_bootstrap → END
 - **Typed planning/acting split**: Planner emits semantic `PlanStep` objects; actor executes one step at a time, emitting typed `ActorResult` with `ActorResultType` enum.
 - **Tool Gateway** (`tools/`, compatibility facade `tool_gateway.py`): Registry-controlled, typed `ToolRequest` → `ToolExecutionResult` → minimal `ToolObservation`. Tools include `web_search`, `fetch_url_text`, and configured read-only MCP test tools.
 - **Evidence tracking**: observations carry only stable identity, concrete content, and optional locator; provenance is reconstructed from immutable tool results. Task instructions are not observations.
-- **HITL** (`hitl/`): LangGraph `interrupt`/`resume`. Review actions are reason-scoped; unsafe/uncertain Judge verdicts and unchanged/rejected candidates expose modify/replan/abort. Only an uncontaminated `capability_approval_required` gate can add exact-digest execution approval; unknown and legacy external pauses cannot.
+- **HITL** (`hitl/`): LangGraph `interrupt`/`resume` with separated ownership. The dashboard validates and durably enqueues typed decisions; the original leased CLI runtime consumes them and resumes in the same terminal, heartbeating ownership during long calls. `--attach-thread` is the explicit recovery path for an orphaned checkpoint still waiting on the same request. Review actions are reason-scoped; unsafe/uncertain Judge verdicts and unchanged/rejected candidates expose modify/replan/abort. Only an uncontaminated `capability_approval_required` gate can add exact-digest execution approval; unknown and legacy external pauses cannot.
 - **External execution**: the connector is entered only after candidate/operation/Evidence/terminal-step preflight. Connector exceptions and mismatched or untyped receipts become checkpointable `indeterminate` reconciliation records.
 - **Replanner** (`replanning.py`): Triggered on `NEEDS_REPLAN`; replaces only current + pending steps; completed steps are immutable history.
-- **Persistence** (`persistence.py`): LangGraph checkpoints → `artifacts/runtime/checkpoints/`; per-thread artifacts → `artifacts/runtime/<thread_id>/`; behavioral SQLite → `artifacts/runtime/behavioral/behavioral.sqlite3`.
+- **Persistence** (`persistence.py`): LangGraph checkpoints → `artifacts/runtime/checkpoints/`; per-thread artifacts → `artifacts/runtime/<thread_id>/`; decision transport → `artifacts/runtime/review_decisions.sqlite3`; behavioral SQLite → `artifacts/runtime/behavioral/behavioral.sqlite3`. Only checkpoints are resumable runtime state.
 - **Traceability** (`observability/`, `evaluation_service/`): `layer2_trace.v6` is a JSON-exportable read model used for thesis evidence, HITL payloads, and offline evaluation.
 
 ### Key Files

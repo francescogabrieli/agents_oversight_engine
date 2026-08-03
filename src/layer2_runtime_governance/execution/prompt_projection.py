@@ -128,7 +128,14 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
              "judge_rationale": getattr(item, "judge_rationale", None),
              "findings": [
                  {"category": finding.category, "code": finding.code, "severity": finding.severity,
-                  "summary": finding.summary, "evidence_refs": list(finding.evidence_refs)}
+                  "summary": finding.summary, "evidence_refs": list(finding.evidence_refs),
+                  "task_requirement": {
+                      "kind": finding.task_requirement_kind,
+                      "index": finding.task_requirement_index,
+                      "quote": finding.task_requirement_quote,
+                  },
+                  "payload_field": finding.payload_field,
+                  "payload_excerpt": finding.payload_excerpt}
                  for finding in item.findings
              ]}
             for item in actor_task.governance_feedback

@@ -43,8 +43,11 @@ from ..judge import (
     JudgeFinding,
     JudgeFindingCategory,
     JudgeModelMetadata,
+    JudgePayloadField,
     JudgeRecommendedDirective,
     JudgeSeverity,
+    JudgeTaskRequirement,
+    JudgeTaskRequirementKind,
     JudgeVerdict,
 )
 from ..external_operations import (
@@ -256,8 +259,11 @@ def _persisted_runtime_types() -> list[type]:
         JudgeFinding,
         JudgeFindingCategory,
         JudgeModelMetadata,
+        JudgePayloadField,
         JudgeRecommendedDirective,
         JudgeSeverity,
+        JudgeTaskRequirement,
+        JudgeTaskRequirementKind,
         JudgeVerdict,
         CommunicationOperationPayload,
         DatabaseOperationPayload,

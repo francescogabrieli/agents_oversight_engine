@@ -190,9 +190,25 @@ For `execute_after_governance`, only a review opened with
 request. Approval submitted against Judge, stall, recovery, or compatibility
 gates is rejected server-side even if a stale client attempts it.
 
-LangGraph `interrupt()` and `Command(resume=...)` remain the only pause/resume
-mechanism. Official LangGraph checkpoints are authoritative; trace, dashboard
-artifacts, and behavioral SQLite are read models.
+LangGraph `interrupt()` and `Command(resume=...)` remain the only workflow
+pause/resume mechanism. The dashboard validates and durably submits a typed human
+decision, but it never invokes the graph. The original runtime process owns the
+thread through a lease, atomically claims the decision, and applies
+`Command(resume=...)`, so continuation remains visible in its terminal. Official
+LangGraph checkpoints are authoritative; the decision inbox is a control-plane
+transport, while trace, dashboard artifacts, and behavioral SQLite are read models.
+
+The owner heartbeats its lease during long provider or tool waits. If that process
+dies, `--attach-thread <thread_id>` may recover only a checkpoint still interrupted
+on the exact same `request_id`; the new owner can then reclaim the corresponding
+`claimed` or `failed` delivery record. The current adapter is local SQLite. A
+multi-host deployment must provide shared transactional storage for
+`ReviewDecisionInboxPort` as well as a shared checkpointer.
+
+A submitted review is removed from the actionable inbox immediately and may be
+shown for two minutes as a non-interactive `review_completed` acknowledgement.
+This describes decision submission, not terminal task completion, and the same
+`request_id` cannot be acted on twice.
 
 ## Execution intent and external execution
 

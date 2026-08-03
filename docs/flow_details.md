@@ -364,8 +364,26 @@ Gli artefatti per thread contengono trace, dashboard snapshot, summary e payload
 HITL pendente. La dashboard ricostruisce lo stato dal checkpoint canonico, non da
 una copia JSON potenzialmente obsoleta.
 
-La review è legata a `request_id`, `operation_id` e digest. Dopo il resume, gli
-artefatti vengono rigenerati dallo stato aggiornato.
+La review è legata a `request_id`, `operation_id` e digest. La dashboard valida la
+decisione e la deposita nella decision inbox SQLite, ma non invoca LangGraph. Il
+processo CLI originario mantiene una lease sul thread, reclama atomicamente il
+comando e applica `Command(resume=...)` sul checkpoint ufficiale, mostrando la
+continuazione nello stesso terminale. Un heartbeat indipendente mantiene valida
+la lease durante attese lunghe di provider o tool. Dopo il resume, gli artefatti
+vengono rigenerati dallo stato aggiornato.
+
+La inbox è un canale control-plane idempotente, non una seconda memoria del
+workflow. I suoi stati di consegna (`pending`, `claimed`, `consumed`, `failed`)
+servono all'audit e alla recovery operativa. Dopo il submit, la dashboard elimina
+la review dalle azioni pendenti e la mostra per due minuti sotto `Completate` come
+elemento non interattivo; `review_completed` non significa che la run sia conclusa.
+
+Se il processo originario termina, `main_layer2.py --attach-thread <thread_id>`
+può acquisire una lease scaduta soltanto se il checkpoint è ancora in
+`WAITING_HUMAN_REVIEW`. Il consumer reclama esclusivamente la decisione con lo
+stesso `request_id`, inclusa una consegna rimasta `claimed` o `failed`. L'adapter
+attivo del proof of concept è SQLite locale; un deployment multi-host deve fornire
+un'implementazione condivisa dello stesso port.
 
 ## 11. Trace ed evaluation
 

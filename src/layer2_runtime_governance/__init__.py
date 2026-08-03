@@ -43,8 +43,9 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
     ".judge": (
         "DisabledJudge", "JudgeAssessment", "JudgeExecutionError", "JudgePort",
         "JudgeAssessmentStatus", "JudgeContext", "JudgeFinding", "JudgeFindingCategory",
-        "JudgeModelMetadata", "JudgePlanStepContext", "JudgeRecommendedDirective",
-        "JudgeSettings", "JudgeSeverity", "JudgeVerdict", "OpenAIJudge",
+        "JudgeModelMetadata", "JudgePayloadField", "JudgePlanStepContext",
+        "JudgeRecommendedDirective", "JudgeSettings", "JudgeSeverity", "JudgeStageContract",
+        "JudgeTaskRequirement", "JudgeTaskRequirementKind", "JudgeVerdict", "OpenAIJudge",
         "build_default_judge", "build_judge_system_prompt", "build_judge_user_prompt",
     ),
     ".external_operations": (
@@ -78,6 +79,10 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
         "observe_tool_result", "planner", "replanner", "tool_gateway",
     ),
     ".hitl": ("build_human_review_request", "coerce_human_review_decision_payload"),
+    ".hitl.decision_inbox": (
+        "ReviewDecisionInboxPort", "ReviewDecisionStatus",
+        "ReviewDecisionSubmission", "RuntimeOwnerLease",
+    ),
     ".oversight": (
         "DynamicPolicyAssessment", "DynamicPolicyRecommendedDirective",
         "EvidenceQualityAssessment", "OperationalRiskAssessment",
@@ -89,6 +94,9 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
         "build_sqlite_checkpointer", "RuntimeArtifactPaths", "RuntimeArtifactStore",
         "get_default_checkpointer_path", "get_default_runtime_artifacts_root",
         "persist_runtime_artifacts",
+    ),
+    ".infrastructure.review_decision_inbox": (
+        "SQLiteReviewDecisionInbox", "get_default_review_decision_inbox_path",
     ),
     ".planning": (
         "OpenAIPlanner", "OpenAIPlannerSettings", "PlannerExecutionError", "PlannerPort",

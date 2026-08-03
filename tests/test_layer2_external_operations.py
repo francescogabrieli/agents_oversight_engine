@@ -108,6 +108,13 @@ class ExternalOperationNormalizerTests(unittest.TestCase):
                     "category": "Coercive / threatening tone",
                     "code": "coercive_tone",
                     "severity": "high",
+                    "task_requirement": {
+                        "kind": "goal",
+                        "index": 0,
+                        "quote": "Unsafe external communication",
+                    },
+                    "payload_field": "body",
+                    "payload_excerpt": "coercive language",
                     "summary": "The message uses coercive language.",
                     "evidence_refs": [],
                 }
@@ -128,6 +135,18 @@ class ExternalOperationNormalizerTests(unittest.TestCase):
         self.assertEqual(
             parsed.findings[0].category,
             JudgeFindingCategory.DECEPTION_OR_COERCION,
+        )
+        self.assertEqual(
+            list(_JudgePayload.model_fields)[:7],
+            [
+                "claim_assessments",
+                "findings",
+                "summary",
+                "rationale",
+                "verdict",
+                "severity",
+                "confidence",
+            ],
         )
 
     # Typed actor drafts preserve routing fields through runtime normalization.
@@ -211,10 +230,21 @@ class ExternalOperationNormalizerTests(unittest.TestCase):
 
         self.assertEqual(proposal.payload.body, body)
         self.assertEqual(context.external_communication_body, body)
+        self.assertFalse(context.stage_contract.side_effect_expected)
+        self.assertEqual(
+            context.stage_contract.completeness_definition,
+            "recipient+subject+body",
+        )
+        self.assertEqual(
+            context.stage_contract.out_of_scope_checks,
+            ("proof_of_send", "finalization_markers"),
+        )
         self.assertEqual(len(proposal.payload_preview), 4096)
         self.assertIn("FULL-BODY-TAIL", prompt)
         self.assertEqual(prompt.count("FULL-BODY-TAIL"), 1)
         self.assertNotIn('"external_communication_body"', prompt)
+        self.assertIn('"stage_contract"', prompt)
+        self.assertIn('"side_effect_expected": false', prompt)
         self.assertEqual(
             proposal.facts_provenance.normalizer_version,
             "external_operation_normalizers.v2",
@@ -767,6 +797,66 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
                 context=context,
             )
 
+    # Keep conditional outcomes semantic and generic instead of encoding task cases.
+    def test_judge_prompt_resolves_fallbacks_without_impossible_revisions(self) -> None:
+        prompt = build_judge_system_prompt()
+
+        self.assertIn("one coherent semantic contract", prompt)
+        self.assertIn("explicitly permitted degradation paths", prompt)
+        self.assertIn("activation condition", prompt)
+        self.assertIn("valid task outcome", prompt)
+        self.assertIn("concretely resolve the finding", prompt)
+        self.assertIn("Do not request impossible", prompt)
+        self.assertIn("complete constraint sweep", prompt)
+        self.assertIn("coarser or ambiguous information", prompt)
+        self.assertIn("Do not speculate about unobserved process state", prompt)
+        self.assertIn("separate proof that the candidate", prompt)
+        self.assertIn("unsupported cannot list supporting evidence", prompt)
+        self.assertNotIn("three sources", prompt.lower())
+        self.assertNotIn("email recipient unavailable", prompt.lower())
+
+    # Findings must be bound to exact task and payload text before the judge can escalate.
+    def test_judge_rejects_unanchored_or_invented_revision_finding(self) -> None:
+        proposal = _generic_proposal()
+        state = _state_with_proposal(proposal)
+        context = build_judge_context(
+            task_state=state,
+            external_operation=proposal,
+            invocation_reason="test_finding_anchor",
+        )
+        payload = _JudgePayload.model_validate(
+            {
+                "claim_assessments": [],
+                "findings": [
+                    {
+                        "category": "goal_alignment",
+                        "code": "invented_lifecycle_requirement",
+                        "severity": "medium",
+                        "task_requirement": {
+                            "kind": "goal",
+                            "index": 0,
+                            "quote": "Find official sources",
+                        },
+                        "payload_field": "action",
+                        "payload_excerpt": "execution-ready",
+                        "summary": "The payload lacks an invented lifecycle marker.",
+                        "evidence_refs": [],
+                    }
+                ],
+                "summary": "Revision required.",
+                "rationale": "The finding is deliberately invalid.",
+                "verdict": "needs_revision",
+                "severity": "medium",
+                "confidence": 0.8,
+                "evaluated_operation_digest": proposal.payload_digest,
+                "evaluated_evidence_snapshot_digest": context.evidence_snapshot_digest,
+                "evaluated_evidence_selection_digest": context.evidence_selection_digest,
+            }
+        )
+
+        with self.assertRaisesRegex(JudgeExecutionError, "payload_excerpt"):
+            _validate_judge_payload(payload=payload, context=context)
+
     # An invalid model reference receives one local correction using the same bundle.
     def test_judge_retries_once_when_model_uses_a_content_digest_as_evidence_ref(self) -> None:
         proposal = _generic_proposal()
@@ -802,10 +892,17 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
                     "confidence": 0.8,
                     "findings": [
                         {
-                            "category": "factual_support",
-                            "code": "support_check",
-                            "severity": "medium",
-                            "summary": "Review the cited support.",
+                    "category": "factual_support",
+                    "code": "support_check",
+                    "severity": "medium",
+                    "task_requirement": {
+                        "kind": "goal",
+                        "index": 0,
+                        "quote": "Find official sources",
+                    },
+                    "payload_field": "action",
+                    "payload_excerpt": "execute",
+                    "summary": "Review the cited support.",
                             "evidence_refs": [reference],
                         }
                     ],
