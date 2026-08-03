@@ -257,8 +257,10 @@ class JudgeExternalRevisionContext:
 @dataclass(frozen=True)
 class JudgeStageContract:
     # Stage-local lifecycle facts are model-visible data rather than remote prose.
+    # The external effect has not occurred at evaluation time in any stage; the
+    # payload is always assessed before its governed side effect is applied.
     stage: JudgeOperationStage
-    side_effect_expected: bool
+    side_effect_occurred: bool
     completeness_definition: str
     out_of_scope_checks: tuple[str, ...] = ()
 
@@ -275,7 +277,6 @@ class JudgeContext:
     authorized_context: str
     current_plan_step: JudgePlanStepContext
     external_operation: ExternalOperationProposal
-    operation_stage: JudgeOperationStage
     stage_contract: JudgeStageContract
     selected_evidence_refs: tuple[str, ...]
     observations: tuple[JudgeEvidenceContext, ...]
@@ -303,6 +304,11 @@ class JudgeContext:
     serialization_version: str = "judge_context.v5"
     # Built deterministically from the fields above and used as the sole model-visible pool.
     evidence_bundle: JudgeEvidenceBundle | None = None
+
+    @property
+    def operation_stage(self) -> JudgeOperationStage:
+        # The stage contract is the single authoritative lifecycle source.
+        return self.stage_contract.stage
 
 
 @dataclass(frozen=True)

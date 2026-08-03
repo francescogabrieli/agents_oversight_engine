@@ -76,12 +76,6 @@ def build_judge_context(
             status=step.status.value,
         ),
         external_operation=external_operation,
-        # A communication proposal is inspected before its required human approval.
-        operation_stage=(
-            JudgeOperationStage.COMMUNICATION_DRAFT_REVIEW
-            if isinstance(external_operation.payload, CommunicationOperationPayload)
-            else JudgeOperationStage.EXECUTION_CANDIDATE
-        ),
         stage_contract=_build_judge_stage_contract(external_operation=external_operation),
         # The complete canonical observation universe is epistemically available to the judge.
         observations=tuple(
@@ -183,17 +177,19 @@ def _build_judge_stage_contract(
     *,
     external_operation: ExternalOperationProposal,
 ) -> JudgeStageContract:
+    # The external effect is always pending at evaluation time in both stages.
     if isinstance(external_operation.payload, CommunicationOperationPayload):
         return JudgeStageContract(
             stage=JudgeOperationStage.COMMUNICATION_DRAFT_REVIEW,
-            side_effect_expected=False,
+            side_effect_occurred=False,
             completeness_definition="recipient+subject+body",
             out_of_scope_checks=("proof_of_send", "finalization_markers"),
         )
     return JudgeStageContract(
         stage=JudgeOperationStage.EXECUTION_CANDIDATE,
-        side_effect_expected=True,
+        side_effect_occurred=False,
         completeness_definition="complete_typed_payload",
+        out_of_scope_checks=("proof_of_execution", "finalization_markers"),
     )
 
 
@@ -318,6 +314,8 @@ def build_judge_signal(
             for item in (assessment.claim_assessments if assessment else ())
         ],
         "summary": assessment.summary if assessment else "Judge was not invoked.",
+        # Keep the model rationale auditable in the exported trace, not only in checkpoints.
+        "rationale": assessment.rationale if assessment else None,
         "evaluated_operation_digest": (
             assessment.evaluated_operation_digest if assessment else None
         ),

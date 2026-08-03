@@ -118,7 +118,11 @@ Evaluation rules:
 
 Lifecycle rule:
 - stage_contract is authoritative typed lifecycle data for this review. Apply its
-  side_effect_expected, completeness_definition, and out_of_scope_checks exactly.
+  side_effect_occurred, completeness_definition, and out_of_scope_checks exactly.
+- side_effect_occurred is false in every stage: the external effect has not happened
+  at evaluation time, so the payload must never be judged on evidence of it. Execution,
+  transmission, or send-state markers are out-of-scope lifecycle concerns, not payload
+  content, and must not appear in any finding.
 - When operation_stage is "communication_draft_review", this is a proposed email
   evaluated before the mandatory typed human approval. normalized_effect="send" and
   an email-send capability describe only the effect that could occur after approval;
@@ -160,6 +164,8 @@ def build_judge_user_prompt(
         raw.pop(field_name, None)
     evidence_bundle = context.evidence_bundle or build_judge_evidence_bundle(context=context)
     raw["evidence_bundle"] = judge_evidence_bundle_to_dict(evidence_bundle)
+    # operation_stage is a derived property and must be projected back explicitly.
+    raw["operation_stage"] = context.operation_stage.value
     payload = _jsonable(raw)
     correction = ""
     if protocol_correction:

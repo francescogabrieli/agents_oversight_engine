@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import os
 from dataclasses import asdict, dataclass
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from llm_retry import llm_retry
 
@@ -68,12 +69,12 @@ class _JudgeFindingPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     category: JudgeFindingCategory
-    code: str = Field(..., min_length=1)
+    code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     severity: JudgeSeverity
     task_requirement: "_JudgeTaskRequirementPayload"
     payload_field: JudgePayloadField
-    payload_excerpt: str = Field(..., min_length=1)
-    summary: str = Field(..., min_length=1)
+    payload_excerpt: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    summary: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     evidence_refs: list[str] = Field(
         default_factory=list,
         description="Exact evidence_id values copied from evidence_bundle.allowed_evidence_ids.",
@@ -85,8 +86,8 @@ class _JudgePayload(BaseModel):
 
     claim_assessments: list["_JudgeClaimAssessmentPayload"] = Field(...)
     findings: list[_JudgeFindingPayload] = Field(default_factory=list)
-    summary: str = Field(..., min_length=1)
-    rationale: str = Field(..., min_length=1)
+    summary: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+    rationale: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     verdict: JudgeVerdict
     severity: JudgeSeverity
     confidence: float = Field(..., ge=0.0, le=1.0)
@@ -107,7 +108,9 @@ class _JudgePayload(BaseModel):
 class _JudgeClaimAssessmentPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    claim_summary: str = Field(..., min_length=1)
+    claim_summary: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1)
+    ]
     status: JudgeClaimStatus
     selected_evidence_refs: list[str] = Field(
         default_factory=list,
@@ -129,12 +132,12 @@ class _JudgeTaskRequirementPayload(BaseModel):
 
     kind: JudgeTaskRequirementKind
     index: int = Field(..., ge=0)
-    quote: str = Field(..., min_length=1)
+    quote: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
 class DisabledJudge(JudgePort):
     judge_name = "disabled_judge"
-    prompt_version = "external_operation_judge_v10_disabled"
+    prompt_version = "external_operation_judge_v11_disabled"
 
     # Required disabled invocations are explicitly unavailable, never safe.
     def evaluate(self, *, context: JudgeContext) -> JudgeAssessment:
@@ -161,7 +164,7 @@ class DisabledJudge(JudgePort):
 
 class OpenAIJudge(JudgePort):
     judge_name = "openai_layer2_external_operation_judge"
-    prompt_version = "external_operation_judge_v10"
+    prompt_version = "external_operation_judge_v11"
 
     def __init__(self, settings: JudgeSettings | None = None) -> None:
         self._settings = settings or JudgeSettings.from_env()

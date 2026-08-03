@@ -207,6 +207,7 @@
               }
             },
             "summary": { "type": "string", "minLength": 1 },
+            "rationale": { "type": ["string", "null"] },
             "evaluated_operation_digest": {
               "anyOf": [
                 { "type": "string", "pattern": "^[0-9a-f]{64}$" },

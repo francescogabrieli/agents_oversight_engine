@@ -149,6 +149,50 @@ class ExternalOperationNormalizerTests(unittest.TestCase):
             ],
         )
 
+    # Whitespace-only rationale/summary must not pass as audit-worthy verdict text.
+    def test_judge_payload_rejects_whitespace_only_summary_and_rationale(self) -> None:
+        base = {
+            "verdict": "safe",
+            "severity": "low",
+            "confidence": 0.9,
+            "findings": [],
+            "claim_assessments": [],
+            "summary": "   ",
+            "rationale": "   ",
+            "evaluated_operation_digest": "a" * 64,
+            "evaluated_evidence_snapshot_digest": "b" * 64,
+            "evaluated_evidence_selection_digest": "c" * 64,
+        }
+
+        with self.assertRaises(ValidationError):
+            _JudgePayload.model_validate(base)
+
+        base["summary"] = "  aligned with the requested goal  "
+        base["rationale"] = "  no material mismatch  "
+        parsed = _JudgePayload.model_validate(base)
+        self.assertEqual(parsed.summary, "aligned with the requested goal")
+        self.assertEqual(parsed.rationale, "no material mismatch")
+
+    # The stage contract is the single lifecycle source; operation_stage derives from it.
+    def test_judge_operation_stage_derives_from_stage_contract(self) -> None:
+        proposal = _generic_proposal()
+        state = _state_with_proposal(proposal)
+        context = build_judge_context(
+            task_state=state,
+            external_operation=proposal,
+            invocation_reason="test_stage_derivation",
+        )
+
+        self.assertEqual(context.operation_stage, context.stage_contract.stage)
+        self.assertFalse(context.stage_contract.side_effect_occurred)
+        self.assertEqual(
+            context.stage_contract.out_of_scope_checks,
+            ("proof_of_execution", "finalization_markers"),
+        )
+        prompt = build_judge_user_prompt(context=context)
+        self.assertIn('"operation_stage": "execution_candidate"', prompt)
+        self.assertIn('"side_effect_occurred": false', prompt)
+
     # Typed actor drafts preserve routing fields through runtime normalization.
     def test_typed_actor_email_draft_preserves_recipient_and_subject(self) -> None:
         state = TaskState.from_intake(_build_external_communication_intake_result())
@@ -230,7 +274,7 @@ class ExternalOperationNormalizerTests(unittest.TestCase):
 
         self.assertEqual(proposal.payload.body, body)
         self.assertEqual(context.external_communication_body, body)
-        self.assertFalse(context.stage_contract.side_effect_expected)
+        self.assertFalse(context.stage_contract.side_effect_occurred)
         self.assertEqual(
             context.stage_contract.completeness_definition,
             "recipient+subject+body",
@@ -244,7 +288,7 @@ class ExternalOperationNormalizerTests(unittest.TestCase):
         self.assertEqual(prompt.count("FULL-BODY-TAIL"), 1)
         self.assertNotIn('"external_communication_body"', prompt)
         self.assertIn('"stage_contract"', prompt)
-        self.assertIn('"side_effect_expected": false', prompt)
+        self.assertIn('"side_effect_occurred": false', prompt)
         self.assertEqual(
             proposal.facts_provenance.normalizer_version,
             "external_operation_normalizers.v2",
