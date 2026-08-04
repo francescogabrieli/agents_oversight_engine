@@ -115,4 +115,4 @@ finalize_bootstrap → END
 | `src/layer2_runtime_governance/signal_services/` | Evidence, Trajectory, Judge, and shadow fact producers |
 | `configs/opa/layer2_governance/` | Sole final policy/directive logic |
 | `src/layer1_intake/models.py` | Layer 1 Pydantic models |
-| `architecture/architecturev3.md` | Current architecture reference doc |
+| `docs/architecture/architecturev3.md` | Current architecture reference doc |

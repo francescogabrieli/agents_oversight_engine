@@ -1,7 +1,7 @@
 # Layer 3 — Tool Bus / External Capabilities
 
 This package implements the architecture macro-block described in
-`architecture/architecturev3.md` as **3. Tool Bus / External Capabilities**.
+`docs/architecture/architecturev3.md` as **3. Tool Bus / External Capabilities**.
 
 - `tool_contract.py` contains the typed capability boundary used by Layer 2.
 - `tools/` contains the actor-facing read-only Tool Gateway and adapters.

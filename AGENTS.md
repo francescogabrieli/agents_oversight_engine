@@ -25,7 +25,7 @@ The project is not a generic chatbot. Its priorities, in contribution order, are
 
 The current design references are:
 
-- `architecture/architecturev3.md`
+- `docs/architecture/architecturev3.md`
 - `training_plan.md`
 
 
@@ -77,7 +77,6 @@ These are the folders to treat as the active implementation baseline:
 
 Supporting material lives in:
 
-- `architecture/`
 - `configs/`
 - `docs/`
 - `frontend/dashboard`
@@ -86,7 +85,7 @@ Supporting material lives in:
 
 ## Architectural Intent
 
-The repository follows the architecture described in `architecture/architecturev3.md`.
+The repository follows the architecture described in `docs/architecture/architecturev3.md`.
 It should also remain aligned with the objectives and design priorities described in
 `training_plan.md`. The repository uses the following contribution boundary:
 
@@ -268,28 +267,6 @@ Current relevant file:
 - `configs/layer1_execution_policies.json`
 - `configs/layer2_tool_gateway.json`
 - `configs/opa/layer2_governance/data.json`
-
-
-### `docs`
-
-Contains diagrams and visual aids.
-
-Current relevant files:
-
-- `docs/guidelines/plan-and-execute.ipynb`
-- `docs/guidelines/plan-and-execute.jpg`
-- `docs/deck/planner_use_cases.html`
-- `docs/deck/confidence_risk_trajectory_deck.html`
-- `docs/governance_hitl_contract.md`
-- `docs/governance_pillars_research_basis.md`
-- `docs/tool_gateway_strategy.md`
-- `docs/flow_details.md`
-- `architecture/e2e_real_task.md`
-
-
-### `tests`
-
-Contains unit and integration-style tests for the implemented layers.
 
 Current relevant files:
 
@@ -644,7 +621,7 @@ Expected Bedrock actor runtime:
 
 When making changes:
 
-1. preserve alignment with `architecture/architecturev3.md`
+1. preserve alignment with `docs/architecture/architecturev3.md`
 2. preserve alignment with `training_plan.md`
 3. prefer evolving existing contracts over adding parallel ad-hoc ones
 4. keep runtime behavior explainable

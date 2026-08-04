@@ -1,7 +1,7 @@
 # Layer 4 — State / Evidence / Observability
 
 This package implements the architecture macro-block described in
-`architecture/architecturev3.md` as **4. State, Evidence & Observability**.
+`docs/architecture/architecturev3.md` as **4. State, Evidence & Observability**.
 
 - `observability/` builds immutable trace and replay projections.
 - `behavioral/` owns the non-authoritative historical read model.

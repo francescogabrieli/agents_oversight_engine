@@ -1,7 +1,7 @@
 # Dettaglio del flusso runtime
 
 Questo documento descrive il percorso live del Layer 2. Il contratto di riferimento
-resta `architecture/architecturev3.md`; qui l'obiettivo è mostrare come i componenti
+resta `docs/architecture/architecturev3.md`; qui l'obiettivo è mostrare come i componenti
 collaborano durante una run.
 
 Il percorso è descritto dalla prospettiva del contributo centrale della tesi: un
