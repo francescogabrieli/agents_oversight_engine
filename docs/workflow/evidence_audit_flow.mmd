@@ -1,0 +1,15 @@
+flowchart LR
+    request["Actor tool request"] --> gateway["Tool Gateway<br/>read-only adapter"]
+    gateway --> result["Tool execution result"]
+    result --> observation["Concrete observation<br/>content and optional locator"]
+    observation --> state["TaskState<br/>evidence, scratchpad and trajectory"]
+    state --> governance["Governance<br/>active evidence and trajectory facts"]
+    state --> trace["Trace builder<br/>step and governance records"]
+    trace --> artifacts["Checkpoint and<br/>runtime artifacts"]
+
+    classDef runtime fill:#e8f0fe,stroke:#3b5ccc,color:#111
+    classDef evidence fill:#e6f4ea,stroke:#188038,color:#111
+    classDef audit fill:#f3e8fd,stroke:#7b1fa2,color:#111
+    class request,gateway,result runtime
+    class observation,state,governance evidence
+    class trace,artifacts audit

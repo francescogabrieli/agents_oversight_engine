@@ -1,0 +1,28 @@
+flowchart TD
+    base["PEP<br/>base facts and static envelope"] --> requirements{"OPA / Rego<br/>required pillars"}
+
+    requirements -->|evidence required| evidence["Evidence facts<br/>typed snapshot and selection"]
+    requirements -->|trajectory required| trajectory["Trajectory facts<br/>progress and deviation"]
+
+    base --> preliminary["OPA / Rego<br/>preliminary decision"]
+    evidence --> preliminary
+    trajectory --> preliminary
+    preliminary --> admission{"Judge admission"}
+    admission -->|required| judge["Semantic Judge<br/>digest-bound assessment"]
+    admission -->|not required| final["OPA / Rego<br/>final directive"]
+    judge --> final
+    final --> route["PEP<br/>apply validated directive"]
+
+    base -.->|external candidate| risk["Operational risk<br/>shadow-only facts"]
+    base -.->|stable audit boundary| behavioral["Behavioral model<br/>shadow-only facts"]
+    risk -.-> shadow["Shadow observations<br/>never influence directive"]
+    behavioral -.-> shadow
+
+    classDef active fill:#e8f0fe,stroke:#3b5ccc,color:#111
+    classDef decision fill:#fff3cd,stroke:#a87900,color:#111
+    classDef shadow fill:#f1f3f4,stroke:#80868b,color:#444
+    classDef result fill:#e6f4ea,stroke:#188038,color:#111
+    class base,evidence,trajectory,judge active
+    class requirements,preliminary,admission decision
+    class risk,behavioral,shadow shadow
+    class final,route result

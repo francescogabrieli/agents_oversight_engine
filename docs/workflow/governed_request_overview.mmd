@@ -1,0 +1,30 @@
+flowchart LR
+    intake["Task Intake<br/>canonical task"] --> planner["Planner<br/>semantic plan"]
+    planner --> actor["Actor<br/>current step"]
+    actor --> governance{"Governance<br/>OPA directive"}
+
+    governance -->|continue| actor
+    governance -->|tool request| gateway["Tool Gateway<br/>read-only capability"]
+    gateway --> observation["Evidence Observation<br/>concrete result"]
+    observation --> actor
+
+    governance -->|replan| replanner["Replanner<br/>semantic trajectory"]
+    replanner --> actor
+
+    governance -->|human review| hitl["Human Review<br/>typed decision"]
+    hitl -->|revision or evidence| actor
+    hitl -->|replan| replanner
+    hitl -->|approved external action| external["External Execution<br/>digest-bound proposal"]
+    governance -->|external action| external
+    external -->|executed| finalize["Finalize<br/>trace and checkpoint"]
+    external -->|indeterminate| hitl
+    governance -->|stop| finalize
+
+    classDef core fill:#e8f0fe,stroke:#3b5ccc,color:#111
+    classDef control fill:#fff3cd,stroke:#a87900,color:#111
+    classDef human fill:#fce8e6,stroke:#c5221f,color:#111
+    classDef terminal fill:#e6f4ea,stroke:#188038,color:#111
+    class intake,planner,actor,gateway,observation,replanner core
+    class governance control
+    class hitl,external human
+    class finalize terminal

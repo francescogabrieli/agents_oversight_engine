@@ -1,0 +1,46 @@
+sequenceDiagram
+    autonumber
+    participant A as Actor
+    participant P as Governance PEP
+    participant O as OPA / Rego
+    participant J as Semantic Judge
+    participant H as Human
+    participant X as External Executor
+    participant T as Trace
+
+    A->>P: Governed external candidate + selected evidence
+    P->>O: Preliminary input + operation and evidence digests
+    O-->>P: Judge admission
+
+    opt Judge required
+        P->>J: Digest-bound candidate + evidence bundle
+        J-->>P: Assessment, findings and digest bindings
+    end
+
+    P->>O: Final decision input
+    O-->>P: Directive and reason codes
+
+    alt Human review required
+        P->>H: Typed request with allowed decisions
+        H-->>P: Approve, edit, request evidence, replan or abort
+        alt Approved candidate
+            P->>X: Authorized digest-bound execution
+        else Edited candidate or replan
+            P-->>A: Revision returns to governance
+        else Abort
+            P->>T: Terminal review record
+        end
+    else Policy allows execution
+        P->>X: Authorized digest-bound execution
+    end
+
+    opt Execution started
+        X-->>P: Executed or indeterminate receipt
+        alt Executed
+            P->>T: External receipt and completion trace
+        else Indeterminate
+            P->>H: Reconciliation request
+            H-->>P: Typed reconciliation decision
+            P->>T: Reconciliation and receipt trace
+        end
+    end

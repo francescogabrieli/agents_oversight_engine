@@ -1,97 +1,161 @@
 # Sequenza verificata di una richiesta governata
 
-Il diagramma sorgente è in [`governed_request_sequence.mmd`](governed_request_sequence.mmd). Rappresenta il wiring effettivo del runtime Layer 2, compreso il ramo di `external_execution`, necessario per essere completo rispetto al codice corrente.
+Il diagramma completo [`governed_request_sequence.mmd`](governed_request_sequence.mmd) resta disponibile come riferimento tecnico. Per la scrittura della tesi, il percorso è stato suddiviso in figure più piccole, ciascuna con una responsabilità esplicita.
+
+## 1. Control loop principale
+
+Questa figura mostra il ciclo operativo Layer 2 e le sole rotte principali dopo la governance.
+
+```mermaid
+flowchart LR
+    intake["Task Intake<br/>canonical task"] --> planner["Planner<br/>semantic plan"]
+    planner --> actor["Actor<br/>current step"]
+    actor --> governance{"Governance<br/>OPA directive"}
+
+    governance -->|continue| actor
+    governance -->|tool request| gateway["Tool Gateway<br/>read-only capability"]
+    gateway --> observation["Evidence Observation<br/>concrete result"]
+    observation --> actor
+
+    governance -->|replan| replanner["Replanner<br/>semantic trajectory"]
+    replanner --> actor
+
+    governance -->|human review| hitl["Human Review<br/>typed decision"]
+    hitl -->|revision or evidence| actor
+    hitl -->|replan| replanner
+    hitl -->|approved external action| external["External Execution<br/>digest-bound proposal"]
+    governance -->|external action| external
+    external -->|executed| finalize["Finalize<br/>trace and checkpoint"]
+    external -->|indeterminate| hitl
+    governance -->|stop| finalize
+
+    classDef core fill:#e8f0fe,stroke:#3b5ccc,color:#111
+    classDef control fill:#fff3cd,stroke:#a87900,color:#111
+    classDef human fill:#fce8e6,stroke:#c5221f,color:#111
+    classDef terminal fill:#e6f4ea,stroke:#188038,color:#111
+    class intake,planner,actor,gateway,observation,replanner core
+    class governance control
+    class hitl,external human
+    class finalize terminal
+```
+
+Sorgente: [`governed_request_overview.mmd`](governed_request_overview.mmd).
+
+## 2. Decisione di governance OPA-first
+
+Questa figura isola il contributo centrale della tesi: i segnali attivi arrivano alla decisione Rego, mentre risk e behavioral restano shadow-only.
+
+```mermaid
+flowchart TD
+    base["PEP<br/>base facts and static envelope"] --> requirements{"OPA / Rego<br/>required pillars"}
+
+    requirements -->|evidence required| evidence["Evidence facts<br/>typed snapshot and selection"]
+    requirements -->|trajectory required| trajectory["Trajectory facts<br/>progress and deviation"]
+
+    base --> preliminary["OPA / Rego<br/>preliminary decision"]
+    evidence --> preliminary
+    trajectory --> preliminary
+    preliminary --> admission{"Judge admission"}
+    admission -->|required| judge["Semantic Judge<br/>digest-bound assessment"]
+    admission -->|not required| final["OPA / Rego<br/>final directive"]
+    judge --> final
+    final --> route["PEP<br/>apply validated directive"]
+
+    base -.->|external candidate| risk["Operational risk<br/>shadow-only facts"]
+    base -.->|stable audit boundary| behavioral["Behavioral model<br/>shadow-only facts"]
+    risk -.-> shadow["Shadow observations<br/>never influence directive"]
+    behavioral -.-> shadow
+
+    classDef active fill:#e8f0fe,stroke:#3b5ccc,color:#111
+    classDef decision fill:#fff3cd,stroke:#a87900,color:#111
+    classDef shadow fill:#f1f3f4,stroke:#80868b,color:#444
+    classDef result fill:#e6f4ea,stroke:#188038,color:#111
+    class base,evidence,trajectory,judge active
+    class requirements,preliminary,admission decision
+    class risk,behavioral,shadow shadow
+    class final,route result
+```
+
+Sorgente: [`governance_decision_flow.mmd`](governance_decision_flow.mmd).
+
+## 3. External operation e Human-in-the-Loop
+
+Questa figura usa una sequenza soltanto per il percorso che beneficia davvero dell’ordine temporale: proposta, valutazione, intervento umano, esecuzione e riconciliazione.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant U as User
-    participant I as Intake
-    participant P as Planner
     participant A as Actor
-    participant TG as Tool Gateway
-    participant EO as Evidence Observation
-    participant PEP as Governance PEP
-    participant PDP as OPA PDP
-    participant PS as Pillar Services
+    participant P as Governance PEP
+    participant O as OPA / Rego
     participant J as Semantic Judge
-    participant DC as Decision Combiner (Rego)
-    participant H as HITL Gateway
-    participant R as Replanner
-    participant X as External Execution
-    participant F as Finalize
-    participant T as Trace / artifacts
+    participant H as Human
+    participant X as External Executor
+    participant T as Trace
 
-    U->>I: Raw task
-    I-->>P: Canonical IntakeResult and execution policy
-    P-->>A: Typed semantic plan
-    loop Per current plan step / actor turn
-        A->>PEP: Typed ActorResult at an operational boundary
-        Note over A,PEP: route_after_actor always routes to governance
-        PEP->>PDP: required_pillars(base facts only)
-        PDP-->>PEP: requirement booleans
+    A->>P: Governed external candidate + selected evidence
+    P->>O: Preliminary input + operation and evidence digests
+    O-->>P: Judge admission
 
-        opt external operation proposal exists
-            PEP->>PS: Build risk raw facts (shadow only)
-            PS-->>PEP: risk signal#59; decision_influence=false
-        end
-        opt require_evidence=true
-            PEP->>PS: Build evidence raw facts
-            PS-->>PEP: evidence signal and snapshot/selection digests
-        end
-        opt require_trajectory=true
-            PEP->>PS: Build trajectory raw facts
-            PS-->>PEP: trajectory signal
-        end
-        opt stable audit boundary OR external operation exists
-            PEP->>PS: Read behavioral SQLite model (shadow only)
-            PS-->>PEP: behavioral signal#59; decision_influence=false
-        end
-        Note over PEP,PS: Static policy is evaluated in Rego#59; it is not a Python pillar-service call.
+    opt Judge required
+        P->>J: Digest-bound candidate + evidence bundle
+        J-->>P: Assessment, findings and digest bindings
+    end
 
-        PEP->>PDP: preliminary decision input + not-required Judge signal
-        PDP->>DC: Evaluate precedence#59; expose judge_admission
-        DC-->>PDP: preliminary output with judge_admission
-        PDP-->>PEP: preliminary decision output
+    P->>O: Final decision input
+    O-->>P: Directive and reason codes
 
-        opt judge_admission.required=true
-            PEP->>J: Digest-bound governed-external candidate + evidence bundle
-            J-->>PEP: judge assessment / findings / digest bindings
+    alt Human review required
+        P->>H: Typed request with allowed decisions
+        H-->>P: Approve, edit, request evidence, replan or abort
+        alt Approved candidate
+            P->>X: Authorized digest-bound execution
+        else Edited candidate or replan
+            P-->>A: Revision returns to governance
+        else Abort
+            P->>T: Terminal review record
         end
-        PEP->>PDP: final decision input: base facts + all pillar signals
-        PDP->>DC: Apply Rego precedence and safety invariants
-        DC-->>PDP: final directive, reason codes, pillar results, judge admission
-        PDP-->>PEP: validated final governance decision
-        PEP->>T: Append governance and pillar assessment histories
+    else Policy allows execution
+        P->>X: Authorized digest-bound execution
+    end
 
-        alt accepted read-only tool proposal
-            PEP->>TG: READY_TOOL_EXECUTION with typed ToolRequest
-            TG-->>EO: ToolExecutionResult
-            EO-->>A: Concrete ToolObservations#59; scratchpad/progress update
-            EO->>T: Tool results, observations and step record
-        else replan
-            PEP->>R: READY_REPLANNING
-            R-->>A: Replacement semantic trajectory
-        else HITL / clarification
-            PEP->>H: Typed HumanReviewRequest
-            H-->>U: interrupt payload
-            U-->>H: Typed resume decision
-            H->>T: Review request, decision and possible edit history
-        else action revision / more evidence
-            PEP-->>A: Restore step for revision or evidence acquisition
-        else stop
-            PEP->>F: ABORTED
-        else authorized external proposal
-            PEP->>X: READY_EXTERNAL_EXECUTION, digest-bound authorization
-            X-->>F: Executed receipt, retry, reconciliation HITL, or abort
-            X->>T: Request/receipt history and step record
-        else local step accepted
-            PEP->>A: READY_NEXT_STEP or ACTING
+    opt Execution started
+        X-->>P: Executed or indeterminate receipt
+        alt Executed
+            P->>T: External receipt and completion trace
+        else Indeterminate
+            P->>H: Reconciliation request
+            H-->>P: Typed reconciliation decision
+            P->>T: Reconciliation and receipt trace
         end
     end
-    F->>T: Persist runtime artifacts
 ```
 
+Sorgente: [`external_operation_hitl_sequence.mmd`](external_operation_hitl_sequence.mmd).
+
+## 4. Evidence e auditabilità
+
+Questa figura mostra come una capacità read-only diventa osservazione concreta e come lo stato alimenta sia la governance sia il trace.
+
+```mermaid
+flowchart LR
+    request["Actor tool request"] --> gateway["Tool Gateway<br/>read-only adapter"]
+    gateway --> result["Tool execution result"]
+    result --> observation["Concrete observation<br/>content and optional locator"]
+    observation --> state["TaskState<br/>evidence, scratchpad and trajectory"]
+    state --> governance["Governance<br/>active evidence and trajectory facts"]
+    state --> trace["Trace builder<br/>step and governance records"]
+    trace --> artifacts["Checkpoint and<br/>runtime artifacts"]
+
+    classDef runtime fill:#e8f0fe,stroke:#3b5ccc,color:#111
+    classDef evidence fill:#e6f4ea,stroke:#188038,color:#111
+    classDef audit fill:#f3e8fd,stroke:#7b1fa2,color:#111
+    class request,gateway,result runtime
+    class observation,state,governance evidence
+    class trace,artifacts audit
+```
+
+Sorgente: [`evidence_audit_flow.mmd`](evidence_audit_flow.mmd).
 ## Verifica del percorso
 
 1. `build_runtime_graph` collega `START → bootstrap_from_intake → planner → actor`; `route_after_actor` restituisce sempre `governance`. Le rotte dopo governance sono `actor`, `tool_gateway`, `replanner`, `human_review`, `external_execution` oppure `finalize_bootstrap`.
