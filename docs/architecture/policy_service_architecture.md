@@ -2,7 +2,7 @@
 
 ## Decision
 
-Layer 2 uses one independently deployable Policy Decision Point (PDP), implemented by OPA, rather than embedding policy interpretation in the LangGraph process. The runtime is the Policy Enforcement Point (PEP): it collects typed facts, calls the PDP, validates the response, applies the directive, and records the trace.
+Layer 2 uses one independently deployable Policy Decision Point (PDP), implemented by OPA, rather than embedding policy interpretation in the LangGraph process. The Layer 2 runtime is the Policy Enforcement Point (PEP): it collects typed facts from Layer 2 and Layer 4, requests capability execution through Layer 3, calls the PDP, validates the response, applies the directive, and records the resulting decision through Layer 4.
 
 ```text
 Planner / Actor / Tool loop
@@ -26,7 +26,9 @@ Planner / Actor / Tool loop
 
 | Boundary | Owns | Must not own |
 |---|---|---|
-| Layer 2 runtime | orchestration, state, signal collection, enforcement, HITL, trace persistence | policy precedence or threshold interpretation |
+| Layer 2 runtime | orchestration, signal collection, enforcement, HITL, and routing | policy precedence, Layer 3 connector execution, or Layer 4 persistence internals |
+| Layer 3 capability boundary | typed tool/external-operation validation and connector execution | final policy decisions or HITL authorization |
+| Layer 4 state/evidence boundary | evidence, oversight, checkpoint, trace, and artifact persistence/projection | final policy decisions or live routing |
 | Policy service client | HTTP transport and OPA `result` envelope | runtime dataclasses or business decisions |
 | OPA PDP | hard policy, pillar interpretation, precedence, safety invariants, final directive | LangGraph state mutation or tool execution |
 | Signal providers | raw facts and diagnostics for one pillar | the final governance directive |

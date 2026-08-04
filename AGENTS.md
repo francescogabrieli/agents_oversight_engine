@@ -31,13 +31,15 @@ The current design references are:
 
 ## Current Scope
 
-At the moment, the repository mainly covers:
+At the moment, the repository covers four numbered architectural layers plus a separate offline evaluation block:
 
-- `Layer 1 - Task Intake`
-- `Layer 2 - Bootstrap + Planner + Actor/Tool Loop + Replanner + Governance`
-- offline evaluation over exported Layer 2 traces
+- `Layer 1 - Task Intake`: canonical task parsing, completeness assessment, and execution-policy assignment
+- `Layer 2 - Runtime & Governance`: bootstrap, planner/actor loop, governance, HITL routing, and coordination
+- `Layer 3 - Tool Bus / External Capabilities`: governed capability execution and external-operation boundaries
+- `Layer 4 - State, Evidence & Observability`: state projections, evidence, oversight, checkpoints, traces, and artifacts
+- offline evaluation over exported Layer 2 traces, kept outside the live runtime
 
-The currently implemented Layer 2 slice is not just a single planner/executor pass.
+Layer 2 is the live orchestration and governance slice, not the whole application. It coordinates Layer 1 input and consumes typed services from Layer 3 and Layer 4; capability execution and durable observability remain owned by those layers.
 It already includes:
 
 - typed planner output
@@ -112,10 +114,21 @@ High-level macro-blocks:
 4. `State, Evidence & Observability`
 5. `Evaluation & Continuous Improvement`
 
+Numbered layer ownership:
+
+- Layer 1 owns intake and canonical task contracts.
+- Layer 2 owns live orchestration, governance, HITL routing, and enforcement.
+- Layer 3 owns the Tool Bus, external capabilities, normalization, and connector boundaries.
+- Layer 4 owns state, evidence, oversight, persistence, trace, and observability.
+- Evaluation is a separate offline block, not a fifth runtime layer.
+
 Important implementation principles:
 
-- `Layer 1` is external to the LangGraph runtime.
-- `Layer 2` is the live orchestration layer and is implemented with LangGraph.
+- `Layer 1` is external to the LangGraph runtime and produces the canonical intake contract.
+- `Layer 2` is the live LangGraph orchestration and governance layer; it owns routing and enforcement, but not Layer 3 connector logic or Layer 4 persistence internals.
+- `Layer 3` is the Tool Bus / External Capabilities boundary; Layer 2 requests capabilities through typed gateways, while actors and governance never call connectors directly.
+- `Layer 4` is the State, Evidence & Observability boundary; it owns typed evidence, trace, checkpoint, and artifact projections.
+- Offline evaluation consumes exported Layer 2 traces through `evaluation_service`; it is a separate post-run block, not `Layer 5`.
 - for the `planner + actor` branch, follow `docs/guidelines/plan-and-execute.ipynb` as the primary implementation pattern reference:
   - multi-step semantic planner
   - step-bounded executor
@@ -231,7 +244,7 @@ Current design:
 - `execution/providers/bedrock_runtime.py` defines the Amazon Bedrock Converse adapter used by the Layer 2 actor with the approved Nova 2 Lite EU inference profile; `bedrock_client.py` is import-compatible
 - `runtime/governance_service.py` applies the OPA-first governance result and persists static, dynamic, behavioral, and judge records before routing
 - `src/layer4_state_evidence_observability/infrastructure/runtime_artifacts.py` configures the local official LangGraph SQLite saver plus the per-thread runtime artifact store; `persistence.py` is import-compatible and `src/layer4_state_evidence_observability/infrastructure/checkpointing.py` can select the official PostgreSQL saver for deployed environments
-- `src/layer4_state_evidence_observability/observability/` defines the typed, JSON-exportable Layer 2 trace models, builders, and compact views used for debugging, thesis evidence, HITL payloads, and evaluation; `trace_summary.py` produces a human-readable Markdown summary written alongside the full JSON trace as `trace_summary.md`; the retired `trace.py` facade must not be restored
+- `src/layer4_state_evidence_observability/observability/` defines the typed, JSON-exportable Layer 4 trace projections for Layer 2 runs, builders, and compact views used for debugging, thesis evidence, HITL payloads, and evaluation; `trace_summary.py` produces a human-readable Markdown summary written alongside the full JSON trace as `trace_summary.md`; the retired `trace.py` facade must not be restored
 - `schemas/layer2_trace.schema.json` is the closed Draft 2020-12 contract for runtime-produced `layer2_trace.v6`; only `evaluation_service` may project historical traces into that current read model
 - `evaluation/` defines the offline trace evaluation pipeline that reads exported trace JSON and produces JSON and Markdown reports, including typed-vs-heuristic evidence mismatch accounting
 - `hitl_dashboard.py` defines the dashboard-facing snapshot model derived from `TaskState`, governance, oversight, and HITL review payloads

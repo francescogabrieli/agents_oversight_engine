@@ -4,7 +4,17 @@
 
 Questo documento ricostruisce il comportamento dal codice e dalle configurazioni attive, non dai README. I riferimenti `file — simbolo` sono le evidenze sorgente. Non contiene diagrammi.
 
-L'architettura effettiva è una pipeline a cinque blocchi: intake Pydantic (Layer 1), runtime LangGraph con PEP (Layer 2), gateway e capability esterne tipizzate (Layer 3), checkpoint/trace/oversight (Layer 4), valutazione offline. L'autorità sull'azione di governance è OPA/Rego; Python costruisce i fatti, valida il contratto di trasporto e applica la direttiva restituita.
+L'architettura effettiva è una pipeline a cinque macro-blocchi: Task Intake (Layer 1), Runtime & Governance (Layer 2), Tool Bus / External Capabilities (Layer 3), State / Evidence / Observability (Layer 4) ed Evaluation offline. I primi quattro sono layer di ownership che collaborano attraverso contratti tipizzati; Evaluation è un blocco post-run separato. L'autorità sull'azione di governance è OPA/Rego; Python costruisce i fatti, valida il contratto di trasporto e applica la direttiva restituita.
+
+## Layer ownership
+
+| Layer / blocco | Responsabilità | Confine |
+|---|---|---|
+| Layer 1 — Task Intake | Parsing canonico, policy e metadati | Fuori dal grafo live |
+| Layer 2 — Runtime & Governance | Orchestrazione, planner/actor, governance, HITL e routing | Non implementa direttamente capability o persistenza |
+| Layer 3 — Tool Bus / External Capabilities | Gateway, normalizzazione, registry, executor e adapter esterni | Non interpreta la policy finale |
+| Layer 4 — State, Evidence & Observability | Stato, evidenze, oversight, checkpoint, trace e artifact | Non ricombina la direttiva OPA |
+| Evaluation | Normalizzazione trace, metriche e report offline | Fuori dalla run live; non è Layer 5 |
 
 ## 1. Entry point e runtime principale
 

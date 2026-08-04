@@ -59,6 +59,17 @@ L'architettura viene compressa in cinque macro-blocchi:
 5. `Evaluation & Continuous Improvement`
    Strato post-run. Misura come si è comportato il sistema e produce aggiornamenti di prompt, policy, soglie e configurazioni.
 
+### Ownership dei layer
+
+I quattro layer numerati descrivono responsabilità e ownership, non quattro passaggi sequenziali di un singolo prompt:
+
+- **Layer 1 — Task Intake**: riceve un input esterno e produce il contratto canonico `IntakeResult`; resta fuori dal grafo LangGraph.
+- **Layer 2 — Runtime & Governance**: esegue il grafo live, coordina planner/actor, raccoglie i segnali applicabili, applica la direttiva OPA e instrada tool, replanning, HITL ed external execution.
+- **Layer 3 — Tool Bus / External Capabilities**: espone il gateway tipizzato, valida e invoca capability; non decide la policy finale.
+- **Layer 4 — State, Evidence & Observability**: mantiene stato, evidenze, oversight, checkpoint, trace e artifact; non è un secondo motore decisionale.
+
+`Evaluation & Continuous Improvement` è un blocco post-run separato: legge i trace esportati e produce metriche/report, ma non è un quinto layer runtime.
+
 ### Flusso End-to-End
 
 - la richiesta entra nel `Task Intake`

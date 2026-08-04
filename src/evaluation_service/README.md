@@ -1,6 +1,6 @@
 # Evaluation Service
 
-This package evaluates exported Layer 2 traces without importing the live runtime.
+This package is the separate offline Evaluation block. It evaluates exported Layer 2 traces without importing the live runtime; it is not a fifth live runtime layer.
 
 - `aggregate.py` is the public compatibility facade and orchestration entry point.
 - `contracts.py` owns report, run, issue, and normalized trace contracts.

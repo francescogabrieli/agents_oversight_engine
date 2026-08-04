@@ -1,12 +1,20 @@
 # Dettaglio del flusso runtime
 
-Questo documento descrive il percorso live del Layer 2. Il contratto di riferimento
+Questo documento descrive il percorso live del **Layer 2 — Runtime & Governance** e il modo in cui coordina Layer 1, Layer 3 e Layer 4. Il contratto di riferimento
 resta `docs/architecture/architecturev3.md`; qui l'obiettivo è mostrare come i componenti
 collaborano durante una run.
 
+La separazione è questa:
+
+- **Layer 1 — Task Intake** prepara il contratto `IntakeResult` canonico prima di avviare il grafo;
+- **Layer 2 — Runtime & Governance** esegue il ciclo LangGraph e prende le decisioni di routing/enforcement;
+- **Layer 3 — Tool Bus / External Capabilities** esegue le capability attraverso gateway e adapter tipizzati;
+- **Layer 4 — State, Evidence & Observability** conserva e proietta stato, evidenze, checkpoint, trace e artifact;
+- **Evaluation** legge i trace esportati a posteriori e non partecipa al percorso live.
+
 Il percorso è descritto dalla prospettiva del contributo centrale della tesi: un
 motore auditabile di Human Oversight e HITL applicato a un runtime agentico autonomo.
-Planner, actor e Tool Gateway formano il sistema supervisionato; pillar, OPA, HITL,
+Planner e actor formano il nucleo agentico supervisionato; Layer 3 espone le capability attraverso il Tool Gateway, mentre OPA, HITL, Layer 4,
 checkpoint e trace costituiscono il control plane e il substrato di accountability.
 
 ## 1. Flusso completo
