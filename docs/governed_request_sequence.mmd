@@ -1,0 +1,113 @@
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant I as Intake
+    participant P as Planner
+    participant A as Actor
+    participant TG as Tool Gateway
+    participant EO as Evidence Observation
+    participant PEP as Governance PEP
+    participant PDP as OPA PDP
+    participant PS as Pillar Services
+    participant J as Semantic Judge
+    participant DC as Decision Combiner (Rego)
+    participant H as HITL Gateway
+    participant R as Replanner
+    participant X as External Execution
+    participant F as Finalize
+    participant T as Trace / artifacts
+
+    U->>I: Raw task
+    I-->>P: Canonical IntakeResult and execution policy
+    P-->>A: Typed semantic plan
+    loop Per current plan step / actor turn
+        A->>PEP: Typed ActorResult at an operational boundary
+        Note over A,PEP: route_after_actor always routes to governance
+        PEP->>PDP: required_pillars(base facts only)
+        PDP-->>PEP: requirement booleans
+        Note over PDP,PEP: OPA query 1: evidence and trajectory requirement is event-sensitive
+
+        opt external operation proposal exists
+            PEP->>PS: Build risk raw facts (shadow only)
+            PS-->>PEP: risk signal; decision_influence=false
+        end
+        opt require_evidence=true
+            PEP->>PS: Build evidence raw facts
+            PS-->>PEP: evidence signal and snapshot/selection digests
+        end
+        opt require_trajectory=true
+            PEP->>PS: Build trajectory raw facts
+            PS-->>PEP: trajectory signal
+        end
+        opt stable audit boundary OR external operation exists
+            PEP->>PS: Read behavioral SQLite model (shadow only)
+            PS-->>PEP: behavioral signal; decision_influence=false
+        end
+        Note over PEP,PS: Static policy is evaluated in Rego; it is not a Python pillar-service call.
+
+        PEP->>PDP: preliminary decision input + not-required Judge signal
+        PDP->>DC: Evaluate precedence; expose judge_admission
+        DC-->>PDP: preliminary output with judge_admission
+        PDP-->>PEP: preliminary decision output
+        Note over PDP,PEP: OPA query 2: Python consumes judge_admission only; it does not apply this preliminary directive.
+
+        opt judge_admission.required=true
+            PEP->>J: Digest-bound governed-external candidate + evidence bundle
+            J-->>PEP: judge assessment / findings / digest bindings
+        end
+        PEP->>PDP: final decision input: base facts + all pillar signals
+        PDP->>DC: Apply Rego precedence and safety invariants
+        DC-->>PDP: final directive, reason codes, pillar results, judge admission
+        PDP-->>PEP: validated final governance decision
+        Note over PDP,PEP: OPA query 3: OPA/Rego is the only final-directive authority.
+        PEP->>T: Append governance history; static/dynamic/behavioral/judge records; step record
+
+        alt directive CONTINUE / CONTINUE_READ_ONLY and actor proposed read-only tool
+            PEP->>TG: Route READY_TOOL_EXECUTION with typed request
+            TG-->>EO: ToolExecutionResult (success/failure/cache/guard result)
+            EO-->>A: Concrete ToolObservations; update scratchpad and progress when new
+            Note over EO,A: If another pending tool request exists, observation first re-enters governance; otherwise actor resumes.
+            EO->>T: Record tool call/result, accepted observations and step record
+        else directive REPLAN or actor NEEDS_REPLAN accepted
+            PEP->>R: Route REPLANNING
+            R-->>A: Replace current/pending semantic trajectory
+            R->>T: Record replanning state/steps in canonical state
+        else directive WAIT_HUMAN_REVIEW or ASK_USER_CLARIFICATION
+            PEP->>H: Typed request: request ID, allowed decisions, reasons, digest-bound proposal
+            H-->>U: LangGraph interrupt payload
+            U-->>H: Typed resume decision (optionally digest-bound approval/edit)
+            alt modify-and-continue
+                H-->>PEP: READY_GOVERNANCE; re-govern changed digest
+            else request more evidence
+                H-->>A: Resume ACTING
+            else replan
+                H-->>R: Resume REPLANNING
+            else approved governed external execution
+                H-->>X: READY_EXTERNAL_EXECUTION with human authorization
+            else abort / terminal decision
+                H-->>F: ABORTED or terminal state
+            end
+            H->>T: Record review request, decision and edit history
+        else directive REQUEST_MORE_EVIDENCE / REVISE_ACTION
+            PEP-->>A: Restore step for evidence collection or bounded revision
+        else directive STOP
+            PEP->>F: ABORTED
+        else authorized governed external proposal
+            PEP->>X: READY_EXTERNAL_EXECUTION with OPA digest authorization
+            X->>X: Preflight exact digest, policy envelope, registry and idempotency
+            alt receipt executed
+                X-->>F: COMPLETED with typed receipt
+            else retryable failed under attempt bound
+                X->>X: Retry with a new attempt scope
+            else indeterminate
+                X->>H: Human reconciliation required; no automatic retry
+            else deterministic failure / rejected preflight
+                X-->>F: ABORTED
+            end
+            X->>T: Record external request, receipt history and step record
+        else local step accepted / no more work
+            PEP->>A: READY_NEXT_STEP or ACTING
+        end
+    end
+    F->>T: Persist final runtime state and trace artifacts
+    T-->>U: full-trace-2.json, trace_summary.md, dashboard snapshot
