@@ -33,7 +33,7 @@ sequenceDiagram
 
         opt external operation proposal exists
             PEP->>PS: Build risk raw facts (shadow only)
-            PS-->>PEP: risk signal; decision_influence=false
+            PS-->>PEP: risk signal#59; decision_influence=false
         end
         opt require_evidence=true
             PEP->>PS: Build evidence raw facts
@@ -45,12 +45,12 @@ sequenceDiagram
         end
         opt stable audit boundary OR external operation exists
             PEP->>PS: Read behavioral SQLite model (shadow only)
-            PS-->>PEP: behavioral signal; decision_influence=false
+            PS-->>PEP: behavioral signal#59; decision_influence=false
         end
-        Note over PEP,PS: Static policy is evaluated in Rego; it is not a Python pillar-service call.
+        Note over PEP,PS: Static policy is evaluated in Rego#59; it is not a Python pillar-service call.
 
         PEP->>PDP: preliminary decision input + not-required Judge signal
-        PDP->>DC: Evaluate precedence; expose judge_admission
+        PDP->>DC: Evaluate precedence#59; expose judge_admission
         DC-->>PDP: preliminary output with judge_admission
         PDP-->>PEP: preliminary decision output
 
@@ -67,7 +67,7 @@ sequenceDiagram
         alt accepted read-only tool proposal
             PEP->>TG: READY_TOOL_EXECUTION with typed ToolRequest
             TG-->>EO: ToolExecutionResult
-            EO-->>A: Concrete ToolObservations; scratchpad/progress update
+            EO-->>A: Concrete ToolObservations#59; scratchpad/progress update
             EO->>T: Tool results, observations and step record
         else replan
             PEP->>R: READY_REPLANNING

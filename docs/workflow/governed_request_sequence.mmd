@@ -29,7 +29,7 @@ sequenceDiagram
 
         opt external operation proposal exists
             PEP->>PS: Build risk raw facts (shadow only)
-            PS-->>PEP: risk signal; decision_influence=false
+            PS-->>PEP: risk signal#59; decision_influence=false
         end
         opt require_evidence=true
             PEP->>PS: Build evidence raw facts
@@ -41,15 +41,15 @@ sequenceDiagram
         end
         opt stable audit boundary OR external operation exists
             PEP->>PS: Read behavioral SQLite model (shadow only)
-            PS-->>PEP: behavioral signal; decision_influence=false
+            PS-->>PEP: behavioral signal#59; decision_influence=false
         end
-        Note over PEP,PS: Static policy is evaluated in Rego; it is not a Python pillar-service call.
+        Note over PEP,PS: Static policy is evaluated in Rego#59; it is not a Python pillar-service call.
 
         PEP->>PDP: preliminary decision input + not-required Judge signal
-        PDP->>DC: Evaluate precedence; expose judge_admission
+        PDP->>DC: Evaluate precedence#59; expose judge_admission
         DC-->>PDP: preliminary output with judge_admission
         PDP-->>PEP: preliminary decision output
-        Note over PDP,PEP: OPA query 2: Python consumes judge_admission only; it does not apply this preliminary directive.
+        Note over PDP,PEP: OPA query 2: Python consumes judge_admission only#59; it does not apply this preliminary directive.
 
         opt judge_admission.required=true
             PEP->>J: Digest-bound governed-external candidate + evidence bundle
@@ -60,13 +60,13 @@ sequenceDiagram
         DC-->>PDP: final directive, reason codes, pillar results, judge admission
         PDP-->>PEP: validated final governance decision
         Note over PDP,PEP: OPA query 3: OPA/Rego is the only final-directive authority.
-        PEP->>T: Append governance history; static/dynamic/behavioral/judge records; step record
+        PEP->>T: Append governance history#59; static/dynamic/behavioral/judge records#59; step record
 
         alt directive CONTINUE / CONTINUE_READ_ONLY and actor proposed read-only tool
             PEP->>TG: Route READY_TOOL_EXECUTION with typed request
             TG-->>EO: ToolExecutionResult (success/failure/cache/guard result)
-            EO-->>A: Concrete ToolObservations; update scratchpad and progress when new
-            Note over EO,A: If another pending tool request exists, observation first re-enters governance; otherwise actor resumes.
+            EO-->>A: Concrete ToolObservations#59; update scratchpad and progress when new
+            Note over EO,A: If another pending tool request exists, observation first re-enters governance#59; otherwise actor resumes.
             EO->>T: Record tool call/result, accepted observations and step record
         else directive REPLAN or actor NEEDS_REPLAN accepted
             PEP->>R: Route REPLANNING
@@ -77,7 +77,7 @@ sequenceDiagram
             H-->>U: LangGraph interrupt payload
             U-->>H: Typed resume decision (optionally digest-bound approval/edit)
             alt modify-and-continue
-                H-->>PEP: READY_GOVERNANCE; re-govern changed digest
+                H-->>PEP: READY_GOVERNANCE#59; re-govern changed digest
             else request more evidence
                 H-->>A: Resume ACTING
             else replan
@@ -100,7 +100,7 @@ sequenceDiagram
             else retryable failed under attempt bound
                 X->>X: Retry with a new attempt scope
             else indeterminate
-                X->>H: Human reconciliation required; no automatic retry
+                X->>H: Human reconciliation required#59; no automatic retry
             else deterministic failure / rejected preflight
                 X-->>F: ABORTED
             end
