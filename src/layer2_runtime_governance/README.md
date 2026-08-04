@@ -1,6 +1,6 @@
 # Layer 2 Runtime and Governance
 
-Layer 2 is a modular runtime for governed plan execution. LangGraph coordinates the flow, while capability packages own domain rules and infrastructure adapters implement external effects.
+Layer 2 is the live LangGraph runtime and governance boundary for governed plan execution. Layer 3 owns capability execution and Layer 4 owns persistence, evidence, and observability; Layer 2 coordinates them through typed ports.
 
 ## Runtime flow
 
@@ -33,25 +33,30 @@ Domain modules must remain independent from LangGraph, provider SDKs, HTTP, subp
   result construction, evidence/claim guards, settings, and provider adapters.
 - `domain/evidence_policy.py`: canonical support-level and claim-precision
   classification shared by execution guards and governance compatibility surfaces.
-- `tools/`: governed tool registry, validation, adapters, and content extraction.
-- `external_operations/`: immutable external proposals, runtime/registry boundary
-  projection, AST-backed SQL and structural communication normalization, capability
-  consequence profiles, and a production executor seam that performs no side effects.
+- `layer3_tool_bus_external_capabilities/tools/`: governed tool registry, validation,
+  adapters, and content extraction.
+- `layer3_tool_bus_external_capabilities/external_operations/`: immutable external
+  proposals, runtime/registry boundary projection, AST-backed SQL and structural
+  communication normalization, capability consequence profiles, and the production
+  executor seam.
 - `signal_services/`: typed governance signal providers.
 - `hitl/`: typed human-review flow and dashboard projections.
 - `graph.py`: LangGraph composition and routing only.
 - `runtime/`: lifecycle, planning, actor, tool, replanning, governance services, and
   thin LangGraph node adapters. The former `nodes.py` facade has been removed.
-- `observability/`: trace models, read-only builders, compact views, and JSON
-  serialization. The former `trace.py` facade has been removed.
 - `evaluation/`: offline evaluation over exported traces.
-- `behavioral/`, `judge/`, and `oversight/`: shadow-only behavioural memory,
-  governed-external semantic assessment, active evidence/trajectory contracts, and
-  shadow operational consequence facts.
+- `judge/`: governed-external semantic assessment used by the Layer 2 governance
+  boundary.
+- `layer4_state_evidence_observability/observability/`: trace models, read-only
+  builders, compact views, and JSON serialization.
+- `layer4_state_evidence_observability/behavioral/` and `oversight/`: shadow-only
+  behavioural memory and persisted oversight assessment contracts.
 - `governance_components/`: OPA contracts, input-document construction, validation,
   response parsing, and fail-closed handling.
-- `infrastructure/`: official checkpoint composition, bounded retention, environment
-  loading, runtime artifacts, and dependency-warning filters.
+- `layer4_state_evidence_observability/infrastructure/`: official checkpoint
+  composition, bounded retention, environment loading, runtime artifacts, and
+  review-decision transport persistence. Runtime warning filters remain in
+  `runtime_warnings.py` because they belong to Layer 2 startup.
 
 ## Persistence and interrupts
 

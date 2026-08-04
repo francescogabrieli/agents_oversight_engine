@@ -8,7 +8,7 @@ from typing import Any
 
 from layer1_intake import ExecutionIntent
 
-from ..external_operations.contracts import (
+from layer3_tool_bus_external_capabilities.external_operations.contracts import (
     CommunicationOperationPayload,
     DatabaseOperationPayload,
     DatabaseOperationParameter,
@@ -565,7 +565,7 @@ def _coerce_external_execution_receipt(
 
 # Recover one typed tool request from JSON-safe checkpoint material.
 def _coerce_tool_request(payload):
-    from ..tool_contract import ToolName, ToolRequest
+    from layer3_tool_bus_external_capabilities.tool_contract import ToolName, ToolRequest
 
     if payload is None or isinstance(payload, ToolRequest):
         return payload

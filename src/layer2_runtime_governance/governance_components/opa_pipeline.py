@@ -1,9 +1,9 @@
 from dataclasses import replace
 from typing import Any
 
-from ..behavioral import BehavioralAssessment, BehavioralStorePort
+from layer4_state_evidence_observability.behavioral import BehavioralAssessment, BehavioralStorePort
 from ..judge import JudgeAssessment, JudgePort
-from ..oversight.contracts import DynamicPolicyAssessment
+from layer4_state_evidence_observability.oversight.contracts import DynamicPolicyAssessment
 from ..domain import (
     ActorResultType,
     TaskState,
@@ -11,7 +11,7 @@ from ..domain import (
     build_evidence_snapshot_manifest,
     digest_json,
 )
-from ..tools import ToolGatewayConfig
+from layer3_tool_bus_external_capabilities.tools import ToolGatewayConfig
 
 # PolicyDecision is the deterministic outcome returned by the policy engine.
 from .contracts import (
@@ -44,7 +44,7 @@ def evaluate_opa_first_governance(
     tool_gateway_config: ToolGatewayConfig | None = None,
     thread_id: str | None = None,
 ) -> GovernanceEvaluationResult:
-    from ..behavioral import build_behavioral_assessment
+    from layer4_state_evidence_observability.behavioral import build_behavioral_assessment
     from .input_document import (
         build_governance_base_facts,
         build_governance_decision_input,
@@ -60,7 +60,7 @@ def evaluate_opa_first_governance(
         build_trajectory_signal,
         validate_required_judge_assessment,
     )
-    from ..external_operations.runtime_projection import (
+    from layer3_tool_bus_external_capabilities.external_operations.runtime_projection import (
         prepare_external_operation_proposal,
     )
 

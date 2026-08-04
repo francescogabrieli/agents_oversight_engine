@@ -4,9 +4,9 @@ import json
 
 from layer1_intake import TaskSpec
 from ..actor_contract import ActorTask
-from ..tool_contract import ToolName
-from ..tools.models import ToolBackend, ToolGatewayConfig
-from ..tools.registry import load_tool_gateway_config
+from layer3_tool_bus_external_capabilities.tool_contract import ToolName
+from layer3_tool_bus_external_capabilities.tools.models import ToolBackend, ToolGatewayConfig
+from layer3_tool_bus_external_capabilities.tools.registry import load_tool_gateway_config
 
 
 _CAPABILITY_ACTIONS: dict[ToolName, tuple[str, str, dict[str, object], tuple[str, ...]]] = {

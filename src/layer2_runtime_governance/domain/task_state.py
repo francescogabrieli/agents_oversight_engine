@@ -13,7 +13,7 @@ from layer1_intake import (
     TaskSpec,
 )
 
-from ..tool_contract import (
+from layer3_tool_bus_external_capabilities.tool_contract import (
     ToolExecutionResult,
     ToolObservation,
     ToolRequest,
@@ -21,11 +21,11 @@ from ..tool_contract import (
 
 if TYPE_CHECKING:
     from ..actor_contract import ActorResult
-    from ..behavioral import BehavioralAssessment
+    from layer4_state_evidence_observability.behavioral import BehavioralAssessment
     from ..governance_components.contracts import GovernanceDecisionTrace, StaticPolicyAssessment
     from ..judge import JudgeAssessment
-    from ..oversight import DynamicPolicyAssessment
-    from ..external_operations.contracts import (
+    from layer4_state_evidence_observability.oversight import DynamicPolicyAssessment
+    from layer3_tool_bus_external_capabilities.external_operations.contracts import (
         ExternalExecutionReceipt,
         ExternalExecutionRequest,
         ExternalOperationProposal,

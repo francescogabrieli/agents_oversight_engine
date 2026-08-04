@@ -6,7 +6,7 @@ from typing import Protocol
 
 from layer1_intake import IntakeResult
 
-from ..domain import TaskState
+from layer2_runtime_governance.domain import TaskState
 
 
 @dataclass(frozen=True)

@@ -34,7 +34,7 @@ from layer2_runtime_governance.governance_components import (
     evaluate_opa_first_governance,
 )
 from layer2_runtime_governance.domain import PlanStep, PlanStepStatus, RuntimeState, TaskState
-from layer2_runtime_governance.oversight import OversightSignalLevel
+from layer4_state_evidence_observability.oversight import OversightSignalLevel
 
 
 class OPAFirstGovernanceContractTests(unittest.TestCase):

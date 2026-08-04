@@ -1,6 +1,6 @@
 from typing import Any
 
-from ..behavioral import BehavioralAssessment
+from layer4_state_evidence_observability.behavioral import BehavioralAssessment
 from ..judge import (
     JudgeAssessment,
     JudgeAssessmentStatus,
@@ -8,7 +8,7 @@ from ..judge import (
     JudgeSeverity,
     JudgeVerdict,
 )
-from ..oversight.contracts import DynamicPolicyAssessment
+from layer4_state_evidence_observability.oversight.contracts import DynamicPolicyAssessment
 from ..domain import TaskState
 
 # PolicyDecision is the deterministic outcome returned by the policy engine.

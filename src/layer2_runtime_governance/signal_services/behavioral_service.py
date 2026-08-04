@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from layer2_runtime_governance.behavioral import BehavioralAssessment
+from layer4_state_evidence_observability.behavioral import BehavioralAssessment
 
 
 # Convert the behavioural read-model assessment into OPA facts.

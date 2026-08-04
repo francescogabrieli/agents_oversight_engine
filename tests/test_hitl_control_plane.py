@@ -45,7 +45,7 @@ from layer2_runtime_governance import (
 )
 from layer2_runtime_governance.governance_components import PolicyEnginePort
 from layer2_runtime_governance.hitl import build_human_review_request
-from layer2_runtime_governance.infrastructure.review_decision_inbox import (
+from layer4_state_evidence_observability.infrastructure.review_decision_inbox import (
     SQLiteReviewDecisionInbox,
 )
 from layer2_runtime_governance.runtime.governance_service import governance

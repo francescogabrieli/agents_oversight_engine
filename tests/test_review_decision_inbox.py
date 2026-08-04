@@ -14,7 +14,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 
-from layer2_runtime_governance.infrastructure.review_decision_inbox import (
+from layer4_state_evidence_observability.infrastructure.review_decision_inbox import (
     SQLiteReviewDecisionInbox,
 )
 

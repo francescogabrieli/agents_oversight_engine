@@ -22,7 +22,7 @@ from layer2_runtime_governance.execution.action_schemas import (
 )
 from layer2_runtime_governance.execution.errors import ActorExecutionError
 from layer2_runtime_governance.execution.response_parser import convert_json_payload_to_tool_call
-from layer2_runtime_governance.tools import load_tool_gateway_config
+from layer3_tool_bus_external_capabilities.tools import load_tool_gateway_config
 
 
 class ActorActionSchemaTests(unittest.TestCase):

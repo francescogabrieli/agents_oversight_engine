@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Protocol
 
-from ..external_operations.contracts import ExternalOperationProposal
+from layer3_tool_bus_external_capabilities.external_operations.contracts import ExternalOperationProposal
 
 
 class JudgeRecommendedDirective(str, Enum):

@@ -9,7 +9,7 @@ import sqlite3
 import threading
 from typing import Any
 
-from ..hitl.decision_inbox import (
+from layer2_runtime_governance.hitl.decision_inbox import (
     ReviewDecisionStatus,
     ReviewDecisionSubmission,
     RuntimeOwnerLease,

@@ -59,13 +59,15 @@ It already includes:
 - typed `external_communication` phase tracking for evidence, draft, review/edit, approval, and blocked states
 - the external communication draft body is taken from the latest governed draft output for the branch, while the trace retains the canonical final body, selected evidence references, and provenance diagnostics
 - external communication plan semantics remain planner-owned; runtime compaction is not part of the active architecture
-- typed runtime trace export through `observability/`, surfaced by `src/main_layer2.py`
+- typed runtime trace export through `src/layer4_state_evidence_observability/observability/`, surfaced by `src/main_layer2.py`
 - offline trace evaluation and reporting through `evaluation/`, surfaced by `src/main_layer2_evaluation.py`
 
 These are the folders to treat as the active implementation baseline:
 
 - `src/layer1_intake`
 - `src/layer2_runtime_governance`
+- `src/layer3_tool_bus_external_capabilities`
+- `src/layer4_state_evidence_observability`
 - `src/main_layer1.py`
 - `src/main_layer2.py`
 - `src/main_layer2_dashboard.py`
@@ -180,27 +182,27 @@ Main files:
 - `acting.py` (compatibility facade)
 - `replanning.py` (compatibility facade)
 - `actor_contract.py`
-- `tool_contract.py`
-- `tool_gateway.py`
+- `src/layer3_tool_bus_external_capabilities/tool_contract.py`
+- `src/layer3_tool_bus_external_capabilities/tools/gateway.py`
 - `governance.py`
-- `behavioral/`
+- `src/layer4_state_evidence_observability/behavioral/`
 - `judge/`
-- `oversight/`
+- `src/layer4_state_evidence_observability/oversight/`
 - `evaluation/`
 - `execution/providers/bedrock_runtime.py` (`bedrock_client.py` is a compatibility facade)
-- `infrastructure/runtime_artifacts.py` (`persistence.py` is a compatibility facade)
-- `infrastructure/runtime_warnings.py`
+- `src/layer4_state_evidence_observability/infrastructure/runtime_artifacts.py` (`persistence.py` is a compatibility facade)
+- `runtime_warnings.py`
 
-Modular capability packages introduced for the active Layer 2 baseline:
+Modular capability packages introduced for the active Layer 2–4 baseline:
 
 - `domain/` exposes framework-independent views of canonical planning, execution, evidence, review, and task-state contracts
 - `runtime/` owns graph contracts, routing, node adapters, and thread context
-- `tools/` owns the Tool Gateway registry, validation, backend adapters, and content extractors; `tool_gateway.py` is a compatibility facade
+- `src/layer3_tool_bus_external_capabilities/tools/` owns the Tool Gateway registry, validation, backend adapters, and content extractors
 - `execution/` owns actor provider configuration, prompts, action schemas, response parsing, result construction, and provider adapters; `acting.py` is a compatibility facade and actor factory
 - `governance_components/` owns policy contracts, inputs, adapters, OPA-first evaluation, response parsing, and fail-closed handling
-- `observability/` owns immutable trace models, read-only builders, compact views, and JSON serialization
+- `src/layer4_state_evidence_observability/observability/` owns immutable trace models, read-only builders, compact views, and JSON serialization
 - `src/evaluation_service/` owns runtime-independent trace discovery, loading, legacy normalization, per-run evaluation, metric aggregation, and report serialization; `aggregate.py` is a thin compatibility facade
-- `infrastructure/` owns checkpoint composition and persistence ports
+- `src/layer4_state_evidence_observability/infrastructure/` owns checkpoint composition and persistence ports
 - `composition.py` is the explicit dependency-injection entry point for runtime construction
 
 Current design:
@@ -213,34 +215,34 @@ Current design:
 - `actor_contract.py` passes observed concrete evidence and the semantic current step; it never passes a universal evidence rank or claim ceiling
 - `planning/replanning.py` defines the replanner port, prompt builders, the default OpenAI-backed replanner, and a local conservative fallback replanner for tests/offline use; `replanning.py` preserves the legacy import path
 - `actor_contract.py` defines the typed handoff from planner state into actor-facing execution context for the current plan step, including observed evidence, scratchpad entries, and prior step validations
-- `tool_contract.py` defines typed tool requests, tool results, and observed evidence contracts
-- `tool_gateway.py` contains the read-only operational tool surface currently available to the runtime, including `web_search`, `fetch_url_text`, and configured read-only MCP test tools behind the gateway registry
+- `src/layer3_tool_bus_external_capabilities/tool_contract.py` defines typed tool requests, tool results, and observed evidence contracts
+- `src/layer3_tool_bus_external_capabilities/tools/` contains the read-only operational tool surface currently available to the runtime, including `web_search`, `fetch_url_text`, and configured read-only MCP test tools behind the gateway registry
 - `configs/layer2_tool_gateway.json` is the active Tool Gateway registry for configured native, HTTP, OpenAI, and MCP-backed tools
 - MCP is usable as a governed backend behind the Tool Gateway; the actor must never call MCP servers directly
 - `governance_components/` defines typed policy contracts, OPA inputs and adapter, OPA-first orchestration, decision parsing, fail-closed handling, and final governance traces; `governance.py` retains checkpoint aliases only
 - `governance_policy_service` owns the runtime-independent HTTP transport contract for the external OPA Policy Decision Point; it must not import Layer 2 runtime state
 - `services/policy_decision_point` is the deployable, stateless OPA service boundary; LangGraph remains the Policy Enforcement Point and applies only validated typed directives
 - OPA/Rego is the sole final directive authority; Python may normalize and validate transport data but must not recreate a competing final decision combiner
-- `behavioral/` defines the shadow-only SQLite historical read model, similarity/deviation/novelty scoring, persistence, and counterfactual recommendations with no directive influence
+- `src/layer4_state_evidence_observability/behavioral/` defines the shadow-only SQLite historical read model, similarity/deviation/novelty scoring, persistence, and counterfactual recommendations with no directive influence
 - `judge/` defines the generic governed-external semantic assessor; OPA owns invocation and directive mapping
-- `oversight/contracts.py` retains typed assessment/checkpoint contracts; `signal_services/` produces raw facts and OPA owns scoring, thresholds, judge requirements, and directives
-- `oversight/` preserves compatibility contracts; evidence and trajectory are active, while `operational_risk` exports shadow consequence facts and is not applicable outside governed external operations
-- `external_operations/` owns immutable typed proposals, execution intent projection, SQL AST and communication/generic normalizers, a dedicated capability registry, durable idempotency records, the external executor port, and the capability-bound MCP adapter
-- `src/external_capability_mcp/` owns the productive typed MCP tools for SMTP email and profile-bound database statements; both are disabled by default and credentials remain infrastructure configuration
+- `src/layer4_state_evidence_observability/oversight/contracts.py` retains typed assessment/checkpoint contracts; `signal_services/` produces raw facts and OPA owns scoring, thresholds, judge requirements, and directives
+- `src/layer4_state_evidence_observability/oversight/` preserves persisted oversight assessment contracts; evidence and trajectory are active, while `operational_risk` exports shadow consequence facts and is not applicable outside governed external operations
+- `src/layer3_tool_bus_external_capabilities/external_operations/` owns immutable typed proposals, execution intent projection, SQL AST and communication/generic normalizers, a dedicated capability registry, durable idempotency records, the external executor port, and the capability-bound MCP adapter
+- `src/layer3_tool_bus_external_capabilities/external_capability_mcp/` owns the productive typed MCP tools for SMTP email and profile-bound database statements; both are disabled by default and credentials remain infrastructure configuration
 - `execution/providers/bedrock_runtime.py` defines the Amazon Bedrock Converse adapter used by the Layer 2 actor with the approved Nova 2 Lite EU inference profile; `bedrock_client.py` is import-compatible
 - `runtime/governance_service.py` applies the OPA-first governance result and persists static, dynamic, behavioral, and judge records before routing
-- `infrastructure/runtime_artifacts.py` configures the local official LangGraph SQLite saver plus the per-thread runtime artifact store; `persistence.py` is import-compatible and `infrastructure/checkpointing.py` can select the official PostgreSQL saver for deployed environments
-- `observability/` defines the typed, JSON-exportable Layer 2 trace models, builders, and compact views used for debugging, thesis evidence, HITL payloads, and evaluation; `observability/trace_summary.py` produces a human-readable Markdown summary written alongside the full JSON trace as `trace_summary.md`; the retired `trace.py` facade must not be restored
+- `src/layer4_state_evidence_observability/infrastructure/runtime_artifacts.py` configures the local official LangGraph SQLite saver plus the per-thread runtime artifact store; `persistence.py` is import-compatible and `src/layer4_state_evidence_observability/infrastructure/checkpointing.py` can select the official PostgreSQL saver for deployed environments
+- `src/layer4_state_evidence_observability/observability/` defines the typed, JSON-exportable Layer 2 trace models, builders, and compact views used for debugging, thesis evidence, HITL payloads, and evaluation; `trace_summary.py` produces a human-readable Markdown summary written alongside the full JSON trace as `trace_summary.md`; the retired `trace.py` facade must not be restored
 - `schemas/layer2_trace.schema.json` is the closed Draft 2020-12 contract for runtime-produced `layer2_trace.v6`; only `evaluation_service` may project historical traces into that current read model
 - `evaluation/` defines the offline trace evaluation pipeline that reads exported trace JSON and produces JSON and Markdown reports, including typed-vs-heuristic evidence mismatch accounting
 - `hitl_dashboard.py` defines the dashboard-facing snapshot model derived from `TaskState`, governance, oversight, and HITL review payloads
 - `main_layer2_dashboard.py` acts as a standalone multi-thread HITL control plane backend that serves the React dashboard build and exposes review inbox, detail, and typed decision-submission APIs; it validates and durably enqueues decisions but never executes or resumes the LangGraph runtime
-- `infrastructure/review_decision_inbox.py` is the durable control-plane transport between the dashboard and the runtime owner; it provides idempotent request-bound submissions, atomic claiming, delivery status, and a single-owner lease, but it is not runtime state and cannot reconstruct a graph
+- `src/layer4_state_evidence_observability/infrastructure/review_decision_inbox.py` is the durable control-plane transport between the dashboard and the runtime owner; it provides idempotent request-bound submissions, atomic claiming, delivery status, and a single-owner lease, but it is not runtime state and cannot reconstruct a graph
 - the original `main_layer2.py` process remains the execution owner while a thread is interrupted, consumes the queued decision, and applies `Command(resume=...)` through the official checkpointer while streaming continuation progress in the same terminal
 - the dashboard removes a submitted request from active approvals immediately, exposes it as a non-interactive completed-review item for 2 minutes, and then removes that transient acknowledgement; canonical run completion remains distinct from review completion
 - `frontend/dashboard` contains the standalone React + TypeScript + Tailwind + daisyUI dashboard frontend that is built into static assets and served by `main_layer2_dashboard.py`
 - `configs/opa/layer2_governance/data.json` is the sole source for static organizational constraints and bounded external-action revision limits consumed by OPA
-- `infrastructure/runtime_warnings.py` centralizes warning suppression needed before importing selected LangGraph/LangChain dependencies
+- `runtime_warnings.py` centralizes warning suppression needed before importing selected LangGraph/LangChain dependencies
 - `graph.py` contains the current LangGraph wiring for the planner/actor/governance/tool/replanner/human-review/external-execution loop:
   `START -> bootstrap_from_intake -> planner -> actor -> { actor | governance }`
   `governance -> { actor | tool_gateway | replanner | human_review | external_execution | finalize_bootstrap }`
@@ -326,7 +328,7 @@ Current relevant files:
 
 ### Maintainability and Modularity
 
-- Organize Layer 2 by bounded capability: domain state, planning, execution, tools, governance, HITL, runtime orchestration, observability, and infrastructure.
+- Organize the implementation by bounded layer: Layer 2 owns domain/runtime/planning/execution/governance/HITL orchestration; Layer 3 owns Tool Bus and external capabilities; Layer 4 owns state, evidence, persistence, and observability.
 - Keep one composition root responsible for selecting concrete adapters and wiring dependencies. Domain and application modules must not construct infrastructure clients directly.
 - Dependencies must point inward: domain models know no frameworks; application services depend on domain contracts and ports; adapters depend on ports; LangGraph wiring composes them.
 - Keep LangGraph nodes thin. A node may adapt graph state, call one application service, and record the result, but business rules belong in domain or application modules.
@@ -468,7 +470,7 @@ Current relevant files:
 - Trajectory Health uses only whole-run observable execution dynamics at semantic boundaries and never treats narrative turns, elapsed thinking, or point confidence alone as degradation.
 - The semantic judge is invoked only after OPA admits a complete governed-external candidate. It receives authoritative task data, full semantic plan, completed-step summaries, all canonical observations and selected references, same-operation revision findings, and the exact digest-bound payload; it never receives scratchpad, raw tool history/arguments, runtime events, counters, retry/replan history, or shadow assessments.
 - runtime trace export must be read-only over `TaskState`; it must not mutate runtime state or become a parallel source of truth
-- `main_layer2.py` may print trace views, but reusable trace construction belongs in `observability/`
+- `main_layer2.py` may print trace views, but reusable trace construction belongs in `src/layer4_state_evidence_observability/observability/`
 - `resume_layer2_flow` should prefer the direct LangGraph `invoke(Command(resume=...))` result when it contains the canonical `task_state`, because interrupted checkpoints may briefly expose only a partial snapshot wrapper during resume; the CLI-owned HITL path may stream the same command to keep node progress visible in the original terminal
 - `main_layer2_evaluation.py` is the offline, trace-only evaluation entrypoint and must stay decoupled from the live runtime CLI
 - `ABORTED` is the hard-denial runtime state for governance decisions that must not be conflated with review
@@ -506,10 +508,10 @@ Useful breakpoint locations:
 - `src/layer2_runtime_governance/planning/__init__.py`
 - `src/layer2_runtime_governance/acting.py`
 - `src/layer2_runtime_governance/planning/replanning.py`
-- `src/layer2_runtime_governance/tool_gateway.py`
-- `src/layer2_runtime_governance/oversight/__init__.py`
-- `src/layer2_runtime_governance/observability/builder.py`
-- `src/layer2_runtime_governance/observability/trace_summary.py`
+- `src/layer3_tool_bus_external_capabilities/tools/gateway.py`
+- `src/layer4_state_evidence_observability/oversight/__init__.py`
+- `src/layer4_state_evidence_observability/observability/builder.py`
+- `src/layer4_state_evidence_observability/observability/trace_summary.py`
 
 In particular:
 

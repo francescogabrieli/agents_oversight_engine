@@ -10,7 +10,7 @@ from layer2_runtime_governance.domain import (
     build_observation_lineage,
     digest_json,
 )
-from layer2_runtime_governance.external_operations import (
+from layer3_tool_bus_external_capabilities.external_operations import (
     CommunicationOperationPayload,
     ExternalOperationProposal,
 )

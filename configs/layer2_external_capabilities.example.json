@@ -70,7 +70,7 @@
       "enabled": true,
       "transport": "stdio",
       "command": "{python}",
-      "args": ["-m", "external_capability_mcp", "communication"],
+      "args": ["-m", "layer3_tool_bus_external_capabilities.external_capability_mcp", "communication"],
       "allowed_tools": ["send_email"],
       "timeout_seconds": 20,
       "environment_keys": [
@@ -89,7 +89,7 @@
       "enabled": true,
       "transport": "stdio",
       "command": "{python}",
-      "args": ["-m", "external_capability_mcp", "database"],
+      "args": ["-m", "layer3_tool_bus_external_capabilities.external_capability_mcp", "database"],
       "allowed_tools": ["execute_statement"],
       "timeout_seconds": 20,
       "environment_keys": [

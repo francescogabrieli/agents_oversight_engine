@@ -20,7 +20,7 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
         "ActorPastStep", "ActorPlanStep", "ActorPort", "ActorResult",
         "ActorResultType", "ActorTask", "CapabilityAccessMode", "build_actor_task",
     ),
-    ".behavioral": (
+    "layer4_state_evidence_observability.behavioral": (
         "BehavioralAssessment", "BehavioralRecommendedDirective", "BehavioralStorePort",
         "BehavioralStoreSettings", "SQLiteBehavioralStore", "build_behavioral_assessment",
         "build_default_behavioral_store", "evaluate_behavioral_policy",
@@ -48,7 +48,7 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
         "JudgeTaskRequirement", "JudgeTaskRequirementKind", "JudgeVerdict", "OpenAIJudge",
         "build_default_judge", "build_judge_system_prompt", "build_judge_user_prompt",
     ),
-    ".external_operations": (
+    "layer3_tool_bus_external_capabilities.external_operations": (
         "CommunicationOperationPayload", "DatabaseOperationPayload",
         "DatabaseOperationParameter", "DatabaseStatementDraft", "DestinationClass",
         "ExternalCapabilityDefinition", "ExternalCapabilityRegistry",
@@ -83,19 +83,19 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
         "ReviewDecisionInboxPort", "ReviewDecisionStatus",
         "ReviewDecisionSubmission", "RuntimeOwnerLease",
     ),
-    ".oversight": (
+    "layer4_state_evidence_observability.oversight": (
         "DynamicPolicyAssessment", "DynamicPolicyRecommendedDirective",
         "EvidenceQualityAssessment", "OperationalRiskAssessment",
         "OversightAssessment", "OversightReasonCode",
         "OversightRecommendedDirective", "OversightSignalLevel",
         "TrajectoryHealthAssessment",
     ),
-    ".infrastructure.runtime_artifacts": (
+    "layer4_state_evidence_observability.infrastructure.runtime_artifacts": (
         "build_sqlite_checkpointer", "RuntimeArtifactPaths", "RuntimeArtifactStore",
         "get_default_checkpointer_path", "get_default_runtime_artifacts_root",
         "persist_runtime_artifacts",
     ),
-    ".infrastructure.review_decision_inbox": (
+    "layer4_state_evidence_observability.infrastructure.review_decision_inbox": (
         "SQLiteReviewDecisionInbox", "get_default_review_decision_inbox_path",
     ),
     ".planning": (
@@ -115,16 +115,16 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
         "ReplanCheckpoint", "ScratchpadEntry", "ScratchpadEntryType", "StepRecord", "StepValidation",
         "TaskState",
     ),
-    ".tool_contract": (
+    "layer3_tool_bus_external_capabilities.tool_contract": (
         "ToolExecutionResult", "ToolGatewayPort", "ToolName", "ToolObservation", "ToolRequest",
     ),
-    ".tools": (
+    "layer3_tool_bus_external_capabilities.tools": (
         "McpServerDefinition", "OpenAIToolGateway", "OpenAIToolGatewaySettings", "ToolBackend",
         "ToolCapability", "ToolDefinition", "ToolExecutionError", "ToolGatewayConfig",
         "ToolRiskLevel", "build_default_tool_gateway", "build_default_tool_gateway_config",
         "get_default_tool_gateway_config_path", "load_tool_gateway_config",
     ),
-    ".observability": (
+    "layer4_state_evidence_observability.observability": (
         "Layer2RuntimeTrace", "TraceActorTurn", "TraceBehavioralAssessment",
         "TraceExecutionSummary", "TraceExternalCommunicationDraft",
         "TraceExternalCommunicationSummary", "TraceExternalExecutionReceipt",

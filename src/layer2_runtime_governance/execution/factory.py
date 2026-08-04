@@ -3,7 +3,7 @@
 from ..actor_contract import ActorPort
 from .providers import BedrockNovaActor, OpenAIActor
 from .settings import resolve_actor_provider
-from ..tools import ToolGatewayConfig
+from layer3_tool_bus_external_capabilities.tools import ToolGatewayConfig
 
 
 # Build the configured production actor without coupling graph wiring to providers.

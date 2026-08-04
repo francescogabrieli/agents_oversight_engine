@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..actor_contract import ActorResultType
-from ..behavioral import BehavioralRecommendedDirective
+from layer4_state_evidence_observability.behavioral import BehavioralRecommendedDirective
 from ..judge import JudgeRecommendedDirective
 from .contracts import (
     GovernanceDirective,

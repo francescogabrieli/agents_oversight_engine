@@ -11,13 +11,13 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 
 from layer1_intake import IntakeResult
 
-from ..hitl.dashboard import (
+from layer2_runtime_governance.hitl.dashboard import (
     build_governance_hitl_dashboard_snapshot,
     governance_hitl_dashboard_snapshot_to_json,
 )
 from .ports import RuntimeArtifactPaths, RuntimeArtifactStorePort
-from ..domain import TaskState
-from ..judge import judge_evidence_bundle_to_json
+from layer2_runtime_governance.domain import TaskState
+from layer2_runtime_governance.judge import judge_evidence_bundle_to_json
 from ..observability import (
     build_layer2_runtime_trace,
     build_trace_summary_markdown,
@@ -247,7 +247,7 @@ def _persist_current_judge_evidence_bundle(
         return None
     try:
         # Import locally so infrastructure persistence does not widen package startup.
-        from ..signal_services.judge_service import build_judge_context
+        from layer2_runtime_governance.signal_services.judge_service import build_judge_context
 
         context = build_judge_context(
             task_state=task_state,

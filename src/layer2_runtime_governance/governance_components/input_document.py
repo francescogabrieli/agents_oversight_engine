@@ -4,13 +4,13 @@ from typing import Any
 
 from .contracts import PolicyEvaluationInput
 from ..domain import TaskState
-from ..external_operations.contracts import (
+from layer3_tool_bus_external_capabilities.external_operations.contracts import (
     CommunicationOperationPayload,
     DatabaseOperationPayload,
     ExternalOperationProposal,
     GenericExternalOperationPayload,
 )
-from ..external_operations.profiles import load_capability_consequence_profiles
+from layer3_tool_bus_external_capabilities.external_operations.profiles import load_capability_consequence_profiles
 
 
 # Build the base facts document sent to OPA before optional pillar selection.

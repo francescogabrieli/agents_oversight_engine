@@ -43,7 +43,7 @@ from layer2_runtime_governance.execution.result_builder import (
     _selected_evidence_refs,
     build_provider_protocol_failure_result,
 )
-from layer2_runtime_governance.external_operations import (
+from layer3_tool_bus_external_capabilities.external_operations import (
     CommunicationOperationPayload,
     DestinationClass,
     OperationBoundary,
@@ -81,7 +81,7 @@ from layer2_runtime_governance.signal_services.judge_service import (
 from layer2_runtime_governance.signal_services.trajectory_service import (
     build_trajectory_signal,
 )
-from layer2_runtime_governance.tool_contract import (
+from layer3_tool_bus_external_capabilities.tool_contract import (
     ToolExecutionResult,
     ToolName,
     ToolObservation,

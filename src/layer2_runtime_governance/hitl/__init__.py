@@ -9,9 +9,9 @@ from json_serialization import to_jsonable as _to_jsonable
 from layer1_intake import ExecutionIntent
 
 from ..actor_contract import ActorResultType
-from ..behavioral import BehavioralAssessment
+from layer4_state_evidence_observability.behavioral import BehavioralAssessment
 from ..governance_components import governance_reason_code_values
-from ..oversight.contracts import DynamicPolicyAssessment, OversightAssessment
+from layer4_state_evidence_observability.oversight.contracts import DynamicPolicyAssessment, OversightAssessment
 from ..domain import (
     ExternalCommunicationPhase,
     ExternalCommunicationDraft,
@@ -29,7 +29,7 @@ from ..domain import (
     normalize_task_state_serialization,
 )
 from ..domain.step_recovery import restore_actor_step_for_more_evidence
-from ..external_operations import (
+from layer3_tool_bus_external_capabilities.external_operations import (
     CommunicationOperationPayload,
     DatabaseOperationPayload,
     DatabaseOperationParameter,

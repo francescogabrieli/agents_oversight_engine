@@ -4,22 +4,22 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from .actor_contract import ActorPort
-from .behavioral import BehavioralStorePort
+from layer4_state_evidence_observability.behavioral import BehavioralStorePort
 from .governance_components import PolicyEnginePort
 from .graph import build_runtime_graph
 from .judge import JudgePort
 from .planning import PlannerPort
 from .planning.replanning import ReplannerPort
 from .domain import TaskState
-from .external_operations import (
+from layer3_tool_bus_external_capabilities.external_operations import (
     ExternalCapabilityRegistry,
     ExternalOperationExecutorPort,
     build_default_external_operation_executor,
     load_external_capability_registry,
 )
-from .tool_contract import ToolGatewayPort
+from layer3_tool_bus_external_capabilities.tool_contract import ToolGatewayPort
 from .execution import build_default_actor
-from .tools import (
+from layer3_tool_bus_external_capabilities.tools import (
     ToolGatewayConfig,
     build_default_tool_gateway,
     load_tool_gateway_config,

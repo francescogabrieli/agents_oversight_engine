@@ -30,7 +30,7 @@ from layer2_runtime_governance.actor_contract import (
     CapabilityAccessMode,
     ActorTask,
 )
-from layer2_runtime_governance.behavioral import (
+from layer4_state_evidence_observability.behavioral import (
     BehavioralAssessment,
     BehavioralRecommendedDirective,
     BehavioralStorePort,
@@ -43,7 +43,7 @@ from layer2_runtime_governance.domain import (
     RuntimeState,
     StepValidation,
 )
-from layer2_runtime_governance.external_operations import normalize_communication_operation
+from layer3_tool_bus_external_capabilities.external_operations import normalize_communication_operation
 from layer2_runtime_governance.governance_components import (
     GovernanceDirective,
     PolicyEnginePort,
@@ -57,7 +57,7 @@ from layer2_runtime_governance.judge import (
     JudgeVerdict,
 )
 from layer2_runtime_governance.planning import PlannerPort
-from layer2_runtime_governance.tool_contract import (
+from layer3_tool_bus_external_capabilities.tool_contract import (
     ToolErrorCode,
     ToolExecutionResult,
     ToolGatewayPort,
@@ -66,7 +66,7 @@ from layer2_runtime_governance.tool_contract import (
     ToolObservation,
 )
 from layer2_runtime_governance.graph import build_runtime_graph
-from layer2_runtime_governance.infrastructure.checkpointing import build_runtime_serializer
+from layer4_state_evidence_observability.infrastructure.checkpointing import build_runtime_serializer
 from tests.layer2_runtime_fixtures import StubPolicyEngine, _build_stub_opa_decision
 
 

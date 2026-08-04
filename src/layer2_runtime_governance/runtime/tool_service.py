@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 from ..actor_contract import ActorResult, ActorResultType, CapabilityAccessMode
 from ..domain import RuntimeFlag, RuntimeState, ScratchpadEntry, ScratchpadEntryType, TaskState
 from ..domain.runtime_records import ToolAttempt, ToolDisposition, ToolInvocation
-from ..tool_contract import ToolErrorCode, ToolExecutionResult, ToolGatewayPort, ToolName, ToolObservation, ToolRequest
+from layer3_tool_bus_external_capabilities.tool_contract import ToolErrorCode, ToolExecutionResult, ToolGatewayPort, ToolName, ToolObservation, ToolRequest
 from .lifecycle_service import _append_step_record
 
 

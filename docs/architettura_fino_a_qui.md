@@ -475,7 +475,7 @@ Deve soltanto orchestrare e instradare.
 
 `src/main_layer2.py` è il punto migliore da cui debuggare l'intero sistema.
 
-`src/layer2_runtime_governance/observability/` contiene il contratto di trace riusabile.
+`src/layer4_state_evidence_observability/observability/` contiene il contratto di trace riusabile.
 Il modulo legge `TaskState` in modo read-only e produce un artefatto tipizzato, JSON-safe e auditabile.
 `src/main_layer2.py` resta l'entrypoint operativo e stampa viste compatte o complete derivate dallo stesso exporter.
 

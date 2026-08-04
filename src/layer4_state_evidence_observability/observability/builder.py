@@ -3,14 +3,14 @@ from typing import Any
 
 from layer1_intake import IntakeResult
 
-from ..actor_contract import ActorResult
+from layer2_runtime_governance.actor_contract import ActorResult
 from ..behavioral import BehavioralAssessment
-from ..governance_components import (
+from layer2_runtime_governance.governance_components import (
     GovernanceDecision,
     StaticPolicyAssessment,
     governance_reason_code_values,
 )
-from ..judge import JudgeAssessment
+from layer2_runtime_governance.judge import JudgeAssessment
 from ..oversight.contracts import (
     EvidenceQualityAssessment,
     OperationalRiskAssessment,
@@ -18,7 +18,7 @@ from ..oversight.contracts import (
     TrajectoryHealthAssessment,
 )
 from .serialization import enum_value, to_jsonable
-from ..domain import (
+from layer2_runtime_governance.domain import (
     ExecutedPlanStep,
     ExternalCommunicationDraft,
     ExternalCommunicationState,
@@ -29,9 +29,9 @@ from ..domain import (
     StepValidation,
     TaskState,
 )
-from ..domain import HumanReviewDecision, HumanReviewRequest
-from ..tool_contract import ToolExecutionResult, ToolObservation, ToolRequest
-from ..external_operations import ExternalExecutionReceipt
+from layer2_runtime_governance.domain import HumanReviewDecision, HumanReviewRequest
+from layer3_tool_bus_external_capabilities.tool_contract import ToolExecutionResult, ToolObservation, ToolRequest
+from layer3_tool_bus_external_capabilities.external_operations import ExternalExecutionReceipt
 
 
 from .models import (

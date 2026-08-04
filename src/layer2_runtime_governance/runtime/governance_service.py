@@ -4,7 +4,7 @@ from typing import Callable
 
 from layer1_intake import ExecutionIntent
 
-from ..behavioral import (
+from layer4_state_evidence_observability.behavioral import (
     BehavioralStorePort,
     persist_behavioral_runtime_snapshot,
     persist_judge_snapshot,
@@ -24,7 +24,7 @@ from ..domain import (
     RuntimeState,
     TaskState,
 )
-from ..tools import ToolGatewayConfig
+from layer3_tool_bus_external_capabilities.tools import ToolGatewayConfig
 
 # Nodes.py contains the executable Layer 2 business logic.
 # At this stage the runtime performs bootstrap, planning, and the actor/tool loop.
@@ -35,7 +35,7 @@ from .actor_service import (
 )
 from .lifecycle_service import _append_step_record
 from ..domain.step_recovery import restore_actor_step_for_more_evidence
-from ..external_operations import (
+from layer3_tool_bus_external_capabilities.external_operations import (
     ExternalExecutionAuthorizationSource,
     GovernanceActionFeedback,
     JudgeFindingSnapshot,

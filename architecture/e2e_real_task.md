@@ -167,8 +167,8 @@ Non inserire segreti nel JSON. Il pool avvia automaticamente il server necessari
 Per avviarli manualmente e verificarne il bootstrap:
 
 ```powershell
-python -m external_capability_mcp communication
-python -m external_capability_mcp database
+python -m layer3_tool_bus_external_capabilities.external_capability_mcp communication
+python -m layer3_tool_bus_external_capabilities.external_capability_mcp database
 ```
 
 In esecuzione normale non avviarli separatamente: il pool MCP composition-owned gestisce

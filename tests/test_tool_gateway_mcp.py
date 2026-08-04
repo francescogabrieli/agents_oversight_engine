@@ -50,7 +50,7 @@ from layer2_runtime_governance import (
     ToolRequest,
     build_runtime_graph,
 )
-from layer2_runtime_governance.tools import (
+from layer3_tool_bus_external_capabilities.tools import (
     OpenAIToolGateway,
     ToolBackend,
     ToolCapability,
@@ -58,7 +58,7 @@ from layer2_runtime_governance.tools import (
     ToolRiskLevel,
     load_tool_gateway_config,
 )
-from layer2_runtime_governance.infrastructure.checkpointing import (
+from layer4_state_evidence_observability.infrastructure.checkpointing import (
     build_runtime_serializer,
 )
 
@@ -231,8 +231,8 @@ class GatewayMCPTests(unittest.TestCase):
             content_type="text/html",
         )
 
-        with patch("layer2_runtime_governance.tools.security.is_blocked_host", return_value=False):
-            with patch("layer2_runtime_governance.tools.adapters.http_fetch.urlopen", return_value=response):
+        with patch("layer3_tool_bus_external_capabilities.tools.security.is_blocked_host", return_value=False):
+            with patch("layer3_tool_bus_external_capabilities.tools.adapters.http_fetch.urlopen", return_value=response):
                 result = gateway.execute(
                     tool_request=ToolRequest(
                         plan_step_id="step_1",
@@ -253,8 +253,8 @@ class GatewayMCPTests(unittest.TestCase):
             content_type="text/html",
         )
 
-        with patch("layer2_runtime_governance.tools.security.is_blocked_host", return_value=False):
-            with patch("layer2_runtime_governance.tools.adapters.http_fetch.urlopen", return_value=response):
+        with patch("layer3_tool_bus_external_capabilities.tools.security.is_blocked_host", return_value=False):
+            with patch("layer3_tool_bus_external_capabilities.tools.adapters.http_fetch.urlopen", return_value=response):
                 result = gateway.execute(
                     tool_request=ToolRequest(
                         plan_step_id="step_1",
@@ -280,12 +280,12 @@ class GatewayMCPTests(unittest.TestCase):
         )
         cellar_response = FakeHTTPResponse(body=b"%PDF-1.7 mock", content_type="application/pdf")
 
-        with patch("layer2_runtime_governance.tools.security.is_blocked_host", return_value=False):
+        with patch("layer3_tool_bus_external_capabilities.tools.security.is_blocked_host", return_value=False):
             with patch(
-                "layer2_runtime_governance.tools.adapters.http_fetch.urlopen",
+                "layer3_tool_bus_external_capabilities.tools.adapters.http_fetch.urlopen",
                 side_effect=[eur_lex_response, cellar_response],
             ), patch(
-                "layer2_runtime_governance.tools.adapters.http_fetch.extract_pdf_text",
+                "layer3_tool_bus_external_capabilities.tools.adapters.http_fetch.extract_pdf_text",
                 return_value=(
                     "The purpose of this Regulation is to contribute to the proper "
                     "functioning of the internal market by laying down harmonised rules."

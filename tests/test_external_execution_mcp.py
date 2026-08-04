@@ -20,7 +20,7 @@ if str(SRC_ROOT) not in sys.path:
 from mcp.types import CallToolResult, TextContent
 
 from layer1_intake import ExecutionIntent
-from layer2_runtime_governance.external_operations import (
+from layer3_tool_bus_external_capabilities.external_operations import (
     DatabaseOperationParameter,
     ExternalExecutionAuthorizationSource,
     ExternalExecutionErrorCode,
@@ -31,7 +31,7 @@ from layer2_runtime_governance.external_operations import (
     normalize_communication_operation,
     normalize_sql_operation,
 )
-from layer2_runtime_governance.external_operations.mcp import (
+from layer3_tool_bus_external_capabilities.external_operations.mcp import (
     MCPCallTimeout,
     MCPConnectionPool,
     MCPExternalOperationExecutor,

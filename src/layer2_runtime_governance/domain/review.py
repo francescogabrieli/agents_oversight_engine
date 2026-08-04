@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from ..tool_contract import ToolRequest
-from ..external_operations.contracts import (
+from layer3_tool_bus_external_capabilities.tool_contract import ToolRequest
+from layer3_tool_bus_external_capabilities.external_operations.contracts import (
     ExternalOperationPayloadEdit,
     ExternalOperationProposal,
 )

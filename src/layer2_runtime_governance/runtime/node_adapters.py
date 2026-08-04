@@ -3,7 +3,7 @@ from typing import Callable
 from langchain_core.runnables import RunnableConfig
 
 from ..actor_contract import ActorPort
-from ..behavioral import BehavioralStorePort
+from layer4_state_evidence_observability.behavioral import BehavioralStorePort
 from ..governance_components import PolicyEnginePort
 from ..judge import JudgePort
 from ..hitl import human_review
@@ -17,12 +17,12 @@ from .tool_service import observe_tool_result, tool_gateway
 from ..planning import PlannerPort
 from ..planning.replanning import ReplannerPort
 from ..domain import TaskState
-from ..external_operations import (
+from layer3_tool_bus_external_capabilities.external_operations import (
     ExternalCapabilityRegistry,
     ExternalOperationExecutorPort,
 )
-from ..tool_contract import ToolGatewayPort
-from ..tools import ToolGatewayConfig
+from layer3_tool_bus_external_capabilities.tool_contract import ToolGatewayPort
+from layer3_tool_bus_external_capabilities.tools import ToolGatewayConfig
 from .context import copy_task_state, extract_bootstrap_thread_id, extract_thread_id
 from .contracts import Layer2GraphInput, Layer2GraphState
 

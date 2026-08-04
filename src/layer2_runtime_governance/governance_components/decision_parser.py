@@ -1,8 +1,8 @@
 from typing import Any
 
-from ..behavioral import BehavioralAssessment
+from layer4_state_evidence_observability.behavioral import BehavioralAssessment
 from ..judge import JudgeAssessment
-from ..oversight.contracts import (
+from layer4_state_evidence_observability.oversight.contracts import (
     DynamicPolicyAssessment,
     DynamicPolicyRecommendedDirective,
     EvidenceQualityAssessment,

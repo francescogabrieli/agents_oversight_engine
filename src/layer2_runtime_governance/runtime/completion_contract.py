@@ -9,7 +9,7 @@ from ..domain import (
     RuntimeFlag,
     TaskState,
 )
-from ..external_operations import ExternalExecutionStatus
+from layer3_tool_bus_external_capabilities.external_operations import ExternalExecutionStatus
 
 
 # Require an execution receipt only when Layer 1 recorded an explicit execution request.

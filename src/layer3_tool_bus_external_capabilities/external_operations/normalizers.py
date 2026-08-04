@@ -28,7 +28,7 @@ from .contracts import (
 )
 
 if TYPE_CHECKING:
-    from ..domain.review import ExternalCommunicationDraft
+    from layer2_runtime_governance.domain.review import ExternalCommunicationDraft
 
 _NORMALIZER_VERSION = "external_operation_normalizers.v2"
 

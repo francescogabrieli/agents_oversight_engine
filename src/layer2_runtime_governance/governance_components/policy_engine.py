@@ -18,7 +18,7 @@ from .contracts import (
     PolicyEvaluationInput,
     PolicyEvaluationResult,
 )
-from ..infrastructure.environment import candidate_env_paths, load_env_file_values
+from layer4_state_evidence_observability.infrastructure.environment import candidate_env_paths, load_env_file_values
 from .decision_parser import _parse_non_empty_text, _parse_policy_decision, _parse_reason_codes
 from .policy_input import build_opa_input_document
 

@@ -38,7 +38,7 @@ from layer2_runtime_governance.runtime.node_adapters import (
 )
 from tests.layer2_runtime_fixtures import *
 
-from layer2_runtime_governance.external_operations import (
+from layer3_tool_bus_external_capabilities.external_operations import (
     DatabaseOperationPayload,
     DeferredExternalOperationExecutor,
     DestinationClass,
@@ -56,7 +56,7 @@ from layer2_runtime_governance.external_operations import (
 from layer2_runtime_governance.runtime.external_execution_service import (
     commit_external_execution_completion,
 )
-from layer2_runtime_governance.external_operations.runtime_projection import (
+from layer3_tool_bus_external_capabilities.external_operations.runtime_projection import (
     prepare_external_operation_proposal,
 )
 from layer2_runtime_governance.domain import normalize_task_state_serialization
@@ -85,7 +85,7 @@ from layer2_runtime_governance.signal_services import (
     build_judge_context,
     build_trajectory_signal,
 )
-from layer2_runtime_governance.infrastructure.runtime_artifacts import (
+from layer4_state_evidence_observability.infrastructure.runtime_artifacts import (
     RuntimeArtifactStore,
     _persist_current_judge_evidence_bundle,
 )
@@ -93,7 +93,7 @@ from layer2_runtime_governance.execution.result_builder import (
     convert_tool_call_to_actor_result,
 )
 from layer2_runtime_governance.runtime.actor_service import actor
-from layer2_runtime_governance.tools import build_default_tool_gateway_config
+from layer3_tool_bus_external_capabilities.tools import build_default_tool_gateway_config
 
 
 class ExternalOperationNormalizerTests(unittest.TestCase):

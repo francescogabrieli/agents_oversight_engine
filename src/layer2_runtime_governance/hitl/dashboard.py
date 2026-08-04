@@ -7,9 +7,9 @@ from typing import Any
 
 from json_serialization import to_jsonable as _to_jsonable
 
-from ..behavioral import BehavioralAssessment
+from layer4_state_evidence_observability.behavioral import BehavioralAssessment
 from ..governance_components import GovernanceDecision, governance_reason_code_values
-from ..oversight.contracts import DynamicPolicyAssessment, OversightAssessment
+from layer4_state_evidence_observability.oversight.contracts import DynamicPolicyAssessment, OversightAssessment
 from ..domain import (
     HumanReviewDecision,
     HumanReviewDecisionType,

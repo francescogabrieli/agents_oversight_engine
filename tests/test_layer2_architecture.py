@@ -8,6 +8,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
 LAYER2_ROOT = SRC_ROOT / "layer2_runtime_governance"
+LAYER3_ROOT = SRC_ROOT / "layer3_tool_bus_external_capabilities"
+LAYER4_ROOT = SRC_ROOT / "layer4_state_evidence_observability"
 EVALUATION_ROOT = SRC_ROOT / "evaluation_service"
 
 if str(SRC_ROOT) not in sys.path:
@@ -58,7 +60,7 @@ class Layer2ArchitectureTests(unittest.TestCase):
             "layer2_runtime_governance.nodes",
             "layer2_runtime_governance.state",
         }
-        for path in (LAYER2_ROOT / "tools").rglob("*.py"):
+        for path in (LAYER3_ROOT / "tools").rglob("*.py"):
             imported_modules = _absolute_imports(path)
             self.assertTrue(
                 forbidden_modules.isdisjoint(imported_modules),
@@ -184,26 +186,24 @@ class Layer2ArchitectureTests(unittest.TestCase):
     def test_runtime_test_monolith_is_removed(self) -> None:
         self.assertFalse((REPO_ROOT / "tests" / "test_layer2_runtime_governance.py").exists())
 
-    # Large capability implementations belong to packages rather than the Layer 2 root.
+    # Layer 3 and Layer 4 implementations must live outside the Layer 2 runtime package.
     def test_root_keeps_capability_implementations_out_of_flat_modules(self) -> None:
-        package_names = {
-            "behavioral",
-            "hitl",
-            "judge",
-            "oversight",
-            "planning",
-        }
-        for package_name in package_names:
+        for package_name in {"hitl", "judge", "planning"}:
             self.assertTrue((LAYER2_ROOT / package_name / "__init__.py").exists())
             self.assertFalse((LAYER2_ROOT / f"{package_name}.py").exists())
+        for package_name in {"behavioral", "observability", "oversight", "infrastructure"}:
+            self.assertTrue((LAYER4_ROOT / package_name / "__init__.py").exists())
+            self.assertFalse((LAYER2_ROOT / package_name).exists())
+        self.assertTrue((LAYER3_ROOT / "tool_contract.py").exists())
+        for package_name in {"tools", "external_operations"}:
+            self.assertTrue((LAYER3_ROOT / package_name / "__init__.py").exists())
+            self.assertFalse((LAYER2_ROOT / package_name).exists())
         self.assertFalse(any((LAYER2_ROOT / "evaluation").glob("*.py")))
         self.assertTrue((SRC_ROOT / "evaluation_service" / "__init__.py").exists())
         self.assertTrue(
             (LAYER2_ROOT / "governance_components" / "input_document.py").exists()
         )
-        self.assertTrue(
-            (LAYER2_ROOT / "infrastructure" / "runtime_artifacts.py").exists()
-        )
+        self.assertTrue((LAYER4_ROOT / "infrastructure" / "runtime_artifacts.py").exists())
 
     # Entrypoints must use the explicit dependency-injection composition root.
     def test_live_entrypoints_use_explicit_composition_root(self) -> None:
@@ -214,7 +214,7 @@ class Layer2ArchitectureTests(unittest.TestCase):
 
     # Persisted threads must accept both pre-refactor and canonical domain type paths.
     def test_checkpoint_allowlist_preserves_legacy_state_and_governance_paths(self) -> None:
-        from layer2_runtime_governance.infrastructure.checkpointing import (
+        from layer4_state_evidence_observability.infrastructure.checkpointing import (
             _legacy_persisted_type_paths,
         )
 
@@ -272,8 +272,8 @@ class Layer2ArchitectureTests(unittest.TestCase):
     # Actor providers cannot import mutating MCP adapters or capability servers.
     def test_actor_cannot_reach_external_mutating_connectors(self) -> None:
         forbidden_prefixes = {
-            "external_capability_mcp",
-            "layer2_runtime_governance.external_operations.mcp",
+            "layer3_tool_bus_external_capabilities.external_capability_mcp",
+            "layer3_tool_bus_external_capabilities.external_operations.mcp",
         }
         for path in (LAYER2_ROOT / "execution").rglob("*.py"):
             imported_modules = _absolute_imports(path)

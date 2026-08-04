@@ -29,18 +29,18 @@ from layer1_intake.infrastructure import build_intake_service
 from layer2_runtime_governance import build_default_checkpointer
 from layer2_runtime_governance import HumanReviewDecision
 from layer2_runtime_governance.actor_contract import ActorPort
-from layer2_runtime_governance.behavioral import BehavioralStorePort
+from layer4_state_evidence_observability.behavioral import BehavioralStorePort
 from layer2_runtime_governance.governance_components import PolicyEnginePort
-from layer2_runtime_governance.infrastructure.checkpoint_retention import (
+from layer4_state_evidence_observability.infrastructure.checkpoint_retention import (
     prune_expired_checkpoint_threads,
 )
-from layer2_runtime_governance.infrastructure.checkpointing import close_checkpointer
+from layer4_state_evidence_observability.infrastructure.checkpointing import close_checkpointer
 from layer2_runtime_governance.composition import (
     Layer2RuntimeDependencies,
     compose_layer2_runtime,
 )
 from layer2_runtime_governance.judge import JudgePort
-from layer2_runtime_governance.infrastructure.runtime_artifacts import (
+from layer4_state_evidence_observability.infrastructure.runtime_artifacts import (
     RuntimeArtifactStore,
     persist_runtime_artifacts,
 )
@@ -48,19 +48,19 @@ from layer2_runtime_governance.hitl.decision_inbox import (
     ReviewDecisionInboxPort,
     ReviewDecisionSubmission,
 )
-from layer2_runtime_governance.infrastructure.review_decision_inbox import (
+from layer4_state_evidence_observability.infrastructure.review_decision_inbox import (
     SQLiteReviewDecisionInbox,
 )
 from layer2_runtime_governance.planning import PlannerPort
 from layer2_runtime_governance.planning.replanning import ReplannerPort
 from layer2_runtime_governance.domain import RuntimeState, TaskState
-from layer2_runtime_governance.observability import (
+from layer4_state_evidence_observability.observability import (
     build_compact_trace_from_runtime_trace,
     build_layer2_runtime_trace,
     build_trace_summary_markdown,
     layer2_trace_to_json,
 )
-from layer2_runtime_governance.tool_contract import ToolGatewayPort
+from layer3_tool_bus_external_capabilities.tool_contract import ToolGatewayPort
 
 
 class IntakeExecutorPort(Protocol):

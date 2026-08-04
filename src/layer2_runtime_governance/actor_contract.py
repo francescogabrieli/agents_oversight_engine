@@ -17,8 +17,8 @@ from .domain import (
     StepValidation,
     TaskState,
 )
-from .tool_contract import ToolExecutionResult, ToolObservation, ToolRequest
-from .external_operations.contracts import (
+from layer3_tool_bus_external_capabilities.tool_contract import ToolExecutionResult, ToolObservation, ToolRequest
+from layer3_tool_bus_external_capabilities.external_operations.contracts import (
     DatabaseStatementDraft,
     ExternalOperationProposal,
     GovernanceActionFeedback,

@@ -18,17 +18,17 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 
-from layer2_runtime_governance.infrastructure.checkpoint_retention import (
+from layer4_state_evidence_observability.infrastructure.checkpoint_retention import (
     CheckpointRetentionSettings,
     prune_expired_checkpoint_threads,
 )
-from layer2_runtime_governance.infrastructure.checkpointing import (
+from layer4_state_evidence_observability.infrastructure.checkpointing import (
     CheckpointBackend,
     CheckpointSettings,
     build_default_checkpointer,
     build_runtime_serializer,
 )
-from layer2_runtime_governance.tool_contract import ToolErrorCode
+from layer3_tool_bus_external_capabilities.tool_contract import ToolErrorCode
 from layer2_runtime_governance.governance_components import JudgeAdmission
 from layer2_runtime_governance.judge import (
     JudgeClaimAssessment,

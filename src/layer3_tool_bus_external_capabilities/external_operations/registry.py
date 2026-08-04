@@ -14,7 +14,7 @@ from .contracts import (
     GenericPayloadField,
     OperationBoundary,
 )
-from ..infrastructure.environment import get_env_value
+from layer4_state_evidence_observability.infrastructure.environment import get_env_value
 
 
 class ExternalConnectorKind(str, Enum):

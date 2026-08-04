@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from tests.layer2_runtime_fixtures import *
-from layer2_runtime_governance.infrastructure.checkpointing import (
+from layer4_state_evidence_observability.infrastructure.checkpointing import (
     build_default_checkpointer,
 )
 

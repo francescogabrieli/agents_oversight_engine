@@ -16,14 +16,14 @@ from layer1_intake import (
     TaskSpec,
 )
 
-from ..actor_contract import ActorResult, ActorResultType, CapabilityAccessMode
+from layer2_runtime_governance.actor_contract import ActorResult, ActorResultType, CapabilityAccessMode
 from ..behavioral import (
     BehavioralAssessment,
     BehavioralRecommendedDirective,
     BehavioralStoreSettings,
     SQLiteBehavioralStore,
 )
-from ..governance_components import (
+from layer2_runtime_governance.governance_components import (
     GovernanceDecision,
     GovernanceDecisionTrace,
     GovernanceDirective,
@@ -35,7 +35,7 @@ from ..governance_components import (
     PolicyEvaluationResult,
     StaticPolicyAssessment,
 )
-from ..judge import (
+from layer2_runtime_governance.judge import (
     JudgeAssessment,
     JudgeAssessmentStatus,
     JudgeClaimAssessment,
@@ -50,7 +50,7 @@ from ..judge import (
     JudgeTaskRequirementKind,
     JudgeVerdict,
 )
-from ..external_operations import (
+from layer3_tool_bus_external_capabilities.external_operations import (
     CommunicationOperationPayload,
     DatabaseOperationPayload,
     DatabaseOperationParameter,
@@ -86,8 +86,8 @@ from ..oversight.contracts import (
     TrajectoryHealthAssessment,
 )
 from .runtime_artifacts import build_sqlite_checkpointer
-from ..planning.replanning import ReplanDecision
-from ..domain import (
+from layer2_runtime_governance.planning.replanning import ReplanDecision
+from layer2_runtime_governance.domain import (
     ExecutedPlanStep,
     ExternalCommunicationDraft,
     ExternalCommunicationPhase,
@@ -111,7 +111,7 @@ from ..domain import (
     StepArtifact,
     TaskState,
 )
-from ..tool_contract import (
+from layer3_tool_bus_external_capabilities.tool_contract import (
     ToolErrorCode,
     ToolExecutionResult,
     ToolName,

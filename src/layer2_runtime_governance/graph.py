@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from .infrastructure.runtime_warnings import suppress_known_runtime_warnings
+from .runtime_warnings import suppress_known_runtime_warnings
 
 # Install targeted filters before importing LangGraph dependencies.
 suppress_known_runtime_warnings()
@@ -11,9 +11,9 @@ from langgraph.graph import END, START, StateGraph
 
 from .execution import build_default_actor
 from .actor_contract import ActorPort
-from .behavioral import BehavioralStorePort, build_default_behavioral_store
+from layer4_state_evidence_observability.behavioral import BehavioralStorePort, build_default_behavioral_store
 from .governance_components import PolicyEnginePort, build_default_policy_engine
-from .infrastructure.checkpointing import build_default_checkpointer
+from layer4_state_evidence_observability.infrastructure.checkpointing import build_default_checkpointer
 from .judge import JudgePort, build_default_judge
 from .planning import PlannerPort, build_default_planner
 from .planning.replanning import ReplannerPort, build_default_replanner
@@ -38,14 +38,14 @@ from .runtime.routing import (
     route_after_observe_tool_result,
 )
 from .domain import TaskState
-from .external_operations import (
+from layer3_tool_bus_external_capabilities.external_operations import (
     ExternalCapabilityRegistry,
     ExternalOperationExecutorPort,
     build_default_external_operation_executor,
     load_external_capability_registry,
 )
-from .tool_contract import ToolGatewayPort
-from .tools import ToolGatewayConfig, build_default_tool_gateway, load_tool_gateway_config
+from layer3_tool_bus_external_capabilities.tool_contract import ToolGatewayPort
+from layer3_tool_bus_external_capabilities.tools import ToolGatewayConfig, build_default_tool_gateway, load_tool_gateway_config
 
 
 # Compose Layer 2 capabilities into the executable LangGraph runtime.

@@ -22,8 +22,8 @@ allowlist.
 Run one server directly:
 
 ```powershell
-.\.venv\Scripts\python.exe -m external_capability_mcp communication
-.\.venv\Scripts\python.exe -m external_capability_mcp database
+.\.venv\Scripts\python.exe -m layer3_tool_bus_external_capabilities.external_capability_mcp communication
+.\.venv\Scripts\python.exe -m layer3_tool_bus_external_capabilities.external_capability_mcp database
 ```
 
 Normally the composition-root-owned MCP pool starts these commands from the

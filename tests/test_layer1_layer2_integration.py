@@ -57,7 +57,7 @@ from layer2_runtime_governance import (
     ToolRequest,
     ToolObservation,
 )
-from layer2_runtime_governance.infrastructure.checkpointing import (
+from layer4_state_evidence_observability.infrastructure.checkpointing import (
     build_runtime_serializer,
 )
 from main_layer2 import run_layer2_flow

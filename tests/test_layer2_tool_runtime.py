@@ -3,8 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from tests.layer2_runtime_fixtures import *
-from layer2_runtime_governance.tool_contract import ToolErrorCode
-from layer2_runtime_governance.tools.adapters.openai_search import (
+from layer3_tool_bus_external_capabilities.tool_contract import ToolErrorCode
+from layer3_tool_bus_external_capabilities.tools.adapters.openai_search import (
     extract_web_observations,
 )
 

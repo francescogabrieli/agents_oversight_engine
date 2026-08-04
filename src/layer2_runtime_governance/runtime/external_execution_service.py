@@ -16,7 +16,7 @@ from ..domain import (
     build_evidence_snapshot_manifest,
     digest_json,
 )
-from ..external_operations import (
+from layer3_tool_bus_external_capabilities.external_operations import (
     ExternalCapabilityDefinition,
     ExternalCapabilityRegistry,
     ExternalConnectorKind,

@@ -253,7 +253,7 @@ normalization remains confined to the offline evaluation boundary.
 
 Primary implementation locations:
 
-- `src/layer2_runtime_governance/external_operations/`
+- `src/layer3_tool_bus_external_capabilities/external_operations/`
 - `src/layer2_runtime_governance/governance_components/`
 - `src/layer2_runtime_governance/judge/`
 - `src/layer2_runtime_governance/signal_services/`

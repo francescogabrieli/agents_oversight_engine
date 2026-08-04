@@ -53,7 +53,7 @@ from layer2_runtime_governance.domain import (
     build_evidence_snapshot_manifest,
     digest_json,
 )
-from layer2_runtime_governance.external_operations import (
+from layer3_tool_bus_external_capabilities.external_operations import (
     ExternalCapabilityDefinition,
     ExternalCapabilityRegistry,
     ExternalConnectorKind,
@@ -262,7 +262,7 @@ def _registry(
         enabled=enabled,
         transport=MCPTransportKind.STDIO,
         command=sys.executable,
-        args=("-m", "external_capability_mcp", "communication"),
+        args=("-m", "layer3_tool_bus_external_capabilities.external_capability_mcp", "communication"),
         allowed_tools=("send_email",) if allowlisted else (),
         timeout_seconds=1,
     )

@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass
 
 from .providers.bedrock_runtime import BedrockRuntimeSettings
-from ..infrastructure.environment import load_env_file_values
+from layer4_state_evidence_observability.infrastructure.environment import load_env_file_values
 
 
 @dataclass(frozen=True)

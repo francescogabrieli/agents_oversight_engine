@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from layer2_runtime_governance.external_operations.contracts import (
+from layer3_tool_bus_external_capabilities.external_operations.contracts import (
     DatabaseOperationPayload,
     ExternalOperationEffect,
     ExternalOperationProposal,
     OperationBoundary,
 )
-from layer2_runtime_governance.external_operations.profiles import (
+from layer3_tool_bus_external_capabilities.external_operations.profiles import (
     load_capability_consequence_profiles,
 )
 from layer2_runtime_governance.governance_components import PolicyEvaluationInput

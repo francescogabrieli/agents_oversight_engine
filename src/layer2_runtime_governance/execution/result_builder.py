@@ -15,13 +15,13 @@ from ..actor_contract import (
 )
 from ..domain import ScratchpadEntry, ScratchpadEntryType, StepValidation
 from ..domain import ExternalCommunicationDraft
-from ..external_operations import (
+from layer3_tool_bus_external_capabilities.external_operations import (
     DatabaseOperationParameter,
     DatabaseStatementDraft,
     ExternalOperationEffect,
     normalize_sql_operation,
 )
-from ..tool_contract import ToolName, ToolRequest
+from layer3_tool_bus_external_capabilities.tool_contract import ToolName, ToolRequest
 from .errors import ActorExecutionError
 
 # Convert empty provider responses into a typed blocked actor result instead of crashing the graph.

@@ -9,7 +9,7 @@ from ..action_schemas import (
 from ..errors import ActorExecutionError
 from ..prompts import build_actor_system_prompt, build_actor_user_prompt
 from ..response_parser import convert_json_payload_to_tool_call
-from ...tools import ToolGatewayConfig
+from layer3_tool_bus_external_capabilities.tools import ToolGatewayConfig
 from ..result_builder import (
     build_provider_blocked_result,
     build_provider_protocol_failure_result,

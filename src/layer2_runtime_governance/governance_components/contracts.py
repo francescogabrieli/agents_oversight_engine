@@ -5,11 +5,11 @@ from typing import Any, Protocol
 from layer1_intake import SensitivityLevel
 
 from ..actor_contract import ActorResultType, CapabilityAccessMode
-from ..behavioral import BehavioralAssessment
+from layer4_state_evidence_observability.behavioral import BehavioralAssessment
 from ..judge import JudgeAssessment
-from ..oversight.contracts import DynamicPolicyAssessment
+from layer4_state_evidence_observability.oversight.contracts import DynamicPolicyAssessment
 from ..domain import ExternalCommunicationPhase, RuntimeFlag, RuntimeState
-from ..tool_contract import ToolName
+from layer3_tool_bus_external_capabilities.tool_contract import ToolName
 
 # PolicyDecision is the deterministic outcome returned by the policy engine.
 # Define the stable typed vocabulary shared by runtime and policy adapters.

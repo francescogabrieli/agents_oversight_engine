@@ -78,8 +78,8 @@ L'architettura viene compressa in cinque macro-blocchi:
 - `Runtime & Governance`: implementato principalmente come nodi e subgraph LangGraph.
 - `Governance PDP`: OPA (Open Policy Agent) è il policy decision point esterno; il nodo LangGraph `governance` è il policy enforcement point che costruisce fatti, invoca OPA e applica la direttiva restituita.
 - `HITL Gateway`: nodo LangGraph con `interrupt()` più control plane di review standalone servito da `src/main_layer2_dashboard.py`. La dashboard valida e deposita la decisione tipizzata in una inbox durabile; il processo runtime originario, unico owner della run, la consuma e applica `Command(resume=...)` sul checkpoint ufficiale LangGraph (`SqliteSaver` locale, `PostgresSaver` in produzione). La inbox è solo trasporto control-plane e gli artifact runtime sono osservabilità: nessuno dei due è stato ripristinabile.
-- `Tool Bus / External Capabilities`: componente esterno al grafo, invocato dal nodo `tool_gateway`.
-- `State, Evidence & Observability`: componente ibrido che fonde gli artefatti nativi prodotti da LangGraph, come stato runtime, checkpoint, thread history, task metadata e interrupt, con il tracciamento custom dell'architettura, come evidenze semantiche, output di governance, rationale, score e audit trail.
+- `Tool Bus / External Capabilities`: componente esterno al grafo, invocato dal nodo `tool_gateway`, implementato in `src/layer3_tool_bus_external_capabilities/`.
+- `State, Evidence & Observability`: componente ibrido che fonde gli artefatti nativi prodotti da LangGraph, come stato runtime, checkpoint, thread history, task metadata e interrupt, con il tracciamento custom dell'architettura, come evidenze semantiche, output di governance, rationale, score e audit trail; è implementato in `src/layer4_state_evidence_observability/`.
 - `Evaluation & Continuous Improvement`: codice esterno, eseguito fuori dal ciclo live del task.
 
 ---
@@ -412,7 +412,7 @@ Dopo il submit, la richiesta scompare immediatamente dalla coda attiva e compare
 
 Le azioni umane sono canoniche ma reason-scoped: `judge_unsafe`/`judge_uncertain` e le resubmission invariate o già respinte espongono modifica, replan o abort; l'identità di resubmission comprende payload digest ed Evidence-selection digest, quindi una correzione reale dell'attribution non è churn. `capability_approval_required` espone approvazione dell’esatto digest, modifica o abort; clarification e riconciliazione di receipt indeterminate espongono soltanto le scelte applicabili. Nessun altro gate, inclusi checkpoint legacy o reason sconosciute, può autorizzare una nuova esecuzione esterna. `modify_and_continue` richiede un edit tipizzato valido al submit e non può aggirare il contratto della proposta. Approval, completion candidate, Evidence selection e Judge assessment sono legati ai rispettivi digest; la prima proiezione governance di una comunicazione review-ready sigilla atomicamente operation id/digest e selection digest nel candidate ancora privo di binding, mentre una modifica crea un nuovo digest, aggiorna atomicamente il candidate, invalida approval e assessment precedenti e passa da `READY_GOVERNANCE` prima di qualunque seam esecutivo. `approve_continue_read_only` non può autorizzare una proposta mutating invariata.
 
-Il package `external_operations/` normalizza communication, SQL e generic external. SQL usa AST `sqlglot` e accetta una sola statement; email normalizza campi e destinazione senza giudicare il tono. Il body canonico della comunicazione conserva integralmente il contenuto semantico, mentre soltanto `payload_preview` è bounded: Judge, OPA, HITL ed executor restano così legati allo stesso payload completo e digest. `ExecutionIntent` distingue `proposal_only` da `execute_after_governance` e recupera checkpoint e payload precedenti conservativamente come `proposal_only`.
+Il package `src/layer3_tool_bus_external_capabilities/external_operations/` normalizza communication, SQL e generic external. SQL usa AST `sqlglot` e accetta una sola statement; email normalizza campi e destinazione senza giudicare il tono. Il body canonico della comunicazione conserva integralmente il contenuto semantico, mentre soltanto `payload_preview` è bounded: Judge, OPA, HITL ed executor restano così legati allo stesso payload completo e digest. `ExecutionIntent` distingue `proposal_only` da `execute_after_governance` e recupera checkpoint e payload precedenti conservativamente come `proposal_only`.
 
 Il nodo applicativo `external_execution` riceve soltanto una `ExternalExecutionRequest` già autorizzata sul digest esatto. Prima del connector verifica proposta, intent, execution candidate, authorization source, digest, binding del completion candidate a operation/Evidence snapshot/Evidence selection, owner step terminale, capability registry, server/tool allowlist, read-only envelope, idempotency key e ricevute precedenti. Non interpreta testo libero, non modifica payload, non sceglie policy e non espone shell o codice. Una receipt non coerente con operation, capability, digest o idempotency key, una risposta non tipizzata o un'eccezione dopo l'ingresso nel connector vengono normalizzate a `indeterminate` e checkpointate per riconciliazione: l'assenza di risposta non prova l'assenza dell'effetto. Il port è implementato da `MCPExternalOperationExecutor`; il fallback deferred resta fail-closed soltanto quando nessuna capability reale è abilitata.
 
@@ -455,7 +455,7 @@ Richiesta di esecuzione proveniente dal `Runtime & Governance`.
 
 ### 3.2 Operazioni Interne
 
-Questo macro-block è implementato come **componente esterno al grafo**, invocato dal nodo `tool_gateway`.
+Questo macro-block è implementato come **componente esterno al grafo**, invocato dal nodo `tool_gateway`, nel package `src/layer3_tool_bus_external_capabilities/`.
 
 Responsabilità principali:
 - verificare che il tool esista
@@ -534,7 +534,7 @@ Input provenienti da:
 
 ### 4.2 Operazioni Interne
 
-Questo macro-block è un **componente ibrido**.
+Questo macro-block è un **componente ibrido**, implementato in `src/layer4_state_evidence_observability/`.
 
 È costruito dalla fusione di:
 - **memory nativa di LangGraph**, usata per working state, checkpoint, pause/resume e stato del grafo

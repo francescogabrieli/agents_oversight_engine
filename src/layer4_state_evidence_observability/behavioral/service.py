@@ -11,10 +11,10 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from layer1_intake import IntakeResult
 
-from ..domain import TaskState
+from layer2_runtime_governance.domain import TaskState
 
 if TYPE_CHECKING:
-    from ..judge import JudgeAssessment
+    from layer2_runtime_governance.judge import JudgeAssessment
 
 
 class BehavioralRecommendedDirective(str, Enum):
