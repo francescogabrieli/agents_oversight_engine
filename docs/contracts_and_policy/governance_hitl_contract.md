@@ -248,8 +248,7 @@ a transport adapter, never policy or authorization.
 `layer2_trace.v6` has a closed `external_execution` section with intent, request,
 receipt history, digest, connector metadata, external reference, and attempt count.
 Actor/HITL fields expose the current proposal and digest; governance pillar results expose `active`,
-`shadow`, `not_applicable`, `unavailable`, and `decision_influence`. Historical
-normalization remains confined to the offline evaluation boundary.
+`shadow`, `not_applicable`, `unavailable`, and `decision_influence`.
 
 Primary implementation locations:
 

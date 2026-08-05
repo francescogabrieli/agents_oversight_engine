@@ -124,7 +124,6 @@ A fine run:
 2. la governance trace espone la direttiva OPA, i pillar, i reason code e le invarianti verificate
 3. `persistence.py` aggiorna artifact per dashboard e replay
 4. `behavioral.py` persiste il read model storico locale
-5. `src/main_layer2_evaluation.py` puo leggere la trace offline senza dipendere dal runtime live
 
 Questo chiude il ciclo e2e reale:
 

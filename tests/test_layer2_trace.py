@@ -76,7 +76,6 @@ from layer2_runtime_governance import (
     layer2_trace_to_json,
 )
 from layer2_runtime_governance.signal_services.evidence_service import build_evidence_signal
-from evaluation_service.trace_normalizer import normalize_trace_json
 
 
 class Layer2TraceTests(unittest.TestCase):
@@ -156,48 +155,6 @@ class Layer2TraceTests(unittest.TestCase):
             _trace_schema_validator().validate(missing)
         with self.assertRaises(ValidationError):
             _trace_schema_validator().validate(wrong_type)
-
-    # Evaluation is the only boundary allowed to project a legacy trace into valid v5.
-    def test_evaluation_normalized_v2_trace_validates_as_v6(self) -> None:
-        legacy = json.loads(
-            (REPO_ROOT / "tests" / "fixtures" / "layer2_trace.v2.legacy.json").read_text(
-                encoding="utf-8"
-            )
-        )
-
-        normalized = normalize_trace_json(legacy)["trace"]
-
-        self.assertEqual(normalized["trace_version"], "layer2_trace.v6")
-        _trace_schema_validator().validate(normalized)
-
-    # A v5 read keeps all semantic sections while receiving only v6 defaults.
-    def test_evaluation_normalized_v5_trace_preserves_external_sections(self) -> None:
-        state = _external_communication_task_state()
-        legacy = layer2_trace_to_dict(
-            build_layer2_runtime_trace(
-                thread_id="legacy-v5-external",
-                intake_result=state.intake_payload,
-                task_state=state,
-            )
-        )
-        legacy["trace_version"] = "layer2_trace.v5"
-        legacy["external_communication"]["draft"].pop("cc")
-        legacy["external_communication"]["draft"].pop("bcc")
-
-        normalized = normalize_trace_json(legacy)["trace"]
-
-        self.assertEqual(normalized["trace_version"], "layer2_trace.v6")
-        self.assertEqual(
-            normalized["external_communication"]["draft"]["recipient"],
-            "ops@example.com",
-        )
-        self.assertEqual(normalized["external_communication"]["draft"]["cc"], [])
-        self.assertEqual(normalized["external_communication"]["draft"]["bcc"], [])
-        self.assertEqual(
-            normalized["external_execution"],
-            legacy["external_execution"],
-        )
-        _trace_schema_validator().validate(normalized)
 
     def test_runtime_trace_includes_core_sections_and_histories(self) -> None:
         state = _complete_task_state()

@@ -24,7 +24,3 @@ Python signal services emit typed raw facts and unscored components. Rego alone 
 7. Python records `GovernanceDecisionTrace` and applies the returned directive.
 
 If OPA cannot return a valid decision, Python performs only a traced fail-closed transition to human review. It does not fall back to the Python decision combiner in the runtime path.
-
-## Evaluation
-
-`src/evaluation_service` is separate from the live runtime. It reads exported trace JSON, normalizes it into `EvaluationInput`, invokes OPA `data.layer2.evaluation.compliance`, and builds JSON/Markdown reports. It intentionally does not import `TaskState`, governance dataclasses, or oversight models.

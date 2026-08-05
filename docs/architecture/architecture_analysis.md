@@ -14,7 +14,7 @@ L'architettura effettiva è una pipeline a cinque macro-blocchi: Task Intake (La
 | Layer 2 — Runtime & Governance | Orchestrazione, planner/actor, governance, HITL e routing | Non implementa direttamente capability o persistenza |
 | Layer 3 — Tool Bus / External Capabilities | Gateway, normalizzazione, registry, executor e adapter esterni | Non interpreta la policy finale |
 | Layer 4 — State, Evidence & Observability | Stato, evidenze, oversight, checkpoint, trace e artifact | Non ricombina la direttiva OPA |
-| Evaluation | Normalizzazione trace, metriche e report offline | Fuori dalla run live; non è Layer 5 |
+| Future Layer 5 — Evaluation & Continuous Improvement | Non ancora implementato | Userà i trace esportati senza entrare nella run live |
 
 ## 1. Entry point e runtime principale
 
@@ -30,7 +30,6 @@ Entrypoint separati:
 
 - `src/main_layer1.py`: solo intake.
 - `src/main_layer2_dashboard.py — main`: control plane HTTP/static frontend per HITL; non invoca né riprende LangGraph.
-- `src/main_layer2_evaluation.py — main`: facciata deprecata verso `evaluation_service.main — main`, processo offline che non importa il runtime live.
 - `services/policy_decision_point/compose.yaml`: avvia OPA 1.15.2 in modalità server su `:8181`, monta il bundle Rego in sola lettura.
 
 ## 2. Nodi LangGraph e transizioni
@@ -177,12 +176,7 @@ Il trace è una proiezione read-only di `TaskState`.
 - `infrastructure.runtime_artifacts — RuntimeArtifactStore`, `persist_runtime_artifacts` scrivono per thread il trace JSON, `trace_summary.md`, dashboard snapshot e runtime summary. Il contratto esterno chiuso è `schemas/layer2_trace.schema.json` (`layer2_trace.v6`).
 - Checkpoint e artifact non sono sinonimi: `infrastructure.checkpointing — build_default_checkpointer` conserva lo stato/interruption LangGraph; gli artifact sono read models e non possono ricostruire un interrupt.
 
-La valutazione è offline e runtime-independent:
-
-- `evaluation_service.discovery/loader/trace_normalizer/trace_projection`: trova, legge, normalizza anche trace legacy e proietta il contratto di evaluation.
-- `run_evaluator.evaluate_normalized_trace`: calcola outcome, distribuzioni directive/review, supporto evidence, mismatch typed-vs-heuristic, tool failure/duplicate e assessment.
-- `metrics.build_aggregate`: aggrega escalation rate, human-review frequency, distribuzioni, tool rates e medie evidence/risk/trajectory.
-- `evaluation_client.OPAEvaluationClient` effettua la valutazione Rego offline (`configs/opa/layer2_governance/evaluation/evaluation.rego`); `report_builder` emette JSON/Markdown.
+Il futuro Layer 5 di evaluation non è attualmente implementato. I trace esportati restano il confine dati disponibile per la sua progettazione.
 
 ## 11. Tool esterni e boundary
 

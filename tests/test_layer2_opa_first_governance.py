@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import os
 import subprocess
 import sys
@@ -139,20 +138,6 @@ class OPAFirstGovernanceContractTests(unittest.TestCase):
         self.assertIn("evidence strong (0.93)", result.governance_decision.dynamic_policy_summary)
         self.assertNotIn("evidence weak (0.00)", result.governance_decision.dynamic_policy_summary)
         self.assertFalse(result.governance_decision.requires_human_review)
-
-
-class EvaluationServiceDecouplingTests(unittest.TestCase):
-    # The standalone evaluation service must not import runtime dataclasses or governance modules.
-    def test_evaluation_service_has_no_runtime_imports(self) -> None:
-        forbidden_roots = {"layer2_runtime_governance"}
-        for path in (SRC_ROOT / "evaluation_service").glob("*.py"):
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Import):
-                    imported = {alias.name.split(".", 1)[0] for alias in node.names}
-                    self.assertTrue(forbidden_roots.isdisjoint(imported), path)
-                if isinstance(node, ast.ImportFrom) and node.module is not None:
-                    self.assertNotIn(node.module.split(".", 1)[0], forbidden_roots, path)
 
 
 class _AllowPolicyEngine(PolicyEnginePort):

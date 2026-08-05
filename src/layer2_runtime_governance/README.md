@@ -44,7 +44,6 @@ Domain modules must remain independent from LangGraph, provider SDKs, HTTP, subp
 - `graph.py`: LangGraph composition and routing only.
 - `runtime/`: lifecycle, planning, actor, tool, replanning, governance services, and
   thin LangGraph node adapters. The former `nodes.py` facade has been removed.
-- `evaluation/`: offline evaluation over exported traces.
 - `judge/`: governed-external semantic assessment used by the Layer 2 governance
   boundary.
 - `layer4_state_evidence_observability/observability/`: trace models, read-only

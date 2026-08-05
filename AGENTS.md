@@ -31,13 +31,12 @@ The current design references are:
 
 ## Current Scope
 
-At the moment, the repository covers four numbered architectural layers plus a separate offline evaluation block:
+At the moment, the repository covers four numbered architectural layers. Evaluation & Continuous Improvement is planned as a future Layer 5 and is not currently implemented:
 
 - `Layer 1 - Task Intake`: canonical task parsing, completeness assessment, and execution-policy assignment
 - `Layer 2 - Runtime & Governance`: bootstrap, planner/actor loop, governance, HITL routing, and coordination
 - `Layer 3 - Tool Bus / External Capabilities`: governed capability execution and external-operation boundaries
 - `Layer 4 - State, Evidence & Observability`: state projections, evidence, oversight, checkpoints, traces, and artifacts
-- offline evaluation over exported Layer 2 traces, kept outside the live runtime
 
 Layer 2 is the live orchestration and governance slice, not the whole application. It coordinates Layer 1 input and consumes typed services from Layer 3 and Layer 4; capability execution and durable observability remain owned by those layers.
 It already includes:
@@ -62,7 +61,6 @@ It already includes:
 - the external communication draft body is taken from the latest governed draft output for the branch, while the trace retains the canonical final body, selected evidence references, and provenance diagnostics
 - external communication plan semantics remain planner-owned; runtime compaction is not part of the active architecture
 - typed runtime trace export through `src/layer4_state_evidence_observability/observability/`, surfaced by `src/main_layer2.py`
-- offline trace evaluation and reporting through `evaluation/`, surfaced by `src/main_layer2_evaluation.py`
 
 These are the folders to treat as the active implementation baseline:
 
@@ -73,7 +71,6 @@ These are the folders to treat as the active implementation baseline:
 - `src/main_layer1.py`
 - `src/main_layer2.py`
 - `src/main_layer2_dashboard.py`
-- `src/main_layer2_evaluation.py`
 - `src/governance_policy_service`
 - `services/policy_decision_point`
 
@@ -128,7 +125,7 @@ Important implementation principles:
 - `Layer 2` is the live LangGraph orchestration and governance layer; it owns routing and enforcement, but not Layer 3 connector logic or Layer 4 persistence internals.
 - `Layer 3` is the Tool Bus / External Capabilities boundary; Layer 2 requests capabilities through typed gateways, while actors and governance never call connectors directly.
 - `Layer 4` is the State, Evidence & Observability boundary; it owns typed evidence, trace, checkpoint, and artifact projections.
-- Offline evaluation consumes exported Layer 2 traces through `evaluation_service`; it is a separate post-run block, not `Layer 5`.
+- Evaluation & Continuous Improvement is not currently implemented; its future Layer 5 design must consume exported traces without entering the live runtime loop.
 - for the `planner + actor` branch, follow `docs/guidelines/plan-and-execute.ipynb` as the primary implementation pattern reference:
   - multi-step semantic planner
   - step-bounded executor
@@ -200,7 +197,6 @@ Main files:
 - `src/layer4_state_evidence_observability/behavioral/`
 - `judge/`
 - `src/layer4_state_evidence_observability/oversight/`
-- `evaluation/`
 - `execution/providers/bedrock_runtime.py` (`bedrock_client.py` is a compatibility facade)
 - `src/layer4_state_evidence_observability/infrastructure/runtime_artifacts.py` (`persistence.py` is a compatibility facade)
 - `runtime_warnings.py`
@@ -213,7 +209,6 @@ Modular capability packages introduced for the active Layer 2–4 baseline:
 - `execution/` owns actor provider configuration, prompts, action schemas, response parsing, result construction, and provider adapters; `acting.py` is a compatibility facade and actor factory
 - `governance_components/` owns policy contracts, inputs, adapters, OPA-first evaluation, response parsing, and fail-closed handling
 - `src/layer4_state_evidence_observability/observability/` owns immutable trace models, read-only builders, compact views, and JSON serialization
-- `src/evaluation_service/` owns runtime-independent trace discovery, loading, legacy normalization, per-run evaluation, metric aggregation, and report serialization; `aggregate.py` is a thin compatibility facade
 - `src/layer4_state_evidence_observability/infrastructure/` owns checkpoint composition and persistence ports
 - `composition.py` is the explicit dependency-injection entry point for runtime construction
 
@@ -244,9 +239,8 @@ Current design:
 - `execution/providers/bedrock_runtime.py` defines the Amazon Bedrock Converse adapter used by the Layer 2 actor with the approved Nova 2 Lite EU inference profile; `bedrock_client.py` is import-compatible
 - `runtime/governance_service.py` applies the OPA-first governance result and persists static, dynamic, behavioral, and judge records before routing
 - `src/layer4_state_evidence_observability/infrastructure/runtime_artifacts.py` configures the local official LangGraph SQLite saver plus the per-thread runtime artifact store; `persistence.py` is import-compatible and `src/layer4_state_evidence_observability/infrastructure/checkpointing.py` can select the official PostgreSQL saver for deployed environments
-- `src/layer4_state_evidence_observability/observability/` defines the typed, JSON-exportable Layer 4 trace projections for Layer 2 runs, builders, and compact views used for debugging, thesis evidence, HITL payloads, and evaluation; `trace_summary.py` produces a human-readable Markdown summary written alongside the full JSON trace as `trace_summary.md`; the retired `trace.py` facade must not be restored
-- `schemas/layer2_trace.schema.json` is the closed Draft 2020-12 contract for runtime-produced `layer2_trace.v6`; only `evaluation_service` may project historical traces into that current read model
-- `evaluation/` defines the offline trace evaluation pipeline that reads exported trace JSON and produces JSON and Markdown reports, including typed-vs-heuristic evidence mismatch accounting
+- `src/layer4_state_evidence_observability/observability/` defines the typed, JSON-exportable Layer 4 trace projections for Layer 2 runs, builders, and compact views used for debugging, thesis evidence, HITL payloads, and future evaluation; `trace_summary.py` produces a human-readable Markdown summary written alongside the full JSON trace as `trace_summary.md`; the retired `trace.py` facade must not be restored
+- `schemas/layer2_trace.schema.json` is the closed Draft 2020-12 contract for runtime-produced `layer2_trace.v6`; historical trace migration has no active owner until Layer 5 is designed
 - `hitl_dashboard.py` defines the dashboard-facing snapshot model derived from `TaskState`, governance, oversight, and HITL review payloads
 - `main_layer2_dashboard.py` acts as a standalone multi-thread HITL control plane backend that serves the React dashboard build and exposes review inbox, detail, and typed decision-submission APIs; it validates and durably enqueues decisions but never executes or resumes the LangGraph runtime
 - `src/layer4_state_evidence_observability/infrastructure/review_decision_inbox.py` is the durable control-plane transport between the dashboard and the runtime owner; it provides idempotent request-bound submissions, atomic claiming, delivery status, and a single-owner lease, but it is not runtime state and cannot reconstruct a graph
@@ -293,7 +287,6 @@ Current relevant files:
 - `tests/test_layer2_hitl_runtime.py`
 - `tests/test_layer2_architecture.py`
 - `tests/test_layer1_layer2_integration.py`
-- `tests/test_layer2_evaluation.py`
 - `tests/test_layer2_hitl_dashboard.py`
 - `tests/test_hitl_control_plane.py`
 - `tests/test_main_layer2_dashboard.py`
@@ -462,7 +455,6 @@ Current relevant files:
 - runtime trace export must be read-only over `TaskState`; it must not mutate runtime state or become a parallel source of truth
 - `main_layer2.py` may print trace views, but reusable trace construction belongs in `src/layer4_state_evidence_observability/observability/`
 - `resume_layer2_flow` should prefer the direct LangGraph `invoke(Command(resume=...))` result when it contains the canonical `task_state`, because interrupted checkpoints may briefly expose only a partial snapshot wrapper during resume; the CLI-owned HITL path may stream the same command to keep node progress visible in the original terminal
-- `main_layer2_evaluation.py` is the offline, trace-only evaluation entrypoint and must stay decoupled from the live runtime CLI
 - `ABORTED` is the hard-denial runtime state for governance decisions that must not be conflated with review
 - HITL is wired as `interrupt / resume`; governance now pauses in typed states and resumes from typed human decisions
 - the local Layer 2 CLI no longer auto-launches the HITL control plane; while a thread is in `WAITING_HUMAN_REVIEW`, the original CLI remains alive as its leased runtime owner and polls the durable decision inbox, while the standalone dashboard discovers pending reviews from persisted runtime artifacts and only submits decisions
