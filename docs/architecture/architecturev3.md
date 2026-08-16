@@ -68,7 +68,7 @@ I quattro layer numerati descrivono responsabilità e ownership, non quattro pas
 - **Layer 3 — Tool Bus / External Capabilities**: espone il gateway tipizzato, valida e invoca capability; non decide la policy finale.
 - **Layer 4 — State, Evidence & Observability**: mantiene stato, evidenze, oversight, checkpoint, trace e artifact; non è un secondo motore decisionale.
 
-`Evaluation & Continuous Improvement` è pianificato come futuro Layer 5, non ancora implementato, e resterà fuori dal ciclo live del task.
+`Evaluation & Continuous Improvement` è il Layer 5 offline: la prima slice di Evaluation è implementata, mentre il feedback loop di Continuous Improvement resta differito.
 
 ### Flusso End-to-End
 
@@ -91,7 +91,7 @@ I quattro layer numerati descrivono responsabilità e ownership, non quattro pas
 - `HITL Gateway`: nodo LangGraph con `interrupt()` più control plane di review standalone servito da `src/main_layer2_dashboard.py`. La dashboard valida e deposita la decisione tipizzata in una inbox durabile; il processo runtime originario, unico owner della run, la consuma e applica `Command(resume=...)` sul checkpoint ufficiale LangGraph (`SqliteSaver` locale, `PostgresSaver` in produzione). La inbox è solo trasporto control-plane e gli artifact runtime sono osservabilità: nessuno dei due è stato ripristinabile.
 - `Tool Bus / External Capabilities`: componente esterno al grafo, invocato dal nodo `tool_gateway`, implementato in `src/layer3_tool_bus_external_capabilities/`.
 - `State, Evidence & Observability`: componente ibrido che fonde gli artefatti nativi prodotti da LangGraph, come stato runtime, checkpoint, thread history, task metadata e interrupt, con il tracciamento custom dell'architettura, come evidenze semantiche, output di governance, rationale, score e audit trail; è implementato in `src/layer4_state_evidence_observability/`.
-- `Evaluation & Continuous Improvement`: futuro Layer 5, non ancora implementato, da eseguire fuori dal ciclo live del task.
+- `Evaluation & Continuous Improvement`: Layer 5 offline con ingestion dei trace, SQLite, metriche e reporting; feedback loop non ancora implementato.
 
 ---
 
@@ -630,9 +630,9 @@ Input principali:
 
 ### 5.2 Operazioni Interne
 
-Questo macro-block è pianificato fuori dal ciclo live del grafo e non è ancora implementato.
+Questo macro-block è esterno al ciclo live del grafo. La prima slice di Evaluation è implementata in `src/layer5_evaluation_continuous_improvement/`.
 
-Stato attuale: il Layer 5 non è implementato. Responsabilità, contratti di persistenza, metriche e interfacce saranno definiti nella prossima fase di progettazione.
+Stato attuale: ingestion idempotente di `layer2_trace.v6`, proiezione SQLite, annotazioni separate, metriche aggregate e report JSON/CSV/SVG. Il feedback loop resta fuori dallo scope corrente.
 
 Direzione di continuous improvement non ancora automatizzata:
 - misurare qualità della traiettoria e gestione dell'incertezza su dataset e run aggregate
@@ -672,7 +672,7 @@ Output possibili:
 
 ### 5.4 Framework / Librerie
 
-Da definire durante la progettazione del Layer 5.
+SQLite e CLI Python standalone; reporting JSON/CSV e SVG senza dipendenze di plotting esterne.
 
 ---
 

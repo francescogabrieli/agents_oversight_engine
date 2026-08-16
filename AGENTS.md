@@ -31,12 +31,13 @@ The current design references are:
 
 ## Current Scope
 
-At the moment, the repository covers four numbered architectural layers. Evaluation & Continuous Improvement is planned as a future Layer 5 and is not currently implemented:
+At the moment, the repository covers five numbered architectural layers; Layer 5 currently implements the offline Evaluation slice, while Continuous Improvement remains deferred:
 
 - `Layer 1 - Task Intake`: canonical task parsing, completeness assessment, and execution-policy assignment
 - `Layer 2 - Runtime & Governance`: bootstrap, planner/actor loop, governance, HITL routing, and coordination
 - `Layer 3 - Tool Bus / External Capabilities`: governed capability execution and external-operation boundaries
 - `Layer 4 - State, Evidence & Observability`: state projections, evidence, oversight, checkpoints, traces, and artifacts
+- `Layer 5 - Evaluation & Continuous Improvement`: offline trace ingestion, evaluation storage, metrics, annotations, plots, and reports; feedback loop deferred
 
 Layer 2 is the live orchestration and governance slice, not the whole application. It coordinates Layer 1 input and consumes typed services from Layer 3 and Layer 4; capability execution and durable observability remain owned by those layers.
 It already includes:
@@ -68,6 +69,7 @@ These are the folders to treat as the active implementation baseline:
 - `src/layer2_runtime_governance`
 - `src/layer3_tool_bus_external_capabilities`
 - `src/layer4_state_evidence_observability`
+- `src/layer5_evaluation_continuous_improvement`
 - `src/main_layer1.py`
 - `src/main_layer2.py`
 - `src/main_layer2_dashboard.py`
@@ -125,7 +127,7 @@ Important implementation principles:
 - `Layer 2` is the live LangGraph orchestration and governance layer; it owns routing and enforcement, but not Layer 3 connector logic or Layer 4 persistence internals.
 - `Layer 3` is the Tool Bus / External Capabilities boundary; Layer 2 requests capabilities through typed gateways, while actors and governance never call connectors directly.
 - `Layer 4` is the State, Evidence & Observability boundary; it owns typed evidence, trace, checkpoint, and artifact projections.
-- Evaluation & Continuous Improvement is not currently implemented; its future Layer 5 design must consume exported traces without entering the live runtime loop.
+- Layer 5 Evaluation consumes exported `layer2_trace.v6` artifacts offline through its own SQLite projection and never enters the live runtime loop; Continuous Improvement is not yet implemented.
 - for the `planner + actor` branch, follow `docs/guidelines/plan-and-execute.ipynb` as the primary implementation pattern reference:
   - multi-step semantic planner
   - step-bounded executor
@@ -209,6 +211,7 @@ Modular capability packages introduced for the active Layer 2–4 baseline:
 - `execution/` owns actor provider configuration, prompts, action schemas, response parsing, result construction, and provider adapters; `acting.py` is a compatibility facade and actor factory
 - `governance_components/` owns policy contracts, inputs, adapters, OPA-first evaluation, response parsing, and fail-closed handling
 - `src/layer4_state_evidence_observability/observability/` owns immutable trace models, read-only builders, compact views, and JSON serialization
+- `src/layer5_evaluation_continuous_improvement/` owns offline v6 trace ingestion, the dedicated SQLite evaluation projection, annotations, metrics, and dependency-free SVG/CSV/JSON reporting
 - `src/layer4_state_evidence_observability/infrastructure/` owns checkpoint composition and persistence ports
 - `composition.py` is the explicit dependency-injection entry point for runtime construction
 
@@ -240,7 +243,7 @@ Current design:
 - `runtime/governance_service.py` applies the OPA-first governance result and persists static, dynamic, behavioral, and judge records before routing
 - `src/layer4_state_evidence_observability/infrastructure/runtime_artifacts.py` configures the local official LangGraph SQLite saver plus the per-thread runtime artifact store; `persistence.py` is import-compatible and `src/layer4_state_evidence_observability/infrastructure/checkpointing.py` can select the official PostgreSQL saver for deployed environments
 - `src/layer4_state_evidence_observability/observability/` defines the typed, JSON-exportable Layer 4 trace projections for Layer 2 runs, builders, and compact views used for debugging, thesis evidence, HITL payloads, and future evaluation; `trace_summary.py` produces a human-readable Markdown summary written alongside the full JSON trace as `trace_summary.md`; the retired `trace.py` facade must not be restored
-- `schemas/layer2_trace.schema.json` is the closed Draft 2020-12 contract for runtime-produced `layer2_trace.v6`; historical trace migration has no active owner until Layer 5 is designed
+- `schemas/layer2_trace.schema.json` is the closed Draft 2020-12 contract for runtime-produced `layer2_trace.v6`; the current Layer 5 importer accepts this version only and does not silently migrate legacy traces
 - `hitl_dashboard.py` defines the dashboard-facing snapshot model derived from `TaskState`, governance, oversight, and HITL review payloads
 - `main_layer2_dashboard.py` acts as a standalone multi-thread HITL control plane backend that serves the React dashboard build and exposes review inbox, detail, and typed decision-submission APIs; it validates and durably enqueues decisions but never executes or resumes the LangGraph runtime
 - `src/layer4_state_evidence_observability/infrastructure/review_decision_inbox.py` is the durable control-plane transport between the dashboard and the runtime owner; it provides idempotent request-bound submissions, atomic claiming, delivery status, and a single-owner lease, but it is not runtime state and cannot reconstruct a graph
@@ -293,6 +296,7 @@ Current relevant files:
 - `tests/test_review_decision_inbox.py`
 - `tests/test_layer2_oversight.py`
 - `tests/test_layer2_trace.py`
+- `tests/test_layer5_evaluation.py`
 - `tests/test_tool_gateway_mcp.py`
 
 
