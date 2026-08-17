@@ -1,0 +1,9 @@
+{
+  "extends": "layer2_external_capabilities.json",
+  "enabled_capabilities": [
+    "communication.email.send"
+  ],
+  "enabled_mcp_servers": [
+    "communication"
+  ]
+}

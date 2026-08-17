@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import os
 from dataclasses import asdict, dataclass
-from typing import Annotated
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, create_model
 
 from environment_config import load_env_file_values
 from llm_retry import llm_retry
@@ -26,6 +26,7 @@ from .contracts import (
     JudgeTaskRequirementKind,
     JudgeVerdict,
 )
+from .evidence_bundle import build_judge_evidence_bundle
 from .prompts import build_judge_system_prompt, build_judge_user_prompt
 
 try:
@@ -132,6 +133,37 @@ class _JudgeTaskRequirementPayload(BaseModel):
     kind: JudgeTaskRequirementKind
     index: int = Field(..., ge=0)
     quote: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
+# Build a response model whose evidence-reference fields are closed over this exact bundle.
+def _build_bound_judge_payload_model(
+    *,
+    allowed_evidence_ids: tuple[str, ...],
+    selected_evidence_ids: tuple[str, ...],
+) -> type[_JudgePayload]:
+    allowed_values = allowed_evidence_ids or ("__no_allowed_evidence_id__",)
+    selected_values = selected_evidence_ids or ("__no_selected_evidence_id__",)
+    allowed_ref = Literal.__getitem__(allowed_values)
+    selected_ref = Literal.__getitem__(selected_values)
+
+    bound_finding = create_model(
+        "BoundJudgeFindingPayload",
+        __base__=_JudgeFindingPayload,
+        evidence_refs=(list[allowed_ref], Field(default_factory=list)),
+    )
+    bound_claim = create_model(
+        "BoundJudgeClaimAssessmentPayload",
+        __base__=_JudgeClaimAssessmentPayload,
+        selected_evidence_refs=(list[selected_ref], Field(default_factory=list)),
+        supporting_evidence_refs=(list[allowed_ref], Field(default_factory=list)),
+        contradicting_evidence_refs=(list[allowed_ref], Field(default_factory=list)),
+    )
+    return create_model(
+        "BoundJudgePayload",
+        __base__=_JudgePayload,
+        claim_assessments=(list[bound_claim], Field(...)),
+        findings=(list[bound_finding], Field(default_factory=list)),
+    )
 
 
 class DisabledJudge(JudgePort):
@@ -275,6 +307,11 @@ class OpenAIJudge(JudgePort):
         context: JudgeContext,
         protocol_correction: str | None = None,
     ) -> object:
+        evidence_bundle = context.evidence_bundle or build_judge_evidence_bundle(context=context)
+        response_model = _build_bound_judge_payload_model(
+            allowed_evidence_ids=evidence_bundle.allowed_evidence_ids,
+            selected_evidence_ids=evidence_bundle.selected_evidence_refs,
+        )
         return self._client.responses.parse(
             model=self._settings.model,
             input=[
@@ -287,7 +324,7 @@ class OpenAIJudge(JudgePort):
                     ),
                 },
             ],
-            text_format=_JudgePayload,
+            text_format=response_model,
         )
 
 

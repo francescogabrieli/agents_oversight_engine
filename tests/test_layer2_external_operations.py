@@ -115,6 +115,7 @@ from layer2_runtime_governance.judge import (
 )
 from layer2_runtime_governance.judge.service import (
     _JudgePayload,
+    _build_bound_judge_payload_model,
     _validate_judge_payload,
 )
 from layer2_runtime_governance.judge import (
@@ -137,6 +138,38 @@ from layer3_tool_bus_external_capabilities.tools import build_default_tool_gatew
 
 
 class ExternalOperationNormalizerTests(unittest.TestCase):
+    # The provider schema must reject evidence IDs outside the current judge bundle.
+    def test_judge_bound_schema_rejects_unknown_evidence_ids(self) -> None:
+        bound_payload = _build_bound_judge_payload_model(
+            allowed_evidence_ids=("observation-1", "observation-2"),
+            selected_evidence_ids=("observation-1",),
+        )
+
+        with self.assertRaises(ValidationError):
+            bound_payload.model_validate(
+                {
+                    "verdict": "safe",
+                    "severity": "low",
+                    "confidence": 0.9,
+                    "findings": [],
+                    "claim_assessments": [
+                        {
+                            "claim_summary": "The claim is supported.",
+                            "status": "supported_by_selected",
+                            "selected_evidence_refs": ["invented-observation"],
+                            "supporting_evidence_refs": [],
+                            "contradicting_evidence_refs": [],
+                            "explanation": "The reference is not in the bundle.",
+                        }
+                    ],
+                    "summary": "Safe.",
+                    "rationale": "The payload is supported.",
+                    "evaluated_operation_digest": "a" * 64,
+                    "evaluated_evidence_snapshot_digest": "b" * 64,
+                    "evaluated_evidence_selection_digest": "c" * 64,
+                }
+            )
+
     # OpenAI structured output must constrain semantic labels before service parsing.
     def test_judge_payload_schema_rejects_free_form_finding_categories(self) -> None:
         payload = {
