@@ -12,7 +12,6 @@ from .prompt_projection import ACTOR_SCRATCHPAD_ENTRY_LIMIT, build_actor_prompt_
 from .response_parser import (
     coerce_provider_confidence,
     convert_json_payload_to_tool_call,
-    extract_single_function_call,
     normalize_actor_payload,
     validate_tool_call_action,
 )
@@ -35,7 +34,6 @@ __all__ = [
     "select_actor_runtime_tools_for_turn",
     "coerce_provider_confidence",
     "convert_json_payload_to_tool_call",
-    "extract_single_function_call",
     "normalize_actor_payload",
     "validate_tool_call_action",
     "resolve_actor_provider",

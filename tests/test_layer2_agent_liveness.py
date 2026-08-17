@@ -1,6 +1,22 @@
 """Characterization tests for the bounded agent progress loop."""
 
-from tests.layer2_runtime_fixtures import *
+import unittest
+from unittest.mock import patch
+
+from tests.layer2_runtime_fixtures import _build_research_intake_result
+
+from layer2_runtime_governance.actor_contract import (
+    ActorResult,
+    ActorResultType,
+    CapabilityAccessMode,
+    build_actor_task,
+)
+from layer2_runtime_governance.domain import (
+    PlanStep,
+    PlanStepStatus,
+    RuntimeState,
+    TaskState,
+)
 from layer2_runtime_governance.runtime.actor_service import _enforce_actor_runtime_contract, _record_actor_execution
 from layer2_runtime_governance.runtime.tool_service import canonical_action_key, tool_gateway
 from layer2_runtime_governance.execution.prompt_projection import build_actor_prompt_payload
@@ -8,15 +24,18 @@ from layer2_runtime_governance.domain.serialization import normalize_task_state_
 from layer3_tool_bus_external_capabilities.external_operations.contracts import GovernanceActionFeedback
 from layer2_runtime_governance.planning import build_planner_system_prompt
 from layer2_runtime_governance.domain import ExecutedPlanStep
-from layer3_tool_bus_external_capabilities.tool_contract import ToolErrorCode
+from layer3_tool_bus_external_capabilities.tool_contract import (
+    ToolErrorCode,
+    ToolExecutionResult,
+    ToolName,
+    ToolRequest,
+)
 from main_layer2 import parse_cli_args
 from layer2_runtime_governance.runtime.routing import route_after_actor
 from layer2_runtime_governance.execution.action_schemas import build_actor_runtime_tools, select_actor_runtime_tools_for_turn
 from layer2_runtime_governance.execution.providers.bedrock_runtime import _extract_tool_call_payloads
 from layer2_runtime_governance.runtime.tool_service import observe_tool_result
 from layer2_runtime_governance.runtime.routing import route_after_observe_tool_result
-
-
 class _Gateway:
     # A deterministic capability adapter used to isolate ProgressGuard behavior.
     gateway_name = "test"

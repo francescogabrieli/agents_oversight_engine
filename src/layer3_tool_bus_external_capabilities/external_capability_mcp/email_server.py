@@ -7,11 +7,17 @@ import socket
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import getaddresses
+from functools import partial
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
 from .ledger import ServerIdempotencyLedger
+from .response import build_tool_response
+
+
+# Bind the connector identity once while sharing the closed response envelope.
+_response = partial(build_tool_response, provider="smtp")
 
 
 # Keep the SMTP defensive bound aligned with communication.email.send.input.v2.
@@ -221,30 +227,6 @@ def _stable_message_id(*, idempotency_key: str, sender: str) -> str:
     digest = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()[:32]
     domain = sender.rsplit("@", 1)[-1] if "@" in sender else "localhost"
     return f"<{digest}@{domain}>"
-
-
-# Build the closed audit-safe response shape consumed by the external executor.
-def _response(
-    *,
-    status: str,
-    summary: str,
-    error_code: str | None,
-    retryable: bool,
-    timestamp: datetime,
-    external_reference: str | None = None,
-    metadata: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    return {
-        "schema_version": "external_execution.tool_response.v1",
-        "status": status,
-        "external_reference": external_reference,
-        "provider": "smtp",
-        "timestamp": timestamp.isoformat(),
-        "summary": summary,
-        "error_code": error_code,
-        "retryable": retryable,
-        "metadata": metadata or {},
-    }
 
 
 # Parse one opt-in boolean environment setting.

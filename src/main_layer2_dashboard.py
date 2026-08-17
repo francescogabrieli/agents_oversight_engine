@@ -1,13 +1,15 @@
+# Dashboard validation uses ValueError so malformed requests map to HTTP 400 responses.
+# ruff: noqa: TRY004
 from __future__ import annotations
 
 import argparse
-from copy import deepcopy
-from datetime import datetime, timedelta, timezone
 import json
 import mimetypes
 import threading
 import webbrowser
+from copy import deepcopy
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -15,38 +17,33 @@ from typing import Any
 from urllib.parse import urlparse
 
 from json_serialization import to_jsonable
-
 from layer1_intake import IntakeResult
 from layer2_runtime_governance import (
-    ActorResultType,
-    ExternalCommunicationDraft,
-    GovernanceDirective,
     HumanReviewDecision,
     HumanReviewDecisionType,
-    HumanReviewExternalEdit,
     HumanReviewRequest,
-    RuntimeState,
-    ToolName,
-    ToolRequest,
     build_default_checkpointer,
     coerce_human_review_decision_payload,
 )
-from layer4_state_evidence_observability.infrastructure.runtime_artifacts import RuntimeArtifactStore
+from layer2_runtime_governance.composition import (
+    Layer2RuntimeDependencies,
+    compose_layer2_runtime,
+)
+from layer2_runtime_governance.domain import (
+    TaskState,
+)
 from layer2_runtime_governance.hitl.decision_inbox import (
     ReviewDecisionInboxPort,
     ReviewDecisionSubmission,
 )
+from layer4_state_evidence_observability.infrastructure.checkpointing import (
+    close_checkpointer,
+)
 from layer4_state_evidence_observability.infrastructure.review_decision_inbox import (
     SQLiteReviewDecisionInbox,
 )
-from layer2_runtime_governance.domain import (
-    TaskState,
-    coerce_external_operation_proposal,
-)
-from layer4_state_evidence_observability.infrastructure.checkpointing import close_checkpointer
-from layer2_runtime_governance.composition import (
-    Layer2RuntimeDependencies,
-    compose_layer2_runtime,
+from layer4_state_evidence_observability.infrastructure.runtime_artifacts import (
+    RuntimeArtifactStore,
 )
 
 # Keep the local dashboard bound to loopback by default.
@@ -207,74 +204,6 @@ def _optional_text(value: Any) -> str | None:
     return text or None
 
 
-# Normalize free-form metadata into a JSON object or fail with a typed validation error.
-def _coerce_metadata_payload(value: Any) -> dict[str, Any]:
-    if value is None:
-        return {}
-    if isinstance(value, dict):
-        return {str(key): item for key, item in value.items()}
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return {}
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise ValueError("External communication metadata must be valid JSON.") from exc
-        if not isinstance(parsed, dict):
-            raise ValueError("External communication metadata must be a JSON object.")
-        return {str(key): item for key, item in parsed.items()}
-    raise ValueError("External communication metadata must be a JSON object.")
-
-
-# Parse the external communication edit accepted by modify_and_continue.
-def _parse_external_communication_edit(
-    payload: dict[str, Any],
-    *,
-    pending_request: HumanReviewRequest,
-) -> HumanReviewExternalEdit:
-    current_draft = pending_request.external_communication_draft
-    if current_draft is None:
-        raise ValueError("modify_and_continue requires an external communication draft.")
-
-    edit_payload = payload.get("external_communication_edit")
-    edit_payload = edit_payload if isinstance(edit_payload, dict) else {}
-    draft_payload = edit_payload.get("draft")
-    draft_payload = draft_payload if isinstance(draft_payload, dict) else {}
-
-    channel = (
-        _optional_text(draft_payload.get("channel"))
-        or _optional_text(payload.get("external_communication_channel"))
-        or current_draft.channel
-    )
-    body = (
-        _optional_text(draft_payload.get("body"))
-        or _optional_text(payload.get("external_communication_body"))
-        or current_draft.body
-    )
-    metadata = current_draft.metadata
-    if "metadata" in draft_payload:
-        metadata = _coerce_metadata_payload(draft_payload.get("metadata"))
-    elif "external_communication_metadata" in payload:
-        metadata = _coerce_metadata_payload(payload.get("external_communication_metadata"))
-
-    if not channel:
-        raise ValueError("External communication channel is required for modify_and_continue.")
-    if not body:
-        raise ValueError("External communication body is required for modify_and_continue.")
-
-    return HumanReviewExternalEdit(
-        draft=ExternalCommunicationDraft(
-            channel=channel,
-            recipient=_optional_text(draft_payload.get("recipient")) or current_draft.recipient,
-            subject=_optional_text(draft_payload.get("subject")) or current_draft.subject,
-            body=body,
-            metadata=metadata,
-        ),
-        note=_optional_text(edit_payload.get("note")) or _optional_text(payload.get("note")),
-    )
-
-
 # Convert one JSON payload into the canonical typed HumanReviewDecision contract.
 def _parse_human_review_decision(
     payload: dict[str, Any],
@@ -287,195 +216,9 @@ def _parse_human_review_decision(
     if payload_thread_id is not None and payload_thread_id != session.thread_id:
         raise ValueError("Submitted thread_id does not match the requested review thread.")
 
-    request_id = _optional_text(payload.get("request_id"))
-    if request_id != pending_request.request_id:
-        raise ValueError("Submitted request_id does not match the pending review request.")
-
-    decision_type_value = _optional_text(payload.get("decision_type"))
-    if decision_type_value is None:
-        raise ValueError("Missing decision_type in the submitted payload.")
-
-    try:
-        decision_type = HumanReviewDecisionType(decision_type_value)
-    except ValueError as exc:
-        raise ValueError(f"Unsupported human review decision_type: {decision_type_value}") from exc
-
-    if decision_type not in pending_request.allowed_decisions:
-        raise ValueError(f"Decision '{decision_type.value}' is not allowed for this review request.")
-
-    clarification_text = None
-    if decision_type == HumanReviewDecisionType.ASK_CLARIFICATION:
-        clarification_text = _optional_text(payload.get("clarification_text"))
-        if clarification_text is None:
-            raise ValueError("Clarification text is required when asking for clarification.")
-
-    external_edit = None
-    if decision_type == HumanReviewDecisionType.MODIFY_AND_CONTINUE:
-        if isinstance(payload.get("external_operation_edit"), dict):
-            return coerce_human_review_decision_payload(
-                payload,
-                expected_request_id=pending_request.request_id,
-                expected_operation_digest=pending_request.operation_payload_digest,
-            )
-        external_edit = _parse_external_communication_edit(
-            payload,
-            pending_request=pending_request,
-        )
-
-    return HumanReviewDecision(
-        request_id=request_id,
-        decision_type=decision_type,
-        note=_optional_text(payload.get("note")),
-        clarification_text=clarification_text,
-        external_communication_edit=external_edit,
-        reviewer_id=_optional_text(payload.get("reviewer_id")),
-        approved_operation_digest=(
-            pending_request.operation_payload_digest
-            if decision_type
-            in {
-                HumanReviewDecisionType.APPROVE_CONTINUE,
-                HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY,
-            }
-            else None
-        ),
-    )
-
-
-# Rebuild a typed ToolRequest from the JSON-safe dashboard artifact payload.
-def _coerce_tool_request(payload: Any) -> ToolRequest | None:
-    if payload is None or isinstance(payload, ToolRequest):
-        return payload
-    if not isinstance(payload, dict):
-        raise ValueError("Pending tool request payload must be a JSON object.")
-
-    tool_name_value = _optional_text(payload.get("tool_name"))
-    if tool_name_value is None:
-        raise ValueError("Pending tool request payload is missing tool_name.")
-
-    plan_step_id = _optional_text(payload.get("plan_step_id"))
-    reason = _optional_text(payload.get("reason"))
-    if plan_step_id is None or reason is None:
-        raise ValueError("Pending tool request payload is incomplete.")
-
-    try:
-        tool_name = ToolName(tool_name_value)
-    except ValueError as exc:
-        raise ValueError(f"Unsupported pending tool name: {tool_name_value}") from exc
-
-    return ToolRequest(
-        plan_step_id=plan_step_id,
-        tool_name=tool_name,
-        reason=reason,
-        query=_optional_text(payload.get("query")),
-        url=_optional_text(payload.get("url")),
-        text=_optional_text(payload.get("text")),
-        path=_optional_text(payload.get("path")),
-        expression=_optional_text(payload.get("expression")),
-        timezone=_optional_text(payload.get("timezone")),
-        limit=payload.get("limit") if isinstance(payload.get("limit"), int) else None,
-        max_results=payload.get("max_results") if isinstance(payload.get("max_results"), int) else 5,
-        extractive_goal=_optional_text(payload.get("extractive_goal")),
-    )
-
-
-# Rebuild a typed HumanReviewRequest from the JSON-safe persisted HITL payload.
-def _coerce_human_review_request(payload: Any) -> HumanReviewRequest:
-    if isinstance(payload, HumanReviewRequest):
-        return payload
-    if not isinstance(payload, dict):
-        raise ValueError("Pending human review payload must be a JSON object.")
-
-    request_id = _optional_text(payload.get("request_id"))
-    thread_id = _optional_text(payload.get("thread_id"))
-    current_state_value = _optional_text(payload.get("current_state"))
-    resume_state_value = _optional_text(payload.get("resume_state"))
-    if request_id is None or thread_id is None or current_state_value is None or resume_state_value is None:
-        raise ValueError("Pending human review payload is incomplete.")
-
-    actor_result_type_value = _optional_text(payload.get("actor_result_type"))
-    governance_directive_value = _optional_text(payload.get("governance_directive"))
-    allowed_decisions = payload.get("allowed_decisions")
-    allowed_decisions = allowed_decisions if isinstance(allowed_decisions, list) else []
-
-    try:
-        current_state = RuntimeState(current_state_value)
-        resume_state = RuntimeState(resume_state_value)
-        actor_result_type = (
-            ActorResultType(actor_result_type_value) if actor_result_type_value is not None else None
-        )
-        governance_directive = (
-            GovernanceDirective(governance_directive_value)
-            if governance_directive_value is not None
-            else None
-        )
-        allowed_decision_values = tuple(HumanReviewDecisionType(value) for value in allowed_decisions)
-    except ValueError as exc:
-        raise ValueError("Pending human review payload contains unsupported enum values.") from exc
-
-    return HumanReviewRequest(
-        request_id=request_id,
-        thread_id=thread_id,
-        current_state=current_state,
-        resume_state=resume_state,
-        current_plan_step_id=_optional_text(payload.get("current_plan_step_id")),
-        current_plan_step_objective=_optional_text(payload.get("current_plan_step_objective")),
-        actor_result_type=actor_result_type,
-        current_tool_request=_coerce_tool_request(payload.get("current_tool_request")),
-        governance_directive=governance_directive,
-        governance_summary=_optional_text(payload.get("governance_summary")),
-        static_policy_summary=_optional_text(payload.get("static_policy_summary")),
-        dynamic_policy_summary=_optional_text(payload.get("dynamic_policy_summary")),
-        behavioral_summary=_optional_text(payload.get("behavioral_summary")),
-        judge_summary=_optional_text(payload.get("judge_summary")),
-        oversight_summary=_optional_text(payload.get("oversight_summary")),
-        external_communication_target_type=_optional_text(payload.get("external_communication_target_type")),
-        external_communication_draft=_coerce_external_communication_draft(
-            payload.get("external_communication_draft")
-        ),
-        reason_codes=tuple(str(value) for value in payload.get("reason_codes", []) if isinstance(value, str)),
-        allowed_decisions=allowed_decision_values,
-        review_summary=_optional_text(payload.get("review_summary")),
-        operation_id=_optional_text(payload.get("operation_id")),
-        operation_payload_digest=_optional_text(payload.get("operation_payload_digest")),
-        operation_proposal_summary=_optional_text(payload.get("operation_proposal_summary")),
-        operation_target=_optional_text(payload.get("operation_target")),
-        external_operation_proposal=coerce_external_operation_proposal(
-            payload.get("external_operation_proposal")
-        ),
-        judge_findings=tuple(
-            str(value)
-            for value in payload.get("judge_findings", [])
-            if isinstance(value, str)
-        ),
-    )
-
-
-# Rebuild a typed external draft from the JSON-safe persisted HITL payload.
-def _coerce_external_communication_draft(payload: Any) -> ExternalCommunicationDraft | None:
-    if payload is None or isinstance(payload, ExternalCommunicationDraft):
-        return payload
-    if not isinstance(payload, dict):
-        raise ValueError("Pending external communication draft payload must be a JSON object.")
-
-    channel = _optional_text(payload.get("channel"))
-    body = _optional_text(payload.get("body"))
-    if channel is None or body is None:
-        raise ValueError("Pending external communication draft payload is incomplete.")
-
-    metadata = payload.get("metadata")
-    if metadata is None:
-        metadata_payload: dict[str, Any] = {}
-    elif isinstance(metadata, dict):
-        metadata_payload = {str(key): item for key, item in metadata.items()}
-    else:
-        raise ValueError("Pending external communication draft metadata must be a JSON object.")
-
-    return ExternalCommunicationDraft(
-        channel=channel,
-        recipient=_optional_text(payload.get("recipient")),
-        subject=_optional_text(payload.get("subject")),
-        body=body,
-        metadata=metadata_payload,
+    return coerce_human_review_decision_payload(
+        payload,
+        pending_request=pending_request,
     )
 
 
@@ -892,7 +635,7 @@ def _build_request_handler(*, context: DashboardServerContext):
         server_context = context
 
         # Route API and static GET requests for the standalone dashboard.
-        def do_GET(self) -> None:  # noqa: N802
+        def do_GET(self) -> None:
             parsed = urlparse(self.path)
             if parsed.path == "/api/health":
                 self._write_json({"status": "ok"})
@@ -911,7 +654,7 @@ def _build_request_handler(*, context: DashboardServerContext):
             self._serve_static(parsed.path)
 
         # Route typed resume requests for one pending HITL thread.
-        def do_POST(self) -> None:  # noqa: N802
+        def do_POST(self) -> None:
             parsed = urlparse(self.path)
             if parsed.path.startswith("/api/reviews/") and parsed.path.endswith("/resume"):
                 self._handle_resume(parsed.path)
@@ -919,7 +662,7 @@ def _build_request_handler(*, context: DashboardServerContext):
             self.send_error(HTTPStatus.NOT_FOUND, "Unknown dashboard route")
 
         # Silence the default HTTP access log so the operator output stays readable.
-        def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
+        def log_message(self, _format: str, *_args: Any) -> None:
             return
 
         # Return one review detail payload for the requested thread id.
@@ -987,7 +730,7 @@ def _build_request_handler(*, context: DashboardServerContext):
                 self._write_json(detail)
             except ValueError as exc:
                 self._write_json({"error": str(exc)}, status=HTTPStatus.BAD_REQUEST)
-            except Exception as exc:  # pragma: no cover - protects the HTTP boundary.
+            except Exception as exc:  # noqa: BLE001  # pragma: no cover
                 # Keep backend failures visible to the operator instead of dropping the connection.
                 self._write_json(
                     {"error": f"Unable to submit the human review decision: {exc}"},

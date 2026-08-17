@@ -6,9 +6,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+from environment_config import load_env_file_values
 from llm_retry import llm_retry
-
-from layer4_state_evidence_observability.infrastructure.environment import load_env_file_values
 from .contracts import (
     JudgeAssessment,
     JudgeAssessmentStatus,
@@ -37,7 +36,7 @@ except ImportError:  # pragma: no cover - handled only when the adapter is selec
 
 @dataclass(frozen=True)
 class JudgeSettings:
-    provider: str = "disabled"
+    provider: str = "openai"
     model: str = "gpt-5.4-nano"
     api_key: str | None = None
     timeout_seconds: float = 30.0
@@ -49,7 +48,7 @@ class JudgeSettings:
         return cls(
             provider=os.getenv(
                 "LAYER2_JUDGE_PROVIDER",
-                file_values.get("LAYER2_JUDGE_PROVIDER", "disabled"),
+                file_values.get("LAYER2_JUDGE_PROVIDER", "openai"),
             ).strip().lower(),
             model=os.getenv(
                 "LAYER2_JUDGE_OPENAI_MODEL",
@@ -165,7 +164,6 @@ class DisabledJudge(JudgePort):
 class OpenAIJudge(JudgePort):
     judge_name = "openai_layer2_external_operation_judge"
     prompt_version = "external_operation_judge_v11"
-
     def __init__(self, settings: JudgeSettings | None = None) -> None:
         self._settings = settings or JudgeSettings.from_env()
         if OpenAI is None:

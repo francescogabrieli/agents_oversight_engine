@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from json_serialization import to_jsonable
+from console_output import print_json_section as _print_section
 
 from layer1_intake import (
     IntakeCommand,
@@ -210,13 +211,6 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
             "created_at": metadata["created_at"],
         },
     }
-
-
-def _print_section(title: str, payload: Any) -> None:
-    # Print one titled JSON block so the terminal output remains scannable.
-
-    print(f"\n=== {title} ===")
-    print(json.dumps(to_jsonable(payload), indent=2, ensure_ascii=False))
 
 
 def print_layer1_summary(trace: dict[str, Any]) -> None:

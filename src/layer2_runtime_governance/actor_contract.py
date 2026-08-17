@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Protocol
+from typing import Any, Protocol
 
 from layer1_intake import ExecutionPolicy, IntakeMetadata, TaskSpec
 
@@ -246,7 +246,6 @@ __all__ = [
     "ActorTask",
     "CapabilityAccessMode",
     "ScratchpadEntry",
-    "ScratchpadEntryType",
     "StepValidation",
     "build_actor_task",
 ]

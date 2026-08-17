@@ -1,16 +1,9 @@
 from __future__ import annotations
 
 import unittest
-import sys
-from pathlib import Path
 from uuid import uuid4
 
 from langgraph.checkpoint.memory import InMemorySaver
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = REPO_ROOT / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
 
 from layer1_intake import (
     BudgetConfig,
@@ -46,7 +39,6 @@ from layer2_runtime_governance.domain import (
 from layer3_tool_bus_external_capabilities.external_operations import normalize_communication_operation
 from layer2_runtime_governance.governance_components import (
     GovernanceDirective,
-    PolicyEnginePort,
 )
 from layer2_runtime_governance.judge import (
     JudgeAssessment,
@@ -65,7 +57,10 @@ from layer3_tool_bus_external_capabilities.tool_contract import (
     ToolRequest,
     ToolObservation,
 )
-from layer2_runtime_governance.graph import build_runtime_graph
+from layer2_runtime_governance.composition import (
+    Layer2RuntimeDependencies,
+    compose_layer2_runtime,
+)
 from layer4_state_evidence_observability.infrastructure.checkpointing import build_runtime_serializer
 from tests.layer2_runtime_fixtures import StubPolicyEngine, _build_stub_opa_decision
 
@@ -98,14 +93,16 @@ class _EmptyBehavioralStore(BehavioralStorePort):
 class LatestAIModelsEmailRegressionTests(unittest.TestCase):
     # The deterministic research-to-email path must pause before any send.
     def test_latest_ai_models_email_reaches_review_ready_hitl(self) -> None:
-        graph = build_runtime_graph(
-            planner_service=_ResearchEmailPlanner(),
-            actor_service=_ResearchEmailActor(),
-            tool_gateway_service=_ResearchEmailToolGateway(),
-            policy_engine_service=_ReviewExternalPolicy(),
-            judge_service=_SafeDigestJudge(),
-            behavioral_store_service=_EmptyBehavioralStore(),
-            checkpointer=InMemorySaver(serde=build_runtime_serializer()),
+        graph = compose_layer2_runtime(
+            Layer2RuntimeDependencies(
+                planner=_ResearchEmailPlanner(),
+                actor=_ResearchEmailActor(),
+                tool_gateway=_ResearchEmailToolGateway(),
+                policy_engine=_ReviewExternalPolicy(),
+                judge=_SafeDigestJudge(),
+                behavioral_store=_EmptyBehavioralStore(),
+                checkpointer=InMemorySaver(serde=build_runtime_serializer()),
+            )
         )
         result = graph.invoke(
             {"intake_result": _research_email_intake()},
@@ -151,13 +148,15 @@ class LatestAIModelsEmailRegressionTests(unittest.TestCase):
 
     # A completion with unusable evidence must recover into typed review, not denial or a loop.
     def test_missing_usable_evidence_stops_in_review_without_hard_deny(self) -> None:
-        graph = build_runtime_graph(
-            planner_service=_OneStepPlanner(),
-            actor_service=_NoEvidenceActor(),
-            tool_gateway_service=_ResearchEmailToolGateway(),
-            policy_engine_service=StubPolicyEngine(),
-            behavioral_store_service=_EmptyBehavioralStore(),
-            checkpointer=InMemorySaver(serde=build_runtime_serializer()),
+        graph = compose_layer2_runtime(
+            Layer2RuntimeDependencies(
+                planner=_OneStepPlanner(),
+                actor=_NoEvidenceActor(),
+                tool_gateway=_ResearchEmailToolGateway(),
+                policy_engine=StubPolicyEngine(),
+                behavioral_store=_EmptyBehavioralStore(),
+                checkpointer=InMemorySaver(serde=build_runtime_serializer()),
+            )
         )
         intake = _research_email_intake(with_email=False)
         result = graph.invoke(

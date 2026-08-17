@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import json
 import shutil
-import sys
 import threading
 import unittest
 from pathlib import Path
@@ -12,11 +11,6 @@ from urllib import request
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = REPO_ROOT / "src"
-
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-
 
 from layer1_intake import (
     BudgetConfig,
@@ -34,26 +28,17 @@ from layer2_runtime_governance import (
     ExternalCommunicationDraft,
     ExternalCommunicationPhase,
     ExternalCommunicationState,
-    GovernanceDecision,
     GovernanceDirective,
-    GovernanceReasonCode,
     HumanReviewDecision,
     HumanReviewDecisionType,
     HumanReviewRequest,
-    OperationalRiskAssessment,
-    OversightAssessment,
-    OversightReasonCode,
-    OversightRecommendedDirective,
-    OversightSignalLevel,
     PlanStep,
     PlanStepStatus,
-    PolicyDecision,
     RuntimeState,
     TaskState,
     ToolName,
     ToolRequest,
 )
-from layer2_runtime_governance import EvidenceQualityAssessment, TrajectoryHealthAssessment
 from layer4_state_evidence_observability.infrastructure.runtime_artifacts import (
     RuntimeArtifactStore,
     persist_runtime_artifacts,
@@ -68,6 +53,10 @@ from main_layer2_dashboard import (
     build_dashboard_session_from_thread_id,
     build_dashboard_httpd,
     submit_dashboard_decision,
+)
+from tests.dashboard_test_factories import (
+    build_dashboard_governance_decision,
+    build_dashboard_oversight_assessment,
 )
 
 
@@ -443,8 +432,8 @@ def _build_paused_session(
         )
     ]
     task_state.current_plan_step_index = 0
-    task_state.last_governance_decision = _governance_decision()
-    task_state.last_oversight_assessment = _oversight_assessment()
+    task_state.last_governance_decision = build_dashboard_governance_decision()
+    task_state.last_oversight_assessment = build_dashboard_oversight_assessment()
     task_state.external_communication = ExternalCommunicationState(
         phase=ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
     )
@@ -498,8 +487,8 @@ def _persist_non_review_artifacts(
     intake_result = _intake_result()
     task_state = TaskState.from_intake(intake_result)
     task_state.current_state = RuntimeState.COMPLETED
-    task_state.last_governance_decision = _governance_decision()
-    task_state.last_oversight_assessment = _oversight_assessment()
+    task_state.last_governance_decision = build_dashboard_governance_decision()
+    task_state.last_oversight_assessment = build_dashboard_oversight_assessment()
     persist_runtime_artifacts(
         thread_id=thread_id,
         intake_result=intake_result,
@@ -548,48 +537,6 @@ def _intake_result() -> IntakeResult:
             warnings=[],
             missing_information=[],
         ),
-    )
-
-
-# Build the governance decision used by the dashboard tests.
-def _governance_decision() -> GovernanceDecision:
-    return GovernanceDecision(
-        directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
-        policy_decision=PolicyDecision.REQUIRE_HUMAN_REVIEW,
-        reason_codes=(GovernanceReasonCode.HUMAN_REVIEW_REQUIRED,),
-        summary="Human review is required.",
-        constrains_capability_use=True,
-        evaluated_actor_result_type=ActorResultType.PROPOSE_ACTION,
-        evaluated_tool_name=ToolName.WEB_SEARCH,
-        policy_engine_name="test_policy",
-        policy_bundle_version="test_v1",
-        policy_directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
-        oversight_recommended_directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
-        oversight_summary="Oversight recommends escalation.",
-    )
-
-
-# Build the deterministic oversight assessment used by the dashboard tests.
-def _oversight_assessment() -> OversightAssessment:
-    return OversightAssessment(
-        evidence_quality=EvidenceQualityAssessment(
-            score=0.52,
-            level=OversightSignalLevel.MODERATE,
-            reason_codes=(OversightReasonCode.EVIDENCE_MARKED_SUFFICIENT,),
-        ),
-        operational_risk=OperationalRiskAssessment(
-            score=0.78,
-            level=OversightSignalLevel.HIGH,
-            reason_codes=(OversightReasonCode.TOOL_REQUIRES_HUMAN_REVIEW,),
-        ),
-        trajectory_health=TrajectoryHealthAssessment(
-            score=0.44,
-            level=OversightSignalLevel.DEGRADED,
-            reason_codes=(OversightReasonCode.RECOMMEND_HUMAN_REVIEW,),
-        ),
-        recommended_directive=OversightRecommendedDirective.WAIT_HUMAN_REVIEW,
-        summary="Evidence and risk warrant human review.",
-        reason_codes=(OversightReasonCode.RECOMMEND_HUMAN_REVIEW,),
     )
 
 

@@ -1,26 +1,41 @@
 import json
 import re
-import sys
 import unittest
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from pydantic import ValidationError
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = REPO_ROOT / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
 
 from layer1_intake import ExecutionIntent
+from layer2_runtime_governance.actor_contract import (
+    ActorPort,
+    ActorResult,
+    ActorResultType,
+    ActorTask,
+    build_actor_task,
+)
 from layer2_runtime_governance.domain import (
     ExecutedPlanStep,
+    ExternalCommunicationDraft,
     ExternalCommunicationPhase,
     ExternalCommunicationState,
+    HumanReviewDecision,
+    HumanReviewDecisionType,
+    PlanStep,
+    PlanStepStatus,
+    RuntimeState,
+    ScratchpadEntry,
+    ScratchpadEntryType,
     StepCompletionCandidate,
+    StepRecord,
+    StepValidation,
+    TaskState,
     build_evidence_selection_digest,
     build_evidence_snapshot_manifest,
     digest_json,
@@ -29,14 +44,39 @@ from layer2_runtime_governance.domain import (
 from layer2_runtime_governance.governance_components import (
     GovernanceDirective,
     GovernanceReasonCode,
-    build_default_policy_engine,
+    PolicyDecision,
+    build_policy_evaluation_input,
     evaluate_opa_first_governance,
+)
+from layer2_runtime_governance.hitl import (
+    _apply_human_review_decision,
+    build_human_review_request,
+)
+from layer2_runtime_governance.judge import (
+    JudgeAssessment,
+    JudgeFindingCategory,
+    JudgePort,
+    JudgeRecommendedDirective,
 )
 from layer2_runtime_governance.runtime.node_adapters import (
     build_governance_node,
-    build_human_review_node,
 )
-from tests.layer2_runtime_fixtures import *
+from layer2_runtime_governance.runtime.governance_service import governance
+from layer3_tool_bus_external_capabilities.tool_contract import (
+    ToolExecutionResult,
+    ToolName,
+    ToolObservation,
+    ToolRequest,
+)
+from tests.layer2_runtime_fixtures import (
+    JudgeRequiredPolicyEngine,
+    StaticJudge,
+    StubPolicyEngine,
+    _build_actor_ready_state_for_judge,
+    _build_external_communication_intake_result,
+    _judge_more_evidence_assessment,
+    _judge_wait_review_assessment,
+)
 
 from layer3_tool_bus_external_capabilities.external_operations import (
     DatabaseOperationPayload,

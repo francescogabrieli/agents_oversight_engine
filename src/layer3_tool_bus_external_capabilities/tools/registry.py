@@ -22,11 +22,11 @@ from ..external_operations.contracts import (
 )
 
 
-# Load the gateway registry from JSON or conservative built-in defaults.
+# Load the gateway registry from its explicit JSON contract.
 def load_tool_gateway_config(*, config_path: Path | None = None) -> ToolGatewayConfig:
     resolved_path = config_path or get_default_tool_gateway_config_path()
     if not resolved_path.exists():
-        return build_default_tool_gateway_config()
+        raise FileNotFoundError(f"Tool Gateway configuration does not exist: {resolved_path}")
     return _load_tool_gateway_config_cached(resolved_path.resolve())
 
 
@@ -52,42 +52,9 @@ def get_default_tool_gateway_config_path() -> Path:
     return repo_root / "configs" / "layer2_tool_gateway.json"
 
 
-# Build a conservative default registry for offline construction and tests.
+# Load the repository default without maintaining a second code-defined registry.
 def build_default_tool_gateway_config() -> ToolGatewayConfig:
-    return ToolGatewayConfig(
-        tools={
-            ToolName.WEB_SEARCH: ToolDefinition(
-                tool_name=ToolName.WEB_SEARCH,
-                backend=ToolBackend.OPENAI,
-                capability=ToolCapability.READ,
-                risk_level=ToolRiskLevel.MEDIUM,
-                enabled=True,
-                requires_human_review=False,
-                timeout_seconds=30.0,
-                required_fields=("query",),
-                operation_boundary=OperationBoundary.EVIDENCE_READ,
-                operation_family=ExternalOperationFamily.GENERIC,
-                normalized_effect=ExternalOperationEffect.READ,
-                capability_profile_id="public_evidence.web_search",
-                capability_profile_version="1",
-            ),
-            ToolName.FETCH_URL_TEXT: ToolDefinition(
-                tool_name=ToolName.FETCH_URL_TEXT,
-                backend=ToolBackend.HTTP_FETCH,
-                capability=ToolCapability.READ,
-                risk_level=ToolRiskLevel.MEDIUM,
-                enabled=True,
-                requires_human_review=False,
-                timeout_seconds=20.0,
-                required_fields=("url",),
-                operation_boundary=OperationBoundary.EVIDENCE_READ,
-                operation_family=ExternalOperationFamily.GENERIC,
-                normalized_effect=ExternalOperationEffect.READ,
-                capability_profile_id="public_evidence.fetch_url_text",
-                capability_profile_version="1",
-            ),
-        }
-    )
+    return load_tool_gateway_config()
 
 
 # Parse one configured MCP server into a typed definition.

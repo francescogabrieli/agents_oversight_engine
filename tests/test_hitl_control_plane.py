@@ -1,21 +1,16 @@
 from __future__ import annotations
 
+import json
 import shutil
-import sys
 import tempfile
 import unittest
 from io import StringIO
 from pathlib import Path
 from unittest import mock
 
+from langgraph.types import Command
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = REPO_ROOT / "src"
-
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-
-
 from layer1_intake import (
     BudgetConfig,
     ExecutionPolicy,
@@ -29,30 +24,31 @@ from layer1_intake import (
 from layer2_runtime_governance import (
     ActorResult,
     ActorResultType,
-    CapabilityAccessMode,
     BehavioralStoreSettings,
+    CapabilityAccessMode,
     GovernanceDirective,
     GovernanceReasonCode,
     PlanStep,
     PlanStepStatus,
     PolicyDecision,
-    PolicyEvaluationResult,
     RuntimeState,
     SQLiteBehavioralStore,
+    TaskState,
     ToolName,
     ToolRequest,
-    TaskState,
 )
-from layer2_runtime_governance.governance_components import PolicyEnginePort
 from layer2_runtime_governance.hitl import build_human_review_request
+from layer2_runtime_governance.runtime.governance_service import governance
 from layer4_state_evidence_observability.infrastructure.review_decision_inbox import (
     SQLiteReviewDecisionInbox,
 )
-from layer2_runtime_governance.runtime.governance_service import governance
+from layer4_state_evidence_observability.infrastructure.runtime_artifacts import (
+    RuntimeArtifactStore,
+)
+from main_layer2 import _run_owned_cli_session, resume_layer2_flow
 from main_layer2 import main as main_layer2_cli
-from main_layer2 import _run_owned_cli_session
-from main_layer2 import resume_layer2_flow
 from main_layer2_dashboard import build_dashboard_session_from_trace
+from tests.layer2_runtime_fixtures import ReviewPolicyEngine
 
 
 class HitlControlPlaneTests(unittest.TestCase):
@@ -65,7 +61,7 @@ class HitlControlPlaneTests(unittest.TestCase):
         try:
             result = governance(
                 task_state,
-                policy_engine_service=_ReviewPolicyEngine(),
+                policy_engine_service=ReviewPolicyEngine(),
                 behavioral_store_service=behavioral_store,
                 thread_id="thread-hitl",
                 hitl_event_callback=notifications.append,
@@ -178,6 +174,128 @@ class HitlControlPlaneTests(unittest.TestCase):
 
         self.assertIs(trace["final_result"]["task_state"], resumed_state)
         self.assertEqual(trace["intake_result"], resumed_state.intake_payload)
+
+    # Verify resume streams its command through the shared helper without changing its trace.
+    def test_resume_layer2_flow_streams_command_with_resume_trace_tag(self) -> None:
+        resumed_state = _waiting_review_state()
+        resumed_state.current_state = RuntimeState.COMPLETED
+        captured: dict[str, object] = {}
+        progress_events: list[tuple[str, dict[str, object]]] = []
+
+        class _FakeGraph:
+            # Capture the exact graph input and yield one canonical runtime update.
+            def stream(self, graph_input, *, config, stream_mode):
+                captured["graph_input"] = graph_input
+                captured["config"] = config
+                captured["stream_mode"] = stream_mode
+                yield {"finalize_bootstrap": {"task_state": resumed_state}}
+
+            # Return the durable post-stream state used to build the public trace.
+            def get_state(self, _config):
+                return mock.Mock(values={"task_state": resumed_state}, interrupts=[])
+
+        runtime_graph = _FakeGraph()
+        artifact_store = mock.Mock(spec=RuntimeArtifactStore)
+        with (
+            mock.patch(
+                "main_layer2.compose_layer2_runtime",
+                return_value=runtime_graph,
+            ),
+            mock.patch("main_layer2._print_live_trace_snapshot") as print_live_trace,
+        ):
+            trace = resume_layer2_flow(
+                thread_id="thread-stream-resume",
+                human_review_decision={
+                    "request_id": "thread-stream-resume:hitl",
+                    "decision_type": "approve_continue",
+                },
+                checkpointer=object(),
+                artifact_store=artifact_store,
+                progress_callback=lambda node, update: progress_events.append(
+                    (node, update)
+                ),
+                live_trace=True,
+            )
+
+        self.assertIsInstance(captured["graph_input"], Command)
+        self.assertEqual(captured["stream_mode"], "updates")
+        self.assertEqual(
+            progress_events,
+            [("finalize_bootstrap", {"task_state": resumed_state})],
+        )
+        print_live_trace.assert_called_once_with(
+            runtime_graph=runtime_graph,
+            config={"configurable": {"thread_id": "thread-stream-resume"}},
+            thread_id="thread-stream-resume",
+            tag="resume_chunk",
+        )
+        self.assertIs(trace["final_result"]["task_state"], resumed_state)
+        self.assertEqual(trace["intake_result"], resumed_state.intake_payload)
+
+    # Verify resume persists its last checkpoint and releases default infrastructure on failure.
+    def test_resume_layer2_flow_persists_failure_and_closes_default_session(
+        self,
+    ) -> None:
+        thread_id = "thread-resume-failure"
+        task_state = _waiting_review_state()
+        temp_root = Path(
+            tempfile.mkdtemp(prefix="_test_resume_failure_", dir=REPO_ROOT)
+        )
+        artifact_store = RuntimeArtifactStore(root_path=temp_root)
+        default_checkpointer = object()
+
+        class _FailingGraph:
+            # Fail after session composition to exercise resume failure persistence.
+            def invoke(self, _command, *, config):
+                raise RuntimeError("synthetic resume failure")
+
+            # Expose the last durable checkpoint for the diagnostic snapshot.
+            def get_state(self, _config):
+                return mock.Mock(values={"task_state": task_state}, interrupts=[])
+
+        try:
+            with (
+                mock.patch(
+                    "main_layer2.build_default_checkpointer",
+                    return_value=default_checkpointer,
+                ),
+                mock.patch(
+                    "main_layer2.compose_layer2_runtime",
+                    return_value=_FailingGraph(),
+                ),
+                mock.patch(
+                    "main_layer2._prune_expired_checkpoints"
+                ) as prune_checkpoints,
+                mock.patch(
+                    "main_layer2.close_checkpointer"
+                ) as close_runtime_checkpointer,
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "synthetic resume failure",
+                ),
+            ):
+                resume_layer2_flow(
+                    thread_id=thread_id,
+                    human_review_decision={
+                        "request_id": f"{thread_id}:hitl",
+                        "decision_type": "approve_continue",
+                    },
+                    artifact_store=artifact_store,
+                )
+
+            artifact_paths = artifact_store.build_paths(thread_id)
+            failure_path = artifact_paths.thread_dir / "runtime_failure.json"
+            failure_payload = json.loads(failure_path.read_text(encoding="utf-8"))
+            self.assertTrue(artifact_paths.full_trace_path.exists())
+            self.assertEqual(failure_payload["error_type"], "RuntimeError")
+            self.assertEqual(failure_payload["runtime_state"], "waiting_human_review")
+            prune_checkpoints.assert_called_once_with(
+                checkpointer=default_checkpointer,
+                artifact_store=artifact_store,
+            )
+            close_runtime_checkpointer.assert_called_once_with(default_checkpointer)
+        finally:
+            shutil.rmtree(temp_root, ignore_errors=True)
 
     # Verify the original CLI owner consumes the dashboard command and resumes with progress.
     def test_cli_owner_waits_for_dashboard_decision_and_resumes_in_place(self) -> None:
@@ -406,21 +524,6 @@ def _build_empty_behavioral_store(suffix: str) -> SQLiteBehavioralStore:
     )
 
 
-# Fake policy engine that forces the runtime into the HITL branch.
-class _ReviewPolicyEngine(PolicyEnginePort):
-    policy_engine_name = "review_policy_engine"
-    policy_bundle_version = "review_policy_v1"
-
-    def evaluate(self, *, policy_input):
-        return PolicyEvaluationResult(
-            policy_decision=PolicyDecision.REQUIRE_HUMAN_REVIEW,
-            reason_codes=(GovernanceReasonCode.HUMAN_REVIEW_REQUIRED,),
-            summary="Human review is required.",
-            policy_engine_name=self.policy_engine_name,
-            policy_bundle_version=self.policy_bundle_version,
-        )
-
-
 # Minimal governance stub for the review-summary deduplication test.
 class _ReviewGovernanceDecision:
     def __init__(self, *, summary: str, oversight_summary: str) -> None:
@@ -442,7 +545,7 @@ class _ReviewGovernanceDecision:
 class _ReviewOversightAssessment:
     def __init__(self) -> None:
         self.summary = "Evidence quality is weak (0.07), operational risk is high (0.61), and trajectory health is healthy (0.80)."
-        self.reason_codes = tuple()
+        self.reason_codes = ()
         self.evidence_quality = None
         self.operational_risk = None
         self.trajectory_health = None

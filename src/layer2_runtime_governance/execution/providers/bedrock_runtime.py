@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from llm_retry import llm_retry
 
-from layer4_state_evidence_observability.infrastructure.environment import candidate_env_paths, load_env_file_values
+from environment_config import load_env_file_values
 
 try:
     import boto3
@@ -44,16 +43,18 @@ class BedrockRuntimeSettings:
 
     @classmethod
     # Build typed Bedrock settings from the supported local configuration sources.
-    def from_env(cls) -> "BedrockRuntimeSettings":
+    def from_env(
+        cls,
+        *,
+        model_env_var: str = "LAYER2_ACTOR_BEDROCK_MODEL_ID",
+        default_model_id: str = _DEFAULT_BEDROCK_MODEL_ID,
+        read_timeout_env_var: str = "LAYER2_ACTOR_BEDROCK_READ_TIMEOUT_SECONDS",
+        connect_timeout_env_var: str = "LAYER2_ACTOR_BEDROCK_CONNECT_TIMEOUT_SECONDS",
+    ) -> "BedrockRuntimeSettings":
         # Read values from process variables first, then the local ignored env files.
         env_file_values = _load_env_file_values()
         return cls(
-            model_id=os.getenv(
-                "LAYER2_ACTOR_BEDROCK_MODEL_ID",
-                env_file_values.get(
-                    "LAYER2_ACTOR_BEDROCK_MODEL_ID", _DEFAULT_BEDROCK_MODEL_ID
-                ),
-            ),
+            model_id=os.getenv(model_env_var, env_file_values.get(model_env_var, default_model_id)),
             region_name=os.getenv(
                 "AWS_REGION",
                 env_file_values.get("AWS_REGION", "eu-central-1"),
@@ -70,14 +71,14 @@ class BedrockRuntimeSettings:
             ),
             read_timeout_seconds=float(
                 os.getenv(
-                    "LAYER2_ACTOR_BEDROCK_READ_TIMEOUT_SECONDS",
-                    env_file_values.get("LAYER2_ACTOR_BEDROCK_READ_TIMEOUT_SECONDS", "3600"),
+                    read_timeout_env_var,
+                    env_file_values.get(read_timeout_env_var, "3600"),
                 )
             ),
             connect_timeout_seconds=float(
                 os.getenv(
-                    "LAYER2_ACTOR_BEDROCK_CONNECT_TIMEOUT_SECONDS",
-                    env_file_values.get("LAYER2_ACTOR_BEDROCK_CONNECT_TIMEOUT_SECONDS", "10"),
+                    connect_timeout_env_var,
+                    env_file_values.get(connect_timeout_env_var, "10"),
                 )
             ),
         )
@@ -152,7 +153,6 @@ class BedrockChatClient:
         if len(payloads) != 1:
             raise BedrockRuntimeError("Bedrock returned multiple tool uses; use complete_tool_calls.")
         return payloads[0]
-
 
 # Validate only generic Bedrock transport prerequisites before making a network request.
 def _validate_settings(*, settings: BedrockRuntimeSettings) -> None:
@@ -269,11 +269,6 @@ def _normalize_client_error(exc: Exception) -> BedrockRuntimeError:
 # Load simple KEY=VALUE pairs from the same ignored locations used by the live runtime.
 def _load_env_file_values() -> dict[str, str]:
     return dict(load_env_file_values())
-
-
-# Search both repository-root and src-level env files for local execution.
-def _candidate_env_paths() -> list[Path]:
-    return list(candidate_env_paths())
 
 
 __all__ = [

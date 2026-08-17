@@ -4,10 +4,8 @@ type KeyValueGridProps = {
 };
 
 const MONO_RE = /^(thread_|req_|step_|run_|[a-z][a-z0-9]*(?:_[a-z0-9]+){2,}$)/;
-const STATUS_BADGE: Record<string, "badge-waiting" | "badge-completed" | "badge-aborted" | "badge-info" | "badge-default" | "badge-neutral"> = {
-  waiting_human_review: "badge-waiting",
-  completed:            "badge-completed",
-  aborted:              "badge-aborted",
+const STATUS_BADGE: Record<string, BadgeVariant> = {
+  ...RUNTIME_STATE_BADGE_VARIANTS,
   yes:                  "badge-completed",
   no:                   "badge-neutral",
   escalate:             "badge-waiting",
@@ -67,3 +65,7 @@ export function KeyValueGrid({ title, values }: KeyValueGridProps) {
     </div>
   );
 }
+import {
+  RUNTIME_STATE_BADGE_VARIANTS,
+  type BadgeVariant,
+} from "./runtimeStatePresentation";

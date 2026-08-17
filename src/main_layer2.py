@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
 
 from langgraph.types import Command
-from json_serialization import to_jsonable
 
+from console_output import print_json_section as _print_section
 from layer1_intake import (
     BudgetConfig,
     ExecutionPolicy,
@@ -26,46 +27,104 @@ from layer1_intake import (
     TaskSpec,
 )
 from layer1_intake.infrastructure import build_intake_service
-from layer2_runtime_governance import build_default_checkpointer
-from layer2_runtime_governance import HumanReviewDecision
+from layer2_runtime_governance import HumanReviewDecision, build_default_checkpointer
 from layer2_runtime_governance.actor_contract import ActorPort
-from layer4_state_evidence_observability.behavioral import BehavioralStorePort
-from layer2_runtime_governance.governance_components import PolicyEnginePort
-from layer4_state_evidence_observability.infrastructure.checkpoint_retention import (
-    prune_expired_checkpoint_threads,
-)
-from layer4_state_evidence_observability.infrastructure.checkpointing import close_checkpointer
 from layer2_runtime_governance.composition import (
     Layer2RuntimeDependencies,
     compose_layer2_runtime,
 )
-from layer2_runtime_governance.judge import JudgePort
-from layer4_state_evidence_observability.infrastructure.runtime_artifacts import (
-    RuntimeArtifactStore,
-    persist_runtime_artifacts,
-)
+from layer2_runtime_governance.domain import RuntimeState, TaskState
+from layer2_runtime_governance.governance_components import PolicyEnginePort
 from layer2_runtime_governance.hitl.decision_inbox import (
     ReviewDecisionInboxPort,
     ReviewDecisionSubmission,
 )
+from layer2_runtime_governance.judge import JudgePort
+from layer2_runtime_governance.planning import PlannerPort
+from layer2_runtime_governance.planning.replanning import ReplannerPort
+from layer3_tool_bus_external_capabilities.tool_contract import ToolGatewayPort
+from layer4_state_evidence_observability.behavioral import BehavioralStorePort
+from layer4_state_evidence_observability.infrastructure.checkpoint_retention import (
+    prune_expired_checkpoint_threads,
+)
+from layer4_state_evidence_observability.infrastructure.checkpointing import (
+    close_checkpointer,
+)
 from layer4_state_evidence_observability.infrastructure.review_decision_inbox import (
     SQLiteReviewDecisionInbox,
 )
-from layer2_runtime_governance.planning import PlannerPort
-from layer2_runtime_governance.planning.replanning import ReplannerPort
-from layer2_runtime_governance.domain import RuntimeState, TaskState
+from layer4_state_evidence_observability.infrastructure.runtime_artifacts import (
+    RuntimeArtifactStore,
+    persist_runtime_artifacts,
+)
 from layer4_state_evidence_observability.observability import (
     build_compact_trace_from_runtime_trace,
     build_layer2_runtime_trace,
     build_trace_summary_markdown,
     layer2_trace_to_json,
 )
-from layer3_tool_bus_external_capabilities.tool_contract import ToolGatewayPort
 
 
 class IntakeExecutorPort(Protocol):
     # This port lets tests inject a deterministic intake service into the Layer 2 runner.
     def execute(self, command: IntakeCommand) -> IntakeResult: ...
+
+
+@dataclass(frozen=True)
+class _Layer2RuntimeSession:
+    runtime_graph: Any
+    checkpointer: Any
+    artifact_store: RuntimeArtifactStore
+
+
+# Compose one scoped runtime session and release only infrastructure created here.
+@contextmanager
+def _open_layer2_runtime_session(
+    *,
+    planner_service: PlannerPort | None,
+    actor_service: ActorPort | None,
+    tool_gateway_service: ToolGatewayPort | None,
+    replanner_service: ReplannerPort | None,
+    policy_engine_service: PolicyEnginePort | None,
+    judge_service: JudgePort | None,
+    behavioral_store_service: BehavioralStorePort | None,
+    checkpointer: Any | None,
+    artifact_store: RuntimeArtifactStore | None,
+    hitl_event_callback: Callable[[TaskState], None] | None = None,
+) -> Iterator[_Layer2RuntimeSession]:
+    uses_default_checkpointer = checkpointer is None
+    resolved_artifact_store = (
+        artifact_store if artifact_store is not None else RuntimeArtifactStore()
+    )
+    resolved_checkpointer = (
+        checkpointer if checkpointer is not None else build_default_checkpointer()
+    )
+    try:
+        runtime_graph = compose_layer2_runtime(
+            Layer2RuntimeDependencies(
+                planner=planner_service,
+                actor=actor_service,
+                tool_gateway=tool_gateway_service,
+                replanner=replanner_service,
+                policy_engine=policy_engine_service,
+                judge=judge_service,
+                behavioral_store=behavioral_store_service,
+                checkpointer=resolved_checkpointer,
+                hitl_event_callback=hitl_event_callback,
+            )
+        )
+        yield _Layer2RuntimeSession(
+            runtime_graph=runtime_graph,
+            checkpointer=resolved_checkpointer,
+            artifact_store=resolved_artifact_store,
+        )
+    finally:
+        if uses_default_checkpointer:
+            _prune_expired_checkpoints(
+                checkpointer=resolved_checkpointer,
+                artifact_store=resolved_artifact_store,
+            )
+            close_checkpointer(resolved_checkpointer)
 
 
 def run_layer2_flow(
@@ -90,100 +149,87 @@ def run_layer2_flow(
     live_trace: bool = False,
 ) -> dict[str, Any]:
     # Run Layer 1 plus the current Layer 2 graph and return the resulting trace.
-    uses_default_checkpointer = checkpointer is None
-    resolved_checkpointer = checkpointer or build_default_checkpointer()
-    resolved_artifact_store = artifact_store or RuntimeArtifactStore()
-    runtime_graph = compose_layer2_runtime(
-        Layer2RuntimeDependencies(
-            planner=planner_service,
-            actor=actor_service,
-            tool_gateway=tool_gateway_service,
-            replanner=replanner_service,
-            policy_engine=policy_engine_service,
-            judge=judge_service,
-            behavioral_store=behavioral_store_service,
-            checkpointer=resolved_checkpointer,
-            hitl_event_callback=hitl_event_callback,
-        )
-    )
+    with _open_layer2_runtime_session(
+        planner_service=planner_service,
+        actor_service=actor_service,
+        tool_gateway_service=tool_gateway_service,
+        replanner_service=replanner_service,
+        policy_engine_service=policy_engine_service,
+        judge_service=judge_service,
+        behavioral_store_service=behavioral_store_service,
+        checkpointer=checkpointer,
+        artifact_store=artifact_store,
+        hitl_event_callback=hitl_event_callback,
+    ) as session:
+        resolved_thread_id = thread_id or f"layer2-{uuid4()}"
+        config = {"configurable": {"thread_id": resolved_thread_id}}
+        _assert_thread_can_bootstrap(runtime_graph=session.runtime_graph, config=config)
 
-    resolved_thread_id = thread_id or f"layer2-{uuid4()}"
-    config = {"configurable": {"thread_id": resolved_thread_id}}
-    _assert_thread_can_bootstrap(runtime_graph=runtime_graph, config=config)
+        if demo_intake_profile is not None and intake_service is not None:
+            raise ValueError(
+                "demo_intake_profile and intake_service cannot be used together in run_layer2_flow."
+            )
 
-    if demo_intake_profile is not None and intake_service is not None:
-        raise ValueError(
-            "demo_intake_profile and intake_service cannot be used together in run_layer2_flow."
-        )
-
-    if demo_intake_profile is not None:
-        if progress_callback is not None:
-            progress_callback("layer1_demo_intake", {})
-        intake_result = _build_demo_intake_result(
-            profile=demo_intake_profile,
-            raw_task_text=raw_task_text,
-            context_hint=context_hint,
-        )
-    else:
-        if progress_callback is not None:
-            progress_callback("layer1_intake", {})
-        resolved_intake_service = intake_service or build_intake_service()
-        intake_result = resolved_intake_service.execute(
-            IntakeCommand(
+        if demo_intake_profile is not None:
+            if progress_callback is not None:
+                progress_callback("layer1_demo_intake", {})
+            intake_result = _build_demo_intake_result(
+                profile=demo_intake_profile,
                 raw_task_text=raw_task_text,
                 context_hint=context_hint,
-                policy_profile=policy_profile,
-            )
-        )
-
-    try:
-        if progress_callback is None:
-            runtime_graph.invoke(
-                {"intake_result": intake_result, "thread_id": resolved_thread_id},
-                config=config,
-            )
-            final_result = _build_final_result_from_graph_snapshot(
-                runtime_graph=runtime_graph,
-                config=config,
             )
         else:
-            final_result = _stream_runtime_graph_with_progress(
-                runtime_graph=runtime_graph,
-                intake_result=intake_result,
-                thread_id=resolved_thread_id,
-                config=config,
-                progress_callback=progress_callback,
-                live_trace=live_trace,
+            if progress_callback is not None:
+                progress_callback("layer1_intake", {})
+            resolved_intake_service = intake_service or build_intake_service()
+            intake_result = resolved_intake_service.execute(
+                IntakeCommand(
+                    raw_task_text=raw_task_text,
+                    context_hint=context_hint,
+                    policy_profile=policy_profile,
+                )
             )
 
-        # Return both layer boundaries so callers can inspect the handoff end to end.
-        trace = {
-            "thread_id": resolved_thread_id,
-            "intake_result": intake_result,
-            "final_result": final_result,
-        }
-        _persist_runtime_artifacts_from_trace(
-            trace,
-            artifact_store=resolved_artifact_store,
-        )
-        return trace
-    except Exception as exc:
-        _persist_failed_runtime_snapshot(
-            thread_id=resolved_thread_id,
-            intake_result=intake_result,
-            runtime_graph=runtime_graph,
-            config=config,
-            artifact_store=resolved_artifact_store,
-            error=exc,
-        )
-        raise
-    finally:
-        if uses_default_checkpointer:
-            _prune_expired_checkpoints(
-                checkpointer=resolved_checkpointer,
-                artifact_store=resolved_artifact_store,
+        graph_input = {"intake_result": intake_result, "thread_id": resolved_thread_id}
+        try:
+            if progress_callback is None:
+                session.runtime_graph.invoke(graph_input, config=config)
+                final_result = _build_final_result_from_graph_snapshot(
+                    runtime_graph=session.runtime_graph,
+                    config=config,
+                )
+            else:
+                final_result = _stream_runtime_graph_with_progress(
+                    runtime_graph=session.runtime_graph,
+                    graph_input=graph_input,
+                    thread_id=resolved_thread_id,
+                    config=config,
+                    progress_callback=progress_callback,
+                    live_trace=live_trace,
+                    trace_tag="chunk",
+                )
+
+            # Return both layer boundaries so callers can inspect the handoff end to end.
+            trace = {
+                "thread_id": resolved_thread_id,
+                "intake_result": intake_result,
+                "final_result": final_result,
+            }
+            _persist_runtime_artifacts_from_trace(
+                trace,
+                artifact_store=session.artifact_store,
             )
-            close_checkpointer(resolved_checkpointer)
+            return trace
+        except Exception as exc:
+            _persist_failed_runtime_snapshot(
+                thread_id=resolved_thread_id,
+                intake_result=intake_result,
+                runtime_graph=session.runtime_graph,
+                config=config,
+                artifact_store=session.artifact_store,
+                error=exc,
+            )
+            raise
 
 
 # Resume a paused Layer 2 run using the same thread id and a typed human decision.
@@ -203,66 +249,68 @@ def resume_layer2_flow(
     progress_callback: Callable[[str, dict[str, Any]], None] | None = None,
     live_trace: bool = False,
 ) -> dict[str, Any]:
-    uses_default_checkpointer = checkpointer is None
-    resolved_checkpointer = checkpointer or build_default_checkpointer()
-    resolved_artifact_store = artifact_store or RuntimeArtifactStore()
-    runtime_graph = compose_layer2_runtime(
-        Layer2RuntimeDependencies(
-            planner=planner_service,
-            actor=actor_service,
-            tool_gateway=tool_gateway_service,
-            replanner=replanner_service,
-            policy_engine=policy_engine_service,
-            judge=judge_service,
-            behavioral_store=behavioral_store_service,
-            checkpointer=resolved_checkpointer,
-        )
-    )
-
-    config = {"configurable": {"thread_id": thread_id}}
-    # Stream owner-side resume updates when the calling terminal requested progress.
-    if progress_callback is None:
-        resume_result = runtime_graph.invoke(
-            Command(resume=human_review_decision),
-            config=config,
-        )
-    else:
-        resume_result = _stream_runtime_graph_resume_with_progress(
-            runtime_graph=runtime_graph,
-            human_review_decision=human_review_decision,
-            thread_id=thread_id,
-            config=config,
-            progress_callback=progress_callback,
-            live_trace=live_trace,
-        )
-    snapshot_result = _build_final_result_from_graph_snapshot(
-        runtime_graph=runtime_graph,
-        config=config,
-    )
-    final_result = _resolve_resume_final_result(
-        resume_result=resume_result,
-        snapshot_result=snapshot_result,
-    )
-    intake_result = _load_intake_result_from_final_result(final_result)
-    if intake_result is None:
-        intake_result = _load_intake_result_from_checkpoint(
-            thread_id=thread_id,
-            runtime_graph=runtime_graph,
-        )
-    trace = {
-        "thread_id": thread_id,
-        "final_result": final_result,
-    }
-    if intake_result is not None:
-        trace["intake_result"] = intake_result
-        _persist_runtime_artifacts_from_trace(trace, artifact_store=resolved_artifact_store)
-    if uses_default_checkpointer:
-        _prune_expired_checkpoints(
-            checkpointer=resolved_checkpointer,
-            artifact_store=resolved_artifact_store,
-        )
-        close_checkpointer(resolved_checkpointer)
-    return trace
+    with _open_layer2_runtime_session(
+        planner_service=planner_service,
+        actor_service=actor_service,
+        tool_gateway_service=tool_gateway_service,
+        replanner_service=replanner_service,
+        policy_engine_service=policy_engine_service,
+        judge_service=judge_service,
+        behavioral_store_service=behavioral_store_service,
+        checkpointer=checkpointer,
+        artifact_store=artifact_store,
+    ) as session:
+        config = {"configurable": {"thread_id": thread_id}}
+        graph_input = Command(resume=human_review_decision)
+        try:
+            # Stream owner-side resume updates when the calling terminal requested progress.
+            if progress_callback is None:
+                resume_result = session.runtime_graph.invoke(graph_input, config=config)
+            else:
+                resume_result = _stream_runtime_graph_with_progress(
+                    runtime_graph=session.runtime_graph,
+                    graph_input=graph_input,
+                    thread_id=thread_id,
+                    config=config,
+                    progress_callback=progress_callback,
+                    live_trace=live_trace,
+                    trace_tag="resume_chunk",
+                )
+            snapshot_result = _build_final_result_from_graph_snapshot(
+                runtime_graph=session.runtime_graph,
+                config=config,
+            )
+            final_result = _resolve_resume_final_result(
+                resume_result=resume_result,
+                snapshot_result=snapshot_result,
+            )
+            intake_result = _load_intake_result_from_final_result(final_result)
+            if intake_result is None:
+                intake_result = _load_intake_result_from_checkpoint(
+                    thread_id=thread_id,
+                    runtime_graph=session.runtime_graph,
+                )
+            trace = {
+                "thread_id": thread_id,
+                "final_result": final_result,
+            }
+            if intake_result is not None:
+                trace["intake_result"] = intake_result
+                _persist_runtime_artifacts_from_trace(
+                    trace,
+                    artifact_store=session.artifact_store,
+                )
+            return trace
+        except Exception as exc:
+            _persist_failed_runtime_snapshot(
+                thread_id=thread_id,
+                intake_result=None,
+                runtime_graph=session.runtime_graph,
+                config=config,
+                artifact_store=session.artifact_store,
+                error=exc,
+            )
+            raise
 
 
 # Keep checkpoint state authoritative: a bootstrap must never overwrite a live or paused thread.
@@ -300,7 +348,7 @@ def _prune_expired_checkpoints(
             checkpointer=checkpointer,
             artifact_store=artifact_store,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - retention must not mask the live result.
         return
 
 
@@ -323,15 +371,16 @@ def _resolve_resume_final_result(
 def _stream_runtime_graph_with_progress(
     *,
     runtime_graph: Any,
-    intake_result: IntakeResult,
+    graph_input: dict[str, Any] | Command[Any],
     thread_id: str,
     config: dict[str, Any],
     progress_callback: Callable[[str, dict[str, Any]], None],
     live_trace: bool,
+    trace_tag: str,
 ) -> dict[str, Any]:
     final_result: dict[str, Any] = {}
     for chunk in runtime_graph.stream(
-        {"intake_result": intake_result, "thread_id": thread_id},
+        graph_input,
         config=config,
         stream_mode="updates",
     ):
@@ -346,7 +395,7 @@ def _stream_runtime_graph_with_progress(
                 runtime_graph=runtime_graph,
                 config=config,
                 thread_id=thread_id,
-                tag="chunk",
+                tag=trace_tag,
             )
 
     snapshot = runtime_graph.get_state(config)
@@ -356,45 +405,6 @@ def _stream_runtime_graph_with_progress(
     if snapshot is not None and getattr(snapshot, "interrupts", None):
         final_result["__interrupt__"] = list(snapshot.interrupts)
 
-    return final_result
-
-
-# Stream a dashboard-submitted decision in the same terminal that owns the run.
-def _stream_runtime_graph_resume_with_progress(
-    *,
-    runtime_graph: Any,
-    human_review_decision: dict[str, Any] | HumanReviewDecision,
-    thread_id: str,
-    config: dict[str, Any],
-    progress_callback: Callable[[str, dict[str, Any]], None],
-    live_trace: bool,
-) -> dict[str, Any]:
-    final_result: dict[str, Any] = {}
-    for chunk in runtime_graph.stream(
-        Command(resume=human_review_decision),
-        config=config,
-        stream_mode="updates",
-    ):
-        if not isinstance(chunk, dict):
-            continue
-        for node_name, update in chunk.items():
-            node_update = update if isinstance(update, dict) else {}
-            progress_callback(str(node_name), node_update)
-            final_result.update(node_update)
-        if live_trace:
-            _print_live_trace_snapshot(
-                runtime_graph=runtime_graph,
-                config=config,
-                thread_id=thread_id,
-                tag="resume_chunk",
-            )
-
-    snapshot = runtime_graph.get_state(config)
-    snapshot_values = snapshot.values if snapshot is not None else {}
-    if isinstance(snapshot_values, dict):
-        final_result = dict(snapshot_values)
-    if snapshot is not None and getattr(snapshot, "interrupts", None):
-        final_result["__interrupt__"] = list(snapshot.interrupts)
     return final_result
 
 
@@ -455,12 +465,6 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
         task_state=final_task_state,
     )
     return build_compact_trace_from_runtime_trace(runtime_trace)
-
-
-def _print_section(title: str, payload: Any) -> None:
-    # Print one section of the Layer 2 trace with a stable visual format.
-    print(f"\n=== {title} ===")
-    print(json.dumps(to_jsonable(payload), indent=2, ensure_ascii=False))
 
 
 # Print compact progress updates while preserving stdout for final traces.
@@ -566,13 +570,14 @@ def _persist_runtime_artifacts_from_trace(
 def _persist_failed_runtime_snapshot(
     *,
     thread_id: str,
-    intake_result: IntakeResult,
+    intake_result: IntakeResult | None,
     runtime_graph: Any,
     config: dict[str, Any],
     artifact_store: RuntimeArtifactStore,
     error: Exception,
 ) -> None:
     task_state: TaskState | None = None
+    resolved_intake_result = intake_result
     try:
         snapshot_result = _build_final_result_from_graph_snapshot(
             runtime_graph=runtime_graph,
@@ -581,15 +586,18 @@ def _persist_failed_runtime_snapshot(
         candidate = snapshot_result.get("task_state")
         if isinstance(candidate, TaskState):
             task_state = candidate
-            _persist_runtime_artifacts_from_trace(
-                {
-                    "thread_id": thread_id,
-                    "intake_result": intake_result,
-                    "final_result": snapshot_result,
-                },
-                artifact_store=artifact_store,
-            )
-    except Exception:
+            if resolved_intake_result is None:
+                resolved_intake_result = candidate.intake_payload
+            if isinstance(resolved_intake_result, IntakeResult):
+                _persist_runtime_artifacts_from_trace(
+                    {
+                        "thread_id": thread_id,
+                        "intake_result": resolved_intake_result,
+                        "final_result": snapshot_result,
+                    },
+                    artifact_store=artifact_store,
+                )
+    except Exception:  # noqa: BLE001 - preserve the original runtime failure.
         task_state = None
     try:
         artifact_store.persist_failure(
@@ -597,7 +605,7 @@ def _persist_failed_runtime_snapshot(
             error=error,
             task_state=task_state,
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - diagnostics must not mask the runtime failure.
         return
 
 
@@ -748,7 +756,9 @@ def _trace_task_state(trace: dict[str, Any]) -> TaskState:
     final_result = trace.get("final_result")
     task_state = final_result.get("task_state") if isinstance(final_result, dict) else None
     if not isinstance(task_state, TaskState):
-        raise ValueError("Layer 2 trace does not contain a canonical task_state.")
+        raise ValueError(  # noqa: TRY004 - malformed trace values use the public ValueError contract.
+            "Layer 2 trace does not contain a canonical task_state."
+        )
     return task_state
 
 
@@ -767,7 +777,9 @@ def _load_interrupted_trace_from_checkpoint(
     )
     task_state = final_result.get("task_state")
     if not isinstance(task_state, TaskState):
-        raise ValueError(f"Thread '{thread_id}' has no canonical LangGraph checkpoint.")
+        raise ValueError(  # noqa: TRY004 - checkpoint lookup exposes a ValueError contract.
+            f"Thread '{thread_id}' has no canonical LangGraph checkpoint."
+        )
     if task_state.current_state != RuntimeState.WAITING_HUMAN_REVIEW:
         raise ValueError(
             f"Thread '{thread_id}' is not waiting for human review and cannot be attached."
@@ -829,7 +841,7 @@ def _resume_with_owner_heartbeat(
                     owner_id=owner_id,
                     status="resuming",
                 )
-            except Exception as exc:  # pragma: no cover - infrastructure failure path.
+            except Exception as exc:  # noqa: BLE001  # pragma: no cover
                 heartbeat_failures.append(exc)
                 return
 

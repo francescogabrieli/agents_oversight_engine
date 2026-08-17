@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from enum import Enum
@@ -31,9 +30,4 @@ def to_jsonable(value: Any) -> Any:
     return value
 
 
-# Serialize one typed value with stable human-readable formatting.
-def to_json(value: Any) -> str:
-    return json.dumps(to_jsonable(value), indent=2, ensure_ascii=False)
-
-
-__all__ = ["to_json", "to_jsonable"]
+__all__ = ["to_jsonable"]

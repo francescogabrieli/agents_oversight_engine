@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import warnings
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -12,6 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from environment_config import load_env_file_values
 from llm_retry import llm_retry
 
 from .models import (
@@ -36,7 +36,6 @@ try:
 except ImportError:  # pragma: no cover - handled at runtime if dependency is missing
     OpenAI = None
 
-
 # OpenAIParserSettings keeps the parser runtime configuration explicit and testable.
 @dataclass(frozen=True)
 class OpenAIParserSettings:
@@ -47,7 +46,7 @@ class OpenAIParserSettings:
     @classmethod
     def from_env(cls) -> "OpenAIParserSettings":
         # Merge process env and local .env files into one parser settings object.
-        env_file_values = _load_env_file_values()
+        env_file_values = load_env_file_values()
 
         return cls(
             model=os.getenv(
@@ -324,49 +323,6 @@ def build_intake_service(
         clock=SystemClock(),
         fingerprint_service=Sha256FingerprintService(),
     )
-
-
-def _load_env_file_values() -> dict[str, str]:
-    # Load simple KEY=VALUE pairs while keeping root .env authoritative.
-    env_values: dict[str, str] = {}
-
-    legacy_env_path, root_env_path = _candidate_env_paths()
-    if legacy_env_path.exists():
-        warnings.warn(
-            "src/.env is deprecated; move local settings to the repository root .env.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-
-    for candidate in (legacy_env_path, root_env_path):
-        if not candidate.exists():
-            continue
-
-        for raw_line in candidate.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith("export "):
-                line = line[len("export ") :].strip()
-            if "=" not in line:
-                continue
-
-            key, value = line.split("=", 1)
-            key = key.strip()
-            value = value.strip().strip("\"'")
-            if key:
-                env_values[key] = value
-
-    return env_values
-
-
-def _candidate_env_paths() -> list[Path]:
-    # Return settings from lowest to highest precedence for deterministic merging.
-    repo_root = Path(__file__).resolve().parents[2]
-    return [
-        repo_root / "src" / ".env",
-        repo_root / ".env",
-    ]
 
 
 def get_default_policy_config_path() -> Path:

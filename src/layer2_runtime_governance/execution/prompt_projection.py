@@ -3,7 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from ..actor_contract import ActorTask
-
+from ..domain import ExternalCommunicationDraft
+from ..prompt_projection import (
+    project_prompt_observation,
+    project_prompt_plan_step,
+    project_prompt_scratchpad_entry,
+)
 
 # Keep only a bounded tail of audit-safe working-memory entries in each model turn.
 ACTOR_SCRATCHPAD_ENTRY_LIMIT = 8
@@ -52,15 +57,11 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
         },
         "plan": {
             "current_step_number": actor_task.current_plan_step_index + 1,
-            "current_plan_step": _full_step(actor_task=actor_task),
+            "current_plan_step": project_prompt_plan_step(
+                step=actor_task.current_plan_step,
+            ),
             "other_steps": [
-                {
-                    "step_id": step.step_id,
-                    "objective": step.objective,
-                    "rationale": step.rationale,
-                    "expected_outcome": step.expected_outcome,
-                    "status": step.status.value,
-                }
+                project_prompt_plan_step(step=step)
                 for index, step in enumerate(actor_task.plan_steps)
                 if index != actor_task.current_plan_step_index
             ],
@@ -76,21 +77,11 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
             for step in actor_task.past_steps
         ],
         "observations": [
-            {
-                "observation_id": item.observation_id,
-                "locator": item.locator,
-                "content": item.content,
-            }
+            project_prompt_observation(observation=item)
             for item in actor_task.observations
         ],
         "scratchpad": [
-            {
-                "turn_index": entry.turn_index,
-                "plan_step_id": entry.plan_step_id,
-                "entry_type": entry.entry_type.value,
-                "summary": entry.summary,
-                "evidence_refs": entry.evidence_refs,
-            }
+            project_prompt_scratchpad_entry(entry=entry)
             for entry in scratchpad
         ],
         "current_step_validation": (
@@ -140,34 +131,21 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
              ]}
             for item in actor_task.governance_feedback
         ],
-        "external_communication_draft": _project_external_communication_draft(
-            actor_task=actor_task,
+        "external_communication_draft": _project_communication_draft(
+            draft=actor_task.external_communication_draft,
         ),
-        "previous_rejected_draft": _project_previous_rejected_draft(
-            actor_task=actor_task,
+        "previous_rejected_draft": _project_communication_draft(
+            draft=actor_task.previous_rejected_draft,
         ),
         "protocol_correction": _project_protocol_correction(actor_task=actor_task),
     }
 
 
-# Expose the runtime-owned draft so a revision edits it instead of rewriting blindly.
-def _project_external_communication_draft(*, actor_task: ActorTask) -> dict[str, Any] | None:
-    draft = actor_task.external_communication_draft
-    if draft is None:
-        return None
-    return {
-        "channel": draft.channel,
-        "recipient": draft.recipient,
-        "subject": draft.subject,
-        "body": draft.body,
-        "cc": list(draft.cc),
-        "bcc": list(draft.bcc),
-    }
-
-
-# Expose the previously rejected draft during revision turns.
-def _project_previous_rejected_draft(*, actor_task: ActorTask) -> dict[str, Any] | None:
-    draft = actor_task.previous_rejected_draft
+# Serialize either typed draft without changing which enclosing prompt key supplied it.
+def _project_communication_draft(
+    *,
+    draft: ExternalCommunicationDraft | None,
+) -> dict[str, Any] | None:
     if draft is None:
         return None
     return {
@@ -212,18 +190,6 @@ def _project_protocol_correction(*, actor_task: ActorTask) -> dict[str, Any] | N
     }
 
 
-# Preserve the full active objective exactly once in the prompt payload.
-def _full_step(*, actor_task: ActorTask) -> dict[str, Any]:
-    step = actor_task.current_plan_step
-    return {
-        "step_id": step.step_id,
-        "objective": step.objective,
-        "rationale": step.rationale,
-        "expected_outcome": step.expected_outcome,
-        "status": step.status.value,
-    }
-
-
 # Retain result status while omitting content already represented as observed evidence.
 def _project_last_tool_result(
     *,
@@ -244,11 +210,7 @@ def _project_last_tool_result(
     if not has_equivalent_observations:
         projected["content"] = result.content
         projected["observations"] = [
-            {
-                "observation_id": observation.observation_id,
-                "locator": observation.locator,
-                "content": observation.content,
-            }
+            project_prompt_observation(observation=observation)
             for observation in result.observations
         ]
     return projected

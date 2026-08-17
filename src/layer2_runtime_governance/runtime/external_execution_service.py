@@ -1,21 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any
 
 from layer1_intake import ExecutionIntent
-
-from ..domain import (
-    ExternalCommunicationPhase,
-    HumanReviewDecisionType,
-    RuntimeFlag,
-    RuntimeState,
-    TaskState,
-    build_evidence_selection_digest,
-    build_evidence_snapshot_manifest,
-    digest_json,
-)
 from layer3_tool_bus_external_capabilities.external_operations import (
     ExternalCapabilityDefinition,
     ExternalCapabilityRegistry,
@@ -30,15 +20,24 @@ from layer3_tool_bus_external_capabilities.external_operations import (
     OperationBoundary,
     build_external_execution_request,
 )
+
+from ..domain import (
+    ExternalCommunicationPhase,
+    HumanReviewDecisionType,
+    RuntimeFlag,
+    RuntimeState,
+    TaskState,
+    build_evidence_selection_digest,
+    build_evidence_snapshot_manifest,
+    digest_json,
+    set_external_communication_phase,
+)
 from ..governance_components import GovernanceDirective
 from ..hitl import (
     build_human_review_request,
     human_review_reasons_authorize_external_execution,
 )
-from .actor_service import (
-    _set_external_communication_phase,
-    commit_terminal_completion_candidate,
-)
+from .actor_service import commit_terminal_completion_candidate
 from .lifecycle_service import _append_step_record
 
 
@@ -61,7 +60,7 @@ def external_execution(
         state.current_external_execution_request = None
         commit_external_execution_completion(state=state, receipt=duplicate)
         state.current_state = RuntimeState.COMPLETED
-        _set_external_communication_phase(
+        set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.EXECUTED,
             summary="A persisted executed receipt prevented duplicate connector invocation.",
@@ -81,7 +80,7 @@ def external_execution(
     if rejection is not None:
         _record_external_execution_receipt(state, receipt=rejection)
         state.current_state = RuntimeState.ABORTED
-        _set_external_communication_phase(
+        set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.EXECUTION_FAILED,
             summary=rejection.summary,
@@ -104,7 +103,7 @@ def external_execution(
     connector_error_type: str | None = None
     try:
         raw_receipt: Any = executor_service.execute(request)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         # Once the connector is entered, an exception cannot prove no effect occurred.
         raw_receipt = None
         connector_error_type = type(exc).__name__
@@ -463,7 +462,7 @@ def _apply_external_execution_outcome(
         commit_external_execution_completion(state=state, receipt=receipt)
         state.current_external_execution_request = None
         state.current_state = RuntimeState.COMPLETED
-        _set_external_communication_phase(
+        set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.EXECUTED,
             summary="The authorized external operation completed and returned a typed receipt.",
@@ -502,7 +501,7 @@ def _apply_external_execution_outcome(
 
     state.current_external_execution_request = None
     state.current_state = RuntimeState.ABORTED
-    _set_external_communication_phase(
+    set_external_communication_phase(
         state,
         phase=ExternalCommunicationPhase.EXECUTION_FAILED,
         summary=receipt.summary or "The external connector failed deterministically.",
@@ -552,7 +551,7 @@ def _route_indeterminate_to_human_reconciliation(
     state.current_external_execution_request = None
     state.human_review_resume_state = RuntimeState.COMPLETED
     state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
-    _set_external_communication_phase(
+    set_external_communication_phase(
         state,
         phase=ExternalCommunicationPhase.INDETERMINATE,
         summary=(

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { fetchReviewDetail, resumeReviewThread } from "../api";
 import { DecisionForm } from "../components/DecisionForm";
 import { KeyValueGrid } from "../components/KeyValueGrid";
+import { runtimeStateBadgeClass } from "../components/runtimeStatePresentation";
 import { usePolledResource } from "../hooks";
 import type { ReviewDetailResponse } from "../types";
 
@@ -10,13 +11,6 @@ function valueToString(value: unknown) {
   if (value === null || value === undefined) return null;
   if (typeof value === "string") return value;
   return JSON.stringify(value, null, 2);
-}
-
-function stateClass(state: string) {
-  if (state === "waiting_human_review") return "badge badge-waiting";
-  if (state === "completed") return "badge badge-completed";
-  if (state === "aborted") return "badge badge-aborted";
-  return "badge badge-default";
 }
 
 export function ReviewThreadPage() {
@@ -55,7 +49,7 @@ export function ReviewThreadPage() {
           </div>
           <div className="review-header-status">
             {snapshot ? (
-              <span className={stateClass(snapshot.runtime_state)}>{snapshot.runtime_state}</span>
+              <span className={runtimeStateBadgeClass(snapshot.runtime_state)}>{snapshot.runtime_state}</span>
             ) : null}
             {snapshot?.resume_state ? (
               <span className="badge badge-neutral">resume: {snapshot.resume_state}</span>
@@ -108,7 +102,7 @@ export function ReviewThreadPage() {
             <section className="card">
               <div className="card-header">
                 <h2 className="card-title">External operation</h2>
-                <span className={stateClass(externalExecution.status ?? snapshot.runtime_state)}>
+                <span className={runtimeStateBadgeClass(externalExecution.status ?? snapshot.runtime_state)}>
                   {externalExecution.status ??
                     (externalExecution.execution_intent === "proposal_only"
                       ? "draft only"

@@ -3,20 +3,23 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from llm_retry import llm_retry
-
+from environment_config import load_env_file_values
 from ..domain import PlanStep, PlanStepStatus, TaskState
-from layer4_state_evidence_observability.infrastructure.environment import candidate_env_paths, load_env_file_values
-
-try:
-    from openai import OpenAI
-except ImportError:  # pragma: no cover - handled at runtime if dependency is missing
-    OpenAI = None
+from ..prompt_projection import (
+    project_prompt_observation,
+    project_prompt_plan_step,
+    project_prompt_scratchpad_entry,
+)
+from .openai_adapter import (
+    ParsedOpenAIClient,
+    build_parsed_openai_client,
+    request_parsed_openai_response,
+    require_parsed_output,
+)
 
 
 @dataclass(frozen=True)
@@ -43,9 +46,9 @@ class OpenAIReplannerSettings:
     timeout_seconds: float = 30.0
 
     @classmethod
-    def from_env(cls) -> "OpenAIReplannerSettings":
+    def from_env(cls) -> OpenAIReplannerSettings:
         # Merge process env and local .env files into one replanner settings object.
-        env_file_values = _load_env_file_values()
+        env_file_values = dict(load_env_file_values())
 
         return cls(
             model=os.getenv(
@@ -166,24 +169,12 @@ def build_replanner_user_prompt(*, task_state: TaskState) -> str:
             else None
         ),
         "current_blocked_step": (
-            {
-                "step_id": current_step.step_id,
-                "objective": current_step.objective,
-                "rationale": current_step.rationale,
-                "expected_outcome": current_step.expected_outcome,
-                "status": current_step.status.value,
-            }
+            project_prompt_plan_step(step=current_step)
             if current_step is not None
             else None
         ),
         "plan_steps": [
-            {
-                "step_id": step.step_id,
-                "objective": step.objective,
-                "rationale": step.rationale,
-                "expected_outcome": step.expected_outcome,
-                "status": step.status.value,
-            }
+            project_prompt_plan_step(step=step)
             for step in task_state.plan_steps
         ],
         "executed_steps": [
@@ -197,21 +188,11 @@ def build_replanner_user_prompt(*, task_state: TaskState) -> str:
             for step in task_state.executed_steps
         ],
         "observations": [
-            {
-                "observation_id": observation.observation_id,
-                "locator": observation.locator,
-                "content": observation.content,
-            }
+            project_prompt_observation(observation=observation)
             for observation in task_state.observations
         ],
         "scratchpad": [
-            {
-                "turn_index": entry.turn_index,
-                "plan_step_id": entry.plan_step_id,
-                "entry_type": entry.entry_type.value,
-                "summary": entry.summary,
-                "evidence_refs": entry.evidence_refs,
-            }
+            project_prompt_scratchpad_entry(entry=entry)
             for entry in task_state.scratchpad
         ],
         "step_validations": [
@@ -239,19 +220,10 @@ class OpenAIReplanner(ReplannerPort):
     def __init__(self, settings: OpenAIReplannerSettings | None = None) -> None:
         # Validate replanner prerequisites once at construction time.
         self._settings = settings or OpenAIReplannerSettings.from_env()
-
-        if OpenAI is None:
-            raise RuntimeError(
-                "The 'openai' package is not installed. Install it before using the Layer 2 replanner."
-            )
-        if not self._settings.api_key:
-            raise RuntimeError(
-                "OPENAI_API_KEY is missing. Set it in the process environment or in .env."
-            )
-
-        self._client = OpenAI(
+        self._client: ParsedOpenAIClient = build_parsed_openai_client(
             api_key=self._settings.api_key,
-            timeout=self._settings.timeout_seconds,
+            timeout_seconds=self._settings.timeout_seconds,
+            adapter_label="replanner",
         )
 
     # Ask OpenAI for a typed replacement trajectory and convert it into domain models.
@@ -261,9 +233,14 @@ class OpenAIReplanner(ReplannerPort):
         except Exception as exc:  # pragma: no cover - network/client errors
             raise ReplannerExecutionError(f"Replanner request failed: {exc}") from exc
 
-        payload = getattr(response, "output_parsed", None)
-        if payload is None:
-            raise ReplannerExecutionError("Replanner returned no structured output.")
+        payload = cast(
+            _ReplanningPayload,
+            require_parsed_output(
+                response=response,
+                error_type=ReplannerExecutionError,
+                missing_output_message="Replanner returned no structured output.",
+            ),
+        )
 
         return ReplanDecision(
             replacement_steps=[
@@ -281,21 +258,13 @@ class OpenAIReplanner(ReplannerPort):
             prompt_version=self.prompt_version,
         )
 
-    # Retry only transient provider failures so one rate-limit does not abort recovery.
-    @llm_retry
+    # Delegate typed parsing and transient retries to the shared provider boundary.
     def _request_replan_response(self, *, task_state: TaskState) -> object:
-        return self._client.responses.parse(
+        return request_parsed_openai_response(
+            client=self._client,
             model=self._settings.model,
-            input=[
-                {
-                    "role": "system",
-                    "content": build_replanner_system_prompt(),
-                },
-                {
-                    "role": "user",
-                    "content": build_replanner_user_prompt(task_state=task_state),
-                },
-            ],
+            system_prompt=build_replanner_system_prompt(),
+            user_prompt=build_replanner_user_prompt(task_state=task_state),
             text_format=_ReplanningPayload,
         )
 
@@ -334,14 +303,6 @@ class LocalConservativeReplanner(ReplannerPort):
 # Build the default replanner for the current runtime slice.
 def build_default_replanner() -> ReplannerPort:
     return OpenAIReplanner()
-
-
-def _load_env_file_values() -> dict[str, str]:
-    return dict(load_env_file_values())
-
-
-def _candidate_env_paths() -> list[Path]:
-    return list(candidate_env_paths())
 
 
 __all__ = [

@@ -38,7 +38,6 @@ if TYPE_CHECKING:
 from .lifecycle import RuntimeFlag, RuntimeState, StepRecord
 from .plan import PlanStep
 from .review import (
-    ExternalCommunicationPhase,
     ExternalCommunicationState,
     HumanReviewDecision,
     HumanReviewRequest,

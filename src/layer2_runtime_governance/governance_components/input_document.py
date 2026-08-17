@@ -19,15 +19,6 @@ def build_governance_base_facts(
     task_state: TaskState,
     policy_input: PolicyEvaluationInput,
 ) -> dict[str, Any]:
-    current_step = next(
-        (
-            step
-            for step in task_state.plan_steps
-            if task_state.actor_result is not None
-            and step.step_id == task_state.actor_result.plan_step_id
-        ),
-        task_state.current_plan_step,
-    )
     validation = (
         task_state.actor_result.step_validation
         if task_state.actor_result is not None

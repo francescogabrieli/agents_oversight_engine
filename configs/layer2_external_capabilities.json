@@ -24,14 +24,9 @@
         }
       },
       "output_schema_version": "external_execution.tool_response.v1",
-      "consequence_profile": "communication.default",
       "timeout_seconds": 20,
       "idempotency_support": "client_key",
-      "max_attempts": 1,
-      "defensive_constraints": {
-        "max_recipients": "20",
-        "max_body_chars": "50000"
-      }
+      "max_attempts": 1
     },
     {
       "capability_id": "database.statement.execute",
@@ -55,14 +50,9 @@
         }
       },
       "output_schema_version": "external_execution.tool_response.v1",
-      "consequence_profile": "enterprise_db.controlled_write",
       "timeout_seconds": 20,
       "idempotency_support": "client_key",
-      "max_attempts": 1,
-      "defensive_constraints": {
-        "single_statement": "true",
-        "profile_allowlist": "required"
-      }
+      "max_attempts": 1
     }
   ],
   "mcp_servers": {

@@ -24,6 +24,7 @@ from .decision_parser import (
     _build_governance_trace_from_opa_output,
     _build_static_assessment_from_decision,
     _validate_governance_decision_output,
+    parse_required_pillars_response,
 )
 from .fail_closed import (
     _build_fail_closed_governance_result,
@@ -75,13 +76,7 @@ def evaluate_opa_first_governance(
     policy_input = build_policy_evaluation_input(task_state=task_state)
     # OPA owns configuration; the PEP only declares the compatible bundle versions.
     policy_bundle_version = str(policy_engine_service.policy_bundle_version)
-    policy_config_version = str(
-        getattr(
-            policy_engine_service,
-            "policy_config_version",
-            "layer2_governance_thresholds_v2",
-        )
-    )
+    policy_config_version = str(policy_engine_service.policy_config_version)
     thresholds_version = policy_config_version
     base_facts = build_governance_base_facts(
         task_state=task_state,
@@ -382,20 +377,7 @@ def _evaluate_required_pillars(
     base_facts: dict[str, Any],
 ) -> dict[str, bool]:
     result = policy_engine_service.evaluate_required_pillars(base_facts=base_facts)
-    if not isinstance(result, dict):
-        raise PolicyEngineExecutionError("OPA required_pillars response must be an object.")
-    required_fields = (
-        "require_evidence",
-        "require_risk",
-        "require_trajectory",
-        "require_behavioral",
-        "require_judge",
-    )
-    if any(type(result.get(field_name)) is not bool for field_name in required_fields):
-        raise PolicyEngineExecutionError(
-            "OPA required_pillars response is missing one or more boolean fields."
-        )
-    return {field_name: result[field_name] for field_name in required_fields}
+    return parse_required_pillars_response(result)
 
 # Keep OPA orchestration explicit and independently testable.
 def _evaluate_governance_decision_output(

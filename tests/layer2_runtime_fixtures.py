@@ -1,28 +1,9 @@
-import io
 import json
-import os
-import shutil
-import subprocess
-import sys
 import unittest
 from contextlib import closing
-from copy import deepcopy
-from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError
-from unittest.mock import patch
-from uuid import uuid4
 
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.types import Command
-
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = REPO_ROOT / "src"
-
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-
 
 from layer1_intake import (
     BudgetConfig,
@@ -36,22 +17,13 @@ from layer1_intake import (
     TaskSpec,
 )
 from layer2_runtime_governance import (
-    ActorExecutionError,
     ActorPort,
     ActorResult,
     ActorResultType,
     ActorTask,
-    BehavioralAssessment,
     BehavioralRecommendedDirective,
-    BehavioralStoreSettings,
     CapabilityAccessMode,
-    DynamicPolicyAssessment,
     DynamicPolicyRecommendedDirective,
-    EvidenceQualityAssessment,
-    ExternalCommunicationDraft,
-    ExternalCommunicationPhase,
-    ExternalCommunicationState,
-    GovernanceDecision,
     GovernanceDirective,
     GovernanceReasonCode,
     JudgeAssessment,
@@ -65,6 +37,7 @@ from layer2_runtime_governance import (
     JudgeTaskRequirement,
     JudgeTaskRequirementKind,
     JudgeVerdict,
+    Layer2RuntimeDependencies,
     PlanStep,
     PlanStepStatus,
     PlannerDecision,
@@ -80,7 +53,6 @@ from layer2_runtime_governance import (
     StepRecord,
     StepValidation,
     TaskState,
-    HumanReviewExternalEdit,
     ToolExecutionResult,
     ToolGatewayPort,
     ToolName,
@@ -88,54 +60,18 @@ from layer2_runtime_governance import (
     ToolObservation,
     BedrockNovaActor,
     BedrockNovaActorSettings,
-    OperationalRiskAssessment,
-    OversightReasonCode,
-    OversightSignalLevel,
-    TrajectoryHealthAssessment,
-    build_actor_task,
-    build_default_actor,
-    HumanReviewDecision,
-    HumanReviewDecisionType,
-    build_human_review_request,
-    build_policy_evaluation_input,
-    build_runtime_graph,
-    replanner,
+    compose_layer2_runtime,
 )
 from layer4_state_evidence_observability.infrastructure.checkpointing import (
     build_runtime_serializer,
 )
-from layer4_state_evidence_observability.infrastructure.runtime_artifacts import RuntimeArtifactStore
-from layer2_runtime_governance.hitl import _apply_human_review_decision, human_review
-from main_layer2 import build_compact_trace, write_layer2_trace_file
-from main_layer2 import run_layer2_flow
 from layer2_runtime_governance.planning.replanning import (
-    OpenAIReplanner,
-    OpenAIReplannerSettings,
     ReplanDecision,
     ReplannerPort,
-    build_replanner_system_prompt,
-    build_replanner_user_prompt,
 )
 from layer2_runtime_governance.planning import (
-    OpenAIPlanner,
-    OpenAIPlannerSettings,
     PlannerPort,
-    build_planner_system_prompt,
 )
-from layer2_runtime_governance.execution import build_actor_system_prompt, build_actor_user_prompt
-from layer2_runtime_governance.governance_components import (
-    OPAHttpPolicyEngine,
-    OPAHttpPolicyEngineSettings,
-    build_opa_input_document,
-    evaluate_opa_first_governance,
-)
-from layer2_runtime_governance.runtime.actor_service import _record_actor_execution
-from layer2_runtime_governance.runtime.governance_service import (
-    _apply_governance_decision,
-    governance,
-)
-from layer2_runtime_governance.runtime.planning_service import planner
-from layer2_runtime_governance.runtime.tool_service import observe_tool_result
 import layer2_runtime_governance.execution.providers.bedrock_runtime as bedrock_client_module
 
 
@@ -406,13 +342,6 @@ class StubPolicyEngine(PolicyEnginePort):
 
     # Model OPA's inexpensive first pass so graph tests never contact a live policy engine.
     def evaluate_required_pillars(self, *, base_facts: dict[str, Any]) -> dict[str, bool]:
-        operation = base_facts.get("external_operation", {})
-        hard_deny = bool(
-            base_facts.get("policy", {}).get("read_only_mode")
-            and operation.get("execution_candidate") is True
-            and operation.get("normalized_effect")
-            in {"create", "update", "delete", "truncate", "send", "publish", "execute", "unknown"}
-        )
         return {
             "require_evidence": True,
             "require_risk": False,
@@ -867,33 +796,6 @@ class ClarificationActor(ActorPort):
         )
 
 
-class WriteActionActor(ActorPort):
-    actor_name = "write_action_actor"
-    prompt_version = "write_action_actor_v1"
-
-    # Request a write-like external action so the policy engine can deny it.
-    def act(self, *, actor_task: ActorTask) -> ActorResult:
-        return ActorResult(
-            plan_step_id=actor_task.current_plan_step.step_id,
-            result_type=ActorResultType.PROPOSE_ACTION,
-            summary="Request a write-like external action.",
-            capability_mode=CapabilityAccessMode.WRITE,
-            external_impact=True,
-            tool_request=ToolRequest(
-                plan_step_id=actor_task.current_plan_step.step_id,
-                tool_name=ToolName.WEB_SEARCH,
-                reason="This request is intentionally unsafe for the deny-path test.",
-                query="unsafe write action",
-            ),
-            scratchpad_entry=ScratchpadEntry(
-                turn_index=actor_task.actor_turn_count,
-                plan_step_id=actor_task.current_plan_step.step_id,
-                entry_type=ScratchpadEntryType.TOOL_DECISION,
-                summary="The actor attempted a write-like external action.",
-            ),
-        )
-
-
 class ReplanRequestActor(ActorPort):
     actor_name = "replan_request_actor"
     prompt_version = "replan_request_v1"
@@ -1309,21 +1211,6 @@ class _FakeOpenRouterEmptyResponseClient:
         raise bedrock_client_module.BedrockRuntimeError("Bedrock returned no tool use.")
 
 
-class _FakeOpenRouterHTTPResponse:
-    # Mirror the minimal response interface consumed by urlopen context managers.
-    def __init__(self, payload: dict[str, Any]) -> None:
-        self._payload = json.dumps(payload).encode("utf-8")
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        return None
-
-    def read(self) -> bytes:
-        return self._payload
-
-
 class FakeOPAResponse:
     # Minimal fake HTTP response object matching the urllib context manager shape.
     def __init__(self, body: bytes) -> None:
@@ -1335,7 +1222,7 @@ class FakeOPAResponse:
     def __enter__(self) -> "FakeOPAResponse":
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> bool:
+    def __exit__(self, _exc_type, _exc, _tb) -> bool:
         return False
 
 
@@ -1915,78 +1802,6 @@ def _build_behavioral_candidate_state() -> TaskState:
     return state
 
 
-# Build a strong dynamic-policy assessment that should not force behavioural escalation by itself.
-def _strong_dynamic_policy_assessment() -> DynamicPolicyAssessment:
-    return DynamicPolicyAssessment(
-        evidence_quality=EvidenceQualityAssessment(
-            score=0.90,
-            level=OversightSignalLevel.STRONG,
-            reason_codes=(OversightReasonCode.EVIDENCE_MARKED_SUFFICIENT,),
-        ),
-        operational_risk=OperationalRiskAssessment(
-            score=0.12,
-            level=OversightSignalLevel.LOW,
-            reason_codes=(OversightReasonCode.TOOL_RISK_LOW,),
-        ),
-        trajectory_health=TrajectoryHealthAssessment(
-            score=0.93,
-            level=OversightSignalLevel.HEALTHY,
-            reason_codes=(OversightReasonCode.ACTOR_TURNS_WITHIN_LIMIT,),
-        ),
-        recommended_directive=DynamicPolicyRecommendedDirective.CONTINUE,
-        summary="Dynamic policy is healthy.",
-        reason_codes=(OversightReasonCode.RECOMMEND_CONTINUE,),
-    )
-
-
-# Build a weak dynamic-policy assessment so novelty can escalate to more evidence.
-def _weak_dynamic_policy_assessment() -> DynamicPolicyAssessment:
-    return DynamicPolicyAssessment(
-        evidence_quality=EvidenceQualityAssessment(
-            score=0.30,
-            level=OversightSignalLevel.WEAK,
-            reason_codes=(OversightReasonCode.OBSERVATIONS_MISSING,),
-        ),
-        operational_risk=OperationalRiskAssessment(
-            score=0.18,
-            level=OversightSignalLevel.LOW,
-            reason_codes=(OversightReasonCode.TOOL_RISK_LOW,),
-        ),
-        trajectory_health=TrajectoryHealthAssessment(
-            score=0.78,
-            level=OversightSignalLevel.HEALTHY,
-            reason_codes=(OversightReasonCode.ACTOR_TURNS_WITHIN_LIMIT,),
-        ),
-        recommended_directive=DynamicPolicyRecommendedDirective.CONTINUE,
-        summary="Dynamic policy sees weak evidence quality.",
-        reason_codes=(OversightReasonCode.RECOMMEND_CONTINUE,),
-    )
-
-
-# Build a dynamic-policy assessment that is already operationally or trajectory-wise unhealthy.
-def _review_dynamic_policy_assessment() -> DynamicPolicyAssessment:
-    return DynamicPolicyAssessment(
-        evidence_quality=EvidenceQualityAssessment(
-            score=0.52,
-            level=OversightSignalLevel.MODERATE,
-            reason_codes=(OversightReasonCode.EVIDENCE_SUPPORT_BELOW_STEP_NEED,),
-        ),
-        operational_risk=OperationalRiskAssessment(
-            score=0.64,
-            level=OversightSignalLevel.HIGH,
-            reason_codes=(OversightReasonCode.TOOL_REQUIRES_HUMAN_REVIEW,),
-        ),
-        trajectory_health=TrajectoryHealthAssessment(
-            score=0.55,
-            level=OversightSignalLevel.DEGRADED,
-            reason_codes=(OversightReasonCode.RECOMMEND_HUMAN_REVIEW,),
-        ),
-        recommended_directive=DynamicPolicyRecommendedDirective.WAIT_HUMAN_REVIEW,
-        summary="Dynamic policy is already unhealthy.",
-        reason_codes=(OversightReasonCode.RECOMMEND_HUMAN_REVIEW,),
-    )
-
-
 # Build one deterministic judge escalation toward more evidence.
 def _judge_more_evidence_assessment() -> JudgeAssessment:
     return JudgeAssessment(
@@ -2218,20 +2033,21 @@ def _build_test_graph(
     checkpointer=None,
 ):
     return _ThreadIdInjectingGraph(
-        build_runtime_graph(
-            # Unit graph fixtures must not share durable checkpoints across test runs.
-            checkpointer=checkpointer or InMemorySaver(serde=build_runtime_serializer()),
-            planner_service=planner_service or StubPlanner(),
-            actor_service=actor_service or StubActor(),
-            tool_gateway_service=tool_gateway_service or StubToolGateway(),
-            replanner_service=replanner_service or StubReplanner(),
-            policy_engine_service=policy_engine_service or StubPolicyEngine(),
-            judge_service=judge_service,
+        compose_layer2_runtime(
+            Layer2RuntimeDependencies(
+                # Unit graph fixtures must not share durable checkpoints across test runs.
+                checkpointer=checkpointer
+                or InMemorySaver(serde=build_runtime_serializer()),
+                planner=planner_service or StubPlanner(),
+                actor=actor_service or StubActor(),
+                tool_gateway=tool_gateway_service or StubToolGateway(),
+                replanner=replanner_service or StubReplanner(),
+                policy_engine=policy_engine_service or StubPolicyEngine(),
+                judge=judge_service,
+            )
         )
     )
 
 
 if __name__ == "__main__":
     unittest.main()
-
-__all__ = [name for name in globals() if not name.startswith("__")]

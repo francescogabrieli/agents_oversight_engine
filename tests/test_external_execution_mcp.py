@@ -14,8 +14,6 @@ from uuid import uuid4
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
 
 from mcp.types import CallToolResult, TextContent
 
@@ -109,7 +107,7 @@ def _enabled_registry(
     extra_environment_keys: tuple[str, ...] = (),
 ):
     payload = json.loads(
-        (REPO_ROOT / "configs" / "layer2_external_capabilities.example.json").read_text(
+        (REPO_ROOT / "configs" / "layer2_external_capabilities.json").read_text(
             encoding="utf-8"
         )
     )
@@ -170,6 +168,17 @@ class MCPExternalExecutorUnitTests(unittest.TestCase):
     # Remove only the test-owned exact directory.
     def tearDown(self) -> None:
         shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    # The compact example overlay activates the canonical base registry explicitly.
+    def test_example_activation_overlay_enables_registered_connectors(self) -> None:
+        registry = load_external_capability_registry(
+            config_path=REPO_ROOT / "configs" / "layer2_external_capabilities.example.json"
+        )
+
+        self.assertIsNotNone(registry.resolve("communication.email.send"))
+        self.assertIsNotNone(registry.resolve("database.statement.execute"))
+        self.assertTrue(registry.mcp_servers["communication"].enabled)
+        self.assertTrue(registry.mcp_servers["database"].enabled)
 
     # A malformed MCP body must never be promoted to executed.
     def test_malformed_response_returns_failed_receipt(self) -> None:
@@ -505,7 +514,6 @@ class MCPExternalExecutorIntegrationTests(unittest.TestCase):
         )
         from tests.layer2_runtime_fixtures import StubPolicyEngine
         from layer2_runtime_governance.actor_contract import ActorPort, ActorTask
-        from layer2_runtime_governance.judge import DisabledJudge
         from layer2_runtime_governance.planning import PlannerPort
 
         class _FixedPlanner(PlannerPort):

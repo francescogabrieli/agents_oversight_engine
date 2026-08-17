@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-from layer4_state_evidence_observability.infrastructure.environment import load_env_file_values
+from environment_config import load_env_file_values
 from ..external_operations.contracts import (
     ExternalOperationEffect,
     ExternalOperationFamily,
@@ -90,7 +90,7 @@ class OpenAIToolGatewaySettings:
     @classmethod
     def from_env(cls) -> "OpenAIToolGatewaySettings":
         # Merge process env and local .env files into one settings object.
-        env_file_values = _load_env_file_values()
+        env_file_values = load_env_file_values()
         config_value = os.getenv(
             "LAYER2_TOOL_GATEWAY_CONFIG_PATH",
             env_file_values.get("LAYER2_TOOL_GATEWAY_CONFIG_PATH", ""),
@@ -119,11 +119,6 @@ class OpenAIToolGatewaySettings:
 
 class ToolExecutionError(RuntimeError):
     """Raised when a tool adapter cannot execute a valid request."""
-
-
-# Load simple KEY=VALUE pairs from supported local development files.
-def _load_env_file_values() -> dict[str, str]:
-    return dict(load_env_file_values())
 
 
 __all__ = [

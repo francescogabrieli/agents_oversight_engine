@@ -23,7 +23,7 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
     "layer4_state_evidence_observability.behavioral": (
         "BehavioralAssessment", "BehavioralRecommendedDirective", "BehavioralStorePort",
         "BehavioralStoreSettings", "SQLiteBehavioralStore", "build_behavioral_assessment",
-        "build_default_behavioral_store", "evaluate_behavioral_policy",
+        "build_default_behavioral_store",
         "get_default_behavioral_store_path", "persist_behavioral_runtime_snapshot",
         "persist_behavioral_snapshot", "persist_judge_snapshot",
     ),
@@ -37,7 +37,7 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
     ),
     ".graph": (
         "Layer2GraphInput", "Layer2GraphOutput", "Layer2GraphState",
-        "build_default_checkpointer", "build_runtime_graph",
+        "build_runtime_graph",
     ),
     ".composition": ("Layer2RuntimeDependencies", "compose_layer2_runtime"),
     ".judge": (
@@ -95,6 +95,9 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
         "get_default_checkpointer_path", "get_default_runtime_artifacts_root",
         "persist_runtime_artifacts",
     ),
+    "layer4_state_evidence_observability.infrastructure.checkpointing": (
+        "build_default_checkpointer",
+    ),
     "layer4_state_evidence_observability.infrastructure.review_decision_inbox": (
         "SQLiteReviewDecisionInbox", "get_default_review_decision_inbox_path",
     ),
@@ -125,14 +128,13 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
         "get_default_tool_gateway_config_path", "load_tool_gateway_config",
     ),
     "layer4_state_evidence_observability.observability": (
-        "Layer2RuntimeTrace", "TraceActorTurn", "TraceBehavioralAssessment",
+        "Layer2RuntimeTrace", "TraceActorTurn",
         "TraceExecutionSummary", "TraceExternalCommunicationDraft",
         "TraceExternalCommunicationSummary", "TraceExternalExecutionReceipt",
         "TraceExternalExecutionSummary", "TraceGovernancePass",
         "TraceHumanReviewDecision", "TraceHumanReviewExternalEdit", "TraceHumanReviewRequest",
-        "TraceHumanReviewSummary", "TraceIntakeSummary", "TraceJudgeAssessment",
-        "TraceToolObservation", "TraceOversightAssessment", "TracePlanStep",
-        "TraceRuntimeSummary", "TraceStaticPolicyAssessment", "TraceToolCall",
+        "TraceHumanReviewSummary", "TraceIntakeSummary", "TraceToolObservation",
+        "TracePlanStep", "TraceRuntimeSummary", "TraceToolCall",
         "build_compact_trace_from_runtime_trace", "build_layer2_runtime_trace",
         "layer2_trace_to_dict", "layer2_trace_to_json",
     ),

@@ -1,29 +1,16 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import MagicMock
 
-# Fixtures must be imported first because they inject src/ into sys.path.
 from tests.layer2_runtime_fixtures import _build_policy_input_task_state
 
-from layer1_intake import (
-    BudgetConfig,
-    ExecutionIntent,
-    ExecutionPolicy,
-    IntakeMetadata,
-    SensitivityLevel,
-    TaskSpec,
-)
 from layer2_runtime_governance.actor_contract import (
-    ActorPlanStep,
-    ActorProtocolFeedback,
     ActorResult,
     ActorResultType,
     ActorTask,
     build_actor_task,
 )
 from layer2_runtime_governance.domain import (
-    AgentWorkspace,
     ExternalCommunicationDraft,
     ExternalCommunicationState,
     PlanStepStatus,
@@ -64,8 +51,6 @@ from layer2_runtime_governance.governance_components import (
     build_policy_evaluation_input,
 )
 from layer2_runtime_governance.judge import (
-    JudgeContext,
-    build_judge_system_prompt,
     build_judge_user_prompt,
 )
 from layer2_runtime_governance.runtime.actor_service import actor

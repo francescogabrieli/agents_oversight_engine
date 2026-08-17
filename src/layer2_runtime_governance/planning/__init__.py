@@ -3,20 +3,18 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from llm_retry import llm_retry
-
-from ..domain import PlanStep, PlannerDecision, TaskState
-from layer4_state_evidence_observability.infrastructure.environment import candidate_env_paths, load_env_file_values
-
-try:
-    from openai import OpenAI
-except ImportError:  # pragma: no cover - handled at runtime if dependency is missing
-    OpenAI = None
+from environment_config import load_env_file_values
+from ..domain import PlannerDecision, PlanStep, TaskState
+from .openai_adapter import (
+    ParsedOpenAIClient,
+    build_parsed_openai_client,
+    request_parsed_openai_response,
+    require_parsed_output,
+)
 
 
 @dataclass(frozen=True)
@@ -26,7 +24,7 @@ class OpenAIPlannerSettings:
     timeout_seconds: float = 30.0
 
     @classmethod
-    def from_env(cls) -> "OpenAIPlannerSettings":
+    def from_env(cls) -> OpenAIPlannerSettings:
         # Merge process env and local .env files into one planner settings object.
         env_file_values = _load_env_file_values()
 
@@ -171,19 +169,10 @@ class OpenAIPlanner(PlannerPort):
     def __init__(self, settings: OpenAIPlannerSettings | None = None) -> None:
         # Validate planner prerequisites once at construction time.
         self._settings = settings or OpenAIPlannerSettings.from_env()
-
-        if OpenAI is None:
-            raise RuntimeError(
-                "The 'openai' package is not installed. Install it before using the Layer 2 planner."
-            )
-        if not self._settings.api_key:
-            raise RuntimeError(
-                "OPENAI_API_KEY is missing. Set it in the process environment or in .env."
-            )
-
-        self._client = OpenAI(
+        self._client: ParsedOpenAIClient = build_parsed_openai_client(
             api_key=self._settings.api_key,
-            timeout=self._settings.timeout_seconds,
+            timeout_seconds=self._settings.timeout_seconds,
+            adapter_label="planner",
         )
 
     def plan(self, *, task_state: TaskState) -> PlannerDecision:
@@ -193,19 +182,24 @@ class OpenAIPlanner(PlannerPort):
         except Exception as exc:  # pragma: no cover - network/client errors
             raise PlannerExecutionError(f"Planner request failed: {exc}") from exc
 
-        payload = getattr(response, "output_parsed", None)
-        if payload is None:
-            raise PlannerExecutionError("Planner returned no structured output.")
+        payload = cast(
+            _PlanningPayload,
+            require_parsed_output(
+                response=response,
+                error_type=PlannerExecutionError,
+                missing_output_message="Planner returned no structured output.",
+            ),
+        )
 
         plan_steps = [
-        PlanStep(
-            step_id=f"step_{index}",
-            objective=item.objective,
-            rationale=item.rationale,
-            expected_outcome=item.expected_outcome,
-        )
-        for index, item in enumerate(payload.plan_steps, start=1)
-    ]
+            PlanStep(
+                step_id=f"step_{index}",
+                objective=item.objective,
+                rationale=item.rationale,
+                expected_outcome=item.expected_outcome,
+            )
+            for index, item in enumerate(payload.plan_steps, start=1)
+        ]
 
         return PlannerDecision(
             plan_steps=plan_steps,
@@ -214,21 +208,13 @@ class OpenAIPlanner(PlannerPort):
             prompt_version=self.prompt_version,
         )
 
-    # Retry only transient provider failures so one rate-limit does not abort the run.
-    @llm_retry
+    # Delegate typed parsing and transient retries to the shared provider boundary.
     def _request_plan_response(self, *, task_state: TaskState) -> object:
-        return self._client.responses.parse(
+        return request_parsed_openai_response(
+            client=self._client,
             model=self._settings.model,
-            input=[
-                {
-                    "role": "system",
-                    "content": build_planner_system_prompt(),
-                },
-                {
-                    "role": "user",
-                    "content": build_planner_user_prompt(task_state=task_state),
-                },
-            ],
+            system_prompt=build_planner_system_prompt(),
+            user_prompt=build_planner_user_prompt(task_state=task_state),
             text_format=_PlanningPayload,
         )
 
@@ -240,7 +226,3 @@ def build_default_planner() -> PlannerPort:
 
 def _load_env_file_values() -> dict[str, str]:
     return dict(load_env_file_values())
-
-
-def _candidate_env_paths() -> list[Path]:
-    return list(candidate_env_paths())

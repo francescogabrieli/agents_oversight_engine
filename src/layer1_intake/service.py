@@ -13,6 +13,7 @@ from .models import (
     IntakeResult,
     IntakeValidationError,
     ParseStatus,
+    SensitivityLevel,
     StructuredTask,
     TaskCompletenessAssessment,
     TaskSpec,

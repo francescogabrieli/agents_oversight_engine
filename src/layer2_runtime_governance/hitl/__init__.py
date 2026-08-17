@@ -5,16 +5,33 @@ from dataclasses import replace
 from typing import Any
 
 from langgraph.types import interrupt
+
 from json_serialization import to_jsonable as _to_jsonable
 from layer1_intake import ExecutionIntent
+from layer3_tool_bus_external_capabilities.external_operations import (
+    CommunicationOperationPayload,
+    DatabaseOperationPayload,
+    ExternalExecutionAuthorizationSource,
+    ExternalExecutionRequest,
+    ExternalExecutionStatus,
+    ExternalOperationEffect,
+    ExternalOperationPayloadEdit,
+    OperationBoundary,
+    build_external_execution_request,
+    normalize_communication_operation,
+    normalize_sql_operation,
+    replace_external_operation_payload,
+)
+from layer4_state_evidence_observability.behavioral import BehavioralAssessment
+from layer4_state_evidence_observability.oversight.contracts import (
+    DynamicPolicyAssessment,
+    OversightAssessment,
+)
 
 from ..actor_contract import ActorResultType
-from layer4_state_evidence_observability.behavioral import BehavioralAssessment
-from ..governance_components import governance_reason_code_values
-from layer4_state_evidence_observability.oversight.contracts import DynamicPolicyAssessment, OversightAssessment
 from ..domain import (
-    ExternalCommunicationPhase,
     ExternalCommunicationDraft,
+    ExternalCommunicationPhase,
     HumanReviewDecision,
     HumanReviewDecisionType,
     HumanReviewExternalEdit,
@@ -25,29 +42,13 @@ from ..domain import (
     TaskState,
     build_evidence_selection_digest,
     build_evidence_snapshot_manifest,
+    coerce_human_review_decision_payload,
     digest_json,
     normalize_task_state_serialization,
+    set_external_communication_phase,
 )
 from ..domain.step_recovery import restore_actor_step_for_more_evidence
-from layer3_tool_bus_external_capabilities.external_operations import (
-    CommunicationOperationPayload,
-    DatabaseOperationPayload,
-    DatabaseOperationParameter,
-    DestinationClass,
-    ExternalOperationEffect,
-    ExternalOperationPayloadEdit,
-    ExternalExecutionAuthorizationSource,
-    ExternalExecutionRequest,
-    ExternalExecutionStatus,
-    GenericExternalOperationPayload,
-    GenericPayloadField,
-    OperationBoundary,
-    SQLStatementClass,
-    normalize_communication_operation,
-    normalize_sql_operation,
-    replace_external_operation_payload,
-    build_external_execution_request,
-)
+from ..governance_components import governance_reason_code_values
 
 
 # Build the canonical human review request from the current runtime state.
@@ -153,10 +154,9 @@ def human_review(state: TaskState, *, thread_id: str) -> TaskState:
 
     # The interrupt payload must be JSON-safe so dashboard code can consume it directly.
     decision_payload = interrupt(_to_jsonable(pending_request))
-    human_review_decision = _coerce_human_review_decision(
+    human_review_decision = coerce_human_review_decision_payload(
         decision_payload,
-        expected_request_id=pending_request.request_id,
-        expected_operation_digest=pending_request.operation_payload_digest,
+        pending_request=pending_request,
     )
     if human_review_decision.decision_type not in pending_request.allowed_decisions:
         raise ValueError(
@@ -185,81 +185,6 @@ def human_review(state: TaskState, *, thread_id: str) -> TaskState:
         )
     )
     return runtime_state
-
-
-# Convert a review decision payload back into the canonical typed decision model.
-def _coerce_human_review_decision(
-    payload: Any,
-    *,
-    expected_request_id: str,
-    expected_operation_digest: str | None = None,
-) -> HumanReviewDecision:
-    if isinstance(payload, HumanReviewDecision):
-        decision = payload
-    elif isinstance(payload, dict):
-        decision_type_value = payload.get("decision_type", payload.get("decision"))
-        if decision_type_value is None:
-            raise ValueError("Human review resume payload is missing decision_type.")
-
-        decision_type = _parse_decision_type(decision_type_value)
-        external_edit = _optional_external_communication_edit(payload)
-        operation_edit = _optional_external_operation_edit(payload)
-        if (
-            decision_type == HumanReviewDecisionType.MODIFY_AND_CONTINUE
-            and external_edit is None
-            and operation_edit is None
-        ):
-            raise ValueError("modify_and_continue requires a typed external operation edit.")
-
-        decision = HumanReviewDecision(
-            request_id=_extract_request_id(payload),
-            decision_type=decision_type,
-            note=_optional_text(payload.get("note")),
-            clarification_text=_optional_text(
-                payload.get("clarification_text", payload.get("clarification"))
-            ),
-            external_communication_edit=external_edit,
-            reviewer_id=_optional_text(payload.get("reviewer_id")),
-            approved_operation_digest=_optional_text(
-                payload.get("approved_operation_digest")
-            ),
-            external_operation_edit=operation_edit,
-        )
-    else:
-        raise ValueError("Human review resume payload must be a decision dict or dataclass.")
-
-    if decision.request_id != expected_request_id:
-        raise ValueError("Human review resume payload request_id does not match the pending review.")
-
-    if (
-        decision.decision_type
-        in {
-            HumanReviewDecisionType.APPROVE_CONTINUE,
-            HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY,
-        }
-        and decision.approved_operation_digest is None
-        and expected_operation_digest is not None
-    ):
-        # The control plane binds the click to the exact pending digest.
-        decision = replace(
-            decision,
-            approved_operation_digest=expected_operation_digest,
-        )
-    return decision
-
-
-# Expose one bounded adapter for dashboard/API payloads without duplicating HITL parsing.
-def coerce_human_review_decision_payload(
-    payload: Any,
-    *,
-    expected_request_id: str,
-    expected_operation_digest: str | None = None,
-) -> HumanReviewDecision:
-    return _coerce_human_review_decision(
-        payload,
-        expected_request_id=expected_request_id,
-        expected_operation_digest=expected_operation_digest,
-    )
 
 
 # Apply the typed human decision to runtime state without mutating the review payload itself.
@@ -326,7 +251,7 @@ def _apply_human_review_decision(
                     "Human review accepted the proposal as the terminal local artifact."
                 ),
             )
-            _set_external_communication_phase(
+            set_external_communication_phase(
                 state,
                 phase=ExternalCommunicationPhase.APPROVED_DRAFT,
                 summary=(
@@ -344,20 +269,13 @@ def _apply_human_review_decision(
         if not _is_governed_external_proposal(state):
             state.current_state = pending_request.resume_state
             return
-        _set_external_communication_phase(
-            state,
-            phase=ExternalCommunicationPhase.APPROVED_FOR_EXECUTION,
-            summary="Human review authorized the exact proposal digest for external execution.",
-            review_ready=True,
-        )
-        state.approved_external_operation_digest = (
-            human_review_decision.approved_operation_digest
-        )
-        state.current_external_execution_request = _build_human_authorized_request(
+        _authorize_governed_external_execution(
             state=state,
             decision=human_review_decision,
+            transition_summary=(
+                "Human review authorized the exact proposal digest for external execution."
+            ),
         )
-        state.current_state = RuntimeState.READY_EXTERNAL_EXECUTION
         return
 
     if human_review_decision.decision_type == HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY:
@@ -384,7 +302,7 @@ def _apply_human_review_decision(
         if _is_governed_external_proposal(state) and (
             state.execution_intent == ExecutionIntent.PROPOSAL_ONLY
         ):
-            _set_external_communication_phase(
+            set_external_communication_phase(
                 state,
                 phase=ExternalCommunicationPhase.APPROVED_DRAFT,
                 summary="Human review approved a terminal draft under a read-only envelope.",
@@ -399,20 +317,13 @@ def _apply_human_review_decision(
         if not _is_governed_external_proposal(state):
             state.current_state = pending_request.resume_state
             return
-        _set_external_communication_phase(
-            state,
-            phase=ExternalCommunicationPhase.APPROVED_FOR_EXECUTION,
-            summary="Human review authorized the exact read-only proposal digest.",
-            review_ready=True,
-        )
-        state.approved_external_operation_digest = (
-            human_review_decision.approved_operation_digest
-        )
-        state.current_external_execution_request = _build_human_authorized_request(
+        _authorize_governed_external_execution(
             state=state,
             decision=human_review_decision,
+            transition_summary=(
+                "Human review authorized the exact read-only proposal digest."
+            ),
         )
-        state.current_state = RuntimeState.READY_EXTERNAL_EXECUTION
         return
 
     if human_review_decision.decision_type == HumanReviewDecisionType.MODIFY_AND_CONTINUE:
@@ -432,7 +343,7 @@ def _apply_human_review_decision(
         return
 
     if human_review_decision.decision_type == HumanReviewDecisionType.REQUEST_MORE_EVIDENCE:
-        _set_external_communication_phase(
+        set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
             summary="Human review sent the external communication branch back for more evidence.",
@@ -444,7 +355,7 @@ def _apply_human_review_decision(
         return
 
     if human_review_decision.decision_type == HumanReviewDecisionType.REPLAN:
-        _set_external_communication_phase(
+        set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
             summary="Human review invalidated the current external communication trajectory and requested replanning.",
@@ -457,7 +368,7 @@ def _apply_human_review_decision(
     if human_review_decision.decision_type == HumanReviewDecisionType.ASK_CLARIFICATION:
         if RuntimeFlag.CLARIFICATION_REQUIRED not in state.runtime_flags:
             state.runtime_flags.append(RuntimeFlag.CLARIFICATION_REQUIRED)
-        _set_external_communication_phase(
+        set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED,
             summary="Human review requested clarification before the external communication branch can continue.",
@@ -468,7 +379,7 @@ def _apply_human_review_decision(
         return
 
     if human_review_decision.decision_type == HumanReviewDecisionType.ABORT:
-        _set_external_communication_phase(
+        set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.BLOCKED,
             summary="Human review aborted the external communication branch.",
@@ -499,6 +410,27 @@ def _build_human_authorized_request(
         authorization_source=ExternalExecutionAuthorizationSource.HUMAN_REVIEW,
         reviewer_id=decision.reviewer_id,
     )
+
+
+# Apply only the identical post-validation authorization mutation shared by approvals.
+def _authorize_governed_external_execution(
+    *,
+    state: TaskState,
+    decision: HumanReviewDecision,
+    transition_summary: str,
+) -> None:
+    set_external_communication_phase(
+        state,
+        phase=ExternalCommunicationPhase.APPROVED_FOR_EXECUTION,
+        summary=transition_summary,
+        review_ready=True,
+    )
+    state.approved_external_operation_digest = decision.approved_operation_digest
+    state.current_external_execution_request = _build_human_authorized_request(
+        state=state,
+        decision=decision,
+    )
+    state.current_state = RuntimeState.READY_EXTERNAL_EXECUTION
 
 
 # Treat approval after an indeterminate receipt as reconciliation, never as retry authority.
@@ -771,183 +703,6 @@ def _append_unique_review_part(
     normalized_parts.append(normalized_part)
 
 
-# Parse decision enum values while failing closed on malformed resume payloads.
-def _parse_decision_type(value: Any) -> HumanReviewDecisionType:
-    if isinstance(value, HumanReviewDecisionType):
-        return value
-    if not isinstance(value, str):
-        raise ValueError("Human review decision_type must be a string.")
-
-    try:
-        return HumanReviewDecisionType(value)
-    except ValueError as exc:
-        raise ValueError(f"Unknown human review decision_type: {value}") from exc
-
-
-# Recover the request id from a review resume payload.
-def _extract_request_id(payload: dict[str, Any]) -> str:
-    request_id = payload.get("request_id")
-    if not isinstance(request_id, str) or not request_id.strip():
-        raise ValueError("Human review resume payload is missing request_id.")
-    return " ".join(request_id.strip().split())
-
-
-# Normalize optional free-text fields before storing them in TaskState.
-def _optional_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise ValueError("Human review text fields must be strings.")
-    cleaned = " ".join(value.strip().split())
-    return cleaned or None
-
-
-# Normalize bounded recipient lists used by typed communication edits.
-def _text_tuple(value: Any) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if not isinstance(value, (list, tuple)):
-        raise ValueError("Communication cc/bcc fields must be arrays of strings.")
-    normalized = tuple(
-        item
-        for raw in value
-        if (item := _optional_text(raw)) is not None
-    )
-    if len(normalized) > 20:
-        raise ValueError("Communication cc/bcc fields exceed the recipient bound.")
-    return normalized
-
-
-# Parse a fully typed external draft from a review payload.
-def _coerce_external_communication_draft(payload: Any) -> ExternalCommunicationDraft:
-    if isinstance(payload, ExternalCommunicationDraft):
-        return payload
-    if not isinstance(payload, dict):
-        raise ValueError("External communication draft must be a dict or dataclass.")
-
-    channel = _optional_text(payload.get("channel"))
-    if channel is None:
-        raise ValueError("External communication draft is missing channel.")
-
-    body = _optional_text(payload.get("body"))
-    if body is None:
-        raise ValueError("External communication draft is missing body.")
-
-    metadata = payload.get("metadata")
-    if metadata is None:
-        metadata_dict: dict[str, Any] = {}
-    elif not isinstance(metadata, dict):
-        raise ValueError("External communication draft metadata must be a dict.")
-    else:
-        metadata_dict = {str(key): value for key, value in metadata.items()}
-
-    return ExternalCommunicationDraft(
-        channel=channel,
-        recipient=_optional_text(payload.get("recipient")),
-        subject=_optional_text(payload.get("subject")),
-        body=body,
-        cc=_text_tuple(payload.get("cc")),
-        bcc=_text_tuple(payload.get("bcc")),
-        metadata=metadata_dict,
-    )
-
-
-# Parse the human edit wrapper used by the modify-and-continue decision.
-def _coerce_external_communication_edit(payload: Any) -> HumanReviewExternalEdit:
-    if isinstance(payload, HumanReviewExternalEdit):
-        return payload
-    if not isinstance(payload, dict):
-        raise ValueError("External communication edit must be a dict or dataclass.")
-
-    draft_payload = payload.get("draft", payload.get("external_communication_draft"))
-    if draft_payload is None:
-        raise ValueError("External communication edit is missing draft.")
-
-    return HumanReviewExternalEdit(
-        draft=_coerce_external_communication_draft(draft_payload),
-        note=_optional_text(payload.get("note")),
-    )
-
-
-# Recover an optional external edit wrapper from a review payload.
-def _optional_external_communication_edit(payload: dict[str, Any]) -> HumanReviewExternalEdit | None:
-    edit_payload = payload.get("external_communication_edit", payload.get("external_edit"))
-    if edit_payload is None:
-        return None
-    return _coerce_external_communication_edit(edit_payload)
-
-
-# Parse a discriminated full-payload replacement for non-communication proposals.
-def _optional_external_operation_edit(
-    payload: dict[str, Any],
-) -> ExternalOperationPayloadEdit | None:
-    edit_payload = payload.get("external_operation_edit")
-    if edit_payload is None:
-        return None
-    if isinstance(edit_payload, ExternalOperationPayloadEdit):
-        return edit_payload
-    if not isinstance(edit_payload, dict):
-        raise ValueError("external_operation_edit must be an object.")
-    typed_payload = edit_payload.get("payload")
-    if not isinstance(typed_payload, dict):
-        raise ValueError("external_operation_edit is missing its typed payload.")
-    payload_type = typed_payload.get("payload_type")
-    if payload_type == "communication":
-        operation_payload = CommunicationOperationPayload(
-            channel=_optional_text(typed_payload.get("channel")) or "external_communication",
-            recipient=_optional_text(typed_payload.get("recipient")),
-            subject=_optional_text(typed_payload.get("subject")),
-            body=_optional_text(typed_payload.get("body")) or "",
-            destination_class=DestinationClass(
-                typed_payload.get("destination_class", DestinationClass.UNKNOWN.value)
-            ),
-            cc=_text_tuple(typed_payload.get("cc")),
-            bcc=_text_tuple(typed_payload.get("bcc")),
-        )
-    elif payload_type == "database":
-        operation_payload = DatabaseOperationPayload(
-            sql=str(typed_payload.get("sql") or "").strip(),
-            normalized_sql=_optional_text(typed_payload.get("normalized_sql")),
-            statement_class=SQLStatementClass(
-                typed_payload.get("statement_class", SQLStatementClass.UNKNOWN.value)
-            ),
-            statement_count=int(typed_payload.get("statement_count", 0)),
-            parse_valid=bool(typed_payload.get("parse_valid", False)),
-            ambiguous=bool(typed_payload.get("ambiguous", True)),
-            database_profile_id=str(
-                typed_payload.get("database_profile_id") or "enterprise_db.read_only"
-            ),
-            parameters=tuple(
-                DatabaseOperationParameter(
-                    name=str(item.get("name") or "").strip(),
-                    value=item.get("value"),
-                )
-                for item in typed_payload.get("parameters", [])
-                if isinstance(item, dict) and str(item.get("name") or "").strip()
-            ),
-        )
-    elif payload_type == "generic":
-        raw_fields = typed_payload.get("fields", [])
-        operation_payload = GenericExternalOperationPayload(
-            action=str(typed_payload.get("action") or "external_action").strip(),
-            target=str(typed_payload.get("target") or "unknown_target").strip(),
-            fields=tuple(
-                GenericPayloadField(
-                    name=str(item.get("name") or "").strip(),
-                    value=str(item.get("value") or "").strip(),
-                )
-                for item in raw_fields
-                if isinstance(item, dict)
-            ),
-        )
-    else:
-        raise ValueError("Unsupported external_operation_edit payload_type.")
-    return ExternalOperationPayloadEdit(
-        payload=operation_payload,
-        note=_optional_text(edit_payload.get("note")),
-    )
-
-
 # Apply a validated external communication edit and preserve it in the audit trail.
 def _apply_external_communication_edit(
     state: TaskState,
@@ -983,7 +738,7 @@ def _apply_external_communication_edit(
         )
         edited_proposal = _mark_human_review_normalization(edited_proposal)
         _replace_current_external_proposal(state, proposal=edited_proposal)
-    _set_external_communication_phase(
+    set_external_communication_phase(
         state,
         phase=ExternalCommunicationPhase.DRAFT_PROPOSAL,
         summary=(
@@ -1147,19 +902,3 @@ def _validate_digest_bound_approval(
         raise ValueError("External operation approval requires an exact payload digest.")
     if approved != expected or approved != proposal.payload_digest:
         raise ValueError("External operation approval digest does not match the current proposal.")
-
-
-# Keep external communication phase updates local to the typed HITL resume logic.
-def _set_external_communication_phase(
-    state: TaskState,
-    *,
-    phase: ExternalCommunicationPhase,
-    summary: str,
-    review_ready: bool | None = None,
-) -> None:
-    if state.external_communication is None:
-        return
-    state.external_communication.phase = phase
-    if review_ready is not None:
-        state.external_communication.review_ready = review_ready
-    state.external_communication.last_transition_summary = summary

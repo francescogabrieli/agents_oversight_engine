@@ -4,7 +4,6 @@ import sys
 import unittest
 from dataclasses import replace
 from datetime import datetime, timezone
-from pathlib import Path
 from uuid import uuid4
 
 from langgraph.checkpoint.memory import InMemorySaver
@@ -24,6 +23,7 @@ from tests.layer2_runtime_fixtures import (
     JudgeRecommendedDirective,
     JudgeSeverity,
     JudgeVerdict,
+    Layer2RuntimeDependencies,
     ParseStatus,
     PlanStep,
     PlannerDecision,
@@ -33,8 +33,8 @@ from tests.layer2_runtime_fixtures import (
     StructuredTask,
     StubPolicyEngine,
     TaskSpec,
-    build_runtime_graph,
     build_runtime_serializer,
+    compose_layer2_runtime,
     _build_stub_opa_decision,
 )
 from layer1_intake import (
@@ -282,7 +282,6 @@ def _registry(
             "optional": ["cc", "bcc"],
         },
         output_schema_version="external_execution.tool_response.v1",
-        consequence_profile="communication.default",
         timeout_seconds=1,
         idempotency_support=IdempotencySupport.CLIENT_KEY,
         max_attempts=max_attempts,
@@ -639,14 +638,16 @@ class ExternalExecutionServiceTests(unittest.TestCase):
 class ExternalExecutionGraphTests(unittest.TestCase):
     # Build a graph using only deterministic local ports.
     def _graph(self, *, executor, policy_engine=None, registry=None):
-        return build_runtime_graph(
-            planner_service=OneStepExternalPlanner(),
-            actor_service=ExternalEmailActor(),
-            policy_engine_service=policy_engine or StubPolicyEngine(),
-            judge_service=_safe_judge(),
-            external_operation_executor_service=executor,
-            external_capability_registry=registry or _registry(),
-            checkpointer=InMemorySaver(serde=build_runtime_serializer()),
+        return compose_layer2_runtime(
+            Layer2RuntimeDependencies(
+                planner=OneStepExternalPlanner(),
+                actor=ExternalEmailActor(),
+                policy_engine=policy_engine or StubPolicyEngine(),
+                judge=_safe_judge(),
+                external_operation_executor=executor,
+                external_capability_registry=registry or _registry(),
+                checkpointer=InMemorySaver(serde=build_runtime_serializer()),
+            )
         )
 
     # Proposal-only approval is terminal and cannot reach the executor.

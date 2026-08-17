@@ -897,20 +897,6 @@ def build_behavioral_assessment(
     )
 
 
-# Keep the new public behavioural-policy entrypoint explicit.
-def evaluate_behavioral_policy(
-    *,
-    thread_id: str,
-    task_state: TaskState,
-    behavioral_store: BehavioralStorePort | None = None,
-) -> BehavioralAssessment:
-    return build_behavioral_assessment(
-        thread_id=thread_id,
-        task_state=task_state,
-        behavioral_store=behavioral_store,
-    )
-
-
 # Persist the current runtime snapshot into the behavioural SQLite read model.
 def persist_behavioral_snapshot(
     *,
@@ -1292,11 +1278,8 @@ def _distribution_from_governance(*, task_state: TaskState) -> dict[str, int]:
 
 # Count completion attestations without turning validation into a routing authority.
 def _distribution_from_validation(*, task_state: TaskState) -> dict[str, int]:
-    distribution: dict[str, int] = {}
-    for validation in task_state.step_validations:
-        key = "completion_attestation"
-        distribution[key] = distribution.get(key, 0) + 1
-    return distribution
+    count = len(task_state.step_validations)
+    return {"completion_attestation": count} if count else {}
 
 
 # Compute a stable ratio-style similarity for quantitative features.
@@ -1376,7 +1359,6 @@ __all__ = [
     "SQLiteBehavioralStore",
     "build_behavioral_assessment",
     "build_default_behavioral_store",
-    "evaluate_behavioral_policy",
     "get_default_behavioral_store_path",
     "persist_behavioral_snapshot",
     "persist_behavioral_runtime_snapshot",

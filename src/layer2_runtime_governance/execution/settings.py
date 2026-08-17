@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass
 
 from .providers.bedrock_runtime import BedrockRuntimeSettings
-from layer4_state_evidence_observability.infrastructure.environment import load_env_file_values
+from environment_config import load_env_file_values
 
 
 @dataclass(frozen=True)
@@ -17,7 +17,7 @@ class OpenAIActorSettings:
     @classmethod
     def from_env(cls) -> "OpenAIActorSettings":
         # Merge process env and local .env files into one actor settings object.
-        env_file_values = _load_env_file_values()
+        env_file_values = load_env_file_values()
         return cls(
             model=os.getenv(
                 "LAYER2_ACTOR_OPENAI_MODEL",
@@ -63,16 +63,11 @@ class BedrockNovaActorSettings:
 
 # Resolve only the actor provider so planner and replanner remain independent.
 def resolve_actor_provider() -> str:
-    env_file_values = _load_env_file_values()
+    env_file_values = load_env_file_values()
     return os.getenv(
         "LAYER2_ACTOR_PROVIDER",
         env_file_values.get("LAYER2_ACTOR_PROVIDER", "bedrock"),
     ).strip().lower()
-
-
-# Load simple KEY=VALUE pairs from supported local environment files.
-def _load_env_file_values() -> dict[str, str]:
-    return dict(load_env_file_values())
 
 
 __all__ = ["BedrockNovaActorSettings", "OpenAIActorSettings", "resolve_actor_provider"]

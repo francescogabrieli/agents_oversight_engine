@@ -109,14 +109,6 @@ def extract_function_calls(response: object) -> tuple[object, ...]:
     return tuple(function_calls)
 
 
-# Preserve the legacy public helper while callers migrate to the batch contract.
-def extract_single_function_call(response: object) -> object:
-    calls = extract_function_calls(response)
-    if len(calls) != 1:
-        raise ActorExecutionError(f"Actor returned {len(calls)} function tool calls; use batch normalization.")
-    return calls[0]
-
-
 # Return the first non-empty string value for known provider fallback keys.
 def _first_string_value(payload: dict[str, Any], *keys: str) -> str | None:
     for key in keys:
@@ -152,7 +144,6 @@ def _truncate_excerpt(value: str, *, limit: int = 240) -> str:
 __all__ = [
     "coerce_provider_confidence",
     "convert_json_payload_to_tool_call",
-    "extract_single_function_call",
     "extract_function_calls",
     "normalize_actor_payload",
     "validate_tool_call_action",

@@ -250,9 +250,6 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
             completion_arguments[key] = _sanitize_completion_text(
                 str(completion_arguments.get(key, ""))
             )
-        is_final_step = (
-            actor_task.current_plan_step_index == len(actor_task.plan_steps) - 1
-        )
         return ActorResult(
             plan_step_id=plan_step_id,
             result_type=ActorResultType.STEP_COMPLETED,
@@ -328,9 +325,6 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
                 actor_task.task_spec.execution_intent
                 == ExecutionIntent.EXECUTE_AFTER_GOVERNANCE
             ),
-        )
-        is_final_step = (
-            actor_task.current_plan_step_index == len(actor_task.plan_steps) - 1
         )
         return ActorResult(
             plan_step_id=plan_step_id,

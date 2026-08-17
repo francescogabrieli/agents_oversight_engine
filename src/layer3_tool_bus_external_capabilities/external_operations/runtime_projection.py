@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from layer1_intake import ExecutionIntent
-
-from layer2_runtime_governance.actor_contract import ActorResult, CapabilityAccessMode
+from layer2_runtime_governance.actor_contract import CapabilityAccessMode
 from layer2_runtime_governance.domain import TaskState
 from ..tools import ToolGatewayConfig, build_default_tool_gateway_config
 from .contracts import (

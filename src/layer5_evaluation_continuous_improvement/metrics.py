@@ -37,9 +37,9 @@ def build_evaluation_summary(
     parameters = (experiment_id,) if experiment_id else ()
     runs = store.query(f"SELECT * FROM runs{where}", parameters)
     run_ids = [str(run["run_id"]) for run in runs]
-    governance = _child_rows(store, "governance_events", run_ids)
-    reviews = _child_rows(store, "human_reviews", run_ids)
-    operations = _child_rows(store, "external_operations", run_ids)
+    governance = store.child_rows("governance_events", run_ids)
+    reviews = store.child_rows("human_reviews", run_ids)
+    operations = store.child_rows("external_operations", run_ids)
 
     runtime_statuses = Counter(str(run["runtime_status"]) for run in runs)
     task_results = Counter(str(run["task_result"]) for run in runs if run["task_result"] is not None)
@@ -68,14 +68,6 @@ def build_evaluation_summary(
         escalation_precision=_ratio(confusion["true_positive"], confusion["true_positive"] + confusion["false_positive"]),
         escalation_recall=_ratio(confusion["true_positive"], confusion["true_positive"] + confusion["false_negative"]),
     )
-
-
-# Load child facts for a selected run set without leaking SQL into plotting.
-def _child_rows(store: EvaluationStore, table: str, run_ids: list[str]) -> list[dict[str, Any]]:
-    if not run_ids:
-        return []
-    placeholders = ", ".join("?" for _ in run_ids)
-    return store.query(f"SELECT * FROM {table} WHERE run_id IN ({placeholders})", run_ids)
 
 
 # Derive the oversight confusion matrix only from reviewed governance events.

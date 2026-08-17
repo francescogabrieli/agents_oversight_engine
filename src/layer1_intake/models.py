@@ -37,12 +37,27 @@ class InvalidTaskSpecError(IntakeDomainError):
     """Raised when the parsed task spec is invalid or inconsistent."""
 
 
-class InvalidExecutionPolicyError(IntakeDomainError):
-    """Raised when the execution policy is invalid."""
-
-
 class IntakeValidationError(IntakeDomainError):
     """Raised when the final intake result cannot be validated."""
+
+
+# Normalize repeated list-shaped text contracts through one canonical boundary.
+def _normalize_string_list(value: object) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise TypeError("Expected a list of strings.")
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            raise TypeError("Each item must be a string.")
+        cleaned = " ".join(item.strip().split())
+        if cleaned and cleaned not in seen:
+            normalized.append(cleaned)
+            seen.add(cleaned)
+    return normalized
 
 # BudgetConfig defines the execution envelope chosen by policy, not by the user task.
 class BudgetConfig(BaseModel):
@@ -116,22 +131,7 @@ class TaskSpec(BaseModel):
     @classmethod
     def normalize_string_lists(cls, value: object) -> list[str]:
         # Remove duplicates and empty items so these lists behave as stable contracts.
-        if value is None:
-            return []
-        if not isinstance(value, list):
-            raise TypeError("Expected a list of strings.")
-
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for item in value:
-            if not isinstance(item, str):
-                raise TypeError("Each item must be a string.")
-            cleaned = " ".join(item.strip().split())
-            if cleaned and cleaned not in seen:
-                normalized.append(cleaned)
-                seen.add(cleaned)
-
-        return normalized
+        return _normalize_string_list(value)
 
     @model_validator(mode="after")
     def validate_task_spec(self) -> "TaskSpec":
@@ -154,20 +154,7 @@ class TaskCompletenessAssessment(BaseModel):
     @classmethod
     def normalize_assessment_lists(cls, value: object) -> list[str]:
         # Reuse Pydantic as the sole shape and whitespace normalization boundary.
-        if value is None:
-            return []
-        if not isinstance(value, list):
-            raise TypeError("Expected a list of strings.")
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for item in value:
-            if not isinstance(item, str):
-                raise TypeError("Each item must be a string.")
-            cleaned = " ".join(item.strip().split())
-            if cleaned and cleaned not in seen:
-                normalized.append(cleaned)
-                seen.add(cleaned)
-        return normalized
+        return _normalize_string_list(value)
 
 # StructuredTask combines semantic intent with system-controlled execution limits.
 class StructuredTask(BaseModel):
@@ -231,22 +218,7 @@ class IntakeMetadata(BaseModel):
     @classmethod
     def normalize_metadata_lists(cls, value: object) -> list[str]:
         # Warnings and missing fields should be deterministic lists with no duplicates.
-        if value is None:
-            return []
-        if not isinstance(value, list):
-            raise TypeError("Expected a list of strings.")
-
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for item in value:
-            if not isinstance(item, str):
-                raise TypeError("Each item must be a string.")
-            cleaned = " ".join(item.strip().split())
-            if cleaned and cleaned not in seen:
-                normalized.append(cleaned)
-                seen.add(cleaned)
-
-        return normalized
+        return _normalize_string_list(value)
 
     @model_validator(mode="after")
     def validate_parse_status_consistency(self) -> "IntakeMetadata":
@@ -273,7 +245,6 @@ __all__ = [
     "IntakeMetadata",
     "IntakeResult",
     "IntakeValidationError",
-    "InvalidExecutionPolicyError",
     "InvalidTaskSpecError",
     "ParseStatus",
     "SensitivityLevel",

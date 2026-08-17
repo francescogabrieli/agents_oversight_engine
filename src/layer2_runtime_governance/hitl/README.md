@@ -14,8 +14,8 @@ the exact request and reclaim the same command after an interrupted delivery. Th
 included SQLite adapter is local-PoC infrastructure; multi-host deployments must
 provide a shared transactional adapter for `ReviewDecisionInboxPort`.
 
-Dashboard projections live in `hitl.dashboard`; the root `hitl_dashboard.py`
-module remains a compatibility facade for existing callers.
+Dashboard projections live in `hitl/dashboard.py`. There is no root dashboard
+facade; callers import the capability module or the explicit package exports.
 
 Review actions are reason-scoped. Unsafe/uncertain Judge review exposes
 modify/replan/abort; capability approval exposes approve/modify/abort;

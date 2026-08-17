@@ -1,19 +1,9 @@
 from __future__ import annotations
 
-import sys
 import unittest
 from datetime import datetime, timezone
-from pathlib import Path
 
 from langgraph.checkpoint.memory import InMemorySaver
-
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = REPO_ROOT / "src"
-
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-
 
 from layer1_intake import (
     IntakeService,
@@ -29,10 +19,7 @@ from layer1_intake.service import (
     TaskSpecBuilder,
 )
 from layer2_runtime_governance import (
-    ActorPort,
-    ActorResult,
     ActorResultType,
-    ActorTask,
     BehavioralAssessment,
     BehavioralRecommendedDirective,
     CapabilityAccessMode,
@@ -48,19 +35,12 @@ from layer2_runtime_governance import (
     ReplannerPort,
     RuntimeFlag,
     RuntimeState,
-    ScratchpadEntry,
-    ScratchpadEntryType,
-    StepValidation,
-    ToolExecutionResult,
-    ToolGatewayPort,
-    ToolName,
-    ToolRequest,
-    ToolObservation,
 )
 from layer4_state_evidence_observability.infrastructure.checkpointing import (
     build_runtime_serializer,
 )
 from main_layer2 import run_layer2_flow
+from tests.layer2_runtime_fixtures import StubActor, StubToolGateway
 
 
 class StubParser:
@@ -107,102 +87,6 @@ class StubPlanner:
             rationale="The stub planner selected an evidence-first semantic mini-plan.",
             planner_name=self.planner_name,
             prompt_version=self.prompt_version,
-        )
-
-
-class StubActor(ActorPort):
-    actor_name = "stub_actor"
-    prompt_version = "stub_actor_v1"
-
-    # Drive one deterministic actor/tool/observation loop across two semantic steps.
-    def act(self, *, actor_task: ActorTask) -> ActorResult:
-        if actor_task.current_plan_step.step_id == "step_1" and not actor_task.observations:
-            return ActorResult(
-                plan_step_id=actor_task.current_plan_step.step_id,
-                result_type=ActorResultType.PROPOSE_ACTION,
-                summary="Request a read-only evidence search for the first step.",
-                capability_mode=CapabilityAccessMode.READ_ONLY,
-                external_impact=False,
-                tool_request=ToolRequest(
-                    plan_step_id=actor_task.current_plan_step.step_id,
-                    tool_name=ToolName.WEB_SEARCH,
-                    reason="The first semantic step requires authoritative documentary evidence.",
-                    query="Digital Markets Act official EU sources",
-                    max_results=3,
-                    extractive_goal="Find official EU sources about the Digital Markets Act.",
-                ),
-                scratchpad_entry=ScratchpadEntry(
-                    turn_index=actor_task.actor_turn_count,
-                    plan_step_id=actor_task.current_plan_step.step_id,
-                    entry_type=ScratchpadEntryType.TOOL_DECISION,
-                    summary="The current step needs external documentary evidence.",
-                ),
-            )
-
-        if actor_task.current_plan_step.step_id == "step_1":
-            return ActorResult(
-                plan_step_id=actor_task.current_plan_step.step_id,
-                result_type=ActorResultType.STEP_COMPLETED,
-                summary="The first step is complete and produced grounded evidence.",
-                capability_mode=CapabilityAccessMode.NONE,
-                output_text="Collected grounded evidence from official sources.",
-                scratchpad_entry=ScratchpadEntry(
-                    turn_index=actor_task.actor_turn_count,
-                    plan_step_id=actor_task.current_plan_step.step_id,
-                    entry_type=ScratchpadEntryType.COMPLETION_RATIONALE,
-                    summary="The observed source satisfies the evidence collection step.",
-                    evidence_refs=[item.observation_id for item in actor_task.observations],
-                ),
-                step_validation=StepValidation(
-                    plan_step_id=actor_task.current_plan_step.step_id,
-                    actor_self_confidence=0.86,
-                    evidence_refs=tuple(item.observation_id for item in actor_task.observations),
-                    rationale_summary="Official evidence was collected for the step objective.",
-                ),
-            )
-
-        return ActorResult(
-            plan_step_id=actor_task.current_plan_step.step_id,
-            result_type=ActorResultType.STEP_COMPLETED,
-            summary="The task can now be completed from the grounded evidence.",
-            capability_mode=CapabilityAccessMode.NONE,
-            external_impact=False,
-            output_text="The DMA is an EU regulation that targets gatekeeper platforms.",
-            scratchpad_entry=ScratchpadEntry(
-                turn_index=actor_task.actor_turn_count,
-                plan_step_id=actor_task.current_plan_step.step_id,
-                entry_type=ScratchpadEntryType.COMPLETION_RATIONALE,
-                summary="The final synthesis satisfies the remaining plan step.",
-                evidence_refs=[item.observation_id for item in actor_task.observations],
-            ),
-            step_validation=StepValidation(
-                plan_step_id=actor_task.current_plan_step.step_id,
-                actor_self_confidence=0.84,
-                evidence_refs=tuple(item.observation_id for item in actor_task.observations),
-                rationale_summary="The synthesis uses the collected official evidence.",
-            ),
-        )
-
-
-class StubToolGateway(ToolGatewayPort):
-    gateway_name = "stub_tool_gateway"
-
-    def execute(self, *, tool_request: ToolRequest) -> ToolExecutionResult:
-        return ToolExecutionResult(
-            request=tool_request,
-            success=True,
-            summary="Stub web search completed successfully.",
-            content="Official EU sources describe the Digital Markets Act as a regulation for gatekeeper platforms.",
-            observations=(
-                ToolObservation(
-                    observation_id=f"{tool_request.request_id}:1",
-                    locator="https://commission.europa.eu/dma",
-                    content=(
-                        "Official EU material describes DMA rules and obligations for "
-                        "gatekeepers and core platform services."
-                    ),
-                ),
-            ),
         )
 
 

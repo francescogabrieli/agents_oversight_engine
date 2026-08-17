@@ -1,13 +1,74 @@
 from __future__ import annotations
 
-from tests.layer2_runtime_fixtures import *
+import json
+import os
+import unittest
+from unittest.mock import patch
+
+from tests.layer2_runtime_fixtures import (
+    OpenRouterActor,
+    OpenRouterActorSettings,
+    _build_conservative_replan_summary_task_state,
+    _build_external_communication_intake_result_for_governance,
+    _build_external_incident_draft_task_state,
+    _build_high_precision_research_task_state,
+    _build_policy_input_task_state,
+    _build_research_intake_result,
+    _build_source_shortlist_task_state,
+    _build_summary_task_state_with_generic_timeline,
+    _build_summary_task_state_with_year_in_citation,
+    _FakeOpenRouterClient,
+    _FakeOpenRouterCompletionWithInternalRefsClient,
+    _FakeOpenRouterCompletionWithoutRationaleClient,
+    _FakeOpenRouterConservativeSummaryAfterExtractabilityLimitClient,
+    _FakeOpenRouterEmptyResponseClient,
+    _FakeOpenRouterFalseNoToolBlockedClient,
+    _FakeOpenRouterIntakeSupportedExternalDraftClient,
+    _FakeOpenRouterJsonWithoutEnvelopeClient,
+    _FakeOpenRouterProceduralImplementationSummaryClient,
+    _FakeOpenRouterRecoveredHighLevelStepOneCompletionClient,
+    _FakeOpenRouterSearchWithoutQueryClient,
+    _FakeOpenRouterSourceShortlistCompletionClient,
+    _FakeOpenRouterSummaryWithGenericTimelineClient,
+    _FakeOpenRouterSummaryWithRegulationYearClient,
+    _FakeOpenRouterUnsupportedPrecisionCompletionClient,
+)
+
+import layer2_runtime_governance.execution.providers.bedrock_runtime as bedrock_client_module
+from layer1_intake import ExecutionIntent
+from layer2_runtime_governance.actor_contract import (
+    ActorResult,
+    ActorResultType,
+    CapabilityAccessMode,
+    build_actor_task,
+)
 from layer2_runtime_governance.domain import ExecutedPlanStep
+from layer2_runtime_governance.domain import (
+    PlanStep,
+    PlanStepStatus,
+    RuntimeState,
+    ScratchpadEntry,
+    ScratchpadEntryType,
+    TaskState,
+)
+from layer2_runtime_governance.execution import (
+    ActorExecutionError,
+    BedrockNovaActor,
+    build_actor_system_prompt,
+    build_actor_user_prompt,
+    build_default_actor,
+)
 from layer2_runtime_governance.runtime.actor_service import (
     _enforce_actor_runtime_contract,
 )
 from layer2_runtime_governance.runtime.lifecycle_service import finalize_bootstrap
-
-
+from layer2_runtime_governance.runtime.tool_service import observe_tool_result
+from layer3_tool_bus_external_capabilities.tool_contract import (
+    ToolExecutionResult,
+    ToolName,
+    ToolObservation,
+    ToolRequest,
+)
 class Layer2ActorExecutionTests(unittest.TestCase):
     # Scenarios remain grouped by the capability whose behavior they verify.
     def test_default_actor_can_be_configured_to_bedrock(self) -> None:

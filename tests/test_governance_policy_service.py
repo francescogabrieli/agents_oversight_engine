@@ -2,16 +2,12 @@ from __future__ import annotations
 
 import ast
 import json
-import sys
 import unittest
 from pathlib import Path
 from urllib.request import Request
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
-
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
 
 from governance_policy_service import OPAClientSettings, OPADecisionClient, PolicyServiceError
 
@@ -26,7 +22,7 @@ class _FakeResponse:
         return self
 
     # No resource cleanup is needed by the in-memory response.
-    def __exit__(self, exc_type, exc, traceback) -> None:
+    def __exit__(self, _exc_type, _exc, _traceback) -> None:
         return None
 
     # Return the encoded response exactly as urllib would.

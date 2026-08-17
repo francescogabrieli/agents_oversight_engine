@@ -4,16 +4,18 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from layer3_tool_bus_external_capabilities.tool_contract import ToolRequest
 from layer3_tool_bus_external_capabilities.external_operations.contracts import (
     ExternalOperationPayloadEdit,
     ExternalOperationProposal,
 )
+from layer3_tool_bus_external_capabilities.tool_contract import ToolRequest
+
 from .lifecycle import RuntimeState
 
 if TYPE_CHECKING:
     from ..actor_contract import ActorResultType
     from ..governance_components.contracts import GovernanceDirective
+    from .task_state import TaskState
 
 
 # Canonical domain contract extracted from the legacy state facade.
@@ -122,12 +124,29 @@ class ExternalCommunicationState:
     last_transition_summary: str | None = None
 
 
+# Apply one canonical external-communication phase transition to typed runtime state.
+def set_external_communication_phase(
+    state: TaskState,
+    *,
+    phase: ExternalCommunicationPhase,
+    summary: str,
+    review_ready: bool | None = None,
+) -> None:
+    if state.external_communication is None:
+        return
+    state.external_communication.phase = phase
+    if review_ready is not None:
+        state.external_communication.review_ready = review_ready
+    state.external_communication.last_transition_summary = summary
+
+
 __all__ = [
-    "HumanReviewDecisionType",
-    "ExternalCommunicationPhase",
     "ExternalCommunicationDraft",
+    "ExternalCommunicationPhase",
+    "ExternalCommunicationState",
+    "HumanReviewDecision",
+    "HumanReviewDecisionType",
     "HumanReviewExternalEdit",
     "HumanReviewRequest",
-    "HumanReviewDecision",
-    "ExternalCommunicationState"
+    "set_external_communication_phase",
 ]

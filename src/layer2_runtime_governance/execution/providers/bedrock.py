@@ -13,8 +13,7 @@ from layer3_tool_bus_external_capabilities.tools import ToolGatewayConfig
 from ..result_builder import (
     build_provider_blocked_result,
     build_provider_protocol_failure_result,
-    build_provider_replan_result,
-    convert_tool_call_to_actor_result, convert_tool_calls_to_actor_result,
+    convert_tool_calls_to_actor_result,
 )
 from ..settings import BedrockNovaActorSettings
 

@@ -1,6 +1,67 @@
 from __future__ import annotations
 
-from tests.layer2_runtime_fixtures import *
+# The fixture module bootstraps the repository src path before production imports.
+# ruff: noqa: I001
+import json
+import os
+import unittest
+from unittest.mock import patch
+
+from tests.layer2_runtime_fixtures import (
+    CollidingReplanner,
+    FakeReplannerClient,
+    OverDecomposedSourceSummaryPlanner,
+    ReplanRequestActor,
+    StubPlanner,
+    StubReplanner,
+    _build_bedrock_actor_test_settings,
+    _build_clarification_intake_result,
+    _build_external_communication_intake_result,
+    _build_policy_input_task_state,
+    _build_replanning_task_state,
+    _build_research_intake_result,
+    _build_test_graph,
+    _FlakyPlannerClient,
+)
+
+from layer2_runtime_governance.actor_contract import (
+    ActorResult,
+    ActorResultType,
+    CapabilityAccessMode,
+    build_actor_task,
+)
+from layer2_runtime_governance.domain import (
+    PlannerDecision,
+    PlanStep,
+    PlanStepStatus,
+    RuntimeState,
+    TaskState,
+)
+from layer2_runtime_governance.execution import (
+    BedrockNovaActor,
+    build_actor_prompt_payload,
+)
+from layer2_runtime_governance.governance_components import GovernanceDirective
+from layer2_runtime_governance.planning import (
+    OpenAIPlanner,
+    OpenAIPlannerSettings,
+    build_planner_system_prompt,
+)
+from layer2_runtime_governance.planning.replanning import (
+    OpenAIReplanner,
+    OpenAIReplannerSettings,
+    build_replanner_system_prompt,
+    build_replanner_user_prompt,
+)
+from layer2_runtime_governance.runtime.planning_service import planner
+from layer2_runtime_governance.runtime.replanning_service import replanner
+from layer3_tool_bus_external_capabilities.tool_contract import (
+    ToolExecutionResult,
+    ToolName,
+    ToolObservation,
+    ToolRequest,
+)
+from main_layer2 import build_compact_trace
 
 
 class Layer2PlanningRuntimeTests(unittest.TestCase):
@@ -197,6 +258,58 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         self.assertIn("current_blocked_step", user_prompt)
 
 
+    # Planner-facing prompts must share exact, detached audit-item projections.
+    def test_planning_prompt_item_projections_are_exact_and_audit_safe(self) -> None:
+        task_state = _build_replanning_task_state()
+        task_state.observations = [
+            ToolObservation(
+                observation_id="step_1:tool:1:source:1",
+                content="A concrete observation used during recovery.",
+                locator="https://example.org/source",
+            )
+        ]
+        task_state.scratchpad[0].evidence_refs.append("step_1:tool:1:source:1")
+
+        replanner_prompt = build_replanner_user_prompt(task_state=task_state)
+        replanner_payload = json.loads(replanner_prompt.split("\n\n", 1)[1])
+        actor_payload = build_actor_prompt_payload(
+            actor_task=build_actor_task(task_state=task_state)
+        )
+        expected_step = {
+            "step_id": "step_1",
+            "objective": "Collect broad evidence for the task.",
+            "rationale": "The initial plan assumed a broad evidence step was enough.",
+            "expected_outcome": "A broad evidence base.",
+            "status": "blocked",
+        }
+        expected_observation = {
+            "observation_id": "step_1:tool:1:source:1",
+            "locator": "https://example.org/source",
+            "content": "A concrete observation used during recovery.",
+        }
+        expected_scratchpad = {
+            "turn_index": 1,
+            "plan_step_id": "step_1",
+            "entry_type": "uncertainty",
+            "summary": "The actor cannot execute the broad initial step reliably.",
+            "evidence_refs": ["step_1:tool:1:source:1"],
+        }
+
+        self.assertEqual(replanner_payload["current_blocked_step"], expected_step)
+        self.assertEqual(replanner_payload["plan_steps"][0], expected_step)
+        self.assertEqual(actor_payload["plan"]["current_plan_step"], expected_step)
+        self.assertEqual(replanner_payload["observations"], [expected_observation])
+        self.assertEqual(actor_payload["observations"], [expected_observation])
+        self.assertEqual(replanner_payload["scratchpad"], [expected_scratchpad])
+        self.assertEqual(actor_payload["scratchpad"], [expected_scratchpad])
+
+        task_state.scratchpad[0].evidence_refs.append("later-observation")
+        self.assertEqual(
+            actor_payload["scratchpad"][0]["evidence_refs"],
+            ["step_1:tool:1:source:1"],
+        )
+
+
     def test_openai_planner_settings_default_timeout_without_env(self) -> None:
         with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), patch(
             "layer2_runtime_governance.planning._load_env_file_values",
@@ -207,8 +320,40 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         self.assertEqual(settings.timeout_seconds, 30.0)
 
 
+    # Planner and replanner configuration must retain separate environment namespaces.
+    def test_openai_planning_settings_keep_distinct_environment_keys(self) -> None:
+        env = {
+            "OPENAI_API_KEY": "test-key",
+            "LAYER2_PLANNER_OPENAI_MODEL": "planner-model",
+            "LAYER2_PLANNER_OPENAI_TIMEOUT_SECONDS": "11",
+            "LAYER2_REPLANNER_OPENAI_MODEL": "replanner-model",
+            "LAYER2_REPLANNER_OPENAI_TIMEOUT_SECONDS": "17",
+        }
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch(
+                "layer2_runtime_governance.planning._load_env_file_values",
+                return_value={},
+            ),
+            patch(
+                "layer2_runtime_governance.planning.replanning.load_env_file_values",
+                return_value={},
+            ),
+        ):
+            planner_settings = OpenAIPlannerSettings.from_env()
+            replanner_settings = OpenAIReplannerSettings.from_env()
+
+        self.assertEqual(planner_settings.model, "planner-model")
+        self.assertEqual(planner_settings.timeout_seconds, 11.0)
+        self.assertEqual(replanner_settings.model, "replanner-model")
+        self.assertEqual(replanner_settings.timeout_seconds, 17.0)
+
+
     def test_openai_planner_retries_retryable_provider_failures(self) -> None:
-        from layer2_runtime_governance.planning import _PlanningPayload, _PlanStepPayload
+        from layer2_runtime_governance.planning import (
+            _PlanningPayload,
+            _PlanStepPayload,
+        )
 
         planner_service = OpenAIPlanner(
             settings=OpenAIPlannerSettings(api_key="test-key", model="test-model")

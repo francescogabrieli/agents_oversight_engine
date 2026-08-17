@@ -4,7 +4,6 @@ from .builder import build_layer2_runtime_trace
 from .models import (
     Layer2RuntimeTrace,
     TraceActorTurn,
-    TraceBehavioralAssessment,
     TraceExecutionSummary,
     TraceExternalCommunicationDraft,
     TraceExternalCommunicationSummary,
@@ -16,12 +15,9 @@ from .models import (
     TraceHumanReviewRequest,
     TraceHumanReviewSummary,
     TraceIntakeSummary,
-    TraceJudgeAssessment,
     TraceToolObservation,
-    TraceOversightAssessment,
     TracePlanStep,
     TraceRuntimeSummary,
-    TraceStaticPolicyAssessment,
     TraceToolCall,
 )
 from .serialization import enum_value, to_json, to_jsonable
@@ -35,7 +31,6 @@ from .views import (
 __all__ = [
     "Layer2RuntimeTrace",
     "TraceActorTurn",
-    "TraceBehavioralAssessment",
     "TraceExecutionSummary",
     "TraceExternalCommunicationDraft",
     "TraceExternalCommunicationSummary",
@@ -47,12 +42,9 @@ __all__ = [
     "TraceHumanReviewRequest",
     "TraceHumanReviewSummary",
     "TraceIntakeSummary",
-    "TraceJudgeAssessment",
     "TraceToolObservation",
-    "TraceOversightAssessment",
     "TracePlanStep",
     "TraceRuntimeSummary",
-    "TraceStaticPolicyAssessment",
     "TraceToolCall",
     "build_compact_trace_from_runtime_trace",
     "build_layer2_runtime_trace",

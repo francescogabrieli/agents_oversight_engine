@@ -11,10 +11,9 @@ from typing import Any
 from .contracts import (
     ExternalOperationEffect,
     ExternalOperationFamily,
-    GenericPayloadField,
     OperationBoundary,
 )
-from layer4_state_evidence_observability.infrastructure.environment import get_env_value
+from environment_config import get_env_value
 
 
 class ExternalConnectorKind(str, Enum):
@@ -63,11 +62,9 @@ class ExternalCapabilityDefinition:
     input_schema_version: str
     input_schema: dict[str, Any]
     output_schema_version: str
-    consequence_profile: str
     timeout_seconds: float
     idempotency_support: IdempotencySupport
     max_attempts: int = 1
-    defensive_constraints: tuple[GenericPayloadField, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -101,7 +98,7 @@ def load_external_capability_registry(
 def _load_external_capability_registry_cached(
     resolved_path: Path,
 ) -> ExternalCapabilityRegistry:
-    payload = json.loads(resolved_path.read_text(encoding="utf-8"))
+    payload = _load_registry_payload(resolved_path)
     repo_root = Path(__file__).resolve().parents[3]
     servers = {
         str(server_id): _parse_server(
@@ -125,6 +122,56 @@ def _load_external_capability_registry_cached(
     )
     _validate_registry(registry)
     return registry
+
+
+# Load either a complete registry or a sibling activation overlay.
+def _load_registry_payload(resolved_path: Path) -> dict[str, Any]:
+    payload = json.loads(resolved_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("External capability configuration must be a JSON object.")
+    base_name = payload.get("extends")
+    if base_name is None:
+        return payload
+    if not isinstance(base_name, str) or Path(base_name).name != base_name:
+        raise ValueError("External capability overlays may extend only a sibling file.")
+    allowed_keys = {"extends", "enabled_capabilities", "enabled_mcp_servers"}
+    if unknown_keys := set(payload) - allowed_keys:
+        raise ValueError(f"Unsupported external capability overlay keys: {sorted(unknown_keys)}")
+
+    base_path = (resolved_path.parent / base_name).resolve()
+    if base_path.parent != resolved_path.parent or not base_path.is_file():
+        raise ValueError("External capability overlay base must be an existing sibling file.")
+    base_payload = json.loads(base_path.read_text(encoding="utf-8"))
+    if not isinstance(base_payload, dict) or "extends" in base_payload:
+        raise ValueError("External capability overlays cannot be nested.")
+
+    enabled_capabilities = _parse_overlay_identifiers(
+        payload.get("enabled_capabilities", []), field_name="enabled_capabilities"
+    )
+    capabilities = base_payload.get("capabilities", [])
+    known_capabilities = {str(item.get("capability_id")) for item in capabilities}
+    if unknown := enabled_capabilities - known_capabilities:
+        raise ValueError(f"Unknown enabled external capabilities: {sorted(unknown)}")
+    for capability in capabilities:
+        capability["enabled"] = str(capability.get("capability_id")) in enabled_capabilities
+
+    enabled_servers = _parse_overlay_identifiers(
+        payload.get("enabled_mcp_servers", []), field_name="enabled_mcp_servers"
+    )
+    servers = base_payload.get("mcp_servers", {})
+    known_servers = {str(server_id) for server_id in servers}
+    if unknown := enabled_servers - known_servers:
+        raise ValueError(f"Unknown enabled external MCP servers: {sorted(unknown)}")
+    for server_id, server in servers.items():
+        server["enabled"] = str(server_id) in enabled_servers
+    return base_payload
+
+
+# Parse one overlay identifier allowlist without accepting truthy non-strings.
+def _parse_overlay_identifiers(value: Any, *, field_name: str) -> set[str]:
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise ValueError(f"External capability overlay field '{field_name}' must be a string list.")
+    return {item for item in value if item}
 
 
 # Parse a configured stdio server while resolving repository-safe placeholders.
@@ -181,16 +228,11 @@ def _parse_capability(payload: dict[str, Any]) -> ExternalCapabilityDefinition:
         input_schema_version=str(payload["input_schema_version"]),
         input_schema=dict(payload.get("input_schema", {})),
         output_schema_version=str(payload["output_schema_version"]),
-        consequence_profile=str(payload["consequence_profile"]),
         timeout_seconds=float(payload.get("timeout_seconds", 15.0)),
         idempotency_support=IdempotencySupport(
             payload.get("idempotency_support", IdempotencySupport.NONE.value)
         ),
         max_attempts=max(1, min(int(payload.get("max_attempts", 1)), 2)),
-        defensive_constraints=tuple(
-            GenericPayloadField(name=str(key), value=str(value))
-            for key, value in payload.get("defensive_constraints", {}).items()
-        ),
     )
 
 

@@ -1,45 +1,13 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { fetchReviewInbox } from "../api";
+import {
+  RuntimeStateIcon,
+  runtimeStateBadgeClass,
+  runtimeStateRowClass,
+} from "../components/runtimeStatePresentation";
 import { usePolledResource } from "../hooks";
 import type { ReviewInboxEntry } from "../types";
-
-function statusClass(runtimeState: string | null) {
-  if (runtimeState === "waiting_human_review") return "inbox-row-status inbox-row-status-waiting";
-  if (runtimeState === "completed" || runtimeState === "review_completed") return "inbox-row-status inbox-row-status-completed";
-  if (runtimeState === "aborted") return "inbox-row-status inbox-row-status-aborted";
-  return "inbox-row-status inbox-row-status-default";
-}
-
-function statusIcon(runtimeState: string | null) {
-  if (runtimeState === "waiting_human_review") return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-    </svg>
-  );
-  if (runtimeState === "completed" || runtimeState === "review_completed") return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="20 6 9 17 4 12"/>
-    </svg>
-  );
-  if (runtimeState === "aborted") return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-    </svg>
-  );
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10"/>
-    </svg>
-  );
-}
-
-function badgeClass(runtimeState: string | null) {
-  if (runtimeState === "waiting_human_review") return "badge badge-waiting";
-  if (runtimeState === "completed" || runtimeState === "review_completed") return "badge badge-completed";
-  if (runtimeState === "aborted") return "badge badge-aborted";
-  return "badge badge-default";
-}
 
 function formatTimestamp(value: string | null) {
   if (!value) return "—";
@@ -56,13 +24,13 @@ function formatTimestamp(value: string | null) {
 function InboxRow({ item, interactive = true }: { item: ReviewInboxEntry; interactive?: boolean }) {
   const content = (
     <>
-      <div className={statusClass(item.runtime_state)}>
-        {statusIcon(item.runtime_state)}
+      <div className={runtimeStateRowClass(item.runtime_state)}>
+        <RuntimeStateIcon state={item.runtime_state} />
       </div>
       <div className="inbox-row-body">
         <div className="inbox-row-top">
           <div className="inbox-row-left">
-            <span className={badgeClass(item.runtime_state)}>
+            <span className={runtimeStateBadgeClass(item.runtime_state)}>
               {item.runtime_state ?? "unknown"}
             </span>
             {item.external_communication_phase ? (

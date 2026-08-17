@@ -5,6 +5,7 @@ import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,11 @@ from sqlglot import exp, parse
 from sqlglot.errors import ParseError
 
 from .ledger import ServerIdempotencyLedger
+from .response import build_tool_response
+
+
+# Bind the connector identity once while sharing the closed response envelope.
+_response = partial(build_tool_response, provider="sqlite")
 
 
 @dataclass(frozen=True)
@@ -209,30 +215,6 @@ def _load_profiles() -> dict[str, DatabaseProfile]:
             timeout_seconds=float(item.get("timeout_seconds", 10)),
         )
         for profile_id, item in payload.get("profiles", {}).items()
-    }
-
-
-# Build the closed audit-safe response without returning database rows.
-def _response(
-    *,
-    status: str,
-    summary: str,
-    error_code: str | None,
-    retryable: bool,
-    timestamp: datetime,
-    external_reference: str | None = None,
-    metadata: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    return {
-        "schema_version": "external_execution.tool_response.v1",
-        "status": status,
-        "external_reference": external_reference,
-        "provider": "sqlite",
-        "timestamp": timestamp.isoformat(),
-        "summary": summary,
-        "error_code": error_code,
-        "retryable": retryable,
-        "metadata": metadata or {},
     }
 
 

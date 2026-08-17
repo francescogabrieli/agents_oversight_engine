@@ -23,12 +23,14 @@ from ..domain import (
     build_evidence_selection_digest,
     build_evidence_snapshot_manifest,
     digest_json,
+    set_external_communication_phase,
 )
+from .completion_contract import terminal_actor_completion_omits_external_candidate
 
 # Nodes.py contains the executable Layer 2 business logic.
 # At this stage the runtime performs bootstrap, planning, and the actor/tool loop.
 from .lifecycle_service import _append_step_record
-from .completion_contract import terminal_actor_completion_omits_external_candidate
+
 
 # Apply actor progress while preserving typed runtime invariants.
 def actor(state: TaskState, *, actor_service: ActorPort) -> TaskState:
@@ -547,7 +549,7 @@ def _update_external_communication_after_actor_result(
         ActorResultType.ASK_CLARIFICATION,
         ActorResultType.NEEDS_REPLAN,
     }:
-        _set_external_communication_phase(
+        set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
             summary="The external communication branch needs more evidence or a revised plan before drafting.",
@@ -556,7 +558,7 @@ def _update_external_communication_after_actor_result(
         return
 
     if actor_result.result_type == ActorResultType.BLOCKED:
-        _set_external_communication_phase(
+        set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
             summary="The external communication branch hit a recoverable runtime block and remains in recovery.",
@@ -581,7 +583,7 @@ def _update_external_communication_after_actor_result(
             typed_draft=actor_result.external_communication_draft,
             review_ready=review_ready,
         )
-        _set_external_communication_phase(
+        set_external_communication_phase(
             state,
             phase=(
                 ExternalCommunicationPhase.DRAFT_PROPOSAL
@@ -595,21 +597,6 @@ def _update_external_communication_after_actor_result(
             ),
             review_ready=review_ready,
         )
-
-# Apply actor progress while preserving typed runtime invariants.
-def _set_external_communication_phase(
-    state: TaskState,
-    *,
-    phase: ExternalCommunicationPhase,
-    summary: str,
-    review_ready: bool | None = None,
-) -> None:
-    if state.external_communication is None:
-        return
-    state.external_communication.phase = phase
-    if review_ready is not None:
-        state.external_communication.review_ready = review_ready
-    state.external_communication.last_transition_summary = summary
 
 # Apply actor progress while preserving typed runtime invariants.
 def _external_communication_output_is_review_ready(
@@ -765,19 +752,18 @@ def _map_actor_result_to_runtime_state(
     return RuntimeState.READY_NEXT_STEP
 
 __all__ = [
-    "actor",
-    "_record_actor_execution",
-    "_update_external_communication_after_actor_result",
-    "_set_external_communication_phase",
-    "_external_communication_output_is_review_ready",
-    "_merge_external_communication_draft",
-    "_build_external_communication_draft_body",
     "_advance_to_next_plan_step",
-    "_map_actor_result_to_runtime_state",
+    "_build_external_communication_draft_body",
     "_enforce_actor_runtime_contract",
-    "_retry_actor_protocol_locally",
-    "_repeats_identical_intermediate_output",
+    "_external_communication_output_is_review_ready",
+    "_map_actor_result_to_runtime_state",
+    "_merge_external_communication_draft",
+    "_record_actor_execution",
     "_record_workspace_artifact",
+    "_repeats_identical_intermediate_output",
+    "_retry_actor_protocol_locally",
+    "_update_external_communication_after_actor_result",
+    "actor",
     "commit_completion_candidate",
     "commit_terminal_completion_candidate",
 ]

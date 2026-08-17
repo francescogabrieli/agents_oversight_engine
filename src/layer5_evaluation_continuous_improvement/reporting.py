@@ -31,9 +31,9 @@ def generate_evaluation_report(
     run_ids = [str(run["run_id"]) for run in runs]
     datasets = {
         "runs": runs,
-        "governance_events": _child_rows(store, "governance_events", run_ids),
-        "human_reviews": _child_rows(store, "human_reviews", run_ids),
-        "external_operations": _child_rows(store, "external_operations", run_ids),
+        "governance_events": store.child_rows("governance_events", run_ids),
+        "human_reviews": store.child_rows("human_reviews", run_ids),
+        "external_operations": store.child_rows("external_operations", run_ids),
     }
     for name, rows in datasets.items():
         csv_path = output_dir / f"{name}.csv"
@@ -79,17 +79,6 @@ def generate_evaluation_report(
     )
     files.append(manifest_path)
     return tuple(files)
-
-
-# Load ordered child rows for the report bundle.
-def _child_rows(store: EvaluationStore, table: str, run_ids: list[str]) -> list[dict[str, Any]]:
-    if not run_ids:
-        return []
-    placeholders = ", ".join("?" for _ in run_ids)
-    return store.query(
-        f"SELECT * FROM {table} WHERE run_id IN ({placeholders}) ORDER BY run_id",
-        run_ids,
-    )
 
 
 # Export the exact tabular input used by downstream figures.

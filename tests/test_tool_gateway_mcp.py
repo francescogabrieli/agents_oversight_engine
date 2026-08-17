@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 import unittest
 from uuid import uuid4
 from pathlib import Path
@@ -9,11 +8,6 @@ from unittest.mock import patch
 from langgraph.checkpoint.memory import InMemorySaver
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = REPO_ROOT / "src"
-
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-
 
 from layer1_intake import (
     BudgetConfig,
@@ -32,6 +26,7 @@ from layer2_runtime_governance import (
     ActorTask,
     CapabilityAccessMode,
     GovernanceReasonCode,
+    Layer2RuntimeDependencies,
     PlanStep,
     PlannerDecision,
     PolicyDecision,
@@ -44,11 +39,10 @@ from layer2_runtime_governance import (
     ScratchpadEntry,
     ScratchpadEntryType,
     StepValidation,
-    ToolExecutionResult,
     ToolGatewayConfig,
     ToolName,
     ToolRequest,
-    build_runtime_graph,
+    compose_layer2_runtime,
 )
 from layer3_tool_bus_external_capabilities.tools import (
     OpenAIToolGateway,
@@ -351,13 +345,15 @@ class GatewayMCPTests(unittest.TestCase):
         self.assertIn("not registered or is disabled", result.error_message or "")
 
     def test_runtime_observes_mcp_tool_result(self) -> None:
-        graph = build_runtime_graph(
-            planner_service=SingleStepPlanner(),
-            actor_service=MCPThenCompleteActor(),
-            tool_gateway_service=_build_mcp_test_gateway(),
-            replanner_service=NoopReplanner(),
-            policy_engine_service=AllowPolicyEngine(),
-            checkpointer=InMemorySaver(serde=build_runtime_serializer()),
+        graph = compose_layer2_runtime(
+            Layer2RuntimeDependencies(
+                planner=SingleStepPlanner(),
+                actor=MCPThenCompleteActor(),
+                tool_gateway=_build_mcp_test_gateway(),
+                replanner=NoopReplanner(),
+                policy_engine=AllowPolicyEngine(),
+                checkpointer=InMemorySaver(serde=build_runtime_serializer()),
+            )
         )
 
         result = graph.invoke(
@@ -396,7 +392,7 @@ class FakeHTTPResponse:
         return self
 
     # Exit the context manager used by urlopen.
-    def __exit__(self, exc_type, exc, traceback) -> None:
+    def __exit__(self, _exc_type, _exc, _traceback) -> None:
         return None
 
     # Return the mocked response body.

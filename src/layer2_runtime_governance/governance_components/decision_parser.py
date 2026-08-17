@@ -379,18 +379,6 @@ def _pillar_result_signals(*, pillar_results: dict[str, Any]) -> list[dict[str, 
         )
     return signals
 
-# Parse and validate one bounded part of the untrusted OPA response.
-def _map_opa_directive_for_trace(directive: GovernanceDirective) -> GovernanceDirective:
-    if directive in {
-        GovernanceDirective.REQUEST_MORE_EVIDENCE,
-        GovernanceDirective.REPLAN,
-        GovernanceDirective.WAIT_HUMAN_REVIEW,
-        GovernanceDirective.CONTINUE_READ_ONLY,
-    }:
-        return directive
-    return GovernanceDirective.CONTINUE
-
-
 # Map only the active dynamic assessment, never the final static/judge-owned directive.
 def _map_dynamic_recommendation_for_trace(
     directive: DynamicPolicyRecommendedDirective,
@@ -402,21 +390,6 @@ def _map_dynamic_recommendation_for_trace(
         DynamicPolicyRecommendedDirective.REPLAN: GovernanceDirective.REPLAN,
         DynamicPolicyRecommendedDirective.WAIT_HUMAN_REVIEW: GovernanceDirective.WAIT_HUMAN_REVIEW,
     }[directive]
-
-# Parse and validate one bounded part of the untrusted OPA response.
-def _map_governance_to_dynamic_directive(
-    directive: GovernanceDirective,
-) -> DynamicPolicyRecommendedDirective:
-    if directive == GovernanceDirective.WAIT_HUMAN_REVIEW:
-        return DynamicPolicyRecommendedDirective.WAIT_HUMAN_REVIEW
-    if directive == GovernanceDirective.REPLAN:
-        return DynamicPolicyRecommendedDirective.REPLAN
-    if directive == GovernanceDirective.REQUEST_MORE_EVIDENCE:
-        return DynamicPolicyRecommendedDirective.REQUEST_MORE_EVIDENCE
-    if directive == GovernanceDirective.CONTINUE_READ_ONLY:
-        return DynamicPolicyRecommendedDirective.CONTINUE_READ_ONLY
-    return DynamicPolicyRecommendedDirective.CONTINUE
-
 
 # Derive the dynamic diagnostic recommendation from active evidence/trajectory only.
 def _dynamic_recommendation_from_active_pillars(
@@ -531,6 +504,24 @@ def _parse_non_empty_text(value: Any, *, field_name: str) -> str:
         raise PolicyEngineExecutionError(f"OPA response field '{field_name}' must be a non-empty string.")
     return " ".join(value.strip().split())
 
+
+# Validate and normalize the policy-owned required-pillar response.
+def parse_required_pillars_response(value: Any) -> dict[str, bool]:
+    if not isinstance(value, dict):
+        raise PolicyEngineExecutionError("OPA required_pillars response must be an object.")
+    required_fields = (
+        "require_evidence",
+        "require_risk",
+        "require_trajectory",
+        "require_behavioral",
+        "require_judge",
+    )
+    if any(type(value.get(field_name)) is not bool for field_name in required_fields):
+        raise PolicyEngineExecutionError(
+            "OPA required_pillars response is missing one or more boolean fields."
+        )
+    return {field_name: value[field_name] for field_name in required_fields}
+
 __all__ = [
     "_build_governance_trace_from_opa_output",
     "_validate_governance_decision_output",
@@ -540,12 +531,11 @@ __all__ = [
     "_static_policy_directive_from_pillar",
     "_static_policy_summary_from_pillar",
     "_pillar_result_signals",
-    "_map_opa_directive_for_trace",
-    "_map_governance_to_dynamic_directive",
     "_parse_oversight_level",
     "_parse_oversight_reason_codes",
     "_merge_oversight_reason_codes",
     "_parse_policy_decision",
     "_parse_reason_codes",
-    "_parse_non_empty_text"
+    "_parse_non_empty_text",
+    "parse_required_pillars_response",
 ]

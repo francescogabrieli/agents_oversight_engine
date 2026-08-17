@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import sys
 import unittest
 from copy import deepcopy
 from dataclasses import replace
@@ -12,11 +11,6 @@ from jsonschema import Draft202012Validator, ValidationError
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = REPO_ROOT / "src"
-
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-
 
 from layer1_intake import (
     BudgetConfig,
@@ -67,8 +61,6 @@ from layer2_runtime_governance import (
     ToolName,
     ToolRequest,
     ToolObservation,
-    TraceOversightAssessment,
-    TraceJudgeAssessment,
     TrajectoryHealthAssessment,
     build_compact_trace_from_runtime_trace,
     build_layer2_runtime_trace,

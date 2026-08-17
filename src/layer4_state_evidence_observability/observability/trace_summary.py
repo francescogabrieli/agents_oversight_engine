@@ -1,6 +1,4 @@
 
-from typing import Any
-
 from .models import (
     Layer2RuntimeTrace,
     TraceGovernancePass,
@@ -37,8 +35,8 @@ def _build_runtime_section(trace: Layer2RuntimeTrace) -> str:
     lines = [
         "## Runtime",
         "",
-        f"| Property | Value |",
-        f"|----------|-------|",
+        "| Property | Value |",
+        "|----------|-------|",
         f"| Current state | `{r.current_state}` |",
         f"| Bootstrap completed | {r.bootstrap_completed} |",
         f"| Actor turns | {r.actor_turn_count} |",
@@ -64,8 +62,8 @@ def _build_intake_section(trace: Layer2RuntimeTrace) -> str:
     lines = [
         "## Task Intake",
         "",
-        f"| Property | Value |",
-        f"|----------|-------|",
+        "| Property | Value |",
+        "|----------|-------|",
         f"| Goal | {_truncate(i.goal, 200)} |",
         f"| Context | {_truncate(i.context, 200) if i.context else '—'} |",
         f"| Sensitivity | `{i.sensitivity}` |",
@@ -126,8 +124,8 @@ def _build_actor_section(trace: Layer2RuntimeTrace) -> str:
     lines = [
         "## Actor (Last Turn)",
         "",
-        f"| Property | Value |",
-        f"|----------|-------|",
+        "| Property | Value |",
+        "|----------|-------|",
         f"| Result type | `{a.result_type}` |",
         f"| Plan step | `{a.plan_step_id or '—'}` |",
         f"| Capability mode | `{a.capability_mode or '—'}` |",
@@ -410,7 +408,7 @@ def _build_human_review_section(trace: Layer2RuntimeTrace) -> str:
             if dec.clarification_text:
                 lines.append(f"  - Clarification: {_truncate(dec.clarification_text, 120)}")
             if dec.external_communication_edit:
-                lines.append(f"  - Draft edit applied: yes")
+                lines.append("  - Draft edit applied: yes")
         lines.append("")
     elif hr.last_decision:
         dec = hr.last_decision
@@ -444,7 +442,7 @@ def _build_external_communication_section(trace: Layer2RuntimeTrace) -> str:
             lines.append(f"- **CC:** {', '.join(d.cc)}")
         if d.body:
             lines.append("")
-            lines.append(f"**Body:**")
+            lines.append("**Body:**")
             lines.append("")
             lines.append(f"```\n{_truncate(d.body, 600)}\n```")
     if ec.edit_history:
@@ -461,8 +459,8 @@ def _build_external_execution_section(trace: Layer2RuntimeTrace) -> str:
     lines = [
         "## External Execution",
         "",
-        f"| Property | Value |",
-        f"|----------|-------|",
+        "| Property | Value |",
+        "|----------|-------|",
         f"| Execution intent | `{ee.execution_intent}` |",
         f"| Capability ID | `{ee.capability_id or '—'}` |",
         f"| Payload digest | `{_truncate(ee.current_payload_digest or '—', 24)}` |",

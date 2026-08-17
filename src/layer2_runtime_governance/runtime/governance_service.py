@@ -1,40 +1,8 @@
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import replace
-from typing import Callable
 
 from layer1_intake import ExecutionIntent
-
-from layer4_state_evidence_observability.behavioral import (
-    BehavioralStorePort,
-    persist_behavioral_runtime_snapshot,
-    persist_judge_snapshot,
-)
-from ..actor_contract import ActorResultType
-from ..governance_components import (
-    GovernanceDecision,
-    GovernanceDirective,
-    PolicyEnginePort,
-    PolicyEvaluationInput,
-    evaluate_opa_first_governance,
-)
-from ..judge import JudgePort
-from ..hitl import build_human_review_request
-from ..domain import (
-    ExternalCommunicationPhase,
-    RuntimeState,
-    TaskState,
-)
-from layer3_tool_bus_external_capabilities.tools import ToolGatewayConfig
-
-# Nodes.py contains the executable Layer 2 business logic.
-# At this stage the runtime performs bootstrap, planning, and the actor/tool loop.
-from .actor_service import (
-    _set_external_communication_phase,
-    commit_completion_candidate,
-    commit_terminal_completion_candidate,
-)
-from .lifecycle_service import _append_step_record
-from ..domain.step_recovery import restore_actor_step_for_more_evidence
 from layer3_tool_bus_external_capabilities.external_operations import (
     ExternalExecutionAuthorizationSource,
     GovernanceActionFeedback,
@@ -42,6 +10,39 @@ from layer3_tool_bus_external_capabilities.external_operations import (
     OperationBoundary,
     build_external_execution_request,
 )
+from layer3_tool_bus_external_capabilities.tools import ToolGatewayConfig
+from layer4_state_evidence_observability.behavioral import (
+    BehavioralStorePort,
+    persist_behavioral_runtime_snapshot,
+    persist_judge_snapshot,
+)
+
+from ..actor_contract import ActorResultType
+from ..domain import (
+    ExternalCommunicationPhase,
+    RuntimeState,
+    TaskState,
+    set_external_communication_phase,
+)
+from ..domain.step_recovery import restore_actor_step_for_more_evidence
+from ..governance_components import (
+    GovernanceDecision,
+    GovernanceDirective,
+    PolicyEnginePort,
+    PolicyEvaluationInput,
+    evaluate_opa_first_governance,
+)
+from ..hitl import build_human_review_request
+from ..judge import JudgePort
+
+# Nodes.py contains the executable Layer 2 business logic.
+# At this stage the runtime performs bootstrap, planning, and the actor/tool loop.
+from .actor_service import (
+    commit_completion_candidate,
+    commit_terminal_completion_candidate,
+)
+from .lifecycle_service import _append_step_record
+
 
 # Apply a validated policy outcome to canonical runtime state.
 def governance(
@@ -121,7 +122,7 @@ def governance(
                 task_state=state,
                 behavioral_store=behavioral_store_service,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             _append_step_record(
                 state,
                 node_name="behavioral_persistence",
@@ -137,7 +138,7 @@ def governance(
                 task_state=state,
                 behavioral_store=behavioral_store_service,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             _append_step_record(
                 state,
                 node_name="judge_persistence",
@@ -165,7 +166,7 @@ def _apply_governance_decision(
     policy_input: PolicyEvaluationInput,
 ) -> None:
     if governance_decision.directive == GovernanceDirective.STOP:
-        _set_external_communication_phase(
+        set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.BLOCKED,
             summary="Governance denied the external communication branch.",
@@ -203,7 +204,7 @@ def _apply_governance_decision(
             if state.external_communication is not None
             else False
         )
-        _set_external_communication_phase(
+        set_external_communication_phase(
             state,
             phase=(
                 ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED
@@ -230,7 +231,7 @@ def _apply_governance_decision(
         return
 
     if governance_decision.directive == GovernanceDirective.REPLAN:
-        _set_external_communication_phase(
+        set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
             summary="Governance redirected the external communication branch back to replanning.",
@@ -247,7 +248,7 @@ def _apply_governance_decision(
         return
 
     if governance_decision.directive == GovernanceDirective.REQUEST_MORE_EVIDENCE:
-        _set_external_communication_phase(
+        set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
             summary="Governance required more evidence before the external communication draft can progress.",
@@ -350,7 +351,7 @@ def _route_authorized_external_operation(
         )
         state.current_external_execution_request = None
         state.current_state = RuntimeState.COMPLETED
-        _set_external_communication_phase(
+        set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.APPROVED_DRAFT,
             summary=(
@@ -492,7 +493,7 @@ def _apply_action_revision(
             external_operation_proposal=None,
             external_impact=False,
         )
-    _set_external_communication_phase(
+    set_external_communication_phase(
         state,
         phase=ExternalCommunicationPhase.DRAFT_IN_PROGRESS,
         summary="Governance invalidated the current payload and requested a bounded semantic revision.",
@@ -535,8 +536,8 @@ def _infer_human_review_resume_state(
     return RuntimeState.ACTING
 
 __all__ = [
-    "governance",
     "_apply_governance_decision",
     "_infer_human_review_resume_state",
     "_route_authorized_external_operation",
+    "governance",
 ]

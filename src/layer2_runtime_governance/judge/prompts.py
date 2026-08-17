@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
-from enum import Enum
+
+from json_serialization import to_jsonable
 
 from .contracts import JudgeContext
 from .evidence_bundle import (
@@ -166,7 +167,7 @@ def build_judge_user_prompt(
     raw["evidence_bundle"] = judge_evidence_bundle_to_dict(evidence_bundle)
     # operation_stage is a derived property and must be projected back explicitly.
     raw["operation_stage"] = context.operation_stage.value
-    payload = _jsonable(raw)
+    payload = to_jsonable(raw)
     correction = ""
     if protocol_correction:
         correction = (
@@ -184,17 +185,6 @@ def build_judge_user_prompt(
         f"{json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True)}"
         f"{correction}"
     )
-
-
-# Convert nested enum values emitted by dataclass serialization.
-def _jsonable(value):
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(item) for item in value]
-    return value
 
 
 __all__ = ["build_judge_system_prompt", "build_judge_user_prompt"]

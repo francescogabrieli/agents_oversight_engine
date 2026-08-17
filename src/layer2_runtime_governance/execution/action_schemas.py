@@ -282,11 +282,6 @@ def _string() -> dict[str, object]:
     return {"type": "string"}
 
 
-# Return a bounded integer property shape.
-def _integer(minimum: int, maximum: int) -> dict[str, object]:
-    return {"type": "integer", "minimum": minimum, "maximum": maximum}
-
-
 # Return the bounded confidence property shape.
 def _confidence() -> dict[str, object]:
     return {"type": "number", "minimum": 0, "maximum": 1}

@@ -248,3 +248,16 @@ class EvaluationStore:
     def query(self, statement: str, parameters: Iterable[Any] = ()) -> list[dict[str, Any]]:
         rows = self.connection.execute(statement, tuple(parameters)).fetchall()
         return [dict(row) for row in rows]
+
+    # Load ordered child facts for a bounded set of evaluation runs.
+    def child_rows(self, table: str, run_ids: Sequence[str]) -> list[dict[str, Any]]:
+        allowed_tables = {"governance_events", "human_reviews", "external_operations"}
+        if table not in allowed_tables:
+            raise ValueError(f"Unsupported evaluation child table: {table}")
+        if not run_ids:
+            return []
+        placeholders = ", ".join("?" for _ in run_ids)
+        return self.query(
+            f"SELECT * FROM {table} WHERE run_id IN ({placeholders}) ORDER BY run_id",
+            run_ids,
+        )

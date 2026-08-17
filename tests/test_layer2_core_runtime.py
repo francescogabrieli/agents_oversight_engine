@@ -1,6 +1,42 @@
 from __future__ import annotations
 
-from tests.layer2_runtime_fixtures import *
+import json
+import shutil
+import unittest
+from pathlib import Path
+from uuid import uuid4
+
+from langgraph.checkpoint.memory import InMemorySaver
+
+from tests.layer2_runtime_fixtures import (
+    LocalProgressPlanner,
+    ProgressThenCompleteActor,
+    StaticJudge,
+    StubActor,
+    StubPlanner,
+    StubPolicyEngine,
+    StubReplanner,
+    StubToolGateway,
+    _build_external_communication_intake_result_for_governance,
+    _build_research_intake_result,
+    _build_test_graph,
+    _judge_wait_review_assessment,
+)
+
+from layer2_runtime_governance.actor_contract import ActorResult, ActorResultType, ActorTask, CapabilityAccessMode
+from layer2_runtime_governance.domain import PlanStepStatus, RuntimeState, TaskState
+from layer2_runtime_governance.governance_components import (
+    GovernanceDirective,
+    PolicyDecision,
+)
+from layer4_state_evidence_observability.infrastructure.checkpointing import (
+    build_runtime_serializer,
+)
+from layer4_state_evidence_observability.infrastructure.runtime_artifacts import (
+    RuntimeArtifactStore,
+)
+from main_layer2 import run_layer2_flow, write_layer2_trace_file
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class _CrashingActor:
@@ -151,13 +187,6 @@ class Layer2RuntimeCoreTests(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-
-    def test_run_layer2_flow_persists_runtime_artifacts(self) -> None:
-        run_id = uuid4().hex
-        temp_dir = REPO_ROOT / f"_layer2_runtime_artifacts_test_{run_id}"
-        artifact_store = RuntimeArtifactStore(root_path=temp_dir)
-        if temp_dir.exists():
-            shutil.rmtree(temp_dir, ignore_errors=True)
 
     # A runtime exception preserves the latest checkpoint and a typed diagnostic artifact.
     def test_run_layer2_flow_persists_failure_artifact(self) -> None:

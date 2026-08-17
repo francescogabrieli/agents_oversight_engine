@@ -7,9 +7,8 @@ from urllib.error import HTTPError, URLError
 
 from ..contracts import ToolErrorCode, ToolExecutionResult, ToolObservation, ToolRequest
 from ..eu_legal import try_fetch_specialized_legal_document
-from ..extractors import extract_pdf_text, extract_title, extract_visible_text
+from ..extractors import extract_pdf_text, extract_visible_text
 from ..models import ToolDefinition
-from ..results import failure_result
 from ..text import is_meaningful_extracted_text, truncate_text
 
 
@@ -17,13 +16,13 @@ class _HttpResponse(Protocol):
     headers: Message
 
     # Read one bounded response body.
-    def read(self, amount: int = -1) -> bytes: ...
+    def read(self, amount: int = -1) -> bytes: ...  # noqa
 
     # Support urllib response context management.
     def __enter__(self) -> "_HttpResponse": ...
 
     # Preserve the standard response cleanup contract.
-    def __exit__(self, exc_type, exc, traceback) -> None: ...
+    def __exit__(self, _exc_type, _exc, _traceback) -> None: ...
 
 
 HttpOpener = Callable[..., _HttpResponse]
@@ -61,10 +60,8 @@ class HttpFetchAdapter:
             return ToolExecutionResult(request=tool_request, success=False, summary="PDF extraction exceeded the byte limit.", error_message="PDF byte limit prevents treating the document as complete.", error_code=ToolErrorCode.BYTE_LIMIT, extractability_limited=True)
         decoded_body = raw_body.decode(charset, errors="replace")
         if content_type == "text/html":
-            title = extract_title(decoded_body) or tool_request.url
             extracted_text = extract_visible_text(decoded_body)
         else:
-            title = tool_request.url
             extracted_text = decoded_body
         content = truncate_text(extracted_text, definition.max_content_chars)
         content_truncated = truncated or len(content or "") < len(extracted_text)

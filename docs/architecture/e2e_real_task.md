@@ -44,17 +44,17 @@ bootstrap_from_intake
   -> planner
   -> actor
   -> governance
-  -> { tool_gateway | replanner | human_review | finalize_bootstrap }
+  -> { actor | tool_gateway | replanner | human_review | external_execution | finalize_bootstrap }
 tool_gateway
   -> observe_tool_result
-  -> actor
+  -> { actor | governance | replanner }
 ```
 
 Per il task DMA, il comportamento atteso e:
 
 1. l'actor riceve il piano completo e può committare soltanto lo step corrente
 2. se servono fonti ufficiali, emette una `ToolRequest` read-only
-3. `governance` valuta sempre il turn prima del tool
+3. `governance` valuta il confine operativo prima del tool
 4. solo dopo una direttiva compatibile il `tool_gateway` esegue davvero il tool
 5. `observe_tool_result` registra le `ToolObservation` concrete prodotte dall'adapter senza assegnare support level o classificazioni semantiche
 6. l'actor riparte con quella evidenza osservata
@@ -65,8 +65,8 @@ Tool tipici in questo scenario:
 
 ## 5. Come Decide La Governance Oggi
 
-La governance attuale non e piu "OPA + massimo livello di conservativita".
-Lavora in strati espliciti:
+La governance attuale è OPA-first. Python raccoglie e tipizza fatti; OPA/Rego resta
+l'unica autorità della direttiva finale. I pillar visibili in trace sono:
 
 1. `static_policy`
 2. `dynamic_policy`
@@ -75,13 +75,14 @@ Lavora in strati espliciti:
 5. decisione finale OPA/Rego
 
 Dettagli rilevanti:
-- `static_policy` e `dynamic_policy` vengono valutati in parallelo nel nodo `governance`
-- `deny`, `require_human_review` e `ask_clarification` di OPA restano veto hard
-- `behavioral` produce similarity, deviation e novelty score su memoria SQLite locale
-- il `judge` e selettivo e puo restare `disabled` mantenendo il contratto typed
-- OPA/Rego usa escalation pesata: i layer advisory non possono scavalcare da soli la static policy
+- i pillar richiesti dipendono dall'evento: una richiesta tool read-only usa la sola
+  policy statica, mentre una completion usa evidenza e traiettoria
+- `deny`, `require_human_review` e `ask_clarification` restano direttive OPA
+- `behavioral` e rischio operativo sono osservazioni shadow-only e non influenzano la direttiva
+- il `judge` è obbligatorio per ogni candidato `governed_external` non negato ed è
+  vincolato al digest della proposta
 - il runtime valida e applica la direttiva OPA senza eseguire un secondo algoritmo decisionale in Python
-- il caso `allow_read_only` mantiene visibile il vincolo read-only anche quando la direttiva finale diventa piu conservativa di `continue_read_only`
+- il vincolo read-only resta esplicito nella trace e non viene indebolito dal routing
 
 Effetto pratico sul task reale:
 - se l'evidenza raccolta supporta solo un summary alto livello, il runtime deve abbassare la precisione del testo
@@ -122,8 +123,8 @@ A fine run:
 
 1. `observability/` esporta la trace tipizzata dal solo `TaskState`
 2. la governance trace espone la direttiva OPA, i pillar, i reason code e le invarianti verificate
-3. `persistence.py` aggiorna artifact per dashboard e replay
-4. `behavioral.py` persiste il read model storico locale
+3. `src/layer4_state_evidence_observability/infrastructure/runtime_artifacts.py` aggiorna gli artifact per dashboard e replay
+4. `src/layer4_state_evidence_observability/behavioral/service.py` aggiorna il read model storico locale
 
 Questo chiude il ciclo e2e reale:
 

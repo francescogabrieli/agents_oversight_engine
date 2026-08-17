@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import sys
 import unittest
 from pathlib import Path
 
@@ -10,10 +9,6 @@ SRC_ROOT = REPO_ROOT / "src"
 LAYER2_ROOT = SRC_ROOT / "layer2_runtime_governance"
 LAYER3_ROOT = SRC_ROOT / "layer3_tool_bus_external_capabilities"
 LAYER4_ROOT = SRC_ROOT / "layer4_state_evidence_observability"
-
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-
 
 class Layer2ArchitectureTests(unittest.TestCase):
     # Domain modules must not regain the copied cross-capability import boilerplate.
@@ -188,6 +183,50 @@ class Layer2ArchitectureTests(unittest.TestCase):
             source = path.read_text(encoding="utf-8")
             self.assertIn("compose_layer2_runtime", source)
             self.assertNotIn("build_runtime_graph(", source)
+
+    # Graph wiring must receive resolved ports instead of selecting concrete adapters.
+    def test_graph_wiring_does_not_import_default_factories(self) -> None:
+        tree = ast.parse((LAYER2_ROOT / "graph.py").read_text(encoding="utf-8"))
+        imported_factories = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+            if alias.name.startswith(("build_default_", "load_"))
+        }
+        self.assertFalse(imported_factories)
+
+        graph_builder = next(
+            node
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "build_runtime_graph"
+        )
+        # A missing AST default marks each wiring dependency as required.
+        keyword_defaults = dict(
+            zip(graph_builder.args.kwonlyargs, graph_builder.args.kw_defaults)
+        )
+        required_dependencies = {
+            "checkpointer",
+            "planner_service",
+            "actor_service",
+            "tool_gateway_service",
+            "tool_gateway_config",
+            "replanner_service",
+            "policy_engine_service",
+            "judge_service",
+            "behavioral_store_service",
+            "external_operation_executor_service",
+            "external_capability_registry",
+        }
+        defaults_by_name = {
+            argument.arg: default
+            for argument, default in keyword_defaults.items()
+        }
+        self.assertTrue(required_dependencies.issubset(defaults_by_name))
+        self.assertTrue(
+            all(defaults_by_name[name] is None for name in required_dependencies)
+        )
 
     # Persisted threads must accept both pre-refactor and canonical domain type paths.
     def test_checkpoint_allowlist_preserves_legacy_state_and_governance_paths(self) -> None:

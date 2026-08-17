@@ -6,13 +6,11 @@ import os
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from threading import Event, Lock, Thread
-from typing import Any
-
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import CallToolResult
 
-from layer4_state_evidence_observability.infrastructure.environment import get_env_value
+from environment_config import get_env_value
 from ..registry import ExternalCapabilityRegistry, MCPTransportKind
 
 

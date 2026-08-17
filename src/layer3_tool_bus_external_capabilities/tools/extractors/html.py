@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-from html import unescape
 from html.parser import HTMLParser
 
 
@@ -13,7 +11,7 @@ class _VisibleTextExtractor(HTMLParser):
         self._skip_depth = 0
 
     # Track ignored regions so script and style content never enters output.
-    def handle_starttag(self, tag: str, attrs) -> None:
+    def handle_starttag(self, tag: str, _attrs) -> None:
         if tag.lower() in {"script", "style", "noscript"}:
             self._skip_depth += 1
 
@@ -35,15 +33,6 @@ class _VisibleTextExtractor(HTMLParser):
         return " ".join(self._chunks)
 
 
-# Extract a readable title from an HTML page when one exists.
-def extract_title(html_text: str) -> str | None:
-    match = re.search(r"<title[^>]*>(.*?)</title>", html_text, flags=re.IGNORECASE | re.DOTALL)
-    if match is None:
-        return None
-    title = " ".join(unescape(match.group(1)).split())
-    return title or None
-
-
 # Convert HTML into compact visible text.
 def extract_visible_text(html_text: str) -> str:
     parser = _VisibleTextExtractor()
@@ -52,4 +41,4 @@ def extract_visible_text(html_text: str) -> str:
     return parser.get_text()
 
 
-__all__ = ["extract_title", "extract_visible_text"]
+__all__ = ["extract_visible_text"]

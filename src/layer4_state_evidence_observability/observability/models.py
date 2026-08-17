@@ -131,89 +131,6 @@ class TraceGovernancePass:
 
 # Read-only observability component extracted from the trace facade.
 @dataclass(frozen=True)
-class TraceOversightSignal:
-    # TraceOversightSignal keeps each adaptive score separate and explainable.
-    score: float | None
-    level: str
-    reason_codes: tuple[str, ...]
-    mode: str
-    decision_influence: bool
-    applicability: str
-    consequence_facts: dict[str, Any] | None
-
-
-# Read-only observability component extracted from the trace facade.
-@dataclass(frozen=True)
-class TraceOversightAssessment:
-    # TraceOversightAssessment records the confidence/risk/trajectory recommendation.
-    evidence_quality: TraceOversightSignal
-    operational_risk: TraceOversightSignal
-    trajectory_health: TraceOversightSignal
-    recommended_directive: str
-    summary: str
-    reason_codes: tuple[str, ...]
-
-
-# Read-only observability component extracted from the trace facade.
-@dataclass(frozen=True)
-class TraceStaticPolicyAssessment:
-    # TraceStaticPolicyAssessment keeps the OPA hard decision separate from later layers.
-    policy_decision: str
-    reason_codes: tuple[str, ...]
-    summary: str
-    policy_engine_name: str
-    policy_bundle_version: str
-    policy_directive: str
-    hard_deny: bool
-    constraints: tuple[str, ...]
-    violations: tuple[str, ...]
-    mode: str
-    decision_influence: bool
-
-
-# Read-only observability component extracted from the trace facade.
-@dataclass(frozen=True)
-class TraceBehavioralAssessment:
-    # TraceBehavioralAssessment exposes the behavioural history summary, scores, and advisory directive.
-    history_available: bool
-    historical_run_count: int
-    feature_snapshot_version: str
-    summary: str
-    notes: tuple[str, ...]
-    matched_run_count: int
-    historical_similarity_score: float | None
-    behavior_deviation_score: float | None
-    novelty_score: float | None
-    behavioral_recommended_directive: str
-    behavioral_flags: tuple[str, ...]
-    matched_run_ids: tuple[str, ...]
-    mode: str
-    decision_influence: bool
-    status: str
-
-
-# Read-only observability component extracted from the trace facade.
-@dataclass(frozen=True)
-class TraceJudgeAssessment:
-    # TraceJudgeAssessment keeps the selective semantic judge auditable across governance passes.
-    invoked: bool
-    recommendation: str
-    confidence: float
-    summary: str
-    rationale: str
-    flags: tuple[str, ...]
-    evaluated_target: str
-    status: str
-    verdict: str | None
-    severity: str
-    findings: tuple[dict[str, Any], ...]
-    evaluated_operation_digest: str | None
-    prompt_version: str | None
-    model_metadata: dict[str, Any] | None
-
-
-# Read-only observability component extracted from the trace facade.
-@dataclass(frozen=True)
 class TraceExternalCommunicationDraft:
     # TraceExternalCommunicationDraft captures the typed outbound content in JSON-safe form.
     channel: str
@@ -376,11 +293,6 @@ __all__ = [
     "TraceToolCall",
     "TraceToolObservation",
     "TraceGovernancePass",
-    "TraceOversightSignal",
-    "TraceOversightAssessment",
-    "TraceStaticPolicyAssessment",
-    "TraceBehavioralAssessment",
-    "TraceJudgeAssessment",
     "TraceExternalCommunicationDraft",
     "TraceHumanReviewExternalEdit",
     "TraceHumanReviewRequest",

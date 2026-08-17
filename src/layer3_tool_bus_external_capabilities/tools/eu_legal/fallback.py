@@ -6,7 +6,7 @@ from ...tool_contract import ToolExecutionResult, ToolObservation, ToolRequest
 from ..models import ToolDefinition
 from ..text import is_meaningful_extracted_text, truncate_text
 from ..extractors import extract_visible_text
-from .source import build_cellar_fallback_url, celex_identifier, is_bot_challenge
+from .source import build_cellar_fallback_url, is_bot_challenge
 
 FetchDocument = Callable[..., object]
 PdfExtractor = Callable[[bytes], str]

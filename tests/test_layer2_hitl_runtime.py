@@ -1,11 +1,72 @@
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
+import unittest
+from copy import deepcopy
 from dataclasses import replace
+from pathlib import Path
+from unittest.mock import patch
+from uuid import uuid4
 
-from tests.layer2_runtime_fixtures import *
+from langgraph.types import Command
+
+from tests.layer2_runtime_fixtures import (
+    ClarificationActor,
+    JudgeRequiredPolicyEngine,
+    ReviewPolicyEngine,
+    StaticJudge,
+    StubPolicyEngine,
+    _build_actor_ready_state_for_judge,
+    _build_clarification_intake_result,
+    _build_external_communication_intake_result,
+    _build_external_communication_intake_result_for_governance,
+    _build_policy_input_task_state,
+    _build_research_intake_result,
+    _build_test_graph,
+    _judge_wait_review_assessment,
+)
+
+from layer2_runtime_governance.actor_contract import (
+    ActorResult,
+    ActorResultType,
+    CapabilityAccessMode,
+)
+from layer2_runtime_governance.domain import (
+    ExternalCommunicationDraft,
+    ExternalCommunicationPhase,
+    ExternalCommunicationState,
+    HumanReviewDecision,
+    HumanReviewDecisionType,
+    HumanReviewExternalEdit,
+    PlanStep,
+    PlanStepStatus,
+    RuntimeFlag,
+    RuntimeState,
+    ScratchpadEntry,
+    ScratchpadEntryType,
+    StepValidation,
+    TaskState,
+)
+from layer2_runtime_governance.governance_components import (
+    GovernanceDirective,
+    PolicyDecision,
+    build_opa_input_document,
+    build_policy_evaluation_input,
+    evaluate_opa_first_governance,
+)
+from layer2_runtime_governance.hitl import (
+    _apply_human_review_decision,
+    build_human_review_request,
+    human_review,
+)
+from layer2_runtime_governance.runtime.actor_service import _record_actor_execution
+from layer2_runtime_governance.runtime.governance_service import governance
 from layer4_state_evidence_observability.infrastructure.checkpointing import (
     build_default_checkpointer,
 )
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class Layer2HumanReviewRuntimeTests(unittest.TestCase):

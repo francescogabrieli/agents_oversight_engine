@@ -197,16 +197,6 @@ def _tool_call_budget_exhausted(*, state: TaskState) -> bool:
     return maximum is not None and state.tool_call_count >= maximum
 
 
-# Backwards-compatible helper now delegates to capability-owned canonicalization.
-def _is_exact_duplicate_request(*, state: TaskState, request: ToolRequest) -> bool:
-    return _successful_result_for_action(state, canonical_action_key(request)) is not None
-
-
-# Backwards-compatible helper for tests and callers.
-def _host_circuit_open(*, state: TaskState, request: ToolRequest) -> bool:
-    return _circuit_open(state, request, canonical_action_key(request))
-
-
 # Validate adapter-produced observations without assigning semantic quality.
 def _validated_tool_observations(*, state: TaskState, tool_result: ToolExecutionResult) -> list[ToolObservation]:
     if not tool_result.success:
@@ -267,4 +257,4 @@ def _append_observation(*, state: TaskState, tool_result: ToolExecutionResult, e
         state.scratchpad.append(ScratchpadEntry(state.actor_turn_count, step.step_id, ScratchpadEntryType.OBSERVATION, f"Observed tool result from '{tool_result.request.tool_name.value}': {tool_result.summary}", evidence_refs))
 
 
-__all__ = ["canonical_action_key", "observe_tool_result", "tool_gateway", "_host_circuit_open", "_is_exact_duplicate_request", "_tool_call_budget_exhausted"]
+__all__ = ["canonical_action_key", "observe_tool_result", "tool_gateway", "_tool_call_budget_exhausted"]

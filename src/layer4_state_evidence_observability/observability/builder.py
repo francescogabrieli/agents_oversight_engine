@@ -4,18 +4,9 @@ from typing import Any
 from layer1_intake import IntakeResult
 
 from layer2_runtime_governance.actor_contract import ActorResult
-from ..behavioral import BehavioralAssessment
 from layer2_runtime_governance.governance_components import (
     GovernanceDecision,
-    StaticPolicyAssessment,
     governance_reason_code_values,
-)
-from layer2_runtime_governance.judge import JudgeAssessment
-from ..oversight.contracts import (
-    EvidenceQualityAssessment,
-    OperationalRiskAssessment,
-    OversightAssessment,
-    TrajectoryHealthAssessment,
 )
 from .serialization import enum_value, to_jsonable
 from layer2_runtime_governance.domain import (
@@ -37,7 +28,6 @@ from layer3_tool_bus_external_capabilities.external_operations import ExternalEx
 from .models import (
     Layer2RuntimeTrace,
     TraceActorTurn,
-    TraceBehavioralAssessment,
     TraceExecutionSummary,
     TraceExternalCommunicationDraft,
     TraceExternalCommunicationSummary,
@@ -49,13 +39,9 @@ from .models import (
     TraceHumanReviewRequest,
     TraceHumanReviewSummary,
     TraceIntakeSummary,
-    TraceJudgeAssessment,
     TraceToolObservation,
-    TraceOversightAssessment,
-    TraceOversightSignal,
     TracePlanStep,
     TraceRuntimeSummary,
-    TraceStaticPolicyAssessment,
     TraceToolCall,
 )
 
@@ -323,86 +309,6 @@ def _build_governance_pass(
 
 
 # Read-only observability component extracted from the trace facade.
-def _build_static_policy_assessment(
-    assessment: StaticPolicyAssessment,
-) -> TraceStaticPolicyAssessment:
-    return TraceStaticPolicyAssessment(
-        policy_decision=assessment.policy_decision.value,
-        reason_codes=tuple(code.value for code in assessment.reason_codes),
-        summary=assessment.summary,
-        policy_engine_name=assessment.policy_engine_name,
-        policy_bundle_version=assessment.policy_bundle_version,
-        policy_directive=assessment.policy_directive.value,
-        hard_deny=assessment.hard_deny,
-        constraints=assessment.constraints,
-        violations=assessment.violations,
-        mode=assessment.mode,
-        decision_influence=assessment.decision_influence,
-    )
-
-
-# Read-only observability component extracted from the trace facade.
-def _build_oversight_assessment(assessment: OversightAssessment) -> TraceOversightAssessment:
-    return TraceOversightAssessment(
-        evidence_quality=_build_oversight_signal(assessment.evidence_quality),
-        operational_risk=_build_oversight_signal(assessment.operational_risk),
-        trajectory_health=_build_oversight_signal(assessment.trajectory_health),
-        recommended_directive=assessment.recommended_directive.value,
-        summary=assessment.summary,
-        reason_codes=tuple(code.value for code in assessment.reason_codes),
-    )
-
-
-# Read-only observability component extracted from the trace facade.
-def _build_behavioral_assessment(
-    assessment: BehavioralAssessment,
-) -> TraceBehavioralAssessment:
-    return TraceBehavioralAssessment(
-        history_available=assessment.history_available,
-        historical_run_count=assessment.historical_run_count,
-        feature_snapshot_version=assessment.feature_snapshot_version,
-        summary=assessment.summary,
-        notes=assessment.notes,
-        matched_run_count=assessment.matched_run_count,
-        historical_similarity_score=assessment.historical_similarity_score,
-        behavior_deviation_score=assessment.behavior_deviation_score,
-        novelty_score=assessment.novelty_score,
-        behavioral_recommended_directive=assessment.behavioral_recommended_directive.value,
-        behavioral_flags=assessment.behavioral_flags,
-        matched_run_ids=assessment.matched_run_ids,
-        mode=assessment.mode,
-        decision_influence=assessment.decision_influence,
-        status=assessment.status,
-    )
-
-
-# Read-only observability component extracted from the trace facade.
-def _build_judge_assessment(
-    assessment: JudgeAssessment,
-) -> TraceJudgeAssessment:
-    return TraceJudgeAssessment(
-        invoked=assessment.invoked,
-        recommendation=assessment.recommendation.value,
-        confidence=assessment.confidence,
-        summary=assessment.summary,
-        rationale=assessment.rationale,
-        flags=assessment.flags,
-        evaluated_target=assessment.evaluated_target,
-        status=assessment.status.value,
-        verdict=assessment.verdict.value if assessment.verdict is not None else None,
-        severity=assessment.severity.value,
-        findings=tuple(to_jsonable(item) for item in assessment.findings),
-        evaluated_operation_digest=assessment.evaluated_operation_digest,
-        prompt_version=assessment.prompt_version,
-        model_metadata=(
-            to_jsonable(assessment.model_metadata)
-            if assessment.model_metadata is not None
-            else None
-        ),
-    )
-
-
-# Read-only observability component extracted from the trace facade.
 def _build_human_review_summary(*, task_state: TaskState) -> TraceHumanReviewSummary:
     return TraceHumanReviewSummary(
         pending_request=(
@@ -609,36 +515,6 @@ def _build_human_review_external_edit(
 
 
 # Read-only observability component extracted from the trace facade.
-def _build_oversight_signal(
-    signal: EvidenceQualityAssessment | OperationalRiskAssessment | TrajectoryHealthAssessment,
-) -> TraceOversightSignal:
-    return TraceOversightSignal(
-        score=signal.score,
-        level=signal.level.value,
-        reason_codes=tuple(code.value for code in signal.reason_codes),
-        mode=getattr(signal, "mode", "active"),
-        decision_influence=bool(getattr(signal, "decision_influence", True)),
-        applicability=getattr(signal, "applicability", "applicable"),
-        consequence_facts=(
-            {
-                "recoverability": signal.recoverability,
-                "blast_radius": signal.blast_radius,
-                "sensitivity": signal.sensitivity,
-                "exposure": signal.exposure,
-                "target_criticality": signal.target_criticality,
-                "impact_level": signal.impact_level,
-                "dominant_factors": list(signal.dominant_factors),
-                "unknown_facts": list(signal.unknown_facts),
-                "fact_provenance": list(signal.fact_provenance),
-                "profile_version": signal.profile_version,
-            }
-            if isinstance(signal, OperationalRiskAssessment)
-            else None
-        ),
-    )
-
-
-# Read-only observability component extracted from the trace facade.
 def _build_step_record(record: StepRecord) -> dict[str, Any]:
     return {
         "step_index": record.step_index,
@@ -701,14 +577,8 @@ __all__ = [
     "_build_tool_call_from_result",
     "_build_tool_call_from_request",
     "_tool_request_fields",
-    "_build_tool_source",
     "_build_tool_observation",
-    "_build_governance_decision",
     "_build_governance_pass",
-    "_build_static_policy_assessment",
-    "_build_oversight_assessment",
-    "_build_behavioral_assessment",
-    "_build_judge_assessment",
     "_build_human_review_summary",
     "_build_human_review_request",
     "_build_human_review_decision",
@@ -717,7 +587,6 @@ __all__ = [
     "_build_external_execution_summary",
     "_build_external_execution_receipt",
     "_build_human_review_external_edit",
-    "_build_oversight_signal",
     "_build_step_record",
     "_build_executed_step",
     "_build_scratchpad_entry",

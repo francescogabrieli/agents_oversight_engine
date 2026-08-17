@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
-from enum import Enum
+
+from json_serialization import to_jsonable
 
 from ..domain import digest_json
 from .contracts import JudgeContext, JudgeEvidenceBundle
@@ -30,7 +31,7 @@ def build_judge_evidence_bundle(*, context: JudgeContext) -> JudgeEvidenceBundle
         "omitted_observation_ids": list(context.omitted_observation_ids),
         "selected_evidence_refs": list(context.selected_evidence_refs),
         "allowed_evidence_ids": list(allowed_evidence_ids),
-        "observations": [_jsonable(asdict(item)) for item in context.observations],
+        "observations": [to_jsonable(asdict(item)) for item in context.observations],
     }
     return JudgeEvidenceBundle(
         artifact_version=str(core["artifact_version"]),
@@ -50,7 +51,7 @@ def build_judge_evidence_bundle(*, context: JudgeContext) -> JudgeEvidenceBundle
 
 # Serialize the bundle without adding runtime narration or alternate evidence identifiers.
 def judge_evidence_bundle_to_dict(bundle: JudgeEvidenceBundle) -> dict[str, object]:
-    return _jsonable(asdict(bundle))
+    return to_jsonable(asdict(bundle))
 
 
 # Persist and replay the exact same JSON object supplied to the semantic prompt.
@@ -61,17 +62,6 @@ def judge_evidence_bundle_to_json(bundle: JudgeEvidenceBundle) -> str:
         ensure_ascii=False,
         sort_keys=True,
     )
-
-
-# Normalize nested enums without changing identifiers or observed content.
-def _jsonable(value):
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(item) for item in value]
-    return value
 
 
 __all__ = [

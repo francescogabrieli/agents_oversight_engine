@@ -17,11 +17,9 @@ from layer3_tool_bus_external_capabilities.external_operations import (
 from layer2_runtime_governance.judge import (
     JudgeAssessment,
     JudgeAssessmentStatus,
-    JudgeClaimAssessment,
     JudgeCompletedStepContext,
     JudgeContext,
     JudgeEvidenceContext,
-    JudgeClaimStatus,
     JudgeExternalRevisionContext,
     JudgeOperationStage,
     JudgePlanStepContext,

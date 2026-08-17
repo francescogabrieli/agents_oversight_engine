@@ -27,12 +27,15 @@ Domain modules must remain independent from LangGraph, provider SDKs, HTTP, subp
   LangGraph may need their historical qualified type paths while restoring durable
   checkpoints; new code must import from `domain/`, `governance_components/`, and
   `planning.replanning` directly.
-- `compat/`: temporary, deprecated migration aliases for non-persistent legacy paths.
 - `planning/`: semantic planning and replanning capabilities.
 - `execution/`: actor prompts, provider-neutral action schemas, response normalization,
-  result construction, evidence/claim guards, settings, and provider adapters.
-- `domain/evidence_policy.py`: canonical support-level and claim-precision
-  classification shared by execution guards and governance compatibility surfaces.
+  result construction, settings, the actor factory, and provider adapters. The Bedrock
+  actor adapter lives in `execution/providers/bedrock.py`; its Converse client and
+  settings live in `execution/providers/bedrock_runtime.py`.
+- `domain/evidence.py`: observation lineage plus digest-bound evidence snapshot and
+  selection projections used at governance boundaries.
+- `layer3_tool_bus_external_capabilities/tool_contract.py`: canonical read-only tool
+  requests, results, adapter-created observations, and the Tool Gateway port.
 - `layer3_tool_bus_external_capabilities/tools/`: governed tool registry, validation,
   adapters, and content extraction.
 - `layer3_tool_bus_external_capabilities/external_operations/`: immutable external
@@ -40,7 +43,7 @@ Domain modules must remain independent from LangGraph, provider SDKs, HTTP, subp
   communication normalization, capability consequence profiles, and the production
   executor seam.
 - `signal_services/`: typed governance signal providers.
-- `hitl/`: typed human-review flow and dashboard projections.
+- `hitl/`: typed human-review flow; dashboard projections live in `hitl/dashboard.py`.
 - `graph.py`: LangGraph composition and routing only.
 - `runtime/`: lifecycle, planning, actor, tool, replanning, governance services, and
   thin LangGraph node adapters. The former `nodes.py` facade has been removed.
@@ -53,9 +56,10 @@ Domain modules must remain independent from LangGraph, provider SDKs, HTTP, subp
 - `governance_components/`: OPA contracts, input-document construction, validation,
   response parsing, and fail-closed handling.
 - `layer4_state_evidence_observability/infrastructure/`: official checkpoint
-  composition, bounded retention, environment loading, runtime artifacts, and
-  review-decision transport persistence. Runtime warning filters remain in
-  `runtime_warnings.py` because they belong to Layer 2 startup.
+  composition, bounded retention, environment loading, review-decision transport,
+  and the runtime artifact store in `infrastructure/runtime_artifacts.py`. Runtime
+  warning filters remain in `runtime_warnings.py` because they belong to Layer 2
+  startup.
 
 ## Persistence and interrupts
 
@@ -93,8 +97,9 @@ configuration.
 External communication synthesis uses a dedicated actor action carrying `channel`,
 `recipient`, `subject`, and `body`; generic completion actions are not exposed on
 that turn. The runtime derives policy facts and the immutable operation digest from
-this typed draft. External communication plans are normalized to one draft step,
-preceded by at most one genuine evidence step when stronger evidence is required.
+this typed draft. Planning services preserve the planner-owned semantic steps
+without compaction, insertion, or lexical rewriting; the planner remains responsible
+for the evidence-acquisition and drafting trajectory.
 
 ## Governed external execution
 
@@ -143,9 +148,9 @@ provide cross-thread application memory, while checkpointers persist graph execu
 5. Add capability-level tests before graph-level integration tests.
 6. Update this map if the extension creates a new architectural boundary.
 
-Only checkpoint-compatible anchors remain at the package root. Production code must target
-the capability package; non-persistent facades belong solely under `compat/` during the
-external migration window and must not be recreated at the root.
+Only checkpoint-compatible compatibility facades remain at the package root. Production
+code must target the capability package; retired non-persistent facades must not be
+recreated at the root.
 
 ## Test map
 
@@ -171,9 +176,8 @@ code must never import them.
 
 - Add provider-neutral runtime actions in `execution/action_schemas.py`.
 - Normalize provider payloads only in `execution/response_parser.py`.
-- Keep canonical evidence sufficiency and claim-precision classification in
-  `domain/evidence_policy.py`; execution-specific guards remain in
-  `execution/evidence_guard.py`.
+- Keep observation lineage and evidence-selection digests in `domain/evidence.py`;
+  validate actor-selected observation identifiers in `execution/result_builder.py`.
 - Construct typed `ActorResult` values in `execution/result_builder.py`.
 - Put SDK-specific calls in `execution/providers/`; providers must return the same
   runtime action envelope and must not import graph nodes or governance policy code.

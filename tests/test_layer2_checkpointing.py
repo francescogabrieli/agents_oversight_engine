@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 import shutil
 import unittest
 from datetime import datetime, timezone
@@ -12,11 +11,6 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = REPO_ROOT / "src"
-
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-
 
 from layer4_state_evidence_observability.infrastructure.checkpoint_retention import (
     CheckpointRetentionSettings,
