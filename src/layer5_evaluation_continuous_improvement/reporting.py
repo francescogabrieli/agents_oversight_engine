@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .metrics import build_evaluation_summary
+from .metrics import build_evaluation_summary, classify_reason_code_pillar
 from .store import EvaluationStore
 
 
@@ -40,7 +40,27 @@ def generate_evaluation_report(
         _write_csv(csv_path, rows)
         files.append(csv_path)
 
-    plot_specs = {
+    # Export reason codes tabular dataset
+    reason_code_rows = [
+        {"reason_code": code, "pillar": classify_reason_code_pillar(code), "count": count}
+        for code, count in summary.reason_codes.items()
+    ]
+    reason_csv = output_dir / "reason_codes.csv"
+    _write_csv(reason_csv, reason_code_rows)
+    files.append(reason_csv)
+
+    efficiency_data: dict[str, float | int] = {
+        "Turni Actor medi": summary.avg_actor_turns if summary.avg_actor_turns is not None else 0.0,
+        "Tool call medie": summary.avg_tool_calls if summary.avg_tool_calls is not None else 0.0,
+        "Replanning medi": summary.avg_replanning_count if summary.avg_replanning_count is not None else 0.0,
+        "Pass di governance medi": summary.avg_governance_passes if summary.avg_governance_passes is not None else 0.0,
+    }
+    if summary.avg_review_time_seconds is not None:
+        efficiency_data["Tempo review medio (s)"] = summary.avg_review_time_seconds
+    if summary.avg_run_duration_seconds is not None:
+        efficiency_data["Durata run media (s)"] = summary.avg_run_duration_seconds
+
+    plot_specs: dict[str, tuple[str, dict[str, int] | dict[str, float | int]]] = {
         "runtime_statuses.svg": ("Stato tecnico delle run", summary.runtime_statuses),
         "task_results.svg": (
             "Correttezza delle run giudicate",
@@ -53,6 +73,18 @@ def generate_evaluation_report(
         "external_operation_statuses.svg": (
             "Stato delle operazioni esterne",
             summary.external_statuses,
+        ),
+        "governance_pillars.svg": (
+            "Distribuzione per pilastro di governance",
+            summary.pillar_breakdown,
+        ),
+        "reason_codes.svg": (
+            "Frequenza reason code di governance",
+            summary.reason_codes,
+        ),
+        "efficiency_averages.svg": (
+            "Metriche medie di efficienza e overhead per run",
+            efficiency_data,
         ),
     }
     for filename, (title, values) in plot_specs.items():
@@ -93,26 +125,28 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 
 # Render a dependency-free SVG bar chart suitable for thesis export.
-def _bar_chart_svg(title: str, values: dict[str, int]) -> str:
+def _bar_chart_svg(title: str, values: dict[str, int] | dict[str, float | int]) -> str:
     items = list(values.items()) or [("nessun dato", 0)]
     width = 900
-    left = 210
+    left = 270
     top = 90
     row_height = 58
-    chart_width = 620
-    maximum = max((value for _, value in items), default=0) or 1
+    chart_width = 540
+    maximum = max((float(value) for _, value in items), default=0.0) or 1.0
     height = top + len(items) * row_height + 50
     elements = [
         f'<text x="40" y="45" font-size="26" font-family="sans-serif">{html.escape(title)}</text>'
     ]
-    for index, (label, value) in enumerate(items):
+    for index, (label, val) in enumerate(items):
         y = top + index * row_height
-        bar_width = int(chart_width * value / maximum)
+        val_float = float(val)
+        bar_width = int(chart_width * val_float / maximum) if maximum > 0 else 0
+        display_val = f"{val:.2f}" if isinstance(val, float) else str(val)
         elements.extend(
             [
                 f'<text x="{left - 15}" y="{y + 25}" text-anchor="end" font-size="18" font-family="sans-serif">{html.escape(label)}</text>',
                 f'<rect x="{left}" y="{y}" width="{bar_width}" height="34" fill="#2563eb" rx="4"/>',
-                f'<text x="{left + bar_width + 10}" y="{y + 25}" font-size="18" font-family="sans-serif">{value}</text>',
+                f'<text x="{left + bar_width + 10}" y="{y + 25}" font-size="18" font-family="sans-serif">{display_val}</text>',
             ]
         )
     return _svg_document(width, height, elements)

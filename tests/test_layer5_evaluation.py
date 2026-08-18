@@ -52,6 +52,18 @@ class Layer5EvaluationTests(unittest.TestCase):
                 self.assertEqual(summary.escalation_confusion["false_negative"], 1)
                 self.assertEqual(summary.human_intervention_rate, 1.0)
                 self.assertEqual(summary.failed_tool_rate, 0.5)
+                self.assertEqual(
+                    summary.reason_codes,
+                    {"judge_uncertain": 1, "local_output_allowed": 1},
+                )
+                self.assertEqual(
+                    summary.pillar_breakdown,
+                    {"General Policy": 1, "Semantic Judge": 1},
+                )
+                self.assertEqual(summary.avg_actor_turns, 3.0)
+                self.assertEqual(summary.avg_tool_calls, 2.0)
+                self.assertEqual(summary.avg_replanning_count, 1.0)
+                self.assertEqual(summary.avg_governance_passes, 2.0)
 
     # Produce a self-contained thesis bundle without optional plotting dependencies.
     def test_report_exports_json_csv_and_svg(self) -> None:
@@ -70,7 +82,11 @@ class Layer5EvaluationTests(unittest.TestCase):
                 names = {path.name for path in files}
                 self.assertIn("summary.json", names)
                 self.assertIn("runs.csv", names)
+                self.assertIn("reason_codes.csv", names)
                 self.assertIn("task_results.svg", names)
+                self.assertIn("governance_pillars.svg", names)
+                self.assertIn("reason_codes.svg", names)
+                self.assertIn("efficiency_averages.svg", names)
                 self.assertIn("escalation_confusion_matrix.svg", names)
                 self.assertIn("manifest.json", names)
                 self.assertTrue(all(path.exists() for path in files))

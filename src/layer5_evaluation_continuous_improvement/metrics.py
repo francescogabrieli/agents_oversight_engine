@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections import Counter
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -23,10 +24,48 @@ class EvaluationSummary:
     escalation_confusion: dict[str, int]
     escalation_precision: float | None
     escalation_recall: float | None
+    reason_codes: dict[str, int]
+    pillar_breakdown: dict[str, int]
+    avg_actor_turns: float | None
+    avg_tool_calls: float | None
+    avg_replanning_count: float | None
+    avg_governance_passes: float | None
+    avg_review_time_seconds: float | None
+    avg_run_duration_seconds: float | None
 
     # Expose a JSON-ready report contract.
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+# Classify a raw governance reason code into its architectural pillar.
+def classify_reason_code_pillar(code: str) -> str:
+    code_lower = code.lower().strip()
+    if code_lower.startswith("judge_") or "confidence" in code_lower:
+        return "Semantic Judge"
+    if code_lower.startswith("evidence_") or "evidence" in code_lower:
+        return "Evidence Pillar"
+    if code_lower.startswith("trajectory_") or any(
+        k in code_lower for k in ("replan", "resubmi", "revision_limit", "recovery", "repeated")
+    ):
+        return "Trajectory Pillar"
+    if code_lower.startswith("behavioral_") or "operational_risk" in code_lower:
+        return "Behavioral / Risk Pillar"
+    if any(
+        k in code_lower
+        for k in (
+            "static_",
+            "read_only",
+            "prohibited",
+            "database_profile",
+            "sql_",
+            "capability_",
+            "policy_version",
+            "opa_",
+        )
+    ):
+        return "Static Policy & Safety"
+    return "General Policy"
 
 
 # Aggregate the core thesis metrics from atomic evaluation facts.
@@ -52,6 +91,38 @@ def build_evaluation_summary(
     failed_tool_total = sum(int(run["failed_tool_count"]) for run in runs)
     confusion = _escalation_confusion(governance)
 
+    # Reason codes and pillar breakdown
+    reason_counter: Counter[str] = Counter()
+    pillar_counter: Counter[str] = Counter()
+    for event in governance:
+        raw_codes = event.get("reason_codes_json")
+        if raw_codes:
+            try:
+                parsed_codes = json.loads(raw_codes)
+                if isinstance(parsed_codes, list):
+                    for code in parsed_codes:
+                        if isinstance(code, str) and code:
+                            reason_counter[code] += 1
+                            pillar_counter[classify_reason_code_pillar(code)] += 1
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+    # Overhead and efficiency metrics
+    actor_turns = [int(run["actor_turn_count"]) for run in runs]
+    tool_calls = [int(run["tool_call_count"]) for run in runs]
+    replannings = [int(run["replanning_count"]) for run in runs]
+    governance_passes = [int(run["governance_pass_count"]) for run in runs]
+    review_times = [
+        float(r["review_time_seconds"])
+        for r in reviews
+        if r.get("review_time_seconds") is not None
+    ]
+    durations = [
+        float(run["duration_seconds"])
+        for run in runs
+        if run.get("duration_seconds") is not None
+    ]
+
     return EvaluationSummary(
         total_runs=len(runs),
         judged_runs=len(judged_runs),
@@ -67,6 +138,14 @@ def build_evaluation_summary(
         escalation_confusion=confusion,
         escalation_precision=_ratio(confusion["true_positive"], confusion["true_positive"] + confusion["false_positive"]),
         escalation_recall=_ratio(confusion["true_positive"], confusion["true_positive"] + confusion["false_negative"]),
+        reason_codes=dict(sorted(reason_counter.items())),
+        pillar_breakdown=dict(sorted(pillar_counter.items())),
+        avg_actor_turns=_mean(actor_turns),
+        avg_tool_calls=_mean(tool_calls),
+        avg_replanning_count=_mean(replannings),
+        avg_governance_passes=_mean(governance_passes),
+        avg_review_time_seconds=_mean(review_times),
+        avg_run_duration_seconds=_mean(durations),
     )
 
 
@@ -93,3 +172,8 @@ def _escalation_confusion(events: list[dict[str, Any]]) -> dict[str, int]:
 # Return a safe ratio or None when the metric has no denominator.
 def _ratio(numerator: int, denominator: int) -> float | None:
     return numerator / denominator if denominator else None
+
+
+# Return arithmetic mean of numeric sequence or None if empty.
+def _mean(values: list[int] | list[float]) -> float | None:
+    return (sum(values) / len(values)) if values else None
