@@ -196,6 +196,7 @@ class HitlControlPlaneTests(unittest.TestCase):
 
         runtime_graph = _FakeGraph()
         artifact_store = mock.Mock(spec=RuntimeArtifactStore)
+        artifact_store.capture_governance_exchange.return_value = mock.MagicMock()
         with (
             mock.patch(
                 "main_layer2.compose_layer2_runtime",

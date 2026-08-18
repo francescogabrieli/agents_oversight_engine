@@ -1,8 +1,50 @@
+import json
+import logging
 from dataclasses import replace
 from typing import Any
 
 from layer4_state_evidence_observability.behavioral import BehavioralAssessment, BehavioralStorePort
+from json_serialization import to_jsonable
 from ..judge import JudgeAssessment, JudgePort
+
+logger = logging.getLogger(__name__)
+
+
+# Format and write governance exchange payloads to DEBUG logs for thesis auditability.
+def _log_governance_exchange_block(
+    header: str,
+    payload: Any,
+    *,
+    thread_id: str | None = None,
+    current_plan_step_id: str | None = None,
+    actor_turn_count: int | None = None,
+    evaluated_operation_digest: str | None = None,
+    opa_stage: str | None = None,
+) -> None:
+    target_logger = logging.getLogger(f"{__name__}.{thread_id}") if thread_id else logger
+    if not target_logger.isEnabledFor(logging.DEBUG):
+        return
+
+    meta_parts = []
+    if thread_id is not None:
+        meta_parts.append(f"thread_id: {thread_id}")
+    if current_plan_step_id is not None:
+        meta_parts.append(f"current_plan_step_id: {current_plan_step_id}")
+    if actor_turn_count is not None:
+        meta_parts.append(f"actor_turn_count: {actor_turn_count}")
+    if evaluated_operation_digest is not None:
+        meta_parts.append(f"evaluated_operation_digest: {evaluated_operation_digest}")
+    if opa_stage is not None:
+        meta_parts.append(f"opa_stage: {opa_stage}")
+
+    meta_str = ("\n" + "\n".join(meta_parts)) if meta_parts else ""
+    try:
+        json_str = json.dumps(to_jsonable(payload), indent=2)
+    except Exception:
+        json_str = str(payload)
+
+    target_logger.debug("%s%s\n%s", header, meta_str, json_str)
+
 from layer4_state_evidence_observability.oversight.contracts import DynamicPolicyAssessment
 from ..domain import (
     ActorResultType,
@@ -74,6 +116,29 @@ def evaluate_opa_first_governance(
         external_operation=external_operation,
     )
     policy_input = build_policy_evaluation_input(task_state=task_state)
+    current_plan_step_id = policy_input.current_plan_step_id
+    actor_turn_count = policy_input.actor_turn_count
+    evaluated_operation_digest = (
+        external_operation.payload_digest if external_operation is not None else None
+    )
+
+    _log_governance_exchange_block(
+        "=== GOVERNANCE EXCHANGE: ACTOR RESULT ===",
+        task_state.actor_result,
+        thread_id=thread_id,
+        current_plan_step_id=current_plan_step_id,
+        actor_turn_count=actor_turn_count,
+        evaluated_operation_digest=evaluated_operation_digest,
+    )
+    _log_governance_exchange_block(
+        "=== GOVERNANCE EXCHANGE: POLICY PROJECTION ===",
+        policy_input,
+        thread_id=thread_id,
+        current_plan_step_id=current_plan_step_id,
+        actor_turn_count=actor_turn_count,
+        evaluated_operation_digest=evaluated_operation_digest,
+    )
+
     # OPA owns configuration; the PEP only declares the compatible bundle versions.
     policy_bundle_version = str(policy_engine_service.policy_bundle_version)
     policy_config_version = str(policy_engine_service.policy_config_version)
@@ -83,10 +148,23 @@ def evaluate_opa_first_governance(
         policy_input=policy_input,
     )
 
+    _log_governance_exchange_block(
+        "=== GOVERNANCE EXCHANGE: OPA REQUIRED PILLARS REQUEST ===",
+        base_facts,
+        thread_id=thread_id,
+        current_plan_step_id=current_plan_step_id,
+        actor_turn_count=actor_turn_count,
+        evaluated_operation_digest=evaluated_operation_digest,
+        opa_stage="required_pillars",
+    )
     try:
         pillar_requirements = _evaluate_required_pillars(
             policy_engine_service=policy_engine_service,
             base_facts=base_facts,
+            thread_id=thread_id,
+            current_plan_step_id=current_plan_step_id,
+            actor_turn_count=actor_turn_count,
+            evaluated_operation_digest=evaluated_operation_digest,
         )
     except Exception as exc:
         return _build_fail_closed_governance_result(
@@ -215,9 +293,27 @@ def evaluate_opa_first_governance(
             pillar_errors=pillar_errors,
         )
         validate_governance_decision_input(preliminary_input)
+        _log_governance_exchange_block(
+            "=== GOVERNANCE EXCHANGE: OPA PRELIMINARY DECISION REQUEST ===",
+            preliminary_input,
+            thread_id=thread_id,
+            current_plan_step_id=current_plan_step_id,
+            actor_turn_count=actor_turn_count,
+            evaluated_operation_digest=evaluated_operation_digest,
+            opa_stage="preliminary_decision",
+        )
         preliminary_output = _evaluate_governance_decision_output(
             policy_engine_service=policy_engine_service,
             decision_input=preliminary_input,
+        )
+        _log_governance_exchange_block(
+            "=== GOVERNANCE EXCHANGE: OPA PRELIMINARY DECISION RESPONSE ===",
+            preliminary_output,
+            thread_id=thread_id,
+            current_plan_step_id=current_plan_step_id,
+            actor_turn_count=actor_turn_count,
+            evaluated_operation_digest=evaluated_operation_digest,
+            opa_stage="preliminary_decision",
         )
         _validate_governance_decision_output(preliminary_output)
         judge_required = _parse_judge_admission(preliminary_output)["required"]
@@ -320,10 +416,31 @@ def evaluate_opa_first_governance(
         )
 
     try:
-        raw_output = _evaluate_governance_decision_output(
-            policy_engine_service=policy_engine_service,
-            decision_input=decision_input,
-        )
+        if judge_required:
+            _log_governance_exchange_block(
+                "=== GOVERNANCE EXCHANGE: OPA FINAL DECISION REQUEST ===",
+                decision_input,
+                thread_id=thread_id,
+                current_plan_step_id=current_plan_step_id,
+                actor_turn_count=actor_turn_count,
+                evaluated_operation_digest=evaluated_operation_digest,
+                opa_stage="final_decision",
+            )
+            raw_output = _evaluate_governance_decision_output(
+                policy_engine_service=policy_engine_service,
+                decision_input=decision_input,
+            )
+            _log_governance_exchange_block(
+                "=== GOVERNANCE EXCHANGE: OPA FINAL DECISION RESPONSE ===",
+                raw_output,
+                thread_id=thread_id,
+                current_plan_step_id=current_plan_step_id,
+                actor_turn_count=actor_turn_count,
+                evaluated_operation_digest=evaluated_operation_digest,
+                opa_stage="final_decision",
+            )
+        else:
+            raw_output = preliminary_output
         # Build every exported diagnostic from the scored final OPA pillars.
         dynamic_assessment = _build_dynamic_assessment_from_signals(
             pillars=raw_output.get("pillar_results", pillars),
@@ -336,6 +453,15 @@ def evaluate_opa_first_governance(
             behavioral_assessment=behavioral_assessment,
             judge_assessment=judge_assessment,
             decision_input=decision_input,
+        )
+        _log_governance_exchange_block(
+            "=== GOVERNANCE EXCHANGE: TYPED GOVERNANCE DECISION ===",
+            governance_decision,
+            thread_id=thread_id,
+            current_plan_step_id=current_plan_step_id,
+            actor_turn_count=actor_turn_count,
+            evaluated_operation_digest=evaluated_operation_digest,
+            opa_stage="final_decision" if judge_required else "preliminary_decision",
         )
     except Exception as exc:
         return _build_fail_closed_governance_result(
@@ -375,8 +501,21 @@ def _evaluate_required_pillars(
     *,
     policy_engine_service: PolicyEnginePort,
     base_facts: dict[str, Any],
+    thread_id: str | None = None,
+    current_plan_step_id: str | None = None,
+    actor_turn_count: int | None = None,
+    evaluated_operation_digest: str | None = None,
 ) -> dict[str, bool]:
     result = policy_engine_service.evaluate_required_pillars(base_facts=base_facts)
+    _log_governance_exchange_block(
+        "=== GOVERNANCE EXCHANGE: OPA REQUIRED PILLARS RESPONSE ===",
+        result,
+        thread_id=thread_id,
+        current_plan_step_id=current_plan_step_id,
+        actor_turn_count=actor_turn_count,
+        evaluated_operation_digest=evaluated_operation_digest,
+        opa_stage="required_pillars",
+    )
     return parse_required_pillars_response(result)
 
 # Keep OPA orchestration explicit and independently testable.

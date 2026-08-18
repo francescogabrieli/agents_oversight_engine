@@ -19,8 +19,6 @@ def build_policy_evaluation_input(*, task_state: TaskState) -> PolicyEvaluationI
         policy_profile_name=task_state.execution_policy.policy_profile_name,
         confidence_threshold=task_state.execution_policy.confidence_threshold,
         read_only_mode=task_state.execution_policy.read_only_mode,
-        budget_max_steps=task_state.execution_policy.budget.max_steps,
-        budget_max_tool_calls=task_state.execution_policy.budget.max_tool_calls,
         runtime_state=task_state.current_state,
         runtime_flags=tuple(task_state.runtime_flags),
         current_plan_step_id=evaluated_step.step_id if evaluated_step is not None else actor_result.plan_step_id,
@@ -56,10 +54,6 @@ def build_opa_input_document(*, policy_input: PolicyEvaluationInput) -> dict[str
             "profile_name": policy_input.policy_profile_name,
             "confidence_threshold": policy_input.confidence_threshold,
             "read_only_mode": policy_input.read_only_mode,
-            "budget": {
-                "max_steps": policy_input.budget_max_steps,
-                "max_tool_calls": policy_input.budget_max_tool_calls,
-            },
         },
         "runtime": {
             "state": policy_input.runtime_state.value,

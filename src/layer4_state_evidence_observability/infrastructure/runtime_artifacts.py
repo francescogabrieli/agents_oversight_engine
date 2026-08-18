@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -60,6 +62,39 @@ class RuntimeArtifactStore:
     # Persist trace, dashboard, and HITL artifacts per thread as first-class runtime evidence.
     def __init__(self, root_path: Path | None = None) -> None:
         self.root_path = root_path or get_default_runtime_artifacts_root()
+
+    # Capture the existing governance DEBUG stream as an append-only Markdown artifact.
+    @contextmanager
+    def capture_governance_exchange(self, *, thread_id: str) -> Iterator[Path]:
+        paths = self.build_paths(thread_id)
+        paths.thread_dir.mkdir(parents=True, exist_ok=True)
+        exchange_path = paths.thread_dir / "governance_exchange.md"
+        is_new_artifact = not exchange_path.exists() or exchange_path.stat().st_size == 0
+        with exchange_path.open("a", encoding="utf-8") as exchange_file:
+            if is_new_artifact:
+                exchange_file.write(
+                    f"# Actor, Governance and OPA Exchange\n\n**Thread ID:** `{thread_id}`\n\n"
+                )
+            exchange_file.write("## Runtime segment\n\n```text\n")
+
+        exchange_logger = logging.getLogger(
+            "layer2_runtime_governance.governance_components.opa_pipeline."
+            f"{thread_id}"
+        )
+        previous_level = exchange_logger.level
+        handler = logging.FileHandler(exchange_path, mode="a", encoding="utf-8")
+        handler.setLevel(logging.DEBUG)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        exchange_logger.addHandler(handler)
+        exchange_logger.setLevel(logging.DEBUG)
+        try:
+            yield exchange_path
+        finally:
+            exchange_logger.removeHandler(handler)
+            exchange_logger.setLevel(previous_level)
+            handler.close()
+            with exchange_path.open("a", encoding="utf-8") as exchange_file:
+                exchange_file.write("```\n\n")
 
     # Persist the current runtime surfaces for one thread and return the written paths.
     def persist(

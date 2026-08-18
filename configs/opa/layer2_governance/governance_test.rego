@@ -6,7 +6,7 @@ local_operation := {"operation_id": null, "boundary": "local", "operation_family
 
 base_facts := {
 	"task": {"sensitivity": "medium"},
-	"policy": {"profile_name": "default", "confidence_threshold": 0.65, "read_only_mode": false, "budget": {"max_steps": 5, "max_tool_calls": 5}},
+	"policy": {"profile_name": "default", "confidence_threshold": 0.65, "read_only_mode": false},
 	"runtime": {"state": "acting", "flags": [], "actor_turn_count": 1, "tool_call_count": 0, "observation_count": 2},
 	"step": {"id": "step-1", "objective": "Perform the step", "rationale": "needed", "expected_outcome": "done"},
 	"actor": {"result_type": "step_completed", "capability_mode": "none", "external_impact": false, "blocking_reason": null, "has_output_text": true},

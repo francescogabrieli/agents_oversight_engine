@@ -37,10 +37,6 @@ def build_governance_base_facts(
             "profile_name": policy_input.policy_profile_name,
             "confidence_threshold": policy_input.confidence_threshold,
             "read_only_mode": policy_input.read_only_mode,
-            "budget": {
-                "max_steps": policy_input.budget_max_steps,
-                "max_tool_calls": policy_input.budget_max_tool_calls,
-            },
         },
         "runtime": {
             "state": policy_input.runtime_state.value,

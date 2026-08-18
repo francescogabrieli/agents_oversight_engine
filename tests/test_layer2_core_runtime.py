@@ -245,6 +245,12 @@ class Layer2RuntimeCoreTests(unittest.TestCase):
             self.assertTrue(paths.dashboard_snapshot_path.exists())
             self.assertTrue(paths.runtime_summary_path.exists())
             self.assertFalse(paths.pending_human_review_path.exists())
+            governance_exchange_path = paths.thread_dir / "governance_exchange.md"
+            self.assertTrue(governance_exchange_path.exists())
+            governance_exchange = governance_exchange_path.read_text(encoding="utf-8")
+            self.assertIn("# Actor, Governance and OPA Exchange", governance_exchange)
+            self.assertIn("GOVERNANCE EXCHANGE: ACTOR RESULT", governance_exchange)
+            self.assertIn("GOVERNANCE EXCHANGE: OPA PRELIMINARY DECISION RESPONSE", governance_exchange)
             self.assertEqual(
                 sorted(path.name for path in paths.thread_dir.glob("*.json")),
                 ["dashboard_snapshot.json", "full-trace-2.json", "runtime_summary.json"],

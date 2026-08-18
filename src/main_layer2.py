@@ -192,22 +192,25 @@ def run_layer2_flow(
 
         graph_input = {"intake_result": intake_result, "thread_id": resolved_thread_id}
         try:
-            if progress_callback is None:
-                session.runtime_graph.invoke(graph_input, config=config)
-                final_result = _build_final_result_from_graph_snapshot(
-                    runtime_graph=session.runtime_graph,
-                    config=config,
-                )
-            else:
-                final_result = _stream_runtime_graph_with_progress(
-                    runtime_graph=session.runtime_graph,
-                    graph_input=graph_input,
-                    thread_id=resolved_thread_id,
-                    config=config,
-                    progress_callback=progress_callback,
-                    live_trace=live_trace,
-                    trace_tag="chunk",
-                )
+            with session.artifact_store.capture_governance_exchange(
+                thread_id=resolved_thread_id
+            ):
+                if progress_callback is None:
+                    session.runtime_graph.invoke(graph_input, config=config)
+                    final_result = _build_final_result_from_graph_snapshot(
+                        runtime_graph=session.runtime_graph,
+                        config=config,
+                    )
+                else:
+                    final_result = _stream_runtime_graph_with_progress(
+                        runtime_graph=session.runtime_graph,
+                        graph_input=graph_input,
+                        thread_id=resolved_thread_id,
+                        config=config,
+                        progress_callback=progress_callback,
+                        live_trace=live_trace,
+                        trace_tag="chunk",
+                    )
 
             # Return both layer boundaries so callers can inspect the handoff end to end.
             trace = {
@@ -263,19 +266,20 @@ def resume_layer2_flow(
         config = {"configurable": {"thread_id": thread_id}}
         graph_input = Command(resume=human_review_decision)
         try:
-            # Stream owner-side resume updates when the calling terminal requested progress.
-            if progress_callback is None:
-                resume_result = session.runtime_graph.invoke(graph_input, config=config)
-            else:
-                resume_result = _stream_runtime_graph_with_progress(
-                    runtime_graph=session.runtime_graph,
-                    graph_input=graph_input,
-                    thread_id=thread_id,
-                    config=config,
-                    progress_callback=progress_callback,
-                    live_trace=live_trace,
-                    trace_tag="resume_chunk",
-                )
+            with session.artifact_store.capture_governance_exchange(thread_id=thread_id):
+                # Stream owner-side resume updates when the calling terminal requested progress.
+                if progress_callback is None:
+                    resume_result = session.runtime_graph.invoke(graph_input, config=config)
+                else:
+                    resume_result = _stream_runtime_graph_with_progress(
+                        runtime_graph=session.runtime_graph,
+                        graph_input=graph_input,
+                        thread_id=thread_id,
+                        config=config,
+                        progress_callback=progress_callback,
+                        live_trace=live_trace,
+                        trace_tag="resume_chunk",
+                    )
             snapshot_result = _build_final_result_from_graph_snapshot(
                 runtime_graph=session.runtime_graph,
                 config=config,

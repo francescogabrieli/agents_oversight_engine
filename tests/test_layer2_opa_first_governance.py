@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -296,6 +298,152 @@ def _intake_result() -> IntakeResult:
             missing_information=[],
         ),
     )
+
+
+# Verify readable diagnostic logging of Actor, Governance, and OPA exchange at DEBUG level.
+class OPADiagnosticExchangeLoggingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.logger = logging.getLogger("layer2_runtime_governance.governance_components.opa_pipeline")
+
+    # 1. DEBUG logging shows ActorResult, OPA requests, OPA responses, and typed decision.
+    def test_debug_logging_shows_exchange_blocks(self) -> None:
+        state = _actor_ready_state()
+        engine = _AllowPolicyEngine()
+        with self.assertLogs("layer2_runtime_governance.governance_components.opa_pipeline", level="DEBUG") as cm:
+            evaluate_opa_first_governance(
+                task_state=state,
+                policy_engine_service=engine,
+                thread_id="test-debug-logging",
+            )
+        output = "\n".join(cm.output)
+        self.assertIn("=== GOVERNANCE EXCHANGE: ACTOR RESULT ===", output)
+        self.assertIn("=== GOVERNANCE EXCHANGE: POLICY PROJECTION ===", output)
+        self.assertIn("=== GOVERNANCE EXCHANGE: OPA REQUIRED PILLARS REQUEST ===", output)
+        self.assertIn("=== GOVERNANCE EXCHANGE: OPA REQUIRED PILLARS RESPONSE ===", output)
+        self.assertIn("=== GOVERNANCE EXCHANGE: OPA PRELIMINARY DECISION REQUEST ===", output)
+        self.assertIn("=== GOVERNANCE EXCHANGE: OPA PRELIMINARY DECISION RESPONSE ===", output)
+        self.assertNotIn("=== GOVERNANCE EXCHANGE: OPA FINAL DECISION REQUEST ===", output)
+        self.assertNotIn("=== GOVERNANCE EXCHANGE: OPA FINAL DECISION RESPONSE ===", output)
+        self.assertIn("=== GOVERNANCE EXCHANGE: TYPED GOVERNANCE DECISION ===", output)
+
+    # 2. Primitive values (None, False, 0, empty string) remain distinguishable in JSON.
+    def test_primitives_distinguishability(self) -> None:
+        state = _actor_ready_state()
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+            summary="Test output",
+            external_impact=False,
+            output_text="",
+            blocking_reason=None,
+        )
+        engine = _AllowPolicyEngine()
+        with self.assertLogs("layer2_runtime_governance.governance_components.opa_pipeline", level="DEBUG") as cm:
+            evaluate_opa_first_governance(
+                task_state=state,
+                policy_engine_service=engine,
+                thread_id="test-primitives",
+            )
+        output = "\n".join(cm.output)
+        self.assertIn('"external_impact": false', output)
+        self.assertIn('"output_text": ""', output)
+        self.assertIn('"blocking_reason": null', output)
+
+    # 3. Diagnostic blocks report the correct stage name and step context.
+    def test_blocks_report_correct_opa_stage_and_context(self) -> None:
+        state = _actor_ready_state()
+        engine = _AllowPolicyEngine()
+        with self.assertLogs("layer2_runtime_governance.governance_components.opa_pipeline", level="DEBUG") as cm:
+            evaluate_opa_first_governance(
+                task_state=state,
+                policy_engine_service=engine,
+                thread_id="test-stages",
+            )
+        logs = cm.output
+        for log in logs:
+            if "REQUIRED PILLARS" in log:
+                self.assertIn("opa_stage: required_pillars", log)
+            elif "PRELIMINARY DECISION" in log:
+                self.assertIn("opa_stage: preliminary_decision", log)
+            elif "FINAL DECISION" in log:
+                self.assertIn("opa_stage: final_decision", log)
+            elif "TYPED GOVERNANCE DECISION" in log:
+                self.assertIn("opa_stage: preliminary_decision", log)
+            self.assertIn("current_plan_step_id: step_1", log)
+            self.assertIn("actor_turn_count: 1", log)
+
+    # 4. Optional OPA steps are not logged if they are not executed.
+    def test_optional_opa_step_not_shown_if_not_executed(self) -> None:
+        state = _actor_ready_state()
+        engine = _IncompletePreflightPolicyEngine()
+        with self.assertLogs("layer2_runtime_governance.governance_components.opa_pipeline", level="DEBUG") as cm:
+            evaluate_opa_first_governance(
+                task_state=state,
+                policy_engine_service=engine,
+                thread_id="test-skipped-step",
+            )
+        output = "\n".join(cm.output)
+        self.assertIn("=== GOVERNANCE EXCHANGE: OPA REQUIRED PILLARS REQUEST ===", output)
+        self.assertIn("=== GOVERNANCE EXCHANGE: OPA REQUIRED PILLARS RESPONSE ===", output)
+        self.assertNotIn("=== GOVERNANCE EXCHANGE: OPA PRELIMINARY DECISION REQUEST ===", output)
+        self.assertNotIn("=== GOVERNANCE EXCHANGE: OPA FINAL DECISION REQUEST ===", output)
+
+    # 5. Diagnostic serialization is not executed when DEBUG logging is disabled.
+    def test_no_serialization_when_debug_disabled(self) -> None:
+        state = _actor_ready_state()
+        engine = _AllowPolicyEngine()
+        self.logger.setLevel(logging.INFO)
+
+        with patch("layer2_runtime_governance.governance_components.opa_pipeline.to_jsonable") as mock_to_jsonable:
+            evaluate_opa_first_governance(
+                task_state=state,
+                policy_engine_service=engine,
+                thread_id="test-no-debug",
+            )
+            mock_to_jsonable.assert_not_called()
+
+    # 6. Runtime behavior, directive, decision inputs, and outputs remain identical regardless of logging.
+    def test_runtime_behavior_identical_regardless_of_debug(self) -> None:
+        state_debug = _actor_ready_state()
+        state_info = _actor_ready_state()
+
+        self.logger.setLevel(logging.DEBUG)
+        res_debug = evaluate_opa_first_governance(
+            task_state=state_debug,
+            policy_engine_service=_AllowPolicyEngine(),
+            thread_id="test-identical-1",
+        )
+
+        self.logger.setLevel(logging.INFO)
+        res_info = evaluate_opa_first_governance(
+            task_state=state_info,
+            policy_engine_service=_AllowPolicyEngine(),
+            thread_id="test-identical-2",
+        )
+
+        self.assertEqual(res_debug.governance_decision.directive, res_info.governance_decision.directive)
+        self.assertEqual(res_debug.governance_decision.reason_codes, res_info.governance_decision.reason_codes)
+        self.assertEqual(res_debug.decision_input["pillars"], res_info.decision_input["pillars"])
+
+    # 7. OPA errors trigger fail-closed without exception interception by logging.
+    def test_opa_error_follows_fail_closed_unaltered_by_logging(self) -> None:
+        state = _actor_ready_state()
+
+        class _FailingEngine(_AllowPolicyEngine):
+            def evaluate_required_pillars(self, *, base_facts):
+                raise RuntimeError("OPA connection down")
+
+        with self.assertLogs("layer2_runtime_governance.governance_components.opa_pipeline", level="DEBUG") as cm:
+            res = evaluate_opa_first_governance(
+                task_state=state,
+                policy_engine_service=_FailingEngine(),
+                thread_id="test-error-handling",
+            )
+        self.assertEqual(res.governance_decision.directive, GovernanceDirective.WAIT_HUMAN_REVIEW)
+        self.assertIn(GovernanceReasonCode.OPA_FAILURE_FAIL_CLOSED, res.governance_decision.reason_codes)
+        output = "\n".join(cm.output)
+        self.assertIn("=== GOVERNANCE EXCHANGE: OPA REQUIRED PILLARS REQUEST ===", output)
+        self.assertNotIn("=== GOVERNANCE EXCHANGE: OPA REQUIRED PILLARS RESPONSE ===", output)
 
 
 if __name__ == "__main__":

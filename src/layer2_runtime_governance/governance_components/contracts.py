@@ -128,8 +128,6 @@ class PolicyEvaluationInput:
     policy_profile_name: str
     confidence_threshold: float
     read_only_mode: bool
-    budget_max_steps: int | None
-    budget_max_tool_calls: int | None
     runtime_state: RuntimeState
     runtime_flags: tuple[RuntimeFlag, ...]
     current_plan_step_id: str | None
