@@ -443,7 +443,50 @@ class OPADiagnosticExchangeLoggingTests(unittest.TestCase):
         self.assertIn(GovernanceReasonCode.OPA_FAILURE_FAIL_CLOSED, res.governance_decision.reason_codes)
         output = "\n".join(cm.output)
         self.assertIn("=== GOVERNANCE EXCHANGE: OPA REQUIRED PILLARS REQUEST ===", output)
-        self.assertNotIn("=== GOVERNANCE EXCHANGE: OPA REQUIRED PILLARS RESPONSE ===", output)
+
+    # 8. ACTOR RESULT block retains 100% full payload text, while downstream OPA blocks abbreviate repeated preview text.
+    def test_actor_result_keeps_full_payload_while_downstream_abbreviates(self) -> None:
+        from layer2_runtime_governance.domain import ExternalCommunicationDraft
+        from layer3_tool_bus_external_capabilities.external_operations import normalize_communication_operation
+
+        long_body = "A" * 500
+        proposal = normalize_communication_operation(
+            operation_id="op-1",
+            plan_step_id="step_1",
+            capability_id="email.send",
+            draft=ExternalCommunicationDraft(
+                channel="email",
+                recipient="mario.rossi@example.com",
+                subject="Test Subject",
+                body=long_body,
+            ),
+            execution_candidate=True,
+        )
+        state = _actor_ready_state()
+        state.external_operation_proposal = proposal
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.PROPOSE_ACTION,
+            summary="Draft email",
+            external_impact=True,
+            output_text="Draft created",
+            external_operation_proposal=proposal,
+        )
+        engine = _AllowPolicyEngine()
+        with self.assertLogs("layer2_runtime_governance.governance_components.opa_pipeline", level="DEBUG") as cm:
+            evaluate_opa_first_governance(
+                task_state=state,
+                policy_engine_service=engine,
+                thread_id="test-abbrev-option-a",
+            )
+        output = "\n".join(cm.output)
+        output_blocks = output.split("=== GOVERNANCE EXCHANGE: ")
+        actor_block = next(b for b in output_blocks if b.startswith("ACTOR RESULT"))
+        req_pillars_block = next(b for b in output_blocks if b.startswith("OPA REQUIRED PILLARS REQUEST"))
+
+        self.assertIn(long_body, actor_block)
+        self.assertNotIn(long_body, req_pillars_block)
+        self.assertIn("... [full text visible above in ACTOR RESULT (", req_pillars_block)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,23 @@ from ..judge import JudgeAssessment, JudgePort
 logger = logging.getLogger(__name__)
 
 
+# Synthesize repeated payload previews in downstream exchange blocks while keeping ACTOR RESULT 100% full.
+def _abbreviate_downstream_exchange_payload(payload: Any, max_len: int = 200) -> Any:
+    if isinstance(payload, str):
+        return payload
+    if isinstance(payload, dict):
+        new_dict = {}
+        for k, v in payload.items():
+            if k in {"payload_preview", "output_text"} and isinstance(v, str) and len(v) > max_len:
+                new_dict[k] = v[:max_len] + f"... [full text visible above in ACTOR RESULT ({len(v)} chars)]"
+            else:
+                new_dict[k] = _abbreviate_downstream_exchange_payload(v, max_len)
+        return new_dict
+    if isinstance(payload, list):
+        return [_abbreviate_downstream_exchange_payload(item, max_len) for item in payload]
+    return payload
+
+
 # Format and write governance exchange payloads to DEBUG logs for thesis auditability.
 def _log_governance_exchange_block(
     header: str,
@@ -39,7 +56,10 @@ def _log_governance_exchange_block(
 
     meta_str = ("\n" + "\n".join(meta_parts)) if meta_parts else ""
     try:
-        json_str = json.dumps(to_jsonable(payload), indent=2)
+        json_payload = to_jsonable(payload)
+        if header != "=== GOVERNANCE EXCHANGE: ACTOR RESULT ===":
+            json_payload = _abbreviate_downstream_exchange_payload(json_payload)
+        json_str = json.dumps(json_payload, indent=2)
     except Exception:
         json_str = str(payload)
 
