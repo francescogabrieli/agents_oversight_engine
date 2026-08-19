@@ -99,7 +99,10 @@ else := hitl_decision("unchanged_candidate_resubmission", "The actor resubmitted
 
 else := replan_decision("actor_requested_replan", "The actor explicitly requested a replacement semantic trajectory from a new observable boundary.") if trajectory.result.replan_request_admissible
 
-else := hitl_decision("judge_unsafe", "The semantic judge found the governed external operation unsafe.") if judge.result.verdict == "unsafe"
+else := hitl_decision("judge_unsafe", "The semantic judge found the governed external operation unsafe.") if {
+	input.pillar_requirements.require_judge == true
+	judge.result.verdict == "unsafe"
+}
 
 else := hitl_decision("judge_uncertain", "The semantic judge could not establish that the governed external operation is safe.") if {
 	input.pillar_requirements.require_judge == true
@@ -107,11 +110,15 @@ else := hitl_decision("judge_uncertain", "The semantic judge could not establish
 }
 
 else := hitl_decision("action_revision_limit_reached", "The external proposal exhausted its bounded semantic revisions and requires human review.") if {
+	input.pillar_requirements.require_judge == true
 	judge.result.verdict == "needs_revision"
 	trajectory.result.action_revision_limit_reached
 }
 
-else := revise_decision if judge.result.verdict == "needs_revision"
+else := revise_decision if {
+	input.pillar_requirements.require_judge == true
+	judge.result.verdict == "needs_revision"
+}
 
 else := hitl_decision("evidence_request_limit_reached", "The actor repeated completion without resolving required evidence and reached the request ceiling.") if {
 	input.pillar_requirements.require_evidence == true
@@ -245,6 +252,7 @@ candidate_alternatives[code] := reason if {
 candidate_alternatives[code] := reason if {
 	code := "judge_unsafe"
 	reason := "The semantic judge found the governed external operation unsafe."
+	input.pillar_requirements.require_judge == true
 	judge.result.verdict == "unsafe"
 }
 
@@ -258,6 +266,7 @@ candidate_alternatives[code] := reason if {
 candidate_alternatives[code] := reason if {
 	code := "action_revision_limit_reached"
 	reason := "The external proposal exhausted its bounded semantic revisions and requires human review."
+	input.pillar_requirements.require_judge == true
 	judge.result.verdict == "needs_revision"
 	trajectory.result.action_revision_limit_reached
 }
@@ -265,6 +274,7 @@ candidate_alternatives[code] := reason if {
 candidate_alternatives[code] := reason if {
 	code := "judge_needs_revision"
 	reason := "The external payload requires semantic revision."
+	input.pillar_requirements.require_judge == true
 	judge.result.verdict == "needs_revision"
 }
 

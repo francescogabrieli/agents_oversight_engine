@@ -107,8 +107,8 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
         self.assertTrue(facts["burden_satisfied"])
         self.assertNotIn("insufficient_independent_sources", facts["deficit_codes"])
         self.assertNotIn("retrieved_content_missing", facts["deficit_codes"])
-        self.assertEqual(signal["mode"], "shadow")
-        self.assertFalse(signal["decision_influence"])
+        self.assertEqual(signal["mode"], "active")
+        self.assertTrue(signal["decision_influence"])
 
     def test_evidence_burden_fail_closed_on_insufficient_sources(self) -> None:
         burden = EvidenceBurden(min_independent_sources=2, require_retrieved_content=True)

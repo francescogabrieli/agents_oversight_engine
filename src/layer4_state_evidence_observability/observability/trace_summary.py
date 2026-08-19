@@ -243,7 +243,8 @@ def _build_governance_section(trace: Layer2RuntimeTrace) -> str:
                 lines.append(f"- {inv}")
         if gp.judge_admission:
             lines.append("")
-            lines.append(f"**Judge admission:** `{gp.judge_admission.get('admission_reason', '—')}`")
+            admission_reason = gp.judge_admission.get("reason", gp.judge_admission.get("admission_reason", "—"))
+            lines.append(f"**Judge admission:** `{admission_reason}`")
         lines.append("")
     return "\n".join(lines).rstrip()
 
@@ -278,11 +279,13 @@ def _append_pillar_results_summary(lines: list[str], gp: TraceGovernancePass) ->
             summary_parts.append(f"score={result['score']}")
         if "mode" in result:
             summary_parts.append(f"mode=`{result['mode']}`")
+        if "decision_influence" in result:
+            summary_parts.append(f"decision_influence={result['decision_influence']}")
         if "policy_decision" in result:
             summary_parts.append(f"decision=`{result['policy_decision']}`")
         if "directive" in result:
             summary_parts.append(f"directive=`{result['directive']}`")
-        if "recommendation" in result:
+        if "recommendation" in result and result["recommendation"] not in (None, "not_invoked"):
             summary_parts.append(f"recommendation=`{result['recommendation']}`")
         if "verdict" in result and result["verdict"] is not None:
             summary_parts.append(f"verdict=`{result['verdict']}`")

@@ -218,7 +218,7 @@ class GovernanceDecisionTrace:
     evaluated_plan_step_id: str | None = None
     evaluated_operation_digest: str | None = None
     behavioral_recommended_directive: GovernanceDirective = GovernanceDirective.CONTINUE
-    judge_recommended_directive: GovernanceDirective = GovernanceDirective.CONTINUE
+    judge_recommended_directive: GovernanceDirective | None = None
     judge_invoked: bool = False
     static_policy_summary: str | None = None
     dynamic_policy_summary: str | None = None

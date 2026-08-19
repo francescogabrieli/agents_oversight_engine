@@ -136,19 +136,20 @@ def _unavailable_pillar(
     mode: str = "active",
     decision_influence: bool = True,
 ) -> dict[str, Any]:
+    is_inactive = mode == "inactive"
     return {
         "raw_facts": {
-            "pillar_unavailable": True,
+            "pillar_unavailable": not is_inactive,
             "pillar_name": name,
             "mode": mode,
             "decision_influence": decision_influence,
         },
         "diagnostic_score": None,
-        "diagnostic_level": "unavailable",
+        "diagnostic_level": "unavailable" if not is_inactive else "unscored",
         "score_components": {},
-        "reason_facts": ["pillar_unavailable"],
-        "summary": f"{name} pillar unavailable.",
-        "score_formula_version": f"{name}_unavailable",
+        "reason_facts": ["pillar_unavailable"] if not is_inactive else [],
+        "summary": f"{name} pillar unavailable." if not is_inactive else f"{name} pillar inactive (not required).",
+        "score_formula_version": f"{name}_unavailable" if not is_inactive else f"{name}_inactive",
         "thresholds_version": thresholds_version,
         "mode": mode,
         "decision_influence": decision_influence,
@@ -171,7 +172,7 @@ def _unavailable_behavioral_assessment(reason: str) -> BehavioralAssessment:
 def _not_required_judge_assessment() -> JudgeAssessment:
     return JudgeAssessment(
         invoked=False,
-        recommendation=JudgeRecommendedDirective.CONTINUE,
+        recommendation=JudgeRecommendedDirective.NOT_INVOKED,
         confidence=0.0,
         summary="Judge not required by OPA required_pillars.",
         rationale="The first OPA pass did not request a semantic judge assessment.",
@@ -186,7 +187,7 @@ def _not_required_judge_assessment() -> JudgeAssessment:
 def _unavailable_judge_assessment(reason: str) -> JudgeAssessment:
     return JudgeAssessment(
         invoked=False,
-        recommendation=JudgeRecommendedDirective.CONTINUE,
+        recommendation=JudgeRecommendedDirective.NOT_INVOKED,
         confidence=0.0,
         summary=f"Judge pillar unavailable: {reason}",
         rationale="The judge backend failed; the failure is passed to OPA as a fact.",

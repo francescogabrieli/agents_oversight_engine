@@ -22,15 +22,19 @@ def map_behavioral_directive(
 
 # Convert one judge recommendation into the shared runtime vocabulary.
 def map_judge_directive(
-    recommended_directive: JudgeRecommendedDirective,
-) -> GovernanceDirective:
+    recommended_directive: JudgeRecommendedDirective | None,
+) -> GovernanceDirective | None:
+    if recommended_directive is None or recommended_directive == JudgeRecommendedDirective.NOT_INVOKED:
+        return None
     if recommended_directive == JudgeRecommendedDirective.WAIT_HUMAN_REVIEW:
         return GovernanceDirective.WAIT_HUMAN_REVIEW
     if recommended_directive == JudgeRecommendedDirective.REPLAN:
         return GovernanceDirective.REPLAN
     if recommended_directive == JudgeRecommendedDirective.REQUEST_MORE_EVIDENCE:
         return GovernanceDirective.REQUEST_MORE_EVIDENCE
-    return GovernanceDirective.CONTINUE
+    if recommended_directive == JudgeRecommendedDirective.CONTINUE:
+        return GovernanceDirective.CONTINUE
+    return None
 
 
 __all__ = [

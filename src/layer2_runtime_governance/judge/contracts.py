@@ -13,6 +13,7 @@ class JudgeRecommendedDirective(str, Enum):
     REQUEST_MORE_EVIDENCE = "request_more_evidence"
     REPLAN = "replan"
     WAIT_HUMAN_REVIEW = "wait_human_review"
+    NOT_INVOKED = "not_invoked"
 
 
 class JudgeAssessmentStatus(str, Enum):

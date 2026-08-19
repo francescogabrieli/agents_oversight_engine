@@ -249,8 +249,8 @@ class TraceFixesIntegrationTests(unittest.TestCase):
 
         self.assertEqual(facts["observation_count"], 3)
         self.assertEqual(facts["selected_evidence_ref_count"], 2)
-        self.assertAlmostEqual(facts["selected_ref_ratio"], 2 / 3, places=3)
-        self.assertEqual(facts["search_title_only_ref_count"], 1)
+        self.assertAlmostEqual(facts["selected_evidence_ref_ratio"], 2 / 3, places=3)
+        self.assertEqual(facts["selected_search_title_only_count"], 1)
 
     def test_fix7_full_communication_body_passed_to_judge(self) -> None:
         state = _build_test_task_state()

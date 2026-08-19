@@ -62,7 +62,7 @@ class DashboardGovernancePanel:
     behavioral_summary: str | None
     judge_summary: str | None
     behavioral_recommended_directive: str
-    judge_recommended_directive: str
+    judge_recommended_directive: str | None
     judge_invoked: bool
     behavioral_similarity_score: float | None
     behavioral_deviation_score: float | None
@@ -184,6 +184,8 @@ class GovernanceHitlDashboardSnapshot:
     external_execution: DashboardExternalExecutionPanel
 
 
+
+
 # Build the dashboard snapshot from the canonical TaskState.
 def build_governance_hitl_dashboard_snapshot(
     task_state: TaskState,
@@ -280,8 +282,12 @@ def _build_governance_panel(
         dynamic_policy_summary=governance_decision.dynamic_policy_summary,
         behavioral_summary=governance_decision.behavioral_summary,
         judge_summary=governance_decision.judge_summary,
+        judge_recommended_directive=(
+            governance_decision.judge_recommended_directive.value
+            if governance_decision.judge_recommended_directive is not None
+            else None
+        ),
         behavioral_recommended_directive=governance_decision.behavioral_recommended_directive.value,
-        judge_recommended_directive=governance_decision.judge_recommended_directive.value,
         judge_invoked=governance_decision.judge_invoked,
         behavioral_similarity_score=governance_decision.behavioral_similarity_score,
         behavioral_deviation_score=governance_decision.behavioral_deviation_score,
