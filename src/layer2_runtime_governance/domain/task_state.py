@@ -120,6 +120,7 @@ class TaskState:
     external_operation_history: list[ExternalOperationProposal] = field(default_factory=list)
     approved_external_operation_digest: str | None = None
     governance_action_feedback: list[GovernanceActionFeedback] = field(default_factory=list)
+    evidence_request_count: int = 0
     external_operation_revision_count: int = 0
     current_external_execution_request: ExternalExecutionRequest | None = None
     last_external_execution_receipt: ExternalExecutionReceipt | None = None

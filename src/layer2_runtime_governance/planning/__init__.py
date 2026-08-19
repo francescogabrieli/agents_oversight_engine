@@ -8,7 +8,7 @@ from typing import Protocol, cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from environment_config import load_env_file_values
-from ..domain import PlannerDecision, PlanStep, TaskState
+from ..domain import EvidenceBurden, PlannerDecision, PlanStep, TaskState
 from .openai_adapter import (
     ParsedOpenAIClient,
     build_parsed_openai_client,
@@ -55,12 +55,22 @@ class PlannerExecutionError(RuntimeError):
     """Raised when the planner cannot produce a valid planning decision."""
 
 
+class _EvidenceBurdenPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    min_independent_sources: int = Field(default=1, ge=1)
+    require_retrieved_content: bool = Field(default=True)
+    freshness_window_days: int | None = Field(default=None, ge=1)
+
+
 class _PlanStepPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective: str = Field(..., min_length=1)
     rationale: str = Field(..., min_length=1)
     expected_outcome: str = Field(..., min_length=1)
+    produces_factual_claims: bool = Field(default=False)
+    evidence_burden: _EvidenceBurdenPayload | None = Field(default=None)
 
 
 class _PlanningPayload(BaseModel):
@@ -84,6 +94,8 @@ Each item in plan_steps must contain:
 - objective
 - rationale
 - expected_outcome
+- produces_factual_claims (boolean: true if this step produces factual claims that leave the system or will be used for downstream decision-making, false otherwise)
+- evidence_burden (optional object when produces_factual_claims is true, with min_independent_sources [default 1], require_retrieved_content [default true], freshness_window_days [optional integer])
 
 Rules:
 - Stay at the semantic planning level.
@@ -197,6 +209,16 @@ class OpenAIPlanner(PlannerPort):
                 objective=item.objective,
                 rationale=item.rationale,
                 expected_outcome=item.expected_outcome,
+                produces_factual_claims=item.produces_factual_claims,
+                evidence_burden=(
+                    EvidenceBurden(
+                        min_independent_sources=item.evidence_burden.min_independent_sources,
+                        require_retrieved_content=item.evidence_burden.require_retrieved_content,
+                        freshness_window_days=item.evidence_burden.freshness_window_days,
+                    )
+                    if item.evidence_burden is not None
+                    else None
+                ),
             )
             for index, item in enumerate(payload.plan_steps, start=1)
         ]

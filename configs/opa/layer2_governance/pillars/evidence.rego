@@ -16,9 +16,19 @@ candidate_binding_present := object.get(facts, "candidate_evidence_binding_prese
 candidate_snapshot_matches := object.get(facts, "candidate_evidence_snapshot_matches", false)
 candidate_selection_matches := object.get(facts, "candidate_evidence_selection_matches", false)
 candidate_operation_matches := object.get(facts, "candidate_external_operation_digest_matches", false)
+evidence_request_count := object.get(facts, "evidence_request_count", 0)
+max_evidence_requests_before_review := object.get(data.policy_config.thresholds, "max_evidence_requests_before_review", 3)
 
-# Evidence is event-specific. References are optional, but every reference the actor
-# selects must resolve to a concrete observation recorded by the runtime.
+coverage_evaluated := object.get(facts, "coverage_evaluated", false)
+burden_satisfied := object.get(facts, "burden_satisfied", true)
+circular_reference_detected := object.get(facts, "circular_reference_detected", false)
+
+default evidence_request_ceiling_reached := false
+
+evidence_request_ceiling_reached if {
+	evidence_request_count >= max_evidence_requests_before_review
+}
+
 default evidence_gap := false
 
 evidence_gap if {
@@ -51,7 +61,11 @@ evidence_gap if {
 	known_steps != true
 }
 
-# A title-only selection is structurally fragile and must acquire direct support first.
+evidence_gap if {
+	coverage_evaluated == true
+	burden_satisfied != true
+}
+
 evidence_gap if {
 	factual_completion == true
 	all_title_only == true
@@ -77,14 +91,36 @@ evidence_gap if {
 	candidate_operation_matches != true
 }
 
+evidence_gap if {
+	circular_reference_detected == true
+}
+
+active_reason_codes := [code |
+	some code in object.get(facts, "deficit_codes", [])
+]
+
+require_evidence := object.get(object.get(input, "pillar_requirements", {}), "require_evidence", false) == true
+
+mode := "active" if {
+	require_evidence
+} else := "inactive"
+
+decision_influence := true if {
+	require_evidence
+} else := false
+
 result := {
+	"mode": mode,
+	"decision_influence": decision_influence,
 	"evidence_gap": evidence_gap,
+	"evidence_request_ceiling_reached": evidence_request_ceiling_reached,
 	"diagnostic_score": object.get(object.get(input.pillars, "evidence", {}), "diagnostic_score", null),
 	"diagnostic_level": object.get(object.get(input.pillars, "evidence", {}), "diagnostic_level", "unscored"),
+	"reason_codes": active_reason_codes,
 	"reason_facts": object.get(object.get(input.pillars, "evidence", {}), "reason_facts", []),
-	"summary": object.get(object.get(input.pillars, "evidence", {}), "summary", "Evidence integrity and provenance observed."),
+	"summary": object.get(object.get(input.pillars, "evidence", {}), "summary", "Evidence structural controls evaluated."),
 	"raw_facts": facts,
 	"score_components": object.get(object.get(input.pillars, "evidence", {}), "score_components", {}),
-	"score_formula_version": object.get(object.get(input.pillars, "evidence", {}), "score_formula_version", "evidence_integrity_provenance_v1"),
+	"score_formula_version": "evidence_structural_v2",
 	"thresholds_version": object.get(object.get(input.pillars, "evidence", {}), "thresholds_version", "unknown"),
 }

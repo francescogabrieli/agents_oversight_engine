@@ -248,6 +248,7 @@ def _apply_governance_decision(
         return
 
     if governance_decision.directive == GovernanceDirective.REQUEST_MORE_EVIDENCE:
+        state.evidence_request_count += 1
         set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
@@ -256,6 +257,55 @@ def _apply_governance_decision(
         )
         state.pending_human_review_request = None
         state.human_review_resume_state = None
+
+        evidence_payload = (governance_decision.pillar_results or {}).get("evidence", {})
+        evidence_facts = evidence_payload.get("raw_facts", {}) if isinstance(evidence_payload, dict) else {}
+        deficit_codes = evidence_facts.get("deficit_codes", []) if isinstance(evidence_facts, dict) else []
+        reason_codes = tuple(governance_decision.reason_codes or ["invalid_or_missing_selected_evidence"])
+        all_codes = tuple(str(c) for c in (deficit_codes or reason_codes))
+
+        operation_id = (
+            state.external_operation_proposal.operation_id
+            if state.external_operation_proposal is not None
+            else (
+                state.plan_steps[state.current_plan_step_index].step_id
+                if state.current_plan_step_index is not None and state.current_plan_step_index < len(state.plan_steps)
+                else "current_step"
+            )
+        )
+        state.governance_action_feedback.append(
+            GovernanceActionFeedback(
+                operation_id=operation_id,
+                invalidated_payload_digest=(
+                    state.external_operation_proposal.payload_digest
+                    if state.external_operation_proposal is not None
+                    else None
+                ),
+                finding_codes=all_codes,
+                summary=governance_decision.summary,
+                revision_index=state.evidence_request_count,
+                invalidated_evidence_selection_digest=(
+                    state.pending_completion_candidate.evidence_selection_digest
+                    if state.pending_completion_candidate is not None
+                    else None
+                ),
+                findings=tuple(
+                    JudgeFindingSnapshot(
+                        category="evidence",
+                        code=code,
+                        severity="medium",
+                        summary=f"Evidence deficit: {code}",
+                    )
+                    for code in all_codes
+                ),
+                judge_summary=f"Governance required additional evidence (request {state.evidence_request_count})",
+                judge_rationale=(
+                    governance_decision.combiner_selected_reason
+                    or governance_decision.summary
+                ),
+            )
+        )
+
         # A governed read-only request is the recovery mechanism for an evidence gap.
         if (
             policy_input.actor_result_type == ActorResultType.PROPOSE_ACTION

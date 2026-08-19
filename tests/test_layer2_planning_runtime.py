@@ -538,7 +538,15 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         self.assertEqual("A complete email.", planned_state.plan_steps[2].expected_outcome)
         self.assertEqual(
             set(vars(planned_state.plan_steps[0])),
-            {"step_id", "objective", "rationale", "expected_outcome", "status"},
+            {
+                "step_id",
+                "objective",
+                "rationale",
+                "expected_outcome",
+                "status",
+                "produces_factual_claims",
+                "evidence_burden",
+            },
         )
 
 

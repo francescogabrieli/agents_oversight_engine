@@ -30,15 +30,23 @@ test_intermediate_output_requires_no_active_semantic_pillars if {
 	facts := object.union(base_facts, {"actor": object.union(base_facts.actor, {"result_type": "intermediate_output"})})
 	result := required_pillars with input as {"base_facts": facts}
 	result.require_evidence == false
-	result.require_trajectory == false
+	result.require_trajectory == true
 	result.require_judge == false
 }
 
 test_read_only_tool_request_requires_static_policy_only if {
-	facts := object.union(base_facts, {"actor": object.union(base_facts.actor, {"result_type": "propose_action", "capability_mode": "read_only"})})
+	facts := object.union(base_facts, {"actor": object.union(base_facts.actor, {"result_type": "propose_action", "capability_mode": "read_only", "has_factual_content": false})})
 	result := required_pillars with input as {"base_facts": facts}
 	result.require_evidence == false
-	result.require_trajectory == false
+	result.require_trajectory == true
+	result.require_judge == false
+}
+
+test_propose_action_with_factual_content_requires_evidence if {
+	facts := object.union(base_facts, {"actor": object.union(base_facts.actor, {"result_type": "propose_action", "capability_mode": "read_only", "has_factual_content": true})})
+	result := required_pillars with input as {"base_facts": facts}
+	result.require_evidence == true
+	result.require_trajectory == true
 	result.require_judge == false
 }
 
@@ -57,11 +65,24 @@ test_local_completion_requires_evidence_and_trajectory if {
 	result.require_judge == false
 }
 
-# Active deterministic pillars retain their non-scored diagnostic levels for the dashboard.
+# Active deterministic pillars retain their non-scored diagnostic levels and declare active mode for the dashboard.
 test_active_diagnostic_levels_are_projected if {
 	result := decision with input as base_input
 	result.pillar_results.evidence.diagnostic_level == "unscored"
+	result.pillar_results.evidence.mode == "active"
+	result.pillar_results.evidence.decision_influence == true
 	result.pillar_results.trajectory.diagnostic_level == "observed"
+	result.pillar_results.trajectory.mode == "active"
+	result.pillar_results.trajectory.decision_influence == true
+}
+
+test_inactive_deterministic_pillars_declare_inactive_mode if {
+	candidate := object.union(base_input, {"pillar_requirements": {"require_evidence": false, "require_risk": false, "require_trajectory": false, "require_behavioral": false, "require_judge": false}})
+	result := decision with input as candidate
+	result.pillar_results.evidence.mode == "inactive"
+	result.pillar_results.evidence.decision_influence == false
+	result.pillar_results.trajectory.mode == "inactive"
+	result.pillar_results.trajectory.decision_influence == false
 }
 
 test_governed_external_candidate_defers_judge_to_staged_admission if {
@@ -183,8 +204,15 @@ test_rejected_external_candidate_requires_non_authorizing_review if {
 	"rejected_candidate_resubmitted" in result.reason_codes
 }
 
-test_action_revision_limit_requires_review_not_another_revision if {
+test_action_revision_below_limit_allows_revision if {
 	candidate := object.union(base_input, {"base_facts": object.union(base_facts, {"external_operation": governed_operation}), "pillar_requirements": {"require_evidence": true, "require_risk": false, "require_trajectory": true, "require_behavioral": false, "require_judge": true}, "pillars": object.union(base_input.pillars, {"judge": object.union(safe_judge, {"raw_facts": object.union(safe_judge.raw_facts, {"verdict": "needs_revision"})}), "trajectory": object.union(facts_trajectory, {"raw_facts": object.union(facts_trajectory.raw_facts, {"external_action_revision_count": 2})})})})
+	result := decision with input as candidate
+	result.directive == "revise_action"
+	"judge_needs_revision" in result.reason_codes
+}
+
+test_action_revision_limit_requires_review_not_another_revision if {
+	candidate := object.union(base_input, {"base_facts": object.union(base_facts, {"external_operation": governed_operation}), "pillar_requirements": {"require_evidence": true, "require_risk": false, "require_trajectory": true, "require_behavioral": false, "require_judge": true}, "pillars": object.union(base_input.pillars, {"judge": object.union(safe_judge, {"raw_facts": object.union(safe_judge.raw_facts, {"verdict": "needs_revision"})}), "trajectory": object.union(facts_trajectory, {"raw_facts": object.union(facts_trajectory.raw_facts, {"external_action_revision_count": 3})})})})
 	result := decision with input as candidate
 	result.directive == "wait_human_review"
 	"action_revision_limit_reached" in result.reason_codes
@@ -195,4 +223,46 @@ test_shadow_pillars_do_not_change_directive if {
 	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"risk": {"raw_facts": {"mode": "shadow", "decision_influence": false, "impact_level": "critical"}}, "behavioral": {"raw_facts": {"mode": "shadow", "decision_influence": false, "novelty_score": 1}}})})
 	changed := decision with input as candidate
 	baseline.directive == changed.directive
+}
+
+test_replan_ceiling_reached_requires_review if {
+	trajectory := object.union(facts_trajectory, {"raw_facts": object.union(facts_trajectory.raw_facts, {"needs_replan_signal": true, "replan_reason_present": true, "first_replan_request": true, "replan_count": 3})})
+	candidate := object.union(base_input, {"base_facts": object.union(base_facts, {"actor": object.union(base_facts.actor, {"result_type": "needs_replan"})}), "pillars": object.union(base_input.pillars, {"trajectory": trajectory})})
+	result := decision with input as candidate
+	result.directive == "wait_human_review"
+	"replan_ceiling_reached" in result.reason_codes
+	"actor_requested_replan" in object.keys(result.rejected_alternatives)
+}
+
+test_consecutive_tool_failures_replan_threshold if {
+	trajectory := object.union(facts_trajectory, {"raw_facts": object.union(facts_trajectory.raw_facts, {"consecutive_tool_failures": 2})})
+	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"trajectory": trajectory})})
+	result := decision with input as candidate
+	result.directive == "replan"
+	"consecutive_tool_failures" in result.reason_codes
+}
+
+test_consecutive_tool_failures_review_threshold if {
+	trajectory := object.union(facts_trajectory, {"raw_facts": object.union(facts_trajectory.raw_facts, {"consecutive_tool_failures": 4})})
+	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"trajectory": trajectory})})
+	result := decision with input as candidate
+	result.directive == "wait_human_review"
+	"consecutive_tool_failures" in result.reason_codes
+}
+
+test_action_churn_requires_review if {
+	trajectory := object.union(facts_trajectory, {"raw_facts": object.union(facts_trajectory.raw_facts, {"action_churn_count": 2})})
+	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"trajectory": trajectory})})
+	result := decision with input as candidate
+	result.directive == "wait_human_review"
+	"action_churn" in result.reason_codes
+}
+
+test_evidence_request_limit_reached_requires_review if {
+	evidence := object.union(facts_evidence, {"raw_facts": object.union(facts_evidence.raw_facts, {"selected_evidence_refs_valid": false, "evidence_request_count": 3})})
+	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"evidence": evidence})})
+	result := decision with input as candidate
+	result.directive == "wait_human_review"
+	"evidence_request_limit_reached" in result.reason_codes
+	"invalid_or_missing_selected_evidence" in object.keys(result.rejected_alternatives)
 }

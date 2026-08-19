@@ -43,10 +43,12 @@ def classify_reason_code_pillar(code: str) -> str:
     code_lower = code.lower().strip()
     if code_lower.startswith("judge_") or "confidence" in code_lower:
         return "Semantic Judge"
-    if code_lower.startswith("evidence_") or "evidence" in code_lower:
+    if code_lower.startswith("evidence_") or "evidence" in code_lower or any(
+        k in code_lower for k in ("unanchored", "provenance", "observation_content", "step_lineage", "retrieved_content", "independent_sources")
+    ):
         return "Evidence Pillar"
     if code_lower.startswith("trajectory_") or any(
-        k in code_lower for k in ("replan", "resubmi", "revision_limit", "recovery", "repeated")
+        k in code_lower for k in ("replan", "resubmi", "revision_limit", "recovery", "repeated", "consecutive_tool", "action_churn")
     ):
         return "Trajectory Pillar"
     if code_lower.startswith("behavioral_") or "operational_risk" in code_lower:

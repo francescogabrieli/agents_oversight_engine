@@ -4,7 +4,10 @@ from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .task_state import TaskState
 
 from layer1_intake import ExecutionIntent
 
@@ -96,6 +99,8 @@ def normalize_task_state_serialization(task_state: TaskState) -> TaskState:
         normalized.state_revision = 0
     if not hasattr(normalized, "no_progress_turns"):
         normalized.no_progress_turns = 0
+    if not hasattr(normalized, "evidence_request_count"):
+        normalized.evidence_request_count = 0
     if not hasattr(normalized, "actor_protocol_retry_count"):
         normalized.actor_protocol_retry_count = 0
     if not hasattr(normalized, "actor_protocol_retry_progress_epoch"):

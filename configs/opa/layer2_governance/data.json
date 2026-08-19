@@ -3,7 +3,12 @@
     "policy_bundle_version": "layer2_governance_v4",
     "thresholds_version": "layer2_governance_thresholds_v2",
     "thresholds": {
-      "max_action_revisions_before_review": 3
+      "max_action_revisions_before_review": 3,
+      "max_replans_before_review": 3,
+      "max_consecutive_tool_failures_before_replan": 2,
+      "max_consecutive_tool_failures_before_review": 4,
+      "max_action_churn_before_review": 2,
+      "max_evidence_requests_before_review": 3
     },
     "static_policy": {
       "prohibited_destinations": ["blocked@example.com"],

@@ -16,6 +16,14 @@ class PlanStepStatus(str, Enum):
 
 
 # Canonical domain contract extracted from the legacy state facade.
+@dataclass(frozen=True)
+class EvidenceBurden:
+    min_independent_sources: int = 1
+    require_retrieved_content: bool = True
+    freshness_window_days: int | None = None
+
+
+# Canonical domain contract extracted from the legacy state facade.
 @dataclass
 class PlanStep:
     # Planner output stays semantic so actor can later choose the concrete action.
@@ -24,6 +32,8 @@ class PlanStep:
     rationale: str
     expected_outcome: str
     status: PlanStepStatus = PlanStepStatus.PENDING
+    produces_factual_claims: bool = False
+    evidence_burden: EvidenceBurden | None = None
 
 
 # Canonical domain contract extracted from the legacy state facade.
@@ -44,6 +54,16 @@ def semantic_plan_signature(steps: Iterable[PlanStep]) -> str:
             "objective": step.objective,
             "rationale": step.rationale,
             "expected_outcome": step.expected_outcome,
+            "produces_factual_claims": step.produces_factual_claims,
+            "evidence_burden": (
+                {
+                    "min_independent_sources": step.evidence_burden.min_independent_sources,
+                    "require_retrieved_content": step.evidence_burden.require_retrieved_content,
+                    "freshness_window_days": step.evidence_burden.freshness_window_days,
+                }
+                if step.evidence_burden is not None
+                else None
+            ),
         }
         for step in steps
     ]
@@ -58,6 +78,7 @@ def semantic_plan_signature(steps: Iterable[PlanStep]) -> str:
 
 __all__ = [
     "PlanStepStatus",
+    "EvidenceBurden",
     "PlanStep",
     "PlannerDecision",
     "semantic_plan_signature",

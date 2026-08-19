@@ -12,10 +12,16 @@ config := data.policy_config
 operation := object.get(input.base_facts, "external_operation", {})
 actor := input.base_facts.actor
 
-default required_pillars := {"require_evidence": false, "require_risk": false, "require_trajectory": false, "require_behavioral": false, "require_judge": false}
+default required_pillars := {"require_evidence": false, "require_risk": false, "require_trajectory": true, "require_behavioral": false, "require_judge": false}
 
-required_pillars := {"require_evidence": false, "require_risk": false, "require_trajectory": false, "require_behavioral": false, "require_judge": false} if {
+required_pillars := {"require_evidence": false, "require_risk": false, "require_trajectory": true, "require_behavioral": false, "require_judge": false} if {
 	actor.result_type == "propose_action"
+	not propose_action_has_factual_content
+}
+
+required_pillars := {"require_evidence": true, "require_risk": false, "require_trajectory": true, "require_behavioral": false, "require_judge": false} if {
+	actor.result_type == "propose_action"
+	propose_action_has_factual_content
 }
 
 required_pillars := {"require_evidence": false, "require_risk": false, "require_trajectory": true, "require_behavioral": false, "require_judge": false} if {
@@ -30,6 +36,11 @@ required_pillars := {"require_evidence": true, "require_risk": false, "require_t
 required_pillars := {"require_evidence": true, "require_risk": false, "require_trajectory": true, "require_behavioral": false, "require_judge": false} if {
 	external_candidate
 	not static_policy.result.hard_deny
+}
+
+propose_action_has_factual_content if {
+	actor.result_type == "propose_action"
+	object.get(actor, "has_factual_content", false) == true
 }
 
 # OPA admits the costly semantic judge only after deterministic pillars have passed.
@@ -53,6 +64,7 @@ judge_admission := {"required": true, "reason": "governed_external_semantic_cand
 	regex.match("^[0-9a-f]{64}$", object.get(operation, "payload_digest", ""))
 }
 
+
 external_candidate if {
 	actor.result_type == "step_completed"
 	object.get(operation, "execution_candidate", false) == true
@@ -70,6 +82,14 @@ else := judge_unavailable_decision if judge_required_unavailable
 else := unavailable_required_pillar_decision if active_required_pillar_unavailable
 
 else := clarification_decision if static_policy.result.clarification_signaled
+
+else := hitl_decision("replan_ceiling_reached", "The total number of replan requests reached the configured ceiling.") if trajectory.result.replan_ceiling_reached
+
+else := hitl_decision("consecutive_tool_failures", "Consecutive tool failures exceeded the human review threshold.") if trajectory.result.consecutive_tool_failures_review_threshold_reached
+
+else := replan_decision("consecutive_tool_failures", "Consecutive tool failures require a replan.") if trajectory.result.consecutive_tool_failures_replan_threshold_reached
+
+else := hitl_decision("action_churn", "The actor oscillated between previously seen candidate variants without converging.") if trajectory.result.action_churn
 
 else := hitl_decision("replan_request_stalled", "The actor repeated a replan request without a new observable execution basis.") if trajectory.result.replan_request_stalled
 
@@ -92,6 +112,12 @@ else := hitl_decision("action_revision_limit_reached", "The external proposal ex
 }
 
 else := revise_decision if judge.result.verdict == "needs_revision"
+
+else := hitl_decision("evidence_request_limit_reached", "The actor repeated completion without resolving required evidence and reached the request ceiling.") if {
+	input.pillar_requirements.require_evidence == true
+	evidence.result.evidence_gap
+	evidence.result.evidence_request_ceiling_reached
+}
 
 else := evidence_decision("invalid_or_missing_selected_evidence", "The completion references invalid or missing concrete evidence.") if {
 	input.pillar_requirements.require_evidence == true
@@ -167,6 +193,126 @@ judge_binding_valid if {
 	judge.result.evaluated_evidence_selection_digest == judge.result.expected_evidence_selection_digest
 }
 
+candidate_alternatives[code] := reason if {
+	code := "replan_ceiling_reached"
+	reason := "The total number of replan requests reached the configured ceiling."
+	trajectory.result.replan_ceiling_reached
+}
+
+candidate_alternatives[code] := reason if {
+	code := "consecutive_tool_failures"
+	reason := "Consecutive tool failures exceeded the human review threshold."
+	trajectory.result.consecutive_tool_failures_review_threshold_reached
+}
+
+candidate_alternatives[code] := reason if {
+	code := "consecutive_tool_failures"
+	reason := "Consecutive tool failures require a replan."
+	trajectory.result.consecutive_tool_failures_replan_threshold_reached
+	not trajectory.result.consecutive_tool_failures_review_threshold_reached
+}
+
+candidate_alternatives[code] := reason if {
+	code := "action_churn"
+	reason := "The actor oscillated between previously seen candidate variants without converging."
+	trajectory.result.action_churn
+}
+
+candidate_alternatives[code] := reason if {
+	code := "replan_request_stalled"
+	reason := "The actor repeated a replan request without a new observable execution basis."
+	trajectory.result.replan_request_stalled
+}
+
+candidate_alternatives[code] := reason if {
+	code := "rejected_candidate_resubmitted"
+	reason := "The actor resubmitted a payload digest already rejected by semantic governance."
+	trajectory.result.repeated_rejected_payload_digest
+}
+
+candidate_alternatives[code] := reason if {
+	code := "unchanged_candidate_resubmission"
+	reason := "The actor resubmitted the same external candidate without a substantive state or payload change."
+	trajectory.result.unchanged_resubmission
+}
+
+candidate_alternatives[code] := reason if {
+	code := "actor_requested_replan"
+	reason := "The actor explicitly requested a replacement semantic trajectory from a new observable boundary."
+	trajectory.result.replan_request_admissible
+}
+
+candidate_alternatives[code] := reason if {
+	code := "judge_unsafe"
+	reason := "The semantic judge found the governed external operation unsafe."
+	judge.result.verdict == "unsafe"
+}
+
+candidate_alternatives[code] := reason if {
+	code := "judge_uncertain"
+	reason := "The semantic judge could not establish that the governed external operation is safe."
+	input.pillar_requirements.require_judge == true
+	judge.result.verdict == "uncertain"
+}
+
+candidate_alternatives[code] := reason if {
+	code := "action_revision_limit_reached"
+	reason := "The external proposal exhausted its bounded semantic revisions and requires human review."
+	judge.result.verdict == "needs_revision"
+	trajectory.result.action_revision_limit_reached
+}
+
+candidate_alternatives[code] := reason if {
+	code := "judge_needs_revision"
+	reason := "The external payload requires semantic revision."
+	judge.result.verdict == "needs_revision"
+}
+
+candidate_alternatives[code] := reason if {
+	code := "evidence_request_limit_reached"
+	reason := "The actor repeated completion without resolving required evidence and reached the request ceiling."
+	input.pillar_requirements.require_evidence == true
+	evidence.result.evidence_gap
+	evidence.result.evidence_request_ceiling_reached
+}
+
+candidate_alternatives[code] := reason if {
+	code := "invalid_or_missing_selected_evidence"
+	reason := "The completion references invalid or missing concrete evidence."
+	input.pillar_requirements.require_evidence == true
+	evidence.result.evidence_gap
+}
+
+candidate_alternatives[code] := reason if {
+	code := "external_low_actor_self_confidence"
+	reason := "The governed external proposal remains uncertain and requires human review."
+	external_candidate
+	low_external_confidence
+}
+
+candidate_alternatives[code] := reason if {
+	code := "capability_approval_required"
+	reason := "The capability approval mode requires a typed human authorization for this exact payload."
+	external_candidate
+	approval_required
+}
+
+candidate_alternatives[code] := reason if {
+	code := "read_only_allowed"
+	reason := "The read-only envelope is preserved."
+	static_policy.result.read_only_required
+}
+
+rejected_alternatives(winning_reason_codes) := {code: reason |
+	some code, reason in candidate_alternatives
+	not array_contains(winning_reason_codes, code)
+}
+
+array_contains(arr, elem) if {
+	some x in arr
+	x == elem
+}
+
 version_mismatch_decision := base_decision("wait_human_review", "require_human_review", ["policy_version_mismatch"], "The runtime and loaded policy bundle versions do not match.", true)
 unavailable_required_pillar_decision := base_decision("wait_human_review", "require_human_review", ["required_pillar_unavailable"], "An active governance pillar is unavailable; review is required.", true)
 judge_unavailable_decision := base_decision("wait_human_review", "require_human_review", ["judge_required_unavailable"], "The mandatory semantic judge assessment is unavailable or invalid.", true)
@@ -182,4 +328,4 @@ static_deny_reason_codes := static_policy.result.reason_codes if count(static_po
 
 else := ["static_policy_hard_deny"]
 
-base_decision(directive, policy_decision, reason_codes, selected_reason, requires_review) := {"schema_version": "governance_decision_output.v1", "directive": directive, "policy_decision": policy_decision, "reason_codes": reason_codes, "judge_admission": judge_admission, "pillar_results": {"static_policy": static_policy.result, "evidence": evidence.result, "risk": risk.result, "trajectory": trajectory.result, "behavioral": behavioral.result, "judge": judge.result}, "selected_reason": selected_reason, "rejected_alternatives": {}, "safety_invariants_checked": ["static_hard_deny_is_absorbing", "deterministic_pillars_precede_judge", "behavioral_shadow_has_no_decision_influence", "operational_risk_shadow_has_no_decision_influence", "read_only_envelope_preserved", "judge_digest_matches_executable_payload"], "requires_human_review": requires_review, "policy_bundle_version": config.policy_bundle_version, "policy_config_version": config.thresholds_version}
+base_decision(directive, policy_decision, reason_codes, selected_reason, requires_review) := {"schema_version": "governance_decision_output.v1", "directive": directive, "policy_decision": policy_decision, "reason_codes": reason_codes, "judge_admission": judge_admission, "pillar_results": {"static_policy": static_policy.result, "evidence": evidence.result, "risk": risk.result, "trajectory": trajectory.result, "behavioral": behavioral.result, "judge": judge.result}, "selected_reason": selected_reason, "rejected_alternatives": rejected_alternatives(reason_codes), "safety_invariants_checked": ["static_hard_deny_is_absorbing", "deterministic_pillars_precede_judge", "behavioral_shadow_has_no_decision_influence", "operational_risk_shadow_has_no_decision_influence", "read_only_envelope_preserved", "judge_digest_matches_executable_payload"], "requires_human_review": requires_review, "policy_bundle_version": config.policy_bundle_version, "policy_config_version": config.thresholds_version}

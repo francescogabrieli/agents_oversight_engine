@@ -113,7 +113,7 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
     ".domain": (
         "ExecutedPlanStep", "ExternalCommunicationPhase", "ExternalCommunicationDraft",
         "ExternalCommunicationState", "HumanReviewDecision", "HumanReviewDecisionType",
-        "HumanReviewExternalEdit", "HumanReviewRequest", "PlanStep",
+        "HumanReviewExternalEdit", "HumanReviewRequest", "EvidenceBurden", "PlanStep",
         "PlanStepStatus", "PlannerDecision", "RuntimeFlag", "RuntimeState",
         "ReplanCheckpoint", "ScratchpadEntry", "ScratchpadEntryType", "StepRecord", "StepValidation",
         "TaskState",

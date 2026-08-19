@@ -8,7 +8,7 @@ from typing import Protocol, cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from environment_config import load_env_file_values
-from ..domain import PlanStep, PlanStepStatus, TaskState
+from ..domain import EvidenceBurden, PlanStep, PlanStepStatus, TaskState
 from ..prompt_projection import (
     project_prompt_observation,
     project_prompt_plan_step,
@@ -69,12 +69,22 @@ class ReplannerExecutionError(RuntimeError):
     """Raised when the replanner cannot produce a valid replan decision."""
 
 
+class _ReplanEvidenceBurdenPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    min_independent_sources: int = Field(default=1, ge=1)
+    require_retrieved_content: bool = Field(default=True)
+    freshness_window_days: int | None = Field(default=None, ge=1)
+
+
 class _ReplanStepPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     objective: str = Field(..., min_length=1)
     rationale: str = Field(..., min_length=1)
     expected_outcome: str = Field(..., min_length=1)
+    produces_factual_claims: bool = Field(default=False)
+    evidence_burden: _ReplanEvidenceBurdenPayload | None = Field(default=None)
 
 
 class _ReplanningPayload(BaseModel):
@@ -99,6 +109,8 @@ Each replacement step must contain:
 - objective
 - rationale
 - expected_outcome
+- produces_factual_claims (boolean: true if this step produces factual claims that leave the system or will be used for downstream decision-making, false otherwise)
+- evidence_burden (optional object when produces_factual_claims is true, with min_independent_sources [default 1], require_retrieved_content [default true], freshness_window_days [optional integer])
 
 Rules:
 - Do not modify or repeat completed steps.
@@ -250,6 +262,16 @@ class OpenAIReplanner(ReplannerPort):
                     rationale=step.rationale,
                     expected_outcome=step.expected_outcome,
                     status=PlanStepStatus.PENDING,
+                    produces_factual_claims=step.produces_factual_claims,
+                    evidence_burden=(
+                        EvidenceBurden(
+                            min_independent_sources=step.evidence_burden.min_independent_sources,
+                            require_retrieved_content=step.evidence_burden.require_retrieved_content,
+                            freshness_window_days=step.evidence_burden.freshness_window_days,
+                        )
+                        if step.evidence_burden is not None
+                        else None
+                    ),
                 )
                 for index, step in enumerate(payload.replacement_steps, start=1)
             ],
@@ -290,6 +312,8 @@ class LocalConservativeReplanner(ReplannerPort):
             rationale=f"The actor requested replanning because: {reason}",
             expected_outcome="A revised executable step that lets the runtime continue safely.",
             status=PlanStepStatus.PENDING,
+            produces_factual_claims=current_step.produces_factual_claims,
+            evidence_burden=current_step.evidence_burden,
         )
 
         return ReplanDecision(

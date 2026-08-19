@@ -9,7 +9,7 @@ from .evidence import (
     digest_text,
 )
 from .lifecycle import RuntimeFlag, RuntimeState, StepRecord
-from .plan import PlannerDecision, PlanStep, PlanStepStatus, semantic_plan_signature
+from .plan import EvidenceBurden, PlannerDecision, PlanStep, PlanStepStatus, semantic_plan_signature
 from .review import (
     ExternalCommunicationDraft,
     ExternalCommunicationPhase,
@@ -67,6 +67,7 @@ __all__ = [
     "HumanReviewExternalEdit",
     "HumanReviewRequest",
     "ObservationLineage",
+    "EvidenceBurden",
     "PlanStep",
     "PlanStepStatus",
     "PlannerDecision",

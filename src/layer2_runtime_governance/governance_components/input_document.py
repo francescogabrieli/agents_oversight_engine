@@ -29,6 +29,41 @@ def build_governance_base_facts(
         if task_state.actor_result is not None
         else None
     )
+    has_factual_content = bool(
+        (
+            task_state.external_operation_proposal is not None
+            and (
+                (
+                    isinstance(
+                        task_state.external_operation_proposal.payload,
+                        CommunicationOperationPayload,
+                    )
+                    and bool(
+                        task_state.external_operation_proposal.payload.body
+                        and task_state.external_operation_proposal.payload.body.strip()
+                    )
+                )
+                or (
+                    isinstance(
+                        task_state.external_operation_proposal.payload,
+                        DatabaseOperationPayload,
+                    )
+                    and bool(
+                        task_state.external_operation_proposal.payload.sql
+                        and task_state.external_operation_proposal.payload.sql.strip()
+                    )
+                )
+            )
+        )
+        or (
+            task_state.external_communication is not None
+            and task_state.external_communication.draft is not None
+            and bool(
+                task_state.external_communication.draft.body
+                and task_state.external_communication.draft.body.strip()
+            )
+        )
+    )
     return {
         "task": {
             "sensitivity": policy_input.task_sensitivity.value,
@@ -55,6 +90,7 @@ def build_governance_base_facts(
             "external_impact": policy_input.external_impact,
             "blocking_reason": policy_input.blocking_reason,
             "has_output_text": policy_input.actor_has_output_text,
+            "has_factual_content": has_factual_content,
         },
         "tool": {
             "name": policy_input.tool_name.value if policy_input.tool_name is not None else None,

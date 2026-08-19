@@ -23,13 +23,33 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
     # A new observable basis means new execution events since the checkpoint.
     # progress_epoch and plan_signature are bumped by the replanner itself, so
     # comparing them would let every replan self-admit the next one.
+    # Human interventions do not count as a new observable basis on the world.
     observable_change_since_last_replan = bool(
         last_replan is None
         or len(task_state.tool_results_history) > getattr(last_replan, "tool_result_count", 0)
         or len(task_state.observations) > getattr(last_replan, "observation_count", 0)
         or len(task_state.executed_steps) > getattr(last_replan, "completed_step_count", 0)
-        or len(task_state.human_review_history) > getattr(last_replan, "human_review_count", 0)
     )
+    consecutive_tool_failures = 0
+    for item in reversed(task_state.tool_results_history):
+        if not item.success:
+            consecutive_tool_failures += 1
+        else:
+            break
+
+    seen_digests: list[str] = []
+    action_churn_count = 0
+    for decision in task_state.governance_history:
+        d = decision.evaluated_operation_digest
+        if d:
+            if d in seen_digests and seen_digests[-1] != d:
+                action_churn_count += 1
+            seen_digests.append(d)
+    if task_state.external_operation_proposal is not None:
+        curr_d = task_state.external_operation_proposal.payload_digest
+        if curr_d and curr_d in seen_digests and (not seen_digests or seen_digests[-1] != curr_d):
+            action_churn_count += 1
+
     raw_facts = {
         "actor_turn_count": task_state.actor_turn_count,
         "progress_epoch": task_state.progress_epoch,
@@ -37,6 +57,8 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
         "tool_call_count": task_state.tool_call_count,
         "successful_tool_call_count": successful_tool_calls,
         "failed_tool_call_count": failed_tool_calls,
+        "consecutive_tool_failures": consecutive_tool_failures,
+        "action_churn_count": action_churn_count,
         "observation_count": len(task_state.observations),
         "replan_count": replan_count,
         "consecutive_provider_protocol_failures": task_state.consecutive_provider_protocol_failures,
