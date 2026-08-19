@@ -209,7 +209,10 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
         governance_feedback=tuple(task_state.governance_action_feedback),
         workspace=task_state.workspace,
         progress_epoch=task_state.progress_epoch,
-        attempted_action_keys=tuple(item.action_key for item in task_state.tool_attempts),
+        attempted_action_keys=tuple(
+            item.action_key if hasattr(item, "action_key") else item.get("action_key", "")
+            for item in task_state.tool_attempts
+        ),
         external_communication_draft=(
             task_state.external_communication.draft
             if task_state.external_communication is not None

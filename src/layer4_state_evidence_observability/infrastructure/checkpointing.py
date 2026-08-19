@@ -110,6 +110,9 @@ from layer2_runtime_governance.domain import (
     AgentWorkspace,
     StepArtifact,
     TaskState,
+    ToolAttempt,
+    ToolDisposition,
+    ToolInvocation,
 )
 from layer3_tool_bus_external_capabilities.tool_contract import (
     ToolErrorCode,
@@ -319,8 +322,11 @@ def _persisted_runtime_types() -> list[type]:
         TaskSpec,
         TaskState,
         TrajectoryHealthAssessment,
-        ToolExecutionResult,
+        ToolAttempt,
+        ToolDisposition,
         ToolErrorCode,
+        ToolExecutionResult,
+        ToolInvocation,
         ToolName,
         ToolObservation,
         ToolRequest,

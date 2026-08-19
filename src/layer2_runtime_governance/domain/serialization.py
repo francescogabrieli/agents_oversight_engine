@@ -39,8 +39,12 @@ from .review import (
     HumanReviewExternalEdit,
     HumanReviewRequest,
 )
-from .task_state import TaskState
-from .runtime_records import AgentWorkspace
+from .runtime_records import (
+    AgentWorkspace,
+    ToolAttempt,
+    ToolDisposition,
+    ToolInvocation,
+)
 
 
 # Recover typed external drafts from checkpoints that restored nested dictionaries.
@@ -100,10 +104,22 @@ def normalize_task_state_serialization(task_state: TaskState) -> TaskState:
         normalized.actor_protocol_retry_step_id = None
     if not hasattr(normalized, "actor_protocol_feedback"):
         normalized.actor_protocol_feedback = None
-    if not hasattr(normalized, "tool_attempts"):
-        normalized.tool_attempts = []
-    if not hasattr(normalized, "tool_invocations"):
-        normalized.tool_invocations = []
+    normalized.tool_attempts = [
+        item
+        for item in (
+            _coerce_tool_attempt(attempt)
+            for attempt in getattr(normalized, "tool_attempts", [])
+        )
+        if item is not None
+    ]
+    normalized.tool_invocations = [
+        item
+        for item in (
+            _coerce_tool_invocation(invocation)
+            for invocation in getattr(normalized, "tool_invocations", [])
+        )
+        if item is not None
+    ]
     if not hasattr(normalized, "pending_tool_requests"):
         normalized.pending_tool_requests = []
     normalized.pending_tool_requests = [
@@ -588,6 +604,37 @@ def _coerce_tool_request(payload):
             else 5
         ),
         extractive_goal=_coerce_optional_string(payload.get("extractive_goal")),
+    )
+
+
+# Recover one typed tool attempt from JSON-safe checkpoint material.
+def _coerce_tool_attempt(payload: ToolAttempt | dict[str, Any] | None) -> ToolAttempt | None:
+    if payload is None or isinstance(payload, ToolAttempt):
+        return payload
+    if not isinstance(payload, dict):
+        return None
+    return ToolAttempt(
+        action_key=_required_text(payload.get("action_key"), "tool_attempt.action_key"),
+        plan_step_id=_required_text(payload.get("plan_step_id"), "tool_attempt.plan_step_id"),
+        progress_epoch=int(payload.get("progress_epoch", 0)),
+        disposition=_coerce_enum(
+            ToolDisposition,
+            payload.get("disposition", ToolDisposition.EXECUTED_SUCCESS.value),
+        ),
+    )
+
+
+# Recover one typed tool invocation from JSON-safe checkpoint material.
+def _coerce_tool_invocation(payload: ToolInvocation | dict[str, Any] | None) -> ToolInvocation | None:
+    if payload is None or isinstance(payload, ToolInvocation):
+        return payload
+    if not isinstance(payload, dict):
+        return None
+    return ToolInvocation(
+        action_key=_required_text(payload.get("action_key"), "tool_invocation.action_key"),
+        plan_step_id=_required_text(payload.get("plan_step_id"), "tool_invocation.plan_step_id"),
+        progress_epoch=int(payload.get("progress_epoch", 0)),
+        retryable_failure=bool(payload.get("retryable_failure", False)),
     )
 
 
