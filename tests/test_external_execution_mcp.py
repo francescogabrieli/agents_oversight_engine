@@ -601,7 +601,6 @@ class MCPExternalExecutorIntegrationTests(unittest.TestCase):
         )
 
         from layer1_intake import (
-            BudgetConfig,
             ExecutionPolicy,
             IntakeMetadata,
             IntakeResult,
@@ -619,7 +618,6 @@ class MCPExternalExecutorIntegrationTests(unittest.TestCase):
                 execution_policy=ExecutionPolicy(
                     read_only_mode=False,
                     confidence_threshold=0.5,
-                    budget=BudgetConfig(max_steps=5, max_tool_calls=5),
                 ),
             ),
             metadata=IntakeMetadata(

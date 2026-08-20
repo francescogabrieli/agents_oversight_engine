@@ -826,7 +826,7 @@ class Layer2ActorExecutionTests(unittest.TestCase):
 
 
     def test_build_actor_task_uses_typed_evidence_metadata(self) -> None:
-        task_state = TaskState.from_intake(_build_research_intake_result(max_steps=None, max_tool_calls=None))
+        task_state = TaskState.from_intake(_build_research_intake_result())
         task_state.plan_steps = [
             PlanStep(
                 step_id="step_1",

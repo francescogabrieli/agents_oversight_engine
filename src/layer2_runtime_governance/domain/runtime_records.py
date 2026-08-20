@@ -25,7 +25,6 @@ class ToolDisposition(str, Enum):
     CACHE_HIT = "cache_hit"
     REJECTED_DUPLICATE = "rejected_duplicate"
     REJECTED_CIRCUIT = "rejected_circuit"
-    REJECTED_BUDGET = "rejected_budget"
 
 
 @dataclass(frozen=True)

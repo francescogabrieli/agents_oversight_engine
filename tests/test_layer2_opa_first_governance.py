@@ -12,7 +12,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
 
 from layer1_intake import (
-    BudgetConfig,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeResult,
@@ -284,7 +283,6 @@ def _intake_result() -> IntakeResult:
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.65,
-                budget=BudgetConfig(max_steps=3, max_tool_calls=2),
                 policy_profile_name="test_profile",
                 read_only_mode=False,
             ),

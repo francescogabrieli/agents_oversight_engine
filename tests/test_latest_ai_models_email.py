@@ -6,7 +6,6 @@ from uuid import uuid4
 from langgraph.checkpoint.memory import InMemorySaver
 
 from layer1_intake import (
-    BudgetConfig,
     ExecutionIntent,
     ExecutionPolicy,
     IntakeMetadata,
@@ -192,7 +191,6 @@ def _research_email_intake(*, with_email: bool = True) -> IntakeResult:
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.7,
-                budget=BudgetConfig(max_steps=None, max_tool_calls=None),
                 read_only_mode=False,
             ),
         ),

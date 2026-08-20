@@ -105,7 +105,7 @@
     },
     "intake": {
       "type": "object",
-      "required": ["goal", "context", "sensitivity", "success_criteria", "constraints", "parse_status", "parser_name", "prompt_version", "schema_version", "policy_profile_name", "confidence_threshold", "max_steps", "max_tool_calls", "read_only_mode", "execution_intent"],
+      "required": ["goal", "context", "sensitivity", "success_criteria", "constraints", "parse_status", "parser_name", "prompt_version", "schema_version", "policy_profile_name", "confidence_threshold", "read_only_mode", "execution_intent"],
       "properties": {
         "goal": { "$ref": "#/$defs/nonEmptyString" },
         "context": { "type": "string" },
@@ -118,8 +118,6 @@
         "schema_version": { "$ref": "#/$defs/nonEmptyString" },
         "policy_profile_name": { "$ref": "#/$defs/nonEmptyString" },
         "confidence_threshold": { "type": "number", "minimum": 0, "maximum": 1 },
-        "max_steps": { "type": ["integer", "null"], "minimum": 1, "maximum": 1000000 },
-        "max_tool_calls": { "type": ["integer", "null"], "minimum": 1, "maximum": 1000000 },
         "read_only_mode": { "type": "boolean" },
         "execution_intent": { "enum": ["proposal_only", "execute_after_governance"] }
       },

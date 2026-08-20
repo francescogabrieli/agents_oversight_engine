@@ -737,8 +737,6 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
                         domain_type TEXT NOT NULL,
                         sensitivity TEXT NOT NULL,
                         policy_profile_name TEXT NOT NULL,
-                        budget_max_steps INTEGER,
-                        budget_max_tool_calls INTEGER,
                         actor_turn_count INTEGER NOT NULL,
                         tool_call_count INTEGER NOT NULL,
                         replan_count INTEGER NOT NULL,
@@ -752,7 +750,7 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
                     """
                     INSERT INTO runs VALUES (
                         'legacy-thread', 'completed', 'research', 'low', 'default',
-                        NULL, NULL, 3, 2, 0, 1, 0, 1
+                        3, 2, 0, 1, 0, 1
                     )
                     """
                 )

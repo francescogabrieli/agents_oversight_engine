@@ -10,7 +10,6 @@ from langgraph.checkpoint.memory import InMemorySaver
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 from layer1_intake import (
-    BudgetConfig,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeResult,
@@ -558,7 +557,6 @@ def build_research_intake_result() -> IntakeResult:
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.65,
-                budget=BudgetConfig(max_steps=3, max_tool_calls=3),
                 read_only_mode=True,
             ),
         ),

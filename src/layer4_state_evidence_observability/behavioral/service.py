@@ -290,8 +290,6 @@ class SQLiteBehavioralStore(BehavioralStorePort):
                 final_state TEXT NOT NULL,
                 sensitivity TEXT NOT NULL,
                 policy_profile_name TEXT NOT NULL,
-                budget_max_steps INTEGER,
-                budget_max_tool_calls INTEGER,
                 actor_turn_count INTEGER NOT NULL,
                 tool_call_count INTEGER NOT NULL,
                 replan_count INTEGER NOT NULL,
@@ -363,7 +361,7 @@ class SQLiteBehavioralStore(BehavioralStorePort):
         self._migrate_steps_table(connection)
         self._migrate_tool_calls_table(connection)
 
-    # Preserve run history while removing retired columns and nullable-budget drift.
+    # Preserve run history while removing retired columns.
     def _migrate_runs_table(self, connection: sqlite3.Connection) -> None:
         columns = connection.execute("PRAGMA table_info(runs)").fetchall()
         if not columns:
@@ -373,8 +371,6 @@ class SQLiteBehavioralStore(BehavioralStorePort):
             "final_state",
             "sensitivity",
             "policy_profile_name",
-            "budget_max_steps",
-            "budget_max_tool_calls",
             "actor_turn_count",
             "tool_call_count",
             "replan_count",
@@ -383,12 +379,7 @@ class SQLiteBehavioralStore(BehavioralStorePort):
             "has_external_communication",
         )
         actual_columns = tuple(str(column[1]) for column in columns)
-        budget_columns_are_nullable = all(
-            int(column[3]) == 0
-            for column in columns
-            if column[1] in {"budget_max_steps", "budget_max_tool_calls"}
-        )
-        if actual_columns == expected_columns and budget_columns_are_nullable:
+        if actual_columns == expected_columns:
             return
 
         connection.executescript(
@@ -399,8 +390,6 @@ class SQLiteBehavioralStore(BehavioralStorePort):
                 final_state TEXT NOT NULL,
                 sensitivity TEXT NOT NULL,
                 policy_profile_name TEXT NOT NULL,
-                budget_max_steps INTEGER,
-                budget_max_tool_calls INTEGER,
                 actor_turn_count INTEGER NOT NULL,
                 tool_call_count INTEGER NOT NULL,
                 replan_count INTEGER NOT NULL,
@@ -410,12 +399,12 @@ class SQLiteBehavioralStore(BehavioralStorePort):
             );
             INSERT INTO runs (
                 thread_id, final_state, sensitivity, policy_profile_name,
-                budget_max_steps, budget_max_tool_calls, actor_turn_count, tool_call_count,
+                actor_turn_count, tool_call_count,
                 replan_count, review_count, abort_count, has_external_communication
             )
             SELECT
                 thread_id, final_state, sensitivity, policy_profile_name,
-                budget_max_steps, budget_max_tool_calls, actor_turn_count, tool_call_count,
+                actor_turn_count, tool_call_count,
                 replan_count, review_count, abort_count, has_external_communication
             FROM runs_schema_migration;
             DROP TABLE runs_schema_migration;
@@ -759,17 +748,15 @@ class SQLiteBehavioralStore(BehavioralStorePort):
             """
             INSERT INTO runs (
                 thread_id, final_state, sensitivity, policy_profile_name,
-                budget_max_steps, budget_max_tool_calls, actor_turn_count, tool_call_count,
+                actor_turn_count, tool_call_count,
                 replan_count, review_count, abort_count, has_external_communication
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 thread_id,
                 task_state.current_state.value,
                 structured_task.task_spec.sensitivity.value,
                 structured_task.execution_policy.policy_profile_name,
-                structured_task.execution_policy.budget.max_steps,
-                structured_task.execution_policy.budget.max_tool_calls,
                 task_state.actor_turn_count,
                 task_state.tool_call_count,
                 sum(1 for record in task_state.step_history if record.node_name == "replanner"),

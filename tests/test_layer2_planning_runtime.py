@@ -412,21 +412,21 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         self.assertNotIn("research", prompt.lower())
 
 
-    def test_planner_does_not_trim_when_step_budget_is_unbounded(self) -> None:
+    def test_planner_does_not_trim_the_semantic_plan(self) -> None:
         task_state = TaskState.from_intake(
-            _build_research_intake_result(max_steps=None, max_tool_calls=None)
+            _build_research_intake_result()
         )
         planned_state = planner(task_state, planner_service=StubPlanner())
 
         self.assertEqual(planned_state.current_state, RuntimeState.PLANNING)
         self.assertEqual(len(planned_state.plan_steps), 2)
         self.assertEqual(planned_state.plan_steps[0].status, PlanStepStatus.IN_PROGRESS)
-        self.assertNotIn("trimmed to the configured", task_state.step_history[0].summary)
+        self.assertNotIn("trimmed", task_state.step_history[0].summary.lower())
 
 
     def test_runtime_preserves_over_decomposed_planner_output_verbatim(self) -> None:
         task_state = TaskState.from_intake(
-            _build_research_intake_result(max_steps=None, max_tool_calls=None)
+            _build_research_intake_result()
         )
         task_state = planner(task_state, planner_service=OverDecomposedSourceSummaryPlanner())
         self.assertEqual(len(task_state.plan_steps), 3)

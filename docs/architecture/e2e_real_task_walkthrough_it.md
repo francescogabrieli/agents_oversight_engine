@@ -136,7 +136,7 @@ riprodurre una risposta LLM esatta. Sono invece invarianti:
 - non esistono campi `domain_type` o `domain_label` nel `TaskSpec` attivo;
 - Pydantic possiede shape e normalizzazione;
 - `assess_task_completeness` produce una sola valutazione semantica tipizzata;
-- budget, soglia di confidenza e read-only mode vengono dalla configurazione di
+- soglia di confidenza e read-only mode vengono dalla configurazione di
   `ExecutionPolicy`, non dal modello;
 - il context mancante può generare un warning, ma non forza da solo lo stato
   `partial`.
@@ -190,7 +190,7 @@ all'actor.
 
 `ActorTask` contiene il piano completo per contesto, ma l'autorità di completion è
 limitata a `current_plan_step`. Include inoltre osservazioni, scratchpad audit-safe,
-validazioni precedenti, ultimo risultato tool, budget residuo e feedback di
+validazioni precedenti, ultimo risultato tool e feedback di
 governance.
 
 L'actor restituisce un `ActorResult` tipizzato, per esempio:
@@ -216,7 +216,7 @@ Il flusso è:
 
 1. l'actor produce la richiesta tipizzata;
 2. la governance valuta il confine read-only;
-3. il Tool Gateway valida registry, schema e budget;
+3. il Tool Gateway valida registry e schema;
 4. l'adapter esegue la capability;
 5. l'adapter crea ogni `ToolObservation` con `observation_id`, contenuto concreto e
    locator opzionale;

@@ -12,7 +12,6 @@ from langgraph.types import Command
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 from layer1_intake import (
-    BudgetConfig,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeResult,
@@ -501,7 +500,6 @@ def _intake_result() -> IntakeResult:
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.65,
-                budget=BudgetConfig(max_steps=4, max_tool_calls=3),
                 policy_profile_name="hitl_control_plane_profile",
             ),
         ),

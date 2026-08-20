@@ -1,37 +1,21 @@
 {
   "default_policy": {
     "confidence_threshold": 0.65,
-    "budget": {
-      "max_steps": null,
-      "max_tool_calls": null
-    },
     "read_only_mode": false
   },
   "named_profiles": {
     "high_sensitivity_default": {
       "confidence_threshold": 0.8,
-      "budget": {
-        "max_steps": null,
-        "max_tool_calls": null
-      },
       "read_only_mode": true
     }
   },
   "sensitivity_overrides": {
     "high": {
       "confidence_threshold": 0.75,
-      "budget": {
-        "max_steps": null,
-        "max_tool_calls": null
-      },
       "read_only_mode": false
     },
     "critical": {
       "confidence_threshold": 0.85,
-      "budget": {
-        "max_steps": null,
-        "max_tool_calls": null
-      },
       "read_only_mode": true
     }
   }

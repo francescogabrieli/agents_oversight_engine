@@ -3,7 +3,6 @@ from __future__ import annotations
 import unittest
 
 from layer1_intake import (
-    BudgetConfig,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeResult,
@@ -118,7 +117,6 @@ def _build_state() -> TaskState:
             execution_policy=ExecutionPolicy(
                 policy_profile_name="default",
                 confidence_threshold=0.65,
-                budget=BudgetConfig(max_steps=None, max_tool_calls=None),
                 read_only_mode=True,
             ),
         ),

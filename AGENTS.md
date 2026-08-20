@@ -409,8 +409,8 @@ Current relevant files:
 
 - `Layer 1` must output a canonical `IntakeResult`.
 - `ExecutionPolicy` is system-controlled, not inferred freely from the user task.
-- `confidence_threshold` and budget are configuration-driven.
-- Layer 1 execution policy currently carries budget, confidence threshold, and read-only mode only; tool allowlists/denylists are deferred and should not be exposed to the actor contract.
+- `confidence_threshold` and read-only mode are configuration-driven.
+- Layer 1 execution policy currently carries confidence threshold and read-only mode only; tool allowlists/denylists are deferred and should not be exposed to the actor contract.
 - `context` may be empty without forcing `partial`.
 - `success_criteria` and missing constraints for sensitive tasks are more important than missing context.
 
@@ -489,7 +489,6 @@ Current relevant files:
 - the actor may request `NEEDS_REPLAN` with a non-empty blocking reason; OPA admits the first request or a later request with a new observable execution basis, while repeated churn on an unchanged trajectory routes to HITL
 - a new observable execution basis means new tool results, observations, or completed steps since the last replan checkpoint (human reviews do not count as a new factual basis on the world); neither the replanner's own `progress_epoch` bump nor its plan-signature change self-admit a subsequent replan request
 - trajectory convergence limits enforce bounded progress: `replan_ceiling_reached`, `consecutive_tool_failures`, and `action_churn` escalate to HITL
-- `max_tool_calls = null` means the current runtime does not impose a hard tool-call ceiling
 - `WAITING_HUMAN_REVIEW` is now the typed pause state that feeds the LangGraph `interrupt / resume` HITL path
 - governance is active as an explicit runtime node and uses OPA over HTTP as the deterministic static policy engine target
 - Python fact normalization must never reinterpret or relax the OPA decision

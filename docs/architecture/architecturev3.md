@@ -115,8 +115,8 @@ Responsabilità principali:
 
 Scelte di progettazione:
 - il parsing può essere realizzato con un LLM
-- soglia di confidenza e budget non vengono inferiti dal task
-- soglia di confidenza e budget vengono impostati dalla configurazione del sistema
+- la soglia di confidenza e la modalità read-only non vengono inferite dal task
+- la soglia di confidenza e la modalità read-only vengono impostate dalla configurazione del sistema
 
 ### 1.3 Output
 
@@ -135,9 +135,7 @@ Output canonico:
     },
     "execution_policy": {
       "confidence_threshold": 0.65,
-      "budget": {
-        "max_steps": 5
-      }
+      "read_only_mode": false
     }
   },
   "metadata": {

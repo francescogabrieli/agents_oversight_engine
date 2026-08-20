@@ -92,7 +92,6 @@ class ActorTask:
     step_validations: tuple[StepValidation, ...]
     last_tool_result: ToolExecutionResult | None
     tool_call_count: int
-    remaining_tool_calls: int | None
     actor_turn_count: int
     current_plan_step_index: int
     current_plan_step: ActorPlanStep
@@ -198,8 +197,6 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
         step_validations=tuple(task_state.step_validations),
         last_tool_result=task_state.last_tool_result,
         tool_call_count=task_state.tool_call_count,
-        # Keep tool budget explicit while allowing policies with no hard tool-call ceiling.
-        remaining_tool_calls=_compute_remaining_tool_calls(task_state=task_state),
         actor_turn_count=task_state.actor_turn_count,
         current_plan_step_index=current_index,
         current_plan_step=actor_plan_steps[current_index],
@@ -228,15 +225,6 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
             else None
         ),
     )
-
-
-# Convert the optional tool-call budget into a remaining count the actor can reason about.
-def _compute_remaining_tool_calls(*, task_state: TaskState) -> int | None:
-    max_tool_calls = task_state.execution_policy.budget.max_tool_calls
-    if max_tool_calls is None:
-        return None
-
-    return max(max_tool_calls - task_state.tool_call_count, 0)
 
 
 __all__ = [

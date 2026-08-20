@@ -4,7 +4,6 @@ import unittest
 from uuid import uuid4
 
 from layer1_intake import (
-    BudgetConfig,
     ExecutionIntent,
     ExecutionPolicy,
     IntakeMetadata,
@@ -57,7 +56,6 @@ def _build_test_task_state(*, produces_factual_claims: bool = False, evidence_bu
                 policy_profile_name="test_policy",
                 confidence_threshold=0.7,
                 read_only_mode=False,
-                budget=BudgetConfig(max_steps=10, max_tool_calls=10),
             ),
         ),
         metadata=IntakeMetadata(

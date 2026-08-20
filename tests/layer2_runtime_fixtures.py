@@ -6,7 +6,6 @@ from typing import Any
 from langgraph.checkpoint.memory import InMemorySaver
 
 from layer1_intake import (
-    BudgetConfig,
     ExecutionIntent,
     ExecutionPolicy,
     IntakeMetadata,
@@ -1253,8 +1252,6 @@ class _ThreadIdInjectingGraph:
 
 def _build_research_intake_result(
     *,
-    max_steps: int | None = None,
-    max_tool_calls: int | None = None,
     read_only_mode: bool = False,
 ) -> IntakeResult:
     return IntakeResult(
@@ -1268,7 +1265,6 @@ def _build_research_intake_result(
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.65,
-                budget=BudgetConfig(max_steps=max_steps, max_tool_calls=max_tool_calls),
                 read_only_mode=read_only_mode,
             ),
         ),
@@ -1294,7 +1290,6 @@ def _build_external_communication_intake_result() -> IntakeResult:
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.75,
-                budget=BudgetConfig(max_steps=None, max_tool_calls=None),
                 read_only_mode=False,
             ),
         ),
@@ -1341,7 +1336,6 @@ def _build_external_incident_intake_result() -> IntakeResult:
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.9,
-                budget=BudgetConfig(max_steps=None, max_tool_calls=None),
                 read_only_mode=False,
             ),
         ),
@@ -1626,7 +1620,6 @@ def _build_clarification_intake_result() -> IntakeResult:
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.8,
-                budget=BudgetConfig(max_steps=4, max_tool_calls=6),
             ),
         ),
         metadata=IntakeMetadata(
@@ -1878,7 +1871,6 @@ def _build_external_communication_intake_result_for_governance() -> IntakeResult
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.65,
-                budget=BudgetConfig(max_steps=4, max_tool_calls=3),
                 policy_profile_name="external_comm_profile",
             ),
         ),
@@ -1912,17 +1904,15 @@ def _seed_behavioral_history(
                 """
                 INSERT OR REPLACE INTO runs (
                     thread_id, final_state, sensitivity, policy_profile_name,
-                    budget_max_steps, budget_max_tool_calls, actor_turn_count, tool_call_count,
+                    actor_turn_count, tool_call_count,
                     replan_count, review_count, abort_count, has_external_communication
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     thread_id,
                     "completed",
                     profile_overrides.get("sensitivity", SensitivityLevel.LOW.value),
                     profile_overrides.get("policy_profile_name", "default"),
-                    5,
-                    10,
                     int(profile_overrides.get("actor_turn_count", 3)),
                     int(profile_overrides.get("tool_call_count", 1)),
                     int(profile_overrides.get("replan_count", 0)),

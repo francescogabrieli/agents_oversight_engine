@@ -71,8 +71,6 @@ def _build_intake_section(trace: Layer2RuntimeTrace) -> str:
         f"| Read-only mode | {i.read_only_mode} |",
         f"| Execution intent | `{i.execution_intent}` |",
         f"| Confidence threshold | {i.confidence_threshold} |",
-        f"| Max steps | {i.max_steps if i.max_steps is not None else 'unbounded'} |",
-        f"| Max tool calls | {i.max_tool_calls if i.max_tool_calls is not None else 'unbounded'} |",
         f"| Policy profile | `{i.policy_profile_name}` |",
     ]
     if i.constraints:

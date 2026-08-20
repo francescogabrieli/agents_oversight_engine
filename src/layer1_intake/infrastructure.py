@@ -63,20 +63,11 @@ class OpenAIParserSettings:
         )
 
 
-class _PolicyBudgetPayload(BaseModel):
-    # Validate the budget section of the JSON policy configuration.
-    model_config = ConfigDict(extra="forbid")
-
-    max_steps: int | None = Field(default=None, ge=1)
-    max_tool_calls: int | None = Field(default=None, ge=1)
-
-
 class _PolicyProfilePayload(BaseModel):
     # Validate one policy profile before it is turned into runtime models.
     model_config = ConfigDict(extra="forbid")
 
     confidence_threshold: float = Field(..., ge=0.0, le=1.0)
-    budget: _PolicyBudgetPayload
     read_only_mode: bool = False
 
 
@@ -269,12 +260,9 @@ class JsonExecutionPolicyRepository(ExecutionPolicyRepositoryPort):
     @staticmethod
     def _to_policy_profile(*, name: str, data: dict[str, Any]) -> PolicyProfile:
         # Translate raw JSON data into the typed PolicyProfile used by the service layer.
-        budget = data["budget"]
         return PolicyProfile(
             name=name,
             confidence_threshold=data["confidence_threshold"],
-            max_steps=budget["max_steps"],
-            max_tool_calls=budget.get("max_tool_calls"),
             read_only_mode=data.get("read_only_mode", False),
         )
 

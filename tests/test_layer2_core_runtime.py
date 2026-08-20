@@ -126,7 +126,7 @@ class Layer2RuntimeCoreTests(unittest.TestCase):
             actor_service=ProgressThenCompleteActor(),
         )
         result = graph.invoke(
-            {"intake_result": _build_research_intake_result(max_steps=1, max_tool_calls=10)},
+            {"intake_result": _build_research_intake_result()},
             config={"configurable": {"thread_id": "layer2-intermediate-output-continues"}},
         )
 

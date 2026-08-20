@@ -13,7 +13,6 @@ from jsonschema import Draft202012Validator, ValidationError
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 from layer1_intake import (
-    BudgetConfig,
     ExecutionIntent,
     ExecutionPolicy,
     IntakeMetadata,
@@ -360,7 +359,6 @@ def _intake_result() -> IntakeResult:
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.65,
-                budget=BudgetConfig(max_steps=4, max_tool_calls=3),
                 policy_profile_name="trace_profile",
             ),
         ),
@@ -389,7 +387,6 @@ def _external_communication_intake_result() -> IntakeResult:
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.7,
-                budget=BudgetConfig(max_steps=4, max_tool_calls=3),
                 policy_profile_name="trace_external_profile",
             ),
         ),

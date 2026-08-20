@@ -58,7 +58,7 @@ I nodi delegano ai seguenti servizi, anziché incorporare logica nel grafo.
 - Intake: `layer1_intake.service — IntakeService`, `TaskSpecBuilder`, `PolicyResolver`, `IntakeResultValidator`; adapter reale OpenAI e JSON policy in `layer1_intake.infrastructure — OpenAITaskSpecParser`, `JsonExecutionPolicyRepository`, `build_intake_service`.
 - Planning: `runtime.planning_service — planner`; port e implementazione OpenAI in `layer2_runtime_governance.planning`; replanning in `runtime.replanning_service — replanner` con port `planning.replanning — ReplannerPort`.
 - Acting: `runtime.actor_service — actor`, che registra turni, artifacts, scratchpad audit-safe, validazioni e completion candidate. Provider/adattatori sono separati in `execution/` (`factory.build_default_actor`, `providers.bedrock_runtime`, `providers.openai`, parser e action schema).
-- Tool loop: `runtime.tool_service — tool_gateway`, `observe_tool_result`. I guard locali gestiscono budget, cache, duplicati, retry/circuito e osservazioni concrete prima/dopo il backend.
+- Tool loop: `runtime.tool_service — tool_gateway`, `observe_tool_result`. I guard locali gestiscono cache, duplicati, retry/circuito e osservazioni concrete prima/dopo il backend.
 - Governance: `runtime.governance_service — governance`, con pipeline OPA-first in `governance_components.opa_pipeline — evaluate_opa_first_governance`.
 - Semantic judge: `judge.service` dietro `JudgePort`; il context e i raw facts sono creati da `signal_services.judge_service — build_judge_context`, `build_judge_signal`.
 - External execution: `runtime.external_execution_service — external_execution`, con preflight, binding digest, idempotenza, receipt e reconciliation.
@@ -71,7 +71,7 @@ I nodi delegano ai seguenti servizi, anziché incorporare logica nel grafo.
 `src/layer1_intake/models.py` usa `pydantic.BaseModel` per i contratti esterni/canonici:
 
 - `TaskSpec`: goal, context, constraints, sensitivity, success criteria ed execution intent;
-- `BudgetConfig`, `ExecutionPolicy`;
+- `ExecutionPolicy`;
 - `TaskCompletenessAssessment`, `StructuredTask`, `IntakeMetadata`, `IntakeResult`;
 - `service.IntakeCommand` è il comando validato di ingresso.
 

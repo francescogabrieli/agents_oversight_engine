@@ -107,7 +107,7 @@
       "role": "contract detail",
       "intent": "Spiegare i campi che definiscono il risultato richiesto senza duplicare il piano.",
       "key_points": ["goal, context, constraints", "sensitivity", "success_criteria", "execution_intent"],
-      "local_context": {"required_background": "TaskSpec fields: goal, context, constraints, sensitivity, success_criteria, execution_intent. Execution intent records proposal_only or execute_after_governance but grants no authority. ExecutionPolicy fields: policy_profile_name, confidence_threshold, budget {max_steps,max_tool_calls}, read_only_mode."},
+      "local_context": {"required_background": "TaskSpec fields: goal, context, constraints, sensitivity, success_criteria, execution_intent. Execution intent records proposal_only or execute_after_governance but grants no authority. ExecutionPolicy fields: policy_profile_name, confidence_threshold, read_only_mode."},
       "layout": {"composition": "JSON TaskSpec leggibile a sinistra; legenda campo-significato a destra in due gruppi: intento utente e policy di sistema."},
       "visual_elements": {"main_visual": "Evidenziare execute_after_governance e external_communication/email"},
       "constraints": ["Non superare 11 righe nel JSON", "Usare valori abbreviati ma realistici"]
@@ -118,7 +118,7 @@
       "role": "handoff",
       "intent": "Mostrare ciò che il planner riceve e ciò che resta fuori.",
       "key_points": ["task_spec", "execution_policy", "intake_metadata", "runtime"],
-      "local_context": {"required_background": "Planner input: task_spec {goal,context,constraints,sensitivity,success_criteria,execution_intent}; execution_policy {policy_profile_name,confidence_threshold,read_only_mode,budget}; intake_metadata {parse_status,warnings,missing_information}; runtime {current_state,runtime_flags,step_index}. The planner owns the complete semantic trajectory and runtime does not rewrite it."},
+      "local_context": {"required_background": "Planner input: task_spec {goal,context,constraints,sensitivity,success_criteria,execution_intent}; execution_policy {policy_profile_name,confidence_threshold,read_only_mode}; intake_metadata {parse_status,warnings,missing_information}; runtime {current_state,runtime_flags,step_index}. The planner owns the complete semantic trajectory and runtime does not rewrite it."},
       "layout": {"composition": "Quattro pannelli input confluiscono nel Planner; una fascia 'non decide' indica tool call, payload email e governance."},
       "visual_elements": {"main_visual": "Funnel controllato verso il planner"},
       "constraints": ["Nessun JSON completo", "Usare etichette di campo"]
@@ -140,7 +140,7 @@
       "role": "contract map",
       "intent": "Raggruppare il grande contratto actor-facing per responsabilità.",
       "key_points": ["Contesto autorizzato", "Passo corrente", "Memoria audit-safe", "Evidenza e progressi", "Feedback runtime"],
-      "local_context": {"required_background": "ActorTask fields: task_spec, execution_policy, intake_metadata, current_state, runtime_flags, plan_steps, past_steps, observations, scratchpad, step_validations, last_tool_result, tool_call_count, remaining_tool_calls, actor_turn_count, current_plan_step_index, current_plan_step, planner_rationale, planner_name, planner_prompt_version, governance_feedback. The actor sees the whole plan but can commit only the current step."},
+      "local_context": {"required_background": "ActorTask fields: task_spec, execution_policy, intake_metadata, current_state, runtime_flags, plan_steps, past_steps, observations, scratchpad, step_validations, last_tool_result, tool_call_count, actor_turn_count, current_plan_step_index, current_plan_step, planner_rationale, planner_name, planner_prompt_version, governance_feedback. The actor sees the whole plan but can commit only the current step."},
       "layout": {"composition": "Cinque gruppi ben separati attorno a un Actor centrale; nessun JSON lungo."},
       "visual_elements": {"main_visual": "Mappa dei campi raggruppati per funzione"},
       "constraints": ["Non elencare più di cinque campi per gruppo", "Usare corpo grande"]

@@ -81,7 +81,7 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
             task_state.external_operation_proposal
             and task_state.external_operation_proposal.execution_candidate
         ),
-        # Count revisions per operation; unrelated proposals never consume this cycle's budget.
+        # Count revisions per operation; unrelated proposals never consume this cycle's allowance.
         "external_action_revision_count": sum(
             1
             for feedback in task_state.governance_action_feedback

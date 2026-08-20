@@ -8,7 +8,6 @@ from .infrastructure import (
     get_default_policy_config_path,
 )
 from .models import (
-    BudgetConfig,
     ExecutionIntent,
     ExecutionPolicy,
     IntakeDomainError,
@@ -38,7 +37,6 @@ from .service import (
 )
 
 __all__ = [
-    "BudgetConfig",
     "ClockPort",
     "ExecutionIntent",
     "ExecutionPolicy",

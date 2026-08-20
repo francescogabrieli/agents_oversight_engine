@@ -115,8 +115,6 @@ def _build_intake_summary(*, intake_result: IntakeResult) -> TraceIntakeSummary:
         schema_version=intake_result.metadata.schema_version,
         policy_profile_name=execution_policy.policy_profile_name,
         confidence_threshold=execution_policy.confidence_threshold,
-        max_steps=execution_policy.budget.max_steps,
-        max_tool_calls=execution_policy.budget.max_tool_calls,
         read_only_mode=execution_policy.read_only_mode,
         execution_intent=task_spec.execution_intent.value,
     )

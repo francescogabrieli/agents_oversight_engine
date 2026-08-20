@@ -56,8 +56,6 @@ def canonical_action_key(request: ToolRequest) -> str:
 
 # Return cache/rejection results without allowing them to become backend invocations.
 def _guarded_tool_result(*, state: TaskState, request: ToolRequest, action_key: str, tool_gateway_service: ToolGatewayPort) -> tuple[ToolExecutionResult, ToolDisposition, bool]:
-    if _tool_call_budget_exhausted(state=state):
-        return _synthetic_result(request, "Tool call budget exhausted.", ToolErrorCode.UNAVAILABLE), ToolDisposition.REJECTED_BUDGET, False
     cached = _successful_result_for_action(state, action_key)
     if cached is not None:
         return ToolExecutionResult(
@@ -191,12 +189,6 @@ def observe_tool_result(state: TaskState) -> TaskState:
     return state
 
 
-# Respect the configured capability-invocation budget.
-def _tool_call_budget_exhausted(*, state: TaskState) -> bool:
-    maximum = state.execution_policy.budget.max_tool_calls
-    return maximum is not None and state.tool_call_count >= maximum
-
-
 # Validate adapter-produced observations without assigning semantic quality.
 def _validated_tool_observations(*, state: TaskState, tool_result: ToolExecutionResult) -> list[ToolObservation]:
     if not tool_result.success:
@@ -257,4 +249,4 @@ def _append_observation(*, state: TaskState, tool_result: ToolExecutionResult, e
         state.scratchpad.append(ScratchpadEntry(state.actor_turn_count, step.step_id, ScratchpadEntryType.OBSERVATION, f"Observed tool result from '{tool_result.request.tool_name.value}': {tool_result.summary}", evidence_refs))
 
 
-__all__ = ["canonical_action_key", "observe_tool_result", "tool_gateway", "_tool_call_budget_exhausted"]
+__all__ = ["canonical_action_key", "observe_tool_result", "tool_gateway"]

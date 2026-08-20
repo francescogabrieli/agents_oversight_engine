@@ -199,8 +199,6 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
         "execution_policy": {
             "policy_profile_name": execution_policy["policy_profile_name"],
             "confidence_threshold": execution_policy["confidence_threshold"],
-            "max_steps": execution_policy["budget"]["max_steps"],
-            "max_tool_calls": execution_policy["budget"]["max_tool_calls"],
             "read_only_mode": execution_policy["read_only_mode"],
         },
         "final_result": {

@@ -151,10 +151,6 @@ def build_planner_user_prompt(*, task_state: TaskState) -> str:
             "policy_profile_name": task_state.execution_policy.policy_profile_name,
             "confidence_threshold": task_state.execution_policy.confidence_threshold,
             "read_only_mode": task_state.execution_policy.read_only_mode,
-            "budget": {
-                "max_steps": task_state.execution_policy.budget.max_steps,
-                "max_tool_calls": task_state.execution_policy.budget.max_tool_calls,
-            },
         },
         "intake_metadata": {
             "parse_status": task_state.intake_metadata.parse_status.value,

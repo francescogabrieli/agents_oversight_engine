@@ -49,8 +49,6 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
             "read_only_mode": actor_task.execution_policy.read_only_mode,
             "actor_turn_count": actor_task.actor_turn_count,
             "tool_call_count": actor_task.tool_call_count,
-            "max_tool_calls": actor_task.execution_policy.budget.max_tool_calls,
-            "remaining_tool_calls": actor_task.remaining_tool_calls,
             "confidence_threshold": actor_task.execution_policy.confidence_threshold,
             "progress_epoch": actor_task.progress_epoch,
             "attempted_action_keys": list(actor_task.attempted_action_keys[-12:]),

@@ -31,11 +31,11 @@ from layer3_tool_bus_external_capabilities.tools.adapters.openai_search import (
 )
 class Layer2ToolRuntimeTests(unittest.TestCase):
     # Scenarios remain grouped by the capability whose behavior they verify.
-    def test_complete_intake_supports_unbounded_tool_budget(self) -> None:
+    def test_complete_intake_supports_tool_execution(self) -> None:
         graph = _build_test_graph()
         result = graph.invoke(
-            {"intake_result": _build_research_intake_result(max_tool_calls=None)},
-            config={"configurable": {"thread_id": "layer2-unbounded-tool-budget"}},
+            {"intake_result": _build_research_intake_result()},
+            config={"configurable": {"thread_id": "layer2-tool-execution"}},
         )
 
         task_state = result["task_state"]
@@ -51,7 +51,7 @@ class Layer2ToolRuntimeTests(unittest.TestCase):
             policy_engine_service=StubPolicyEngine(),
         )
         result = graph.invoke(
-            {"intake_result": _build_research_intake_result(max_steps=1, max_tool_calls=10)},
+            {"intake_result": _build_research_intake_result()},
             config={"configurable": {"thread_id": "layer2-duplicate-fetch-blocked"}},
         )
 

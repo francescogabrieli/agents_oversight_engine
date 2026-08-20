@@ -40,7 +40,7 @@ are recorded separately from the mutable `AgentWorkspace`, whose durable artifac
 are projected into the next actor context. `progress_epoch` advances only for a
 concrete observation, changed artifact, completed step, human decision, or changed
 semantic plan. The local ProgressGuard uses a capability-owned action key before
-the backend and before OPA; cache, duplicate, circuit, and budget outcomes are not
+ the backend and before OPA; cache, duplicate, and circuit outcomes are not
 backend invocations and cannot poison the circuit breaker.
 
 Legacy topology details retained for Judge/HITL/external completion:
@@ -107,10 +107,6 @@ Il runtime non interpreta nuovamente il testo grezzo. Riceve un `IntakeResult`:
     "execution_policy": {
       "policy_profile_name": "default",
       "confidence_threshold": 0.65,
-      "budget": {
-        "max_steps": null,
-        "max_tool_calls": null
-      },
       "read_only_mode": false
     }
   },
@@ -175,7 +171,7 @@ Regole:
   della governance;
 - il runtime conserva esattamente la lista prodotta dal planner;
 - il runtime non accorcia, fonde, espande o sostituisce il piano;
-- il budget opzionale viene validato senza riscrivere la semantica.
+- la policy viene validata senza riscrivere la semantica.
 
 Il replanner può sostituire soltanto lo step corrente e quelli ancora pendenti.
 La cronologia degli step completati resta immutabile.
@@ -192,7 +188,7 @@ L'actor riceve un `ActorTask` immutabile con:
 - ultimo risultato tool;
 - scratchpad e validazioni precedenti;
 - feedback di governance;
-- budget e contatori.
+- contatori runtime.
 
 Il piano completo permette all'actor di capire dipendenze, destinazione finale e
 coerenza globale. L'autorità di commit resta limitata allo step corrente: l'actor

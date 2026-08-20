@@ -13,7 +13,6 @@ from tests.layer2_runtime_fixtures import (
     ActorPort,
     ActorResult,
     ActorResultType,
-    BudgetConfig,
     CapabilityAccessMode,
     ExecutionPolicy,
     IntakeMetadata,
@@ -236,7 +235,6 @@ def _intake(
             ),
             execution_policy=ExecutionPolicy(
                 confidence_threshold=0.7,
-                budget=BudgetConfig(max_steps=None, max_tool_calls=None),
                 read_only_mode=read_only,
             ),
         ),

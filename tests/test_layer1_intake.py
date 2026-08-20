@@ -10,7 +10,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 from layer1_intake.infrastructure import JsonExecutionPolicyRepository
 from layer1_intake.models import (
-    BudgetConfig,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeValidationError,
@@ -230,14 +229,12 @@ class Layer1IntakeTests(unittest.TestCase):
         config = {
             "default_policy": {
                 "confidence_threshold": 0.65,
-                "budget": {"max_steps": None, "max_tool_calls": None},
                 "read_only_mode": False,
             },
             "named_profiles": {},
             "sensitivity_overrides": {
                 "high": {
                     "confidence_threshold": 0.8,
-                    "budget": {"max_steps": None, "max_tool_calls": None},
                     "read_only_mode": True,
                 }
             },
@@ -258,8 +255,6 @@ class Layer1IntakeTests(unittest.TestCase):
 
         self.assertEqual(profile.name, "default")
         self.assertEqual(profile.confidence_threshold, 0.8)
-        self.assertIsNone(profile.max_steps)
-        self.assertIsNone(profile.max_tool_calls)
         self.assertTrue(profile.read_only_mode)
 
 
@@ -275,8 +270,6 @@ class _StubPolicyRepository:
         return PolicyProfile(
             name=profile_name or "default",
             confidence_threshold=0.65,
-            max_steps=None,
-            max_tool_calls=None,
             read_only_mode=False,
         )
 
@@ -299,7 +292,6 @@ def _structured_task(task_spec: TaskSpec) -> StructuredTask:
         execution_policy=ExecutionPolicy(
             policy_profile_name="default",
             confidence_threshold=0.65,
-            budget=BudgetConfig(max_steps=None, max_tool_calls=None),
             read_only_mode=True,
         ),
     )

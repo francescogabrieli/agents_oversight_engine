@@ -16,7 +16,6 @@ from langgraph.types import Command
 
 from console_output import print_json_section as _print_section
 from layer1_intake import (
-    BudgetConfig,
     ExecutionPolicy,
     IntakeCommand,
     IntakeMetadata,
@@ -732,7 +731,6 @@ def _build_demo_intake_result(
 
     execution_policy = ExecutionPolicy(
         confidence_threshold=0.65,
-        budget=BudgetConfig(max_steps=None, max_tool_calls=None),
     )
 
     return IntakeResult(

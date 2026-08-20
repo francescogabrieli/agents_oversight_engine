@@ -7,7 +7,6 @@ from typing import Protocol
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .models import (
-    BudgetConfig,
     ExecutionPolicy,
     IntakeMetadata,
     IntakeResult,
@@ -25,8 +24,6 @@ from .completeness import assess_task_completeness
 class PolicyProfile:
     name: str
     confidence_threshold: float
-    max_steps: int | None = None
-    max_tool_calls: int | None = None
     read_only_mode: bool = False
 
 
@@ -158,10 +155,6 @@ class PolicyResolver:
         return ExecutionPolicy(
             policy_profile_name=profile.name,
             confidence_threshold=profile.confidence_threshold,
-            budget=BudgetConfig(
-                max_steps=profile.max_steps,
-                max_tool_calls=profile.max_tool_calls,
-            ),
             read_only_mode=profile.read_only_mode,
         )
 

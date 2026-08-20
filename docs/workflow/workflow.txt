@@ -20,10 +20,6 @@ Layer 1 produce:
   },
   "execution_policy": {
     "confidence_threshold": 0.65,
-    "budget": {
-      "max_steps": null,
-      "max_tool_calls": null
-    },
     "read_only_mode": false
   }
 }

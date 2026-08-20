@@ -59,21 +59,6 @@ def _normalize_string_list(value: object) -> list[str]:
             seen.add(cleaned)
     return normalized
 
-# BudgetConfig defines the execution envelope chosen by policy, not by the user task.
-class BudgetConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    max_steps: Optional[int] = Field(
-        default=None,
-        ge=1,
-        description="Optional upper bound for semantic steps.",
-    )
-    max_tool_calls: Optional[int] = Field(
-        default=None,
-        ge=1,
-        description="Optional upper bound for tool calls.",
-    )
-
 # ExecutionPolicy is the canonical policy object consumed by later layers.
 class ExecutionPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -84,7 +69,6 @@ class ExecutionPolicy(BaseModel):
         description="Name of the policy profile applied to the task.",
     )
     confidence_threshold: float = Field(..., ge=0.0, le=1.0)
-    budget: BudgetConfig
     read_only_mode: bool = Field(
         default=False,
         description="If true, only non-mutating actions should be allowed downstream.",
@@ -156,7 +140,7 @@ class TaskCompletenessAssessment(BaseModel):
         # Reuse Pydantic as the sole shape and whitespace normalization boundary.
         return _normalize_string_list(value)
 
-# StructuredTask combines semantic intent with system-controlled execution limits.
+# StructuredTask combines semantic intent with system-controlled execution policy.
 class StructuredTask(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -238,7 +222,6 @@ class IntakeResult(BaseModel):
 
 
 __all__ = [
-    "BudgetConfig",
     "ExecutionIntent",
     "ExecutionPolicy",
     "IntakeDomainError",

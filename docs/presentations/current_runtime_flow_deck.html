@@ -593,7 +593,7 @@
             </p>
             <ul class="tight-list">
               <li>`task_spec` porta goal, context, vincoli, dominio, sensitivity e success criteria.</li>
-              <li>`execution_policy` porta confidence threshold, budget e modalita read-only.</li>
+              <li>`execution_policy` porta confidence threshold e modalita read-only.</li>
               <li>`metadata` porta parse status, versioning del parser, warning e missing information.</li>
             </ul>
           </div>
@@ -606,7 +606,7 @@
     },
     "execution_policy": {
       "confidence_threshold": 0.65,
-      "budget": {"max_steps": 5},
+      "read_only_mode": false,
       "read_only_mode": false
     }
   },
