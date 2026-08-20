@@ -13,6 +13,7 @@ class EvaluationSummary:
     total_runs: int
     judged_runs: int
     runtime_statuses: dict[str, int]
+    termination_reasons: dict[str, int]
     task_results: dict[str, int]
     review_decisions: dict[str, int]
     external_statuses: dict[str, int]
@@ -83,6 +84,11 @@ def build_evaluation_summary(
     operations = store.child_rows("external_operations", run_ids)
 
     runtime_statuses = Counter(str(run["runtime_status"]) for run in runs)
+    termination_reasons = Counter(
+        str(run["termination_reason"])
+        for run in runs
+        if run.get("termination_reason")
+    )
     task_results = Counter(str(run["task_result"]) for run in runs if run["task_result"] is not None)
     review_decisions = Counter(str(review["decision"]) for review in reviews)
     external_statuses = Counter(str(operation["execution_status"]) for operation in operations)
@@ -129,6 +135,7 @@ def build_evaluation_summary(
         total_runs=len(runs),
         judged_runs=len(judged_runs),
         runtime_statuses=dict(sorted(runtime_statuses.items())),
+        termination_reasons=dict(sorted(termination_reasons.items())),
         task_results=dict(sorted(task_results.items())),
         review_decisions=dict(sorted(review_decisions.items())),
         external_statuses=dict(sorted(external_statuses.items())),

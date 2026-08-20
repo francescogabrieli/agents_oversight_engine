@@ -62,6 +62,7 @@ It already includes:
 - the external communication draft body is taken from the latest governed draft output for the branch, while the trace retains the canonical final body, selected evidence references, and provenance diagnostics
 - external communication plan semantics remain planner-owned; runtime compaction is not part of the active architecture
 - typed runtime trace export through `src/layer4_state_evidence_observability/observability/`, surfaced by `src/main_layer2.py`
+- typed termination classification (`termination_reason`) for governance denial, human abort, external execution failure, and runtime failure, exported in the trace and runtime summary
 
 These are the folders to treat as the active implementation baseline:
 
@@ -244,7 +245,7 @@ Current design:
 - `runtime/governance_service.py` applies the OPA-first governance result and persists static, dynamic, behavioral, and judge records before routing
 - `src/layer4_state_evidence_observability/infrastructure/runtime_artifacts.py` configures the local official LangGraph SQLite saver plus the per-thread runtime artifact store; `src/layer4_state_evidence_observability/infrastructure/checkpointing.py` can select the official PostgreSQL saver for deployed environments
 - `src/layer4_state_evidence_observability/observability/` defines the typed, JSON-exportable Layer 4 trace projections for Layer 2 runs, builders, and compact views used for debugging, thesis evidence, HITL payloads, and future evaluation; `trace_summary.py` produces a human-readable Markdown summary written alongside the full JSON trace as `trace_summary.md`; the retired `trace.py` facade must not be restored
-- `schemas/layer2_trace.schema.json` is the closed Draft 2020-12 contract for runtime-produced `layer2_trace.v6`; the current Layer 5 importer accepts this version only and does not silently migrate legacy traces
+- `schemas/layer2_trace.schema.json` is the closed Draft 2020-12 contract for runtime-produced `layer2_trace.v6`; the current Layer 5 importer accepts this version only and does not silently migrate legacy traces or exchange-only runs
 - `hitl/dashboard.py` defines the dashboard-facing snapshot model derived from `TaskState`, governance, oversight, and HITL review payloads
 - `main_layer2_dashboard.py` acts as a standalone multi-thread HITL control plane backend that serves the React dashboard build and exposes review inbox, detail, and typed decision-submission APIs; it validates and durably enqueues decisions but never executes or resumes the LangGraph runtime
 - `src/layer4_state_evidence_observability/infrastructure/review_decision_inbox.py` is the durable control-plane transport between the dashboard and the runtime owner; it provides idempotent request-bound submissions, atomic claiming, delivery status, and a single-owner lease, but it is not runtime state and cannot reconstruct a graph
@@ -507,7 +508,7 @@ Current relevant files:
 - the local Layer 2 CLI no longer auto-launches the HITL control plane; while a thread is in `WAITING_HUMAN_REVIEW`, the original CLI remains alive as its leased runtime owner and polls the durable decision inbox, while the standalone dashboard discovers pending reviews from persisted runtime artifacts and only submits decisions
 - owner leases must be heartbeated while a resumed provider/tool call is in flight; after owner loss, `--attach-thread <thread_id>` may recover only a checkpoint that is still waiting for the exact request, and the inbox may reclaim that same request-bound command from `claimed` or `failed` delivery state
 - the current proof-of-concept inbox adapter is local SQLite; any multi-host deployment must bind `ReviewDecisionInboxPort` to shared transactional storage rather than combining PostgreSQL checkpoints with host-local inbox files
-- `runtime_summary.json` is now inbox-oriented and includes `task_goal`, `review_summary`, `pending_request_id`, `allowed_decisions`, `external_communication_phase`, `has_pending_human_review`, and `updated_at`
+- `runtime_summary.json` is now inbox-oriented and includes `task_goal`, `review_summary`, `pending_request_id`, `allowed_decisions`, `external_communication_phase`, `has_pending_human_review`, `termination_reason`, and `updated_at`
 - the dashboard snapshot is the sole artifact DTO for pending-review data; the standalone dashboard may read legacy `pending_human_review.json` files but never writes new ones
 
 ### HITL Rules

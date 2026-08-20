@@ -57,6 +57,8 @@ Contiene una riga per ogni esecuzione.
 - esperimento, task case e configurazione utilizzata;
 - percorso e digest del trace;
 - stato tecnico: `completed`, `aborted` o `waiting`;
+- causa di terminazione, quando presente (`governance_denied`, `human_abort`,
+  `external_execution_failed`, `runtime_failure` o altra causa tipizzata);
 - risultato del task: `correct`, `partial`, `incorrect` oppure `NULL` se non valutato;
 - metodo di valutazione: automatico, umano oppure assente;
 - durata, actor turn, tool call, tool failure e replanning;
@@ -105,6 +107,20 @@ Permette di distinguere operazioni corrette, errori intercettati prima dell'esec
 - giudizio umano quando la verifica automatica non è possibile.
 
 Le run non ancora giudicate mantengono `task_result = NULL` e non vengono incluse nel denominatore delle metriche di correttezza.
+
+La classificazione `termination_reason` resta distinta dal risultato semantico
+del task: un `governance_denied` è un arresto corretto del controllo, mentre un
+`runtime_failure` è un fallimento tecnico da escludere dalle conclusioni sulla
+qualità della policy.
+
+### Confine del corpus
+
+L'importer accetta esclusivamente `full-trace-2.json` con versione
+`layer2_trace.v6`. Le directory legacy che contengono soltanto
+`governance_conversation.*` o `governance_exchanges/` — inclusa la run 031 —
+sono intenzionalmente escluse dal corpus corrente: quei debug exchange non sono
+un trace canonico e non vengono ricostruiti retroattivamente. Per includere una
+run legacy è necessario rieseguirla o produrre un artefatto v6 completo.
 
 ## Metriche e risultati
 

@@ -40,6 +40,7 @@ from ..domain import (
     RuntimeState,
     StepRecord,
     TaskState,
+    TerminationReason,
     build_evidence_selection_digest,
     build_evidence_snapshot_manifest,
     coerce_human_review_decision_payload,
@@ -387,6 +388,7 @@ def _apply_human_review_decision(
         )
         state.current_tool_request = None
         state.last_tool_result = None
+        state.termination_reason = TerminationReason.HUMAN_ABORT
         state.current_state = RuntimeState.ABORTED
         return
 

@@ -8,7 +8,7 @@ from .evidence import (
     digest_json,
     digest_text,
 )
-from .lifecycle import RuntimeFlag, RuntimeState, StepRecord
+from .lifecycle import RuntimeFlag, RuntimeState, StepRecord, TerminationReason
 from .plan import EvidenceBurden, PlannerDecision, PlanStep, PlanStepStatus, semantic_plan_signature
 from .review import (
     ExternalCommunicationDraft,
@@ -74,6 +74,7 @@ __all__ = [
     "ReplanCheckpoint",
     "RuntimeFlag",
     "RuntimeState",
+    "TerminationReason",
     "ScratchpadEntry",
     "ScratchpadEntryType",
     "StepArtifact",

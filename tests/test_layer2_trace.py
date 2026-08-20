@@ -50,6 +50,7 @@ from layer2_runtime_governance import (
     PlanStepStatus,
     PolicyDecision,
     RuntimeState,
+    TerminationReason,
     ScratchpadEntry,
     ScratchpadEntryType,
     StaticPolicyAssessment,
@@ -278,6 +279,7 @@ class Layer2TraceTests(unittest.TestCase):
         review_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
         aborted_state = _complete_task_state()
         aborted_state.current_state = RuntimeState.ABORTED
+        aborted_state.termination_reason = TerminationReason.GOVERNANCE_DENIED
 
         review_trace = build_layer2_runtime_trace(
             thread_id="review",
@@ -292,6 +294,7 @@ class Layer2TraceTests(unittest.TestCase):
 
         self.assertEqual(review_trace.runtime.current_state, "waiting_human_review")
         self.assertEqual(aborted_trace.runtime.current_state, "aborted")
+        self.assertEqual(aborted_trace.runtime.termination_reason, "governance_denied")
 
     def test_trace_includes_external_communication_edit_history(self) -> None:
         state = _external_communication_task_state()

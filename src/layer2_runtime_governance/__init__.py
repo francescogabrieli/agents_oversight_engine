@@ -114,7 +114,7 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
         "ExecutedPlanStep", "ExternalCommunicationPhase", "ExternalCommunicationDraft",
         "ExternalCommunicationState", "HumanReviewDecision", "HumanReviewDecisionType",
         "HumanReviewExternalEdit", "HumanReviewRequest", "EvidenceBurden", "PlanStep",
-        "PlanStepStatus", "PlannerDecision", "RuntimeFlag", "RuntimeState",
+        "PlanStepStatus", "PlannerDecision", "RuntimeFlag", "RuntimeState", "TerminationReason",
         "ReplanCheckpoint", "ScratchpadEntry", "ScratchpadEntryType", "StepRecord", "StepValidation",
         "TaskState",
     ),

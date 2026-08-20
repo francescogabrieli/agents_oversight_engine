@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import os
 import sys
 import threading
@@ -32,7 +33,7 @@ from layer2_runtime_governance.composition import (
     Layer2RuntimeDependencies,
     compose_layer2_runtime,
 )
-from layer2_runtime_governance.domain import RuntimeState, TaskState
+from layer2_runtime_governance.domain import RuntimeState, TaskState, TerminationReason
 from layer2_runtime_governance.governance_components import PolicyEnginePort
 from layer2_runtime_governance.hitl.decision_inbox import (
     ReviewDecisionInboxPort,
@@ -588,15 +589,18 @@ def _persist_failed_runtime_snapshot(
         )
         candidate = snapshot_result.get("task_state")
         if isinstance(candidate, TaskState):
-            task_state = candidate
+            task_state = deepcopy(candidate)
+            task_state.termination_reason = TerminationReason.RUNTIME_FAILURE
             if resolved_intake_result is None:
                 resolved_intake_result = candidate.intake_payload
             if isinstance(resolved_intake_result, IntakeResult):
+                failure_snapshot = dict(snapshot_result)
+                failure_snapshot["task_state"] = task_state
                 _persist_runtime_artifacts_from_trace(
                     {
                         "thread_id": thread_id,
                         "intake_result": resolved_intake_result,
-                        "final_result": snapshot_result,
+                        "final_result": failure_snapshot,
                     },
                     artifact_store=artifact_store,
                 )

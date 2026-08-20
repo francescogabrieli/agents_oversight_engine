@@ -75,10 +75,22 @@
     },
     "runtime": {
       "type": "object",
-      "required": ["thread_id", "current_state", "bootstrap_completed", "runtime_flags", "step_history", "actor_turn_count", "tool_call_count"],
+      "required": ["thread_id", "current_state", "termination_reason", "bootstrap_completed", "runtime_flags", "step_history", "actor_turn_count", "tool_call_count"],
       "properties": {
         "thread_id": { "$ref": "#/$defs/nonEmptyString" },
         "current_state": { "$ref": "#/$defs/runtimeState" },
+        "termination_reason": {
+          "type": ["string", "null"],
+          "enum": [
+            "governance_denied",
+            "human_abort",
+            "governance_invariant_failure",
+            "external_execution_rejected",
+            "external_execution_failed",
+            "runtime_failure",
+            null
+          ]
+        },
         "bootstrap_completed": { "type": "boolean" },
         "runtime_flags": {
           "type": "array",

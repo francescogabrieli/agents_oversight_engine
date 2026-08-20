@@ -27,6 +27,7 @@ from ..domain import (
     RuntimeFlag,
     RuntimeState,
     TaskState,
+    TerminationReason,
     build_evidence_selection_digest,
     build_evidence_snapshot_manifest,
     digest_json,
@@ -79,6 +80,7 @@ def external_execution(
     )
     if rejection is not None:
         _record_external_execution_receipt(state, receipt=rejection)
+        state.termination_reason = TerminationReason.EXTERNAL_EXECUTION_REJECTED
         state.current_state = RuntimeState.ABORTED
         set_external_communication_phase(
             state,
@@ -484,6 +486,7 @@ def _apply_external_execution_outcome(
         current = state.current_external_execution_request
         proposal = state.external_operation_proposal
         if current is None or proposal is None:
+            state.termination_reason = TerminationReason.EXTERNAL_EXECUTION_FAILED
             state.current_state = RuntimeState.ABORTED
             return
         retry_scope = f"retry-{state.external_execution_attempt_count}"
@@ -500,6 +503,7 @@ def _apply_external_execution_outcome(
         return
 
     state.current_external_execution_request = None
+    state.termination_reason = TerminationReason.EXTERNAL_EXECUTION_FAILED
     state.current_state = RuntimeState.ABORTED
     set_external_communication_phase(
         state,

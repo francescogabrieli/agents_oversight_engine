@@ -18,7 +18,7 @@ from layer2_runtime_governance.hitl.dashboard import (
     governance_hitl_dashboard_snapshot_to_json,
 )
 from .ports import RuntimeArtifactPaths, RuntimeArtifactStorePort
-from layer2_runtime_governance.domain import TaskState
+from layer2_runtime_governance.domain import TaskState, TerminationReason
 from layer2_runtime_governance.judge import judge_evidence_bundle_to_json
 from ..observability import (
     build_layer2_runtime_trace,
@@ -132,6 +132,11 @@ class RuntimeArtifactStore:
                     "artifact_version": "layer2_runtime_artifacts_v2",
                     "thread_id": thread_id,
                     "runtime_state": task_state.current_state.value,
+                    "termination_reason": (
+                        getattr(task_state, "termination_reason", None).value
+                        if getattr(task_state, "termination_reason", None) is not None
+                        else None
+                    ),
                     "runtime_thread_id": task_state.runtime_thread_id,
                     "has_pending_human_review": task_state.pending_human_review_request is not None,
                     "task_goal": intake_result.structured_task.task_spec.goal,
@@ -210,6 +215,11 @@ class RuntimeArtifactStore:
             "error_message": str(error),
             "runtime_state": (
                 task_state.current_state.value if task_state is not None else None
+            ),
+            "termination_reason": (
+                getattr(task_state, "termination_reason", None).value
+                if task_state is not None and getattr(task_state, "termination_reason", None) is not None
+                else TerminationReason.RUNTIME_FAILURE.value
             ),
             "actor_turn_count": (
                 task_state.actor_turn_count if task_state is not None else None

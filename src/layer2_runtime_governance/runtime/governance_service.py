@@ -22,6 +22,7 @@ from ..domain import (
     ExternalCommunicationPhase,
     RuntimeState,
     TaskState,
+    TerminationReason,
     set_external_communication_phase,
 )
 from ..domain.step_recovery import restore_actor_step_for_more_evidence
@@ -172,6 +173,7 @@ def _apply_governance_decision(
             summary="Governance denied the external communication branch.",
             review_ready=False,
         )
+        state.termination_reason = TerminationReason.GOVERNANCE_DENIED
         state.current_state = RuntimeState.ABORTED
         state.current_tool_request = None
         state.pending_tool_requests = []
@@ -412,11 +414,13 @@ def _route_authorized_external_operation(
         )
         return True
     if not proposal.execution_candidate:
+        state.termination_reason = TerminationReason.GOVERNANCE_INVARIANT_FAILURE
         state.current_state = RuntimeState.ABORTED
         return True
     evaluated_digest = governance_decision.evaluated_operation_digest
     if evaluated_digest != proposal.payload_digest:
         state.current_external_execution_request = None
+        state.termination_reason = TerminationReason.GOVERNANCE_INVARIANT_FAILURE
         state.current_state = RuntimeState.ABORTED
         return True
     state.approved_external_operation_digest = evaluated_digest

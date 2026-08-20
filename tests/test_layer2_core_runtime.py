@@ -218,7 +218,14 @@ class Layer2RuntimeCoreTests(unittest.TestCase):
             payload = json.loads(failure_path.read_text(encoding="utf-8"))
             self.assertEqual(payload["thread_id"], thread_id)
             self.assertEqual(payload["error_type"], "RuntimeError")
+            self.assertEqual(payload["termination_reason"], "runtime_failure")
             self.assertIn("synthetic actor failure", payload["error_message"])
+            runtime_summary = json.loads(
+                artifact_store.build_paths(thread_id).runtime_summary_path.read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(runtime_summary["termination_reason"], "runtime_failure")
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 

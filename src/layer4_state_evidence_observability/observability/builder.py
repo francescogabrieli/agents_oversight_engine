@@ -91,6 +91,7 @@ def _build_runtime_summary(*, thread_id: str, task_state: TaskState) -> TraceRun
     return TraceRuntimeSummary(
         thread_id=thread_id,
         current_state=task_state.current_state.value,
+        termination_reason=enum_value(task_state.termination_reason),
         bootstrap_completed=task_state.bootstrap_completed,
         runtime_flags=tuple(flag.value for flag in task_state.runtime_flags),
         step_history=tuple(_build_step_record(record) for record in task_state.step_history),

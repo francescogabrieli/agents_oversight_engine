@@ -32,7 +32,7 @@ from layer3_tool_bus_external_capabilities.external_operations.contracts import 
     OperationFactsProvenance,
     SQLStatementClass,
 )
-from .lifecycle import RuntimeState
+from .lifecycle import RuntimeState, TerminationReason
 from .review import (
     ExternalCommunicationDraft,
     ExternalCommunicationPhase,
@@ -93,6 +93,13 @@ def normalize_task_state_serialization(task_state: TaskState) -> TaskState:
     # Older checkpoints predate operational workspace and progress fields.
     if not hasattr(normalized, "workspace"):
         normalized.workspace = AgentWorkspace()
+    if not hasattr(normalized, "termination_reason"):
+        normalized.termination_reason = None
+    else:
+        normalized.termination_reason = _coerce_optional_enum(
+            TerminationReason,
+            normalized.termination_reason,
+        )
     if not hasattr(normalized, "progress_epoch"):
         normalized.progress_epoch = 0
     if not hasattr(normalized, "state_revision"):

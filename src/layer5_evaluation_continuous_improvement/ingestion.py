@@ -97,6 +97,8 @@ def _validate_trace(payload: Any, *, source_path: Path) -> None:
             raise ValueError(f"Trace is missing '{field}': {source_path}")
     if not isinstance(payload["runtime"], dict) or not payload["runtime"].get("thread_id"):
         raise ValueError(f"Trace has no runtime thread id: {source_path}")
+    if "termination_reason" not in payload["runtime"]:
+        raise ValueError(f"Trace runtime is missing 'termination_reason': {source_path}")
 
 
 # Project one canonical trace into the five evaluation tables.
@@ -125,6 +127,7 @@ def _project_trace(
         "trace_version": TRACE_VERSION,
         "configuration_fingerprint": _configuration_fingerprint(payload),
         "runtime_status": str(runtime.get("current_state") or "unknown"),
+        "termination_reason": _optional_text(runtime.get("termination_reason")),
         "goal": str(intake.get("goal") or ""),
         "sensitivity": str(intake.get("sensitivity") or "unknown"),
         "execution_intent": str(intake.get("execution_intent") or "unknown"),

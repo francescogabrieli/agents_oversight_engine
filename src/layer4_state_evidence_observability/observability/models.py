@@ -11,6 +11,7 @@ class TraceRuntimeSummary:
     # TraceRuntimeSummary identifies the run and its terminal runtime state.
     thread_id: str
     current_state: str
+    termination_reason: str | None
     bootstrap_completed: bool
     runtime_flags: tuple[str, ...]
     step_history: tuple[dict[str, Any], ...]

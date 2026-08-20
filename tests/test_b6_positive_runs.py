@@ -53,6 +53,12 @@ class B6PositiveRunsTests(unittest.TestCase):
             self.assertTrue((paths / "trace_summary.md").exists())
             persisted = json.loads((paths / "full-trace-2.json").read_text(encoding="utf-8"))
             self.assertEqual(persisted["runtime"]["current_state"], "waiting_human_review")
+            evidence_trace = persisted["governance_passes"][1]["pillar_results"]["evidence"]
+            self.assertTrue(evidence_trace["evidence_gap"])
+            self.assertIn(
+                "insufficient_independent_sources",
+                evidence_trace["raw_facts"]["deficit_codes"],
+            )
 
     # Verify three observable replans reach the configured human-review ceiling.
     def test_replan_ceiling_runs_through_runtime_and_routes_to_human_review(self) -> None:
@@ -85,3 +91,6 @@ class B6PositiveRunsTests(unittest.TestCase):
             self.assertTrue((paths / "trace_summary.md").exists())
             persisted = json.loads((paths / "full-trace-2.json").read_text(encoding="utf-8"))
             self.assertEqual(persisted["runtime"]["current_state"], "waiting_human_review")
+            trajectory_trace = persisted["governance_passes"][-1]["pillar_results"]["trajectory"]
+            self.assertTrue(trajectory_trace["replan_ceiling_reached"])
+            self.assertEqual(trajectory_trace["raw_facts"]["replan_count"], 3)

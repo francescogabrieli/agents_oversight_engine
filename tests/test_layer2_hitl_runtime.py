@@ -48,6 +48,7 @@ from layer2_runtime_governance.domain import (
     ScratchpadEntryType,
     StepValidation,
     TaskState,
+    TerminationReason,
 )
 from layer2_runtime_governance.governance_components import (
     GovernanceDirective,
@@ -613,6 +614,7 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
             ),
         )
         self.assertEqual(abort_state.current_state, RuntimeState.ABORTED)
+        self.assertEqual(abort_state.termination_reason, TerminationReason.HUMAN_ABORT)
 
         read_only_state = deepcopy(task_state)
         _apply_human_review_decision(

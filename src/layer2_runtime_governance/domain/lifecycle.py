@@ -18,6 +18,16 @@ class RuntimeState(str, Enum):
     ABORTED = "aborted"
 
 
+# Classify why a run reached a terminal or failed runtime boundary.
+class TerminationReason(str, Enum):
+    GOVERNANCE_DENIED = "governance_denied"
+    HUMAN_ABORT = "human_abort"
+    GOVERNANCE_INVARIANT_FAILURE = "governance_invariant_failure"
+    EXTERNAL_EXECUTION_REJECTED = "external_execution_rejected"
+    EXTERNAL_EXECUTION_FAILED = "external_execution_failed"
+    RUNTIME_FAILURE = "runtime_failure"
+
+
 # Canonical domain contract extracted from the legacy state facade.
 class RuntimeFlag(str, Enum):
     CLARIFICATION_REQUIRED = "clarification_required"
@@ -42,6 +52,7 @@ class StepRecord:
 
 __all__ = [
     "RuntimeState",
+    "TerminationReason",
     "RuntimeFlag",
     "StepRecord"
 ]

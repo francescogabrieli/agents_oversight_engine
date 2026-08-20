@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
 # Layer 2 currently covers bootstrap, planning, and the actor/tool observation loop.
 # This file keeps the canonical runtime state shared by the graph nodes.
-from .lifecycle import RuntimeFlag, RuntimeState, StepRecord
+from .lifecycle import RuntimeFlag, RuntimeState, StepRecord, TerminationReason
 from .plan import PlanStep
 from .review import (
     ExternalCommunicationState,
@@ -63,6 +63,7 @@ class TaskState:
     # Bootstrap outcome.
     current_state: RuntimeState
     runtime_thread_id: str | None = None
+    termination_reason: TerminationReason | None = None
     step_index: int = 0
     step_history: list[StepRecord] = field(default_factory=list)
     runtime_flags: list[RuntimeFlag] = field(default_factory=list)

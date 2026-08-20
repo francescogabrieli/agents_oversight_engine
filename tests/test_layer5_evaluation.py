@@ -38,6 +38,7 @@ class Layer5EvaluationTests(unittest.TestCase):
             trace_path = _write_trace(root)
             with EvaluationStore(root / "evaluation.sqlite3") as store:
                 TraceImporter(store).import_paths([trace_path], experiment_id="experiment-1")
+                self.assertIsNone(store.query("SELECT termination_reason FROM runs")[0]["termination_reason"])
                 store.set_task_result(run_id="run-1", result="incorrect", method="human")
                 store.set_human_review_needed(event_id="run-1:governance:1", needed=False)
                 store.set_human_review_needed(event_id="run-1:governance:2", needed=True)
@@ -47,6 +48,7 @@ class Layer5EvaluationTests(unittest.TestCase):
 
                 self.assertEqual(summary.total_runs, 1)
                 self.assertEqual(summary.task_results, {"incorrect": 1})
+                self.assertEqual(summary.termination_reasons, {})
                 self.assertEqual(summary.incorrect_completion_rate, 1.0)
                 self.assertEqual(summary.escalation_confusion["false_positive"], 1)
                 self.assertEqual(summary.escalation_confusion["false_negative"], 1)
@@ -122,6 +124,37 @@ class Layer5EvaluationTests(unittest.TestCase):
                 self.assertEqual(event["human_review_was_needed"], 1)
                 self.assertEqual(operation["operation_correct"], 1)
 
+    # Preserve the terminal classification in the offline evaluation projection.
+    def test_termination_reason_is_projected_and_aggregated(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            trace_path = _write_trace(root)
+            payload = json.loads(trace_path.read_text(encoding="utf-8"))
+            payload["runtime"]["termination_reason"] = "governance_denied"
+            trace_path.write_text(json.dumps(payload), encoding="utf-8")
+
+            with EvaluationStore(root / "evaluation.sqlite3") as store:
+                TraceImporter(store).import_paths([trace_path], experiment_id="experiment-1")
+                run = store.query("SELECT * FROM runs")[0]
+                self.assertEqual(run["termination_reason"], "governance_denied")
+                summary = build_evaluation_summary(store, experiment_id="experiment-1")
+                self.assertEqual(summary.termination_reasons, {"governance_denied": 1})
+
+    # Legacy governance debug exchanges without a v6 trace stay outside the evaluation corpus.
+    def test_discovery_excludes_legacy_exchange_only_run(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            legacy = root / "031"
+            legacy.mkdir()
+            (legacy / "governance_conversation.md").write_text("legacy", encoding="utf-8")
+            (legacy / "governance_exchanges").mkdir()
+            (legacy / "governance_exchanges" / "001.json").write_text(
+                "{}", encoding="utf-8"
+            )
+
+            with EvaluationStore(root / "evaluation.sqlite3") as store:
+                self.assertEqual(TraceImporter(store).discover([root]), [])
+
 # Write one compact v6 trace covering every Layer 5 table.
 def _write_trace(root: Path) -> Path:
     trace_dir = root / "run-1"
@@ -138,6 +171,7 @@ def _trace_payload() -> dict[str, object]:
         "runtime": {
             "thread_id": "run-1",
             "current_state": "completed",
+            "termination_reason": None,
             "actor_turn_count": 3,
             "step_history": [{"node_name": "replanner"}],
         },

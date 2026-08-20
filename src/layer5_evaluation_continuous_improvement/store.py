@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = "layer5_evaluation_db.v1"
+SCHEMA_VERSION = "layer5_evaluation_db.v2"
 
 
 class EvaluationStore:
@@ -57,6 +57,7 @@ class EvaluationStore:
                 trace_version TEXT NOT NULL,
                 configuration_fingerprint TEXT NOT NULL,
                 runtime_status TEXT NOT NULL,
+                termination_reason TEXT,
                 task_result TEXT CHECK (task_result IN ('correct', 'partial', 'incorrect')),
                 evaluation_method TEXT CHECK (evaluation_method IN ('automatic', 'human')),
                 goal TEXT NOT NULL,
@@ -117,6 +118,12 @@ class EvaluationStore:
             CREATE INDEX IF NOT EXISTS idx_operations_run ON external_operations(run_id);
             """
         )
+        run_columns = {
+            str(row[1])
+            for row in self.connection.execute("PRAGMA table_info(runs)").fetchall()
+        }
+        if "termination_reason" not in run_columns:
+            self.connection.execute("ALTER TABLE runs ADD COLUMN termination_reason TEXT")
         self.connection.execute(
             "INSERT OR REPLACE INTO metadata(key, value) VALUES ('schema_version', ?)",
             (SCHEMA_VERSION,),

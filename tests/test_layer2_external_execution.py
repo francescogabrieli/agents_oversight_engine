@@ -48,6 +48,7 @@ from layer2_runtime_governance.domain import (
     RuntimeState,
     StepCompletionCandidate,
     TaskState,
+    TerminationReason,
     build_evidence_selection_digest,
     build_evidence_snapshot_manifest,
     digest_json,
@@ -568,6 +569,7 @@ class ExternalExecutionServiceTests(unittest.TestCase):
             thread_id="service-failed",
         )
         self.assertEqual(result.current_state, RuntimeState.ABORTED)
+        self.assertEqual(result.termination_reason, TerminationReason.EXTERNAL_EXECUTION_FAILED)
         self.assertEqual(len(executor.calls), 1)
 
     # Retryable failure creates at most one fresh stable attempt scope.
@@ -818,6 +820,7 @@ class ExternalExecutionGraphTests(unittest.TestCase):
         )
         state = result["task_state"]
         self.assertEqual(state.current_state, RuntimeState.ABORTED)
+        self.assertEqual(state.termination_reason, TerminationReason.EXTERNAL_EXECUTION_REJECTED)
         self.assertEqual(
             state.last_external_execution_receipt.status,
             ExternalExecutionStatus.REJECTED_BEFORE_EXECUTION,
@@ -837,6 +840,10 @@ class ExternalExecutionGraphTests(unittest.TestCase):
             config={"configurable": {"thread_id": f"deny-external-{uuid4()}"}},
         )
         self.assertEqual(result["task_state"].current_state, RuntimeState.ABORTED)
+        self.assertEqual(
+            result["task_state"].termination_reason,
+            TerminationReason.GOVERNANCE_DENIED,
+        )
         self.assertEqual(executor.calls, [])
 
 
