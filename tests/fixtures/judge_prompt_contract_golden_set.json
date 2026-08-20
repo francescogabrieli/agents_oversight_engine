@@ -1,0 +1,37 @@
+{
+  "schema_version": "judge_prompt_contract_golden_set.v1",
+  "prompt_version": "external_operation_judge_v11",
+  "case_id": "generic_execution_candidate",
+  "system": {
+    "must_contain": [
+      "one coherent semantic contract",
+      "explicitly permitted degradation paths",
+      "complete constraint sweep",
+      "Do not request impossible",
+      "unsupported cannot list supporting evidence",
+      "side_effect_occurred is false in every stage"
+    ],
+    "must_not_contain": [
+      "three sources",
+      "email recipient unavailable",
+      "release chronology",
+      "actor_turn_count"
+    ]
+  },
+  "user": {
+    "must_contain": [
+      "\"evidence_bundle\"",
+      "\"allowed_evidence_ids\"",
+      "\"operation_stage\": \"execution_candidate\"",
+      "\"side_effect_occurred\": false",
+      "\"payload\""
+    ],
+    "must_not_contain": [
+      "\"scratchpad_entries\"",
+      "\"tool_executions\"",
+      "\"runtime_events\"",
+      "\"external_communication_body\"",
+      "\"content_digest\""
+    ]
+  }
+}

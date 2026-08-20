@@ -36,6 +36,14 @@ Provider failure, invalid output, non-invocation, or mismatch in any of the thre
 bindings is unavailable/invalid; when the pillar is required OPA fails closed to
 HITL.
 
+The active provider prompt is `external_operation_judge_v11`. It is already the
+refined semantic contract for the current Evidence boundary and is intentionally not
+changed while Evidence attribution is being stabilized. The versioned
+`tests/fixtures/judge_prompt_contract_golden_set.json` freezes its structural
+requirements and exclusions (including the projection perimeter), without pretending
+to be a model-verdict golden set. Provider-output goldens remain a separate follow-up
+after the Evidence baseline is stable, so a future regression remains attributable.
+
 Evidence-base completeness is explicit: serialization cannot silently change the
 epistemic perimeter. An incomplete base leads to `uncertain`, not invented unsupported
 claims. Base completeness means that every canonical observation at the boundary is

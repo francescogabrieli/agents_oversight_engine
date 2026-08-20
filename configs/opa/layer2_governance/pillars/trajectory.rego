@@ -3,6 +3,42 @@ package layer2.governance.pillars.trajectory
 import rego.v1
 
 facts := object.get(object.get(input.pillars, "trajectory", {}), "raw_facts", {})
+
+# Keep the policy boundary explicit: only convergence and replay facts can alter a directive.
+policy_fact_names := [
+	"needs_replan_signal",
+	"replan_reason_present",
+	"first_replan_request",
+	"observable_change_since_last_replan",
+	"external_action_revision_count",
+	"unchanged_resubmission",
+	"repeated_rejected_payload_digest",
+	"replan_count",
+	"consecutive_tool_failures",
+	"action_churn_count",
+]
+
+# Runtime counters and recovery markers remain replayable telemetry, not policy triggers.
+observational_only_fact_names := [
+	"actor_turn_count",
+	"progress_epoch",
+	"completed_step_count",
+	"tool_call_count",
+	"successful_tool_call_count",
+	"failed_tool_call_count",
+	"observation_count",
+	"consecutive_provider_protocol_failures",
+	"completion_signal",
+	"external_candidate",
+	"provider_recovery_active",
+	"provider_protocol_retry_exhausted",
+]
+
+fact_usage := {
+	"policy_facts": policy_fact_names,
+	"observational_only_facts": observational_only_fact_names,
+}
+
 actor_requested_replan := object.get(facts, "needs_replan_signal", false)
 replan_reason_present := object.get(facts, "replan_reason_present", false)
 first_replan_request := object.get(facts, "first_replan_request", true)
@@ -100,6 +136,7 @@ result := {
 	"reason_facts": object.get(object.get(input.pillars, "trajectory", {}), "reason_facts", []),
 	"summary": object.get(object.get(input.pillars, "trajectory", {}), "summary", "Trajectory health observed."),
 	"raw_facts": facts,
+	"fact_usage": fact_usage,
 	"score_components": object.get(object.get(input.pillars, "trajectory", {}), "score_components", {}),
 	"score_formula_version": object.get(object.get(input.pillars, "trajectory", {}), "score_formula_version", "trajectory_health_v1"),
 	"thresholds_version": object.get(object.get(input.pillars, "trajectory", {}), "thresholds_version", "unknown"),

@@ -932,6 +932,36 @@ class ExternalOperationGovernanceTests(unittest.TestCase):
         self.assertNotIn("three sources", prompt.lower())
         self.assertNotIn("email recipient unavailable", prompt.lower())
 
+    # Freeze the refined v11 prompt contract without coupling tests to a model verdict.
+    def test_judge_prompt_matches_versioned_contract_golden_set(self) -> None:
+        golden = json.loads(
+            (
+                REPO_ROOT
+                / "tests"
+                / "fixtures"
+                / "judge_prompt_contract_golden_set.json"
+            ).read_text(encoding="utf-8")
+        )
+        proposal = _generic_proposal()
+        state = _state_with_proposal(proposal)
+        context = build_judge_context(
+            task_state=state,
+            external_operation=proposal,
+            invocation_reason="test_prompt_contract_golden_set",
+        )
+        system_prompt = build_judge_system_prompt()
+        user_prompt = build_judge_user_prompt(context=context)
+
+        self.assertEqual(OpenAIJudge.prompt_version, golden["prompt_version"])
+        for fragment in golden["system"]["must_contain"]:
+            self.assertIn(fragment, system_prompt)
+        for fragment in golden["system"]["must_not_contain"]:
+            self.assertNotIn(fragment.lower(), system_prompt.lower())
+        for fragment in golden["user"]["must_contain"]:
+            self.assertIn(fragment, user_prompt)
+        for fragment in golden["user"]["must_not_contain"]:
+            self.assertNotIn(fragment.lower(), user_prompt.lower())
+
     # Findings must be bound to exact task and payload text before the judge can escalate.
     def test_judge_rejects_unanchored_or_invented_revision_finding(self) -> None:
         proposal = _generic_proposal()

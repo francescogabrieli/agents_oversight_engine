@@ -102,6 +102,43 @@ class Layer2OversightRawFactsTests(unittest.TestCase):
         self.assertIsNone(signal["diagnostic_score"])
         self.assertNotIn("recommended_directive", signal)
 
+    # Keep the produced Trajectory fact inventory explicit so new fields cannot silently drift.
+    def test_trajectory_fact_inventory_is_explicit(self) -> None:
+        state = _build_state()
+        signal = build_trajectory_signal(
+            task_state=state,
+            policy_input=build_policy_evaluation_input(task_state=state),
+            thresholds_version="policy.v1",
+        )
+
+        self.assertEqual(
+            set(signal["raw_facts"]),
+            {
+                "actor_turn_count",
+                "progress_epoch",
+                "completed_step_count",
+                "tool_call_count",
+                "successful_tool_call_count",
+                "failed_tool_call_count",
+                "consecutive_tool_failures",
+                "action_churn_count",
+                "observation_count",
+                "replan_count",
+                "consecutive_provider_protocol_failures",
+                "needs_replan_signal",
+                "replan_reason_present",
+                "first_replan_request",
+                "observable_change_since_last_replan",
+                "completion_signal",
+                "external_candidate",
+                "external_action_revision_count",
+                "repeated_rejected_payload_digest",
+                "unchanged_resubmission",
+                "provider_recovery_active",
+                "provider_protocol_retry_exhausted",
+            },
+        )
+
 
 # Build a deterministic actor-ready state without invoking any provider.
 def _build_state() -> TaskState:

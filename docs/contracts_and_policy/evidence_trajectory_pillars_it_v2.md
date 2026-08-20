@@ -227,6 +227,27 @@ Trajectory osserva la forma del percorso, non la qualità di un output. Non chie
 
 Una differenza rispetto alla v1: **gli interventi umani non contano come nuova base osservabile.** Nella v1 `human_review_count` entrava nel delta di `observable_change_since_last_replan`, quindi una review umana azzerava gratuitamente il vincolo di liveness. Una decisione umana non è un fatto nuovo sul mondo.
 
+### Contratto di consumo dei fatti
+
+Il contratto runtime corrente esporta 22 `raw_facts`. Dieci sono consumati direttamente
+da Trajectory/OPA per la convergenza: `needs_replan_signal`, `replan_reason_present`,
+`first_replan_request`, `observable_change_since_last_replan`,
+`external_action_revision_count`, `unchanged_resubmission`,
+`repeated_rejected_payload_digest`, `replan_count`, `consecutive_tool_failures` e
+`action_churn_count`. `replan_count` appartiene quindi al percorso decisionale attivo.
+
+I restanti dodici — `actor_turn_count`, `progress_epoch`, `completed_step_count`,
+`tool_call_count`, `successful_tool_call_count`, `failed_tool_call_count`,
+`observation_count`, `consecutive_provider_protocol_failures`, `completion_signal`,
+`external_candidate`, `provider_recovery_active` e
+`provider_protocol_retry_exhausted` — sono fatti di trace/evaluation. Alcuni contatori
+sono sorgenti locali per costruire fatti derivati, come
+`observable_change_since_last_replan`; non diventano per questo soglie OPA autonome.
+`progress_epoch` e i marker di recovery restano inoltre sotto il controllo tecnico del
+runtime. Il risultato OPA pubblica il manifest `fact_usage` per rendere questa
+separazione verificabile e impedire che un nuovo campo venga aggiunto senza decidere il
+suo ruolo.
+
 ### Regole di convergenza
 
 Nella v1 esistevano solo regole di liveness e di ripresentazione. La v2 aggiunge i tetti, ciascuno con il proprio reason code — l'attribuzione per pillar nelle metriche dipende da questa granularità.

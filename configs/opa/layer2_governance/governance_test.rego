@@ -76,6 +76,36 @@ test_active_diagnostic_levels_are_projected if {
 	result.pillar_results.trajectory.decision_influence == true
 }
 
+test_trajectory_fact_usage_manifest_is_explicit if {
+	result := data.layer2.governance.pillars.trajectory.result with input as base_input
+	result.fact_usage.policy_facts == [
+		"needs_replan_signal",
+		"replan_reason_present",
+		"first_replan_request",
+		"observable_change_since_last_replan",
+		"external_action_revision_count",
+		"unchanged_resubmission",
+		"repeated_rejected_payload_digest",
+		"replan_count",
+		"consecutive_tool_failures",
+		"action_churn_count",
+	]
+	result.fact_usage.observational_only_facts == [
+		"actor_turn_count",
+		"progress_epoch",
+		"completed_step_count",
+		"tool_call_count",
+		"successful_tool_call_count",
+		"failed_tool_call_count",
+		"observation_count",
+		"consecutive_provider_protocol_failures",
+		"completion_signal",
+		"external_candidate",
+		"provider_recovery_active",
+		"provider_protocol_retry_exhausted",
+	]
+}
+
 test_inactive_deterministic_pillars_declare_inactive_mode if {
 	candidate := object.union(base_input, {"pillar_requirements": {"require_evidence": false, "require_risk": false, "require_trajectory": false, "require_behavioral": false, "require_judge": false}})
 	result := decision with input as candidate
@@ -223,6 +253,29 @@ test_shadow_pillars_do_not_change_directive if {
 	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"risk": {"raw_facts": {"mode": "shadow", "decision_influence": false, "impact_level": "critical"}}, "behavioral": {"raw_facts": {"mode": "shadow", "decision_influence": false, "novelty_score": 1}}})})
 	changed := decision with input as candidate
 	baseline.directive == changed.directive
+}
+
+test_trajectory_observational_facts_do_not_change_directive if {
+	baseline := decision with input as base_input
+	changed_raw_facts := object.union(facts_trajectory.raw_facts, {
+		"actor_turn_count": 999,
+		"progress_epoch": 999,
+		"completed_step_count": 999,
+		"tool_call_count": 999,
+		"successful_tool_call_count": 999,
+		"failed_tool_call_count": 999,
+		"observation_count": 999,
+		"consecutive_provider_protocol_failures": 999,
+		"completion_signal": false,
+		"external_candidate": true,
+		"provider_recovery_active": true,
+		"provider_protocol_retry_exhausted": true,
+	})
+	changed_trajectory := object.union(facts_trajectory, {"raw_facts": changed_raw_facts})
+	changed_input := object.union(base_input, {"pillars": object.union(base_input.pillars, {"trajectory": changed_trajectory})})
+	changed := decision with input as changed_input
+	baseline.directive == changed.directive
+	baseline.reason_codes == changed.reason_codes
 }
 
 test_replan_ceiling_reached_requires_review if {
