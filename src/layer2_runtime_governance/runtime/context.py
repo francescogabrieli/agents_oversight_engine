@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 
-from ..domain import TaskState
+from ..domain import TaskState, normalize_task_state_serialization
 from .contracts import Layer2GraphInput, Layer2GraphState
 
 
-# Copy canonical state before a graph node applies a domain transition.
+# Copy and normalize checkpoint state before a graph node applies a domain transition.
 def copy_task_state(task_state: TaskState) -> TaskState:
-    return deepcopy(task_state)
+    return normalize_task_state_serialization(task_state)
 
 
 # Extract a stable thread id from TaskState or LangGraph configuration.

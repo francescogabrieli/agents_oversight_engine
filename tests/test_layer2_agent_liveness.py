@@ -16,6 +16,9 @@ from layer2_runtime_governance.domain import (
     PlanStepStatus,
     RuntimeState,
     TaskState,
+    ToolAttempt,
+    ToolDisposition,
+    ToolInvocation,
 )
 from layer2_runtime_governance.runtime.actor_service import _enforce_actor_runtime_contract, _record_actor_execution
 from layer2_runtime_governance.runtime.tool_service import canonical_action_key, tool_gateway
@@ -36,6 +39,7 @@ from layer2_runtime_governance.execution.action_schemas import build_actor_runti
 from layer2_runtime_governance.execution.providers.bedrock_runtime import _extract_tool_call_payloads
 from layer2_runtime_governance.runtime.tool_service import observe_tool_result
 from layer2_runtime_governance.runtime.routing import route_after_observe_tool_result
+from layer2_runtime_governance.runtime.context import copy_task_state
 class _Gateway:
     # A deterministic capability adapter used to isolate ProgressGuard behavior.
     gateway_name = "test"
@@ -132,6 +136,50 @@ class Layer2AgentLivenessTests(unittest.TestCase):
         self.assertEqual(terminal.calls, 1)
         self.assertEqual(state.tool_call_count, 1)
         self.assertEqual(state.tool_invocations[0].retryable_failure, False)
+
+    # A legacy checkpoint with nested dicts must be normalized before Tool Gateway guards inspect it.
+    def test_legacy_checkpoint_tool_history_is_normalized_at_runtime_boundary(self) -> None:
+        request = ToolRequest(
+            "step_1",
+            ToolName.FETCH_URL_TEXT,
+            "Fetch again.",
+            url="https://example.test/a",
+        )
+        state = self._tool_state(request)
+        action_key = canonical_action_key(request)
+        state.tool_attempts = [
+            {
+                "action_key": action_key,
+                "plan_step_id": "step_1",
+                "progress_epoch": 0,
+                "disposition": ToolDisposition.EXECUTED_TERMINAL_FAILURE.value,
+            }
+        ]
+        state.tool_invocations = [
+            {
+                "action_key": action_key,
+                "plan_step_id": "step_1",
+                "progress_epoch": 0,
+                "retryable_failure": False,
+            }
+        ]
+
+        resumed_state = copy_task_state(state)
+        self.assertIsInstance(resumed_state.tool_attempts[0], ToolAttempt)
+        self.assertIsInstance(resumed_state.tool_invocations[0], ToolInvocation)
+
+        gateway = _Gateway(
+            ToolExecutionResult(
+                request,
+                False,
+                "forbidden",
+                error_code=ToolErrorCode.FORBIDDEN,
+            )
+        )
+        result = tool_gateway(resumed_state, tool_gateway_service=gateway)
+
+        self.assertEqual(gateway.calls, 0)
+        self.assertEqual(result.last_tool_result.error_code, ToolErrorCode.DUPLICATE_REQUEST)
 
     # Retryable failures have a finite local retry path before semantic replanning.
     def test_same_epoch_retryable_repetition_requests_replan(self) -> None:
