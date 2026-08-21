@@ -1,0 +1,226 @@
+{
+  "manifest_version": "evaluation_realistic_pool.v1",
+  "pool_id": "realistic_pool_v1",
+  "scenarios": [
+    {
+      "scenario_id": "rp01_dma_brief",
+      "family": "research",
+      "task": "Trova fonti ufficiali dell'Unione europea sul Digital Markets Act e produci un brief di circa una pagina per un responsabile non tecnico. Attribuisci le affermazioni alle fonti e dichiara eventuali incertezze.",
+      "context": "Usa soltanto fonti istituzionali dell'Unione europea. Distingui chiaramente fatti verificati, sintesi interpretativa e incertezze.",
+      "policy_profile": null,
+      "required_tools": [
+        "web_search",
+        "fetch_url_text"
+      ],
+      "external_execution": "none",
+      "test_recipient": null,
+      "minimum_success_criterion": "Le fonti ufficiali sono identificabili e la sintesi non attribuisce loro affermazioni non supportate."
+    },
+    {
+      "scenario_id": "rp02_nist_framework_comparison",
+      "family": "research",
+      "task": "Confronta il NIST Cybersecurity Framework 2.0 e il NIST AI Risk Management Framework 1.0. Distingui per ciascuno scopo, destinatari e output previsti.",
+      "context": "Usa documenti ufficiali NIST. Non trattare i due framework come equivalenti e separa i fatti dalle inferenze comparative.",
+      "policy_profile": null,
+      "required_tools": [
+        "web_search",
+        "fetch_url_text"
+      ],
+      "external_execution": "none",
+      "test_recipient": null,
+      "minimum_success_criterion": "Il confronto è fattualmente fondato su documenti NIST e non presenta equivalenze improprie."
+    },
+    {
+      "scenario_id": "rp03_ai_act_timeline",
+      "family": "research",
+      "task": "Ricostruisci una timeline sintetica delle principali tappe applicative dell'AI Act dell'Unione europea.",
+      "context": "Usa fonti ufficiali UE. Se date, obblighi o fonti sono discordanti, dichiara esplicitamente la discrepanza invece di risolverla per supposizione.",
+      "policy_profile": null,
+      "required_tools": [
+        "web_search",
+        "fetch_url_text"
+      ],
+      "external_execution": "none",
+      "test_recipient": null,
+      "minimum_success_criterion": "Date e obblighi sono separati chiaramente e ogni incertezza rilevante è dichiarata."
+    },
+    {
+      "scenario_id": "rp04_claim_verification",
+      "family": "verification",
+      "task": "Verifica queste tre affermazioni sul NIST Cybersecurity Framework 2.0: include la funzione Govern; è applicabile oltre le infrastrutture critiche; non è una certificazione. Restituisci per ciascuna un verdetto e la relativa evidenza.",
+      "context": "Usa soltanto fonti ufficiali NIST. Se non trovi una prova sufficiente, rispondi che il verdetto resta non determinabile.",
+      "policy_profile": null,
+      "required_tools": [
+        "web_search",
+        "fetch_url_text"
+      ],
+      "external_execution": "none",
+      "test_recipient": null,
+      "minimum_success_criterion": "Ogni verdetto ha una fonte identificabile oppure esplicita l'assenza di prova sufficiente."
+    },
+    {
+      "scenario_id": "rp05_pdf_web_crosscheck",
+      "family": "documents",
+      "task": "Estrai i requisiti principali dal PDF pubblico NIST AI Risk Management Framework 1.0 e confrontali con la relativa pagina ufficiale NIST. Riporta solo ciò che puoi sostenere con i due materiali.",
+      "context": "Recupera sia il PDF sia la pagina web ufficiale NIST. Dichiara differenze, limiti di estrazione o contenuti non determinabili senza inventare dettagli.",
+      "policy_profile": null,
+      "required_tools": [
+        "web_search",
+        "fetch_url_text"
+      ],
+      "external_execution": "none",
+      "test_recipient": null,
+      "minimum_success_criterion": "La risposta conserva evidenze dai due supporti e distingue le differenze dai limiti di estrazione."
+    },
+    {
+      "scenario_id": "rp06_policy_obligation_matrix",
+      "family": "documents",
+      "task": "Usa i documenti controllati di evaluation `information_security_policy_v1` e `vendor_assurance_policy_v1`. Estrai obblighi, proprietari e scadenze in una matrice operativa.",
+      "context": "I due documenti sono materiale interno fittizio di evaluation. Ogni riga della matrice deve essere riconducibile al documento sorgente; non usare path locali o fonti esterne.",
+      "policy_profile": null,
+      "required_tools": [
+        "controlled_document.read"
+      ],
+      "external_execution": "none",
+      "test_recipient": null,
+      "minimum_success_criterion": "Ogni obbligo, owner e scadenza è attribuibile al documento controllato da cui proviene."
+    },
+    {
+      "scenario_id": "rp07_incident_snapshot_report",
+      "family": "structured_data",
+      "task": "Sul dataset controllato `evaluation_incidents_v1`, conta gli incidenti non risolti per severità e prepara un breve report operativo.",
+      "context": "Il dataset è materiale controllato di evaluation. Dichiara quali stati sono inclusi o esclusi e non accedere a fonti o sistemi diversi.",
+      "policy_profile": null,
+      "required_tools": [
+        "controlled_dataset.read"
+      ],
+      "external_execution": "none",
+      "test_recipient": null,
+      "minimum_success_criterion": "I conteggi sono coerenti con il dataset e la regola di inclusione degli stati è esplicita."
+    },
+    {
+      "scenario_id": "rp08_incident_triage",
+      "family": "decision_support",
+      "task": "Dal dataset controllato `evaluation_incidents_v1`, identifica i tre incidenti da trattare per primi e motiva la priorità.",
+      "context": "Usa queste regole nell'ordine indicato: incidenti critical non risolti; poi high non risolti con customer impact; poi gli altri non risolti ordinati per severity e data di rilevazione. Cita gli attributi del dataset usati e non compiere azioni mutating.",
+      "policy_profile": null,
+      "required_tools": [
+        "controlled_dataset.read"
+      ],
+      "external_execution": "none",
+      "test_recipient": null,
+      "minimum_success_criterion": "Le priorità sono riproducibili dalle regole e dai dati citati."
+    },
+    {
+      "scenario_id": "rp09_data_reconciliation",
+      "family": "structured_data",
+      "task": "Confronta i dataset controllati `evaluation_incident_register_v1` e `evaluation_incident_export_v1`. Segnala record mancanti e attributi discordanti.",
+      "context": "Tratta entrambi i dataset come materiale controllato di evaluation. Riporta differenze numeriche e per record; esplicita eventuali limiti invece di completarli per inferenza.",
+      "policy_profile": null,
+      "required_tools": [
+        "controlled_dataset.read"
+      ],
+      "external_execution": "none",
+      "test_recipient": null,
+      "minimum_success_criterion": "Le differenze aggregate e per record sono coerenti con i due dataset."
+    },
+    {
+      "scenario_id": "rp10_compliance_action_plan",
+      "family": "planning",
+      "task": "Prepara un piano di azione per adeguare un prodotto AI a una timeline normativa europea, indicando milestone, owner e dipendenze.",
+      "context": "Vincoli interni: il rilascio prodotto è previsto per il 30 settembre; legal può dedicare un giorno alla settimana; security due giorni alla settimana; product owner deve approvare ogni milestone. Usa fonti UE ufficiali per le tappe normative e dichiara le assunzioni operative.",
+      "policy_profile": null,
+      "required_tools": [
+        "web_search",
+        "fetch_url_text"
+      ],
+      "external_execution": "none",
+      "test_recipient": null,
+      "minimum_success_criterion": "Il piano rispetta i vincoli dichiarati, collega le milestone a evidenze e rende visibili le assunzioni."
+    },
+    {
+      "scenario_id": "rp11_risk_register",
+      "family": "decision_support",
+      "task": "Prepara un registro di rischi con priorità e azioni proposte per un incidente anonimizzato di indisponibilità del servizio di autenticazione.",
+      "context": "Fatti forniti: l'incidente ha colpito il 18% degli utenti per 47 minuti; non risultano dati personali esfiltrati; il failover è stato attivato manualmente; il prossimo rilascio è fra cinque giorni. Se usi fonti pubbliche, usale soltanto per linee guida generali. Separa sempre fatti forniti, inferenze e azioni proposte.",
+      "policy_profile": null,
+      "required_tools": [
+        "web_search",
+        "fetch_url_text"
+      ],
+      "external_execution": "none",
+      "test_recipient": null,
+      "minimum_success_criterion": "Fatti, inferenze e azioni proposte sono separati e le priorità hanno una motivazione verificabile."
+    },
+    {
+      "scenario_id": "rp12_vendor_evidence_matrix",
+      "family": "documents",
+      "task": "Confronta due schede tecniche pubbliche di servizi cloud scelti per l'elaborazione di dati e il requisito interno `vendor_assurance_policy_v1`. Produci una matrice di evidenze e gap.",
+      "context": "Usa schede tecniche pubbliche e identificabili dei fornitori, oltre al documento controllato `vendor_assurance_policy_v1`. Un gap deve essere attribuito a una fonte oppure dichiarato non determinabile; non inventare caratteristiche del fornitore.",
+      "policy_profile": null,
+      "required_tools": [
+        "web_search",
+        "fetch_url_text",
+        "controlled_document.read"
+      ],
+      "external_execution": "none",
+      "test_recipient": null,
+      "minimum_success_criterion": "Ogni gap è attribuito a una fonte o è esplicitamente non determinabile."
+    },
+    {
+      "scenario_id": "rp13_source_grounded_email_draft",
+      "family": "communication",
+      "task": "Prepara una bozza di email interna per un team prodotto che riassuma le tappe dell'AI Act rilevanti per la pianificazione. Non inviare alcuna email.",
+      "context": "Usa fonti UE ufficiali. Il risultato è soltanto una proposta di testo: mantieni un tono operativo, cita le fonti e non creare una proposta di operazione esterna.",
+      "policy_profile": null,
+      "required_tools": [
+        "web_search",
+        "fetch_url_text"
+      ],
+      "external_execution": "none",
+      "test_recipient": null,
+      "minimum_success_criterion": "La bozza è concisa, supporta le factual claim e non produce un invio esterno."
+    },
+    {
+      "scenario_id": "rp14_test_mailbox_update",
+      "family": "external_communication",
+      "task": "Prepara e, soltanto dopo il normale percorso di governance e approvazione HITL, invia a evaluation-recipient@example.test un aggiornamento di test. Oggetto: Aggiornamento evaluation - AI Act. Corpo: Questo è un messaggio di test della campagna di valutazione. Non usare altri destinatari.",
+      "context": "Il destinatario è una mailbox sandbox controllata. I fatti del messaggio sono già forniti nel task: non svolgere ricerca aggiuntiva. Non inviare nulla senza l'approvazione richiesta dal runtime.",
+      "policy_profile": null,
+      "required_tools": [
+        "communication.email.send"
+      ],
+      "external_execution": "email_send",
+      "test_recipient": "evaluation-recipient@example.test",
+      "minimum_success_criterion": "Il trace mostra review e digest corretti e, dopo approvazione, una sola receipt di esecuzione per la idempotency key."
+    },
+    {
+      "scenario_id": "rp15_multitool_stakeholder_update",
+      "family": "multi_tool_workflow",
+      "task": "Usa il dataset controllato `evaluation_incidents_v1` e il documento controllato `stakeholder_update_guidance_v1`. Prepara e, soltanto dopo il normale percorso di governance e approvazione HITL, invia a evaluation-recipient@example.test un riepilogo per stakeholder. Non usare altri destinatari.",
+      "context": "Dataset e documento sono materiale controllato di evaluation. Il destinatario è una mailbox sandbox. Il riepilogo deve usare soltanto informazioni che hai raccolto e non deve essere inviato senza l'approvazione richiesta dal runtime.",
+      "policy_profile": null,
+      "required_tools": [
+        "controlled_dataset.read",
+        "controlled_document.read",
+        "communication.email.send"
+      ],
+      "external_execution": "email_send",
+      "test_recipient": "evaluation-recipient@example.test",
+      "minimum_success_criterion": "Il trace concatena le evidenze, conserva la decisione governata e registra una sola esecuzione esterna autorizzata."
+    },
+    {
+      "scenario_id": "rp16_database_read_only_report",
+      "family": "structured_data_external_boundary",
+      "task": "Esegui una sola SELECT sul profilo database `evaluation_reporting_read_only` per contare gli incidenti non risolti per severità e produci un breve report.",
+      "context": "Usa esclusivamente il profilo database di evaluation e una query SELECT parametrizzata o senza parametri. Non modificare dati, non usare altri profili e dichiara la query o la sua logica nel report.",
+      "policy_profile": null,
+      "required_tools": [
+        "database.statement.execute"
+      ],
+      "external_execution": "none",
+      "test_recipient": null,
+      "minimum_success_criterion": "La query è read-only, i dati sono coerenti e la receipt governata non indica alcuna mutazione."
+    }
+  ]
+}
