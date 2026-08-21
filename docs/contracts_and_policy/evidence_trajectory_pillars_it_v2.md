@@ -1,15 +1,12 @@
-# Evidence e Trajectory pillar — v2
+# Evidence e Trajectory pillar — v2 (contratto corrente)
 
-> Questo documento è la revisione proposta di `evidence_trajectory_pillars_it.md`, che
-> resta valido come descrizione del comportamento **attuale**. Qui è descritto il
-> comportamento **da raggiungere**. Le differenze rispetto alla v1 sono raccolte
-> nell'ultima sezione.
+> **Stato del documento:** questo documento descrive il comportamento corrente del runtime e della policy OPA. La v1 (`evidence_trajectory_pillars_it.md`) è mantenuta esclusivamente come riferimento storico.
 
 ## Idea generale
 
 I pillar **Evidence** e **Trajectory** forniscono a OPA fatti osservabili sulla run:
 
-- **Evidence** controlla che le affermazioni fattuali in uscita siano *verificabili*: che il supporto dichiarato esista, sia integro, sia sufficiente rispetto a quanto lo step richiedeva, e non sia circolare.
+- **Evidence** controlla che le affermazioni fattuali in uscita siano *verificabili*: che il supporto dichiarato esista, sia integro, sia sufficiente rispetto a quanto lo step richiedeva e che il contratto esponga i controlli di non-circolarità.
 - **Trajectory** controlla che la run *termini*: che l'agente avanzi, che non ripeta replan o proposte esterne senza una nuova base osservabile, e che non superi i limiti di convergenza configurati.
 
 Nessuno dei due valuta il significato. Evidence risponde a «il supporto c'è ed è controllabile?», Trajectory a «stiamo convergendo?». La domanda «ha senso ed è appropriato?» è del **Judge**.
@@ -51,7 +48,7 @@ PlanStep(
 )
 ```
 
-Se `produces_factual_claims` è falso o `evidence_burden` è assente, **Evidence non decide**: emette i soli fatti di integrità e resta non autoritativo. È una scelta deliberata di fail-open, così che una regressione del planner degradi al comportamento della v1 invece di bloccare la run.
+Se `produces_factual_claims` è falso, Trajectory resta attivo per la liveness ma Evidence non è richiesto. Se lo step dichiara `produces_factual_claims=True` e un `evidence_burden`, Evidence è valutativo e la sua copertura entra nella decisione OPA. Un burden assente non abilita una verifica di copertura; non rende però “shadow” un Evidence richiesto. I controlli strutturali restano fail-closed quando il pillar è richiesto.
 
 ### Come viene registrata un'evidenza
 
@@ -77,7 +74,7 @@ StepValidation(
 
 ### Cosa controlla
 
-Cinque famiglie di controlli, ciascuna con i propri reason code.
+I controlli producono fatti grezzi e `deficit_codes`; OPA li combina con lo stato della run e restituisce la direttiva finale. Le categorie operative sono integrità referenziale, copertura dell'onere dichiarato, disponibilità del contenuto recuperato, fragilità dei titoli e ancoraggio letterale.
 
 **1. Integrità referenziale.** Ogni `evidence_ref` esiste in `TaskState.observations`; riferimenti e ID sono univoci; le osservazioni selezionate contengono testo concreto; la provenienza risale a una tool call e a uno step conosciuti; snapshot, selezione e operazione coincidono con i digest sigillati alla creazione del candidato.
 
@@ -92,14 +89,14 @@ candidate_digest_binding_valid
 **2. Copertura dell'onere dichiarato.** Aritmetica su tipi, non semantica.
 
 ```text
-independent_full_source_count = 3
-declared_min_independent_sources = 3
-evidence_burden_satisfied = true
+distinct_independent_sources_count = 3
+min_independent_sources_required = 3
+burden_satisfied = true
 ```
 
 L'indipendenza è strutturale: locator distinti per schema e dominio. Non è un giudizio sull'indipendenza editoriale delle fonti, che resta del Judge.
 
-**3. Qualità strutturale dell'osservazione.** Contenuto recuperato contro solo titolo di ricerca, schema del locator, flag di troncamento, timestamp dentro o fuori dalla finestra dichiarata.
+**3. Qualità strutturale dell'osservazione.** Contenuto recuperato contro solo titolo di ricerca, schema del locator, flag di troncamento e il campo di freshness rispetto alla finestra dichiarata. Nel runtime corrente `freshness_satisfied` è esposto come fatto contrattuale ma resta predisposto per l'implementazione della verifica temporale.
 
 ```text
 selected_evidence_all_title_only
@@ -107,10 +104,10 @@ retrieved_content_source_count
 freshness_satisfied
 ```
 
-**4. Non-circolarità.** Nessun riferimento selezionato punta a qualcosa prodotto dall'agente stesso: file scritti nel workspace, draft precedenti, voci di scratchpad.
+**4. Non-circolarità.** Il contratto espone `circular_reference_detected` per rilevare riferimenti a file scritti nel workspace, draft precedenti o voci di scratchpad. Nel runtime corrente il fatto è inizializzato a `false`: il rilevamento effettivo è un'estensione dichiarata, non una verifica già attiva.
 
 ```text
-self_produced_evidence_refs = []
+circular_reference_detected = false
 ```
 
 **5. Ancoraggio letterale.** Sui soli token estraibili — numeri, date, importi, URL, indirizzi. Un letterale presente nel payload deve comparire verbatim in almeno un'osservazione.
@@ -124,15 +121,15 @@ I due fatti sono distinti perché portano a decisioni diverse. Assente dalla sel
 
 ### Cosa decide
 
-Tre esiti, non uno. La v1 collassava dodici controlli in un unico booleano e un unico reason code; qui ogni famiglia porta a una direttiva coerente col difetto.
+I fatti di Evidence non producono direttamente una revisione semantica del payload: OPA li usa nel percorso di ammissione.
 
-| Esito | Condizione | Direttiva | Perché |
+| Situazione | Fatti / condizione | Direttiva OPA | Reason code |
 |---|---|---|---|
-| **Integrità violata** | ref inesistenti, id duplicati, provenienza irrisolvibile, digest non combacianti | `REVISE_ACTION` | L'evidenza c'è, è il riferimento che è rotto: chiedere più evidenza sarebbe la direttiva sbagliata |
-| **Letterale non ancorato nell'universo** | `unanchored_literals_in_universe` non vuoto | `REVISE_ACTION` | Il dato è inventato, non mancante |
-| **Onere non soddisfatto** | `evidence_burden_satisfied = false` | `REQUEST_MORE_EVIDENCE` | Serve davvero acquisire altro |
-| **Gap irriducibile** | onere non soddisfatto oltre il tetto configurato | `WAIT_HUMAN_REVIEW` | Le osservazioni disponibili non possono soddisfarlo |
-| **Pillar richiesto ma non disponibile** | errore del signal service | `WAIT_HUMAN_REVIEW` | Fail-closed, invariato dalla v1 |
+| **Gap strutturale o di copertura** | integrità non valida, contenuto recuperato mancante, onere non soddisfatto o letterali non ancorati | `REQUEST_MORE_EVIDENCE` | `invalid_or_missing_selected_evidence` |
+| **Tetto delle richieste raggiunto** | `evidence_request_count` oltre il limite configurato | `WAIT_HUMAN_REVIEW` | `evidence_request_limit_reached` |
+| **Pillar richiesto ma non disponibile** | errore del signal service | `WAIT_HUMAN_REVIEW` | `required_pillar_unavailable` |
+
+`REVISE_ACTION` resta invece una direttiva del percorso Judge quando la valutazione semantica richiede una modifica del candidato.
 
 Nota che nella v1 una selezione vuota non era automaticamente invalida. **Nella v2 lo è, ma solo quando lo step ha dichiarato un onere probatorio.** Su uno step che non produce affermazioni fattuali la selezione vuota resta legittima.
 
@@ -162,47 +159,47 @@ Il corpo afferma: «Tre fonti indipendenti confermano un aumento del 12% nel Q2 
 ```text
 selected_evidence_refs_valid          = true
 candidate_digest_binding_valid        = true
-independent_full_source_count         = 3
-evidence_burden_satisfied             = true
+distinct_independent_sources_count    = 3
+burden_satisfied                      = true
 freshness_satisfied                   = true
-self_produced_evidence_refs           = []
+circular_reference_detected           = false
 unanchored_literals_in_universe       = []
 evidence_gap                          = false
 ```
 
-Reason code `evidence_burden_satisfied`. `obs_19` è solo un titolo ma non serve al conteggio, quindi non guasta nulla. Il candidato passa al Judge, che ora valuta se il 12% è davvero quello che dice il report e se le fonti sono indipendenti nel merito — su una base garantita non vuota e citabile.
+`burden_satisfied = true` indica che la copertura strutturale è sufficiente. `obs_19` è solo un titolo ma non serve al conteggio, quindi non guasta nulla. Il candidato passa al Judge, che ora valuta se il 12% è davvero quello che dice il report e se le fonti sono indipendenti nel merito — su una base garantita non vuota e citabile.
 
 ### Esempi in cui Evidence blocca
 
 **A — onere non soddisfatto.** Selezione vuota, universo di 23 osservazioni, il corpo dichiara «Fonti effettivamente disponibili entro la finestra: 2».
 
 ```text
-independent_full_source_count = 0
-evidence_burden_satisfied     = false
+distinct_independent_sources_count = 0
+burden_satisfied                 = false
 evidence_gap                  = true
 ```
 
-Reason code `evidence_burden_unmet_no_declared_source`, direttiva `REQUEST_MORE_EVIDENCE` con feedback e contatore a 1. Nella v1 questo caso passa: tutti i controlli sono vacuamente veri su selezione vuota.
+Deficit code `insufficient_independent_sources`; OPA restituisce `REQUEST_MORE_EVIDENCE` con reason code `invalid_or_missing_selected_evidence`, feedback e contatore a 1. Nella v1 questo caso passa: tutti i controlli sono vacuamente veri su selezione vuota.
 
 **B — copertura solo apparente.** Tre riferimenti, tutti solo titoli di ricerca.
 
 ```text
-independent_full_source_count      = 0
+distinct_independent_sources_count = 0
 selected_evidence_all_title_only   = true
-evidence_burden_satisfied          = false
+burden_satisfied                   = false
 ```
 
-Reason code `evidence_burden_unmet_title_only_sources`, distinto dal precedente. Nella v1 questo caso blocca, ma sotto lo stesso reason code generico del caso A: dal trace non si distingue quale dei dodici controlli abbia deciso.
+Deficit codes `insufficient_independent_sources` e `title_only_evidence_fragility`, distinti dal caso A. OPA usa comunque il reason code di direttiva `invalid_or_missing_selected_evidence`; dal trace si distinguono i deficit grezzi che hanno prodotto il gap.
 
 **C — letterale non ancorato.** Onere soddisfatto, tre fonti piene e fresche. Ma il corpo dice «un aumento del 18%» e `"18%"` non compare in nessuna delle 23 osservazioni.
 
 ```text
-evidence_burden_satisfied        = true
+burden_satisfied                 = true
 unanchored_literals_in_universe  = ["18%"]
 evidence_gap                     = true
 ```
 
-Reason code `evidence_unanchored_numeric_literal`, direttiva `REVISE_ACTION`.
+Deficit code `unanchored_literals_in_universe`; OPA restituisce `REQUEST_MORE_EVIDENCE` con reason code `invalid_or_missing_selected_evidence`.
 
 **Caso da non bloccare, per contrasto.** Il corpo dice «circa un quinto» dove le osservazioni dicono «19,4%». «Un quinto» non è un token estraibile, l'ancoraggio non si pronuncia, la parafrasi va al Judge. Evidence non deve mai dover decidere se «circa un quinto» equivale a 19,4%.
 
@@ -260,13 +257,13 @@ Nella v1 esistevano solo regole di liveness e di ripresentazione. La v2 aggiunge
 | `action_churn` | oscillazione fra varianti già viste senza convergere | `WAIT_HUMAN_REVIEW` |
 | `unchanged_resubmission` | stesso payload e stessa selezione ripresentati | `WAIT_HUMAN_REVIEW` |
 | `repeated_rejected_payload_digest` | ripresentato un digest già respinto | `WAIT_HUMAN_REVIEW` |
-| `revision_limit_reached` | revisioni oltre `max_action_revisions_before_review` | `WAIT_HUMAN_REVIEW` |
+| `action_revision_limit_reached` | revisioni oltre `max_action_revisions_before_review` | `WAIT_HUMAN_REVIEW` |
 
 `replan_ceiling_reached`, `consecutive_tool_failures` e `action_churn` sono nuove. Le altre esistono già e funzionano: `unchanged_resubmission` e `repeated_rejected_payload_digest` sono la parte più solida del sistema attuale.
 
 Due correzioni sulle regole esistenti:
 
-- `revision_limit_reached` va confrontata con `max_action_revisions_before_review` e non con quel valore meno uno: con limite configurato a 3 la v1 scatta a 2;
+- `action_revision_limit_reached` va confrontata con `max_action_revisions_before_review` e non con quel valore meno uno: con limite configurato a 3 la v1 scatta a 2;
 - quando più regole sono vere nello stesso pass, OPA deve riportare la regola decisiva **e** popolare `rejected_alternatives` con le altre. Nella v1 `rejected_alternatives` è sempre vuoto, quindi un pass in cui scattano quattro patologie diverse ne conserva una sola.
 
 ### Esempio di replan
@@ -300,7 +297,7 @@ L'Actor propone l'invio di un'email. Il Judge richiede una revisione, il runtime
 ```text
 unchanged_resubmission            = true
 repeated_rejected_payload_digest  = true
-revision_limit_reached            = true
+action_revision_limit_reached     = true
 ```
 
 OPA restituisce `WAIT_HUMAN_REVIEW` con reason code `rejected_candidate_resubmitted`, e `rejected_alternatives` conserva le altre due. Questo percorso è già osservato end-to-end nelle run di benchmark: è il ciclo di revisione limitato che chiude correttamente.
@@ -343,23 +340,23 @@ In breve: **Evidence protegge la verificabilità del legame fra affermazione e o
 | Attivazione Trajectory | `NEEDS_REPLAN` e `STEP_COMPLETED` | sempre, con modalità liveness e convergenza |
 | Criterio di Evidence | integrità dei riferimenti scelti | integrità **più** onere probatorio dichiarato dallo step |
 | Selezione vuota | mai invalida | invalida se lo step ha dichiarato un onere |
-| Esito di Evidence | un booleano, un reason code | cinque famiglie, reason code distinti, tre direttive |
+| Esito di Evidence | un booleano, un reason code | fatti grezzi e deficit codes, con mapping OPA a direttive osservabili |
 | `REQUEST_MORE_EVIDENCE` | senza feedback, senza contatore, senza tetto | feedback all'Actor, contatore, escalation a revisione umana |
 | Ancoraggio del contenuto | assente | letterale sui token estraibili, con distinzione selezione/universo |
-| Non-circolarità | assente | riferimenti auto-prodotti rifiutati |
+| Non-circolarità | assente | esposta come fatto strutturale; `circular_reference_detected` è il punto di estensione per il rilevamento dei riferimenti auto-prodotti |
 | Regole di convergenza | solo liveness e ripresentazione | più tetto sui replan, fallimenti consecutivi, churn |
 | Interventi umani nella liveness | contano come nuova base | non contano |
 | Regole concorrenti | una sola riportata | decisiva riportata, altre in `rejected_alternatives` |
-| Limite di revisione | scatta a limite meno uno | scatta al limite |
+| Limite di revisione | scatta a limite meno uno | `action_revision_limit_reached` scatta al limite |
 
 ### Ordine di adozione
 
-L'ordine conta più del contenuto, perché ogni nuovo percorso di deny è un nuovo percorso di abort.
+L'ordine conta perché Evidence e Trajectory partecipano ora al percorso attivo con direttive OPA osservabili e tracciate.
 
-1. **Trajectory always-on in fase esplorativa, solo fatti**, nessuna direttiva nuova.
-2. **Tetti e feedback prima delle decisioni**: contatore e escalation di `REQUEST_MORE_EVIDENCE` messi in opera prima che Evidence possa bloccare.
-3. **Evidence in shadow** — `decision_influence = false`, come già fanno `risk` e `behavioral`. Si rigirano le run di benchmark e si legge cosa *avrebbe* deciso. Questo produce gratuitamente l'ablazione su Evidence che il documento di ricerca oggi propone soltanto.
-4. **Evidence autoritativo** solo quando lo shadow è pulito.
-5. **Prompt del Judge invariato** durante tutti i passi precedenti: cambiare il filtro a monte e il valutatore a valle insieme rende non attribuibile qualunque regressione.
+1. **Trajectory always-on**: produce fatti di liveness e convergenza su tutti gli eventi dell'Actor, con vincoli decisionali ai confini di replan, completamento e proposta esterna.
+2. **Evidence event-sensitive**: è richiesto per gli step fattuali con burden dichiarato, per gli step completati e per i candidati di external operation ammessi; resta non richiesto per output intermedi e proposte non fattuali.
+3. **Feedback e tetti**: `REQUEST_MORE_EVIDENCE` incrementa il contatore e si trasforma in `WAIT_HUMAN_REVIEW` al limite configurato.
+4. **Judge separato**: OPA ammette il candidato solo dopo Evidence e Trajectory; il Judge valuta poi il significato e l'appropriatezza del contenuto quando è richiesto.
+5. **Risk e Behavioral restano shadow-only**: forniscono segnali e conseguenze operative senza autorità sulla direttiva finale.
 
-A ogni passo il criterio di non-regressione è la sequenza di reason code delle run di benchmark: i completamenti puliti restano `completed`, e la run con ripresentazione resta `aborted` per `rejected_candidate_resubmitted`.
+Il criterio di non-regressione è la sequenza di direttive e reason code delle run di benchmark. Una ripresentazione invariata viene instradata a revisione umana; la classificazione finale della terminazione dipende dalla decisione umana o dall'esito del runtime.

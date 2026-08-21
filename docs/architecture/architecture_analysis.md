@@ -14,7 +14,7 @@ L'architettura effettiva è una pipeline a cinque macro-blocchi: Task Intake (La
 | Layer 2 — Runtime & Governance | Orchestrazione, planner/actor, governance, HITL e routing | Non implementa direttamente capability o persistenza |
 | Layer 3 — Tool Bus / External Capabilities | Gateway, normalizzazione, registry, executor e adapter esterni | Non interpreta la policy finale |
 | Layer 4 — State, Evidence & Observability | Stato, evidenze, oversight, checkpoint, trace e artifact | Non ricombina la direttiva OPA |
-| Future Layer 5 — Evaluation & Continuous Improvement | Non ancora implementato | Userà i trace esportati senza entrare nella run live |
+| Layer 5 — Evaluation & Continuous Improvement | Evaluation offline implementata; Continuous Improvement differita | Consuma `layer2_trace.v6` esportati senza entrare nella run live |
 
 ## 1. Entry point e runtime principale
 
@@ -120,16 +120,16 @@ Il bundle è `configs/opa/layer2_governance/`:
 - `data.json`: `policy_bundle_version=layer2_governance_v4`, `thresholds_version=layer2_governance_thresholds_v2`, massimo tre revisioni e destinazioni/domini proibiti.
 - `main.rego`: package `layer2.governance`, endpoint `required_pillars`, staged `judge_admission` e decisione finale `decision`.
 - `pillars/static_policy.rego`: hard deny per write in read-only, SQL non-SELECT/ambiguo su profile read-only, recipient/dominio proibito; conserva envelope read-only e segnale clarification.
-- `pillars/evidence.rego`: gap strutturale per riferimenti invalidi/duplicati, osservazioni senza contenuto/lineage/step, title-only, o digest candidate–snapshot–selection–operation non coerenti.
-- `pillars/trajectory.rego`: valuta ammissibilità/stallo del replan, resubmission invariata o già rifiutata e soglia revisioni.
+- `pillars/evidence.rego`: gap strutturale per riferimenti invalidi/duplicati, osservazioni senza contenuto/lineage/step, title-only, burden non soddisfatto, letterali non ancorati o digest candidate–snapshot–selection–operation non coerenti.
+- `pillars/trajectory.rego`: valuta liveness, ammissibilità/stallo e tetto del replan, resubmission invariata o già rifiutata, fallimenti consecutivi, churn e soglia revisioni.
 - `pillars/judge.rego`: proietta assessment semantico e binding fra digest payload/evidence.
 - `pillars/risk.rego` e `pillars/behavioral.rego`: proiettano esplicitamente `mode: shadow` e `decision_influence: false`.
 
-`main.rego — required_pillars` è event-sensitive: azione proposta di tool richiede solo static policy; `needs_replan` richiede trajectory; completion locale richiede evidence+trajectory; candidato external richiede inizialmente evidence+trajectory. Solo dopo questo gate Rego ammette il judge per un candidato governed external digestato. L'output finale contiene `directive`, `policy_decision`, `reason_codes`, `judge_admission`, risultati dei sei pillar, invarianti verificati, `requires_human_review` e versioni.
+`main.rego — required_pillars` è event-sensitive: `intermediate_output` e una proposta non fattuale richiedono Trajectory per la liveness; una proposta fattuale richiede Evidence+Trajectory; `needs_replan` richiede Trajectory; completion locale e candidato external richiedono Evidence+Trajectory. Solo dopo questo gate Rego ammette il Judge per un candidato governed external digestato. L'output finale contiene `directive`, `policy_decision`, `reason_codes`, `judge_admission`, risultati dei sei pillar, invarianti verificati, `requires_human_review` e versioni.
 
 ## 7. Evidence, Operational Risk e Trajectory pillars
 
-**Evidence Integrity & Provenance (attivo).** Python calcola fatti deterministici in `signal_services.evidence_service — build_evidence_signal`; digest e manifest provengono da `domain.evidence — build_evidence_snapshot_manifest`, `build_evidence_selection_digest`. Rego non valuta entailment semantico: richiede integrità di ref, contenuto, lineage, associazione allo step e binding immutabile della completion candidate. A fronte di gap, `main.rego` emette `request_more_evidence`.
+**Evidence Integrity & Provenance (attivo).** Python calcola fatti deterministici in `signal_services.evidence_service — build_evidence_signal`; digest e manifest provengono da `domain.evidence — build_evidence_snapshot_manifest`, `build_evidence_selection_digest`. Rego non valuta entailment semantico: richiede integrità di ref, contenuto, lineage, associazione allo step, copertura dell'`evidence_burden`, ancoraggio letterale dei token estraibili e binding immutabile della completion candidate. I deficit sono esposti nei fatti `deficit_codes`; a fronte di un gap, `main.rego` emette `request_more_evidence`, con escalation a review al tetto configurato.
 
 **Trajectory Health (attivo).** `signal_services.trajectory_service — build_trajectory_signal` esporta fatti osservabili: turni, tool/observation/completed steps, checkpoints di replan, protocol failure, reason, novità osservabile e revisioni. `pillars/trajectory.rego` decide se il replan è ammissibile; lo stallo/una resubmission invariata si trasformano in review, non in progresso fittizio. `runtime.replanning_service — replanner` sostituisce solo step corrente e futuri e conserva gli step completati immutabili.
 
@@ -173,10 +173,10 @@ Il trace è una proiezione read-only di `TaskState`.
 
 - `observability.builder — build_layer2_runtime_trace` crea `Layer2RuntimeTrace` dai modelli in `observability.models.py`: runtime/intake, piano, actor, tool request/result/observation, pass OPA, assessment, judge, review, communication, execution receipt.
 - `observability.views — layer2_trace_to_json`, `build_compact_trace_from_runtime_trace` serializzano vista completa e compatta; `trace_summary — build_trace_summary_markdown` produce la vista leggibile.
-- `infrastructure.runtime_artifacts — RuntimeArtifactStore`, `persist_runtime_artifacts` scrivono per thread il trace JSON, `trace_summary.md`, dashboard snapshot e runtime summary. Il contratto esterno chiuso è `schemas/layer2_trace.schema.json` (`layer2_trace.v6`).
+- `infrastructure.runtime_artifacts — RuntimeArtifactStore`, `persist_runtime_artifacts` scrivono per thread il trace JSON, `trace_summary.md`, dashboard snapshot e runtime summary, inclusa la classificazione `termination_reason` quando il runtime termina per denial, abort umano, failure/invariant dell'esecuzione esterna o failure runtime. Il contratto esterno chiuso è `schemas/layer2_trace.schema.json` (`layer2_trace.v6`).
 - Checkpoint e artifact non sono sinonimi: `infrastructure.checkpointing — build_default_checkpointer` conserva lo stato/interruption LangGraph; gli artifact sono read models e non possono ricostruire un interrupt.
 
-Il futuro Layer 5 di evaluation non è attualmente implementato. I trace esportati restano il confine dati disponibile per la sua progettazione.
+Layer 5 Evaluation è implementato come percorso offline: importa solo `layer2_trace.v6` nel proprio SQLite, conserva annotazioni separate e produce metriche/report. Il feedback loop di Continuous Improvement resta differito e non entra nel runtime live.
 
 ## 11. Tool esterni e boundary
 

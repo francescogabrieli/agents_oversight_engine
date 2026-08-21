@@ -66,21 +66,26 @@ Tool tipici in questo scenario:
 ## 5. Come Decide La Governance Oggi
 
 La governance attuale è OPA-first. Python raccoglie e tipizza fatti; OPA/Rego resta
-l'unica autorità della direttiva finale. I pillar visibili in trace sono:
+l'unica autorità della direttiva finale. I risultati dei pillar visibili in trace sono:
 
 1. `static_policy`
-2. `dynamic_policy`
-3. `behavioral`
+2. `evidence`
+3. `trajectory`
 4. `judge`
-5. decisione finale OPA/Rego
+5. `risk` e `behavioral` (shadow-only)
+6. decisione finale OPA/Rego
+
+La `dynamic_policy` resta una proiezione diagnostica Python dei segnali e non un
+secondo decision combiner.
 
 Dettagli rilevanti:
-- i pillar richiesti dipendono dall'evento: una richiesta tool read-only usa la sola
-  policy statica, mentre una completion usa evidenza e traiettoria
+- i pillar richiesti dipendono dall'evento: output intermedi e proposte non fattuali
+  mantengono Trajectory per la liveness; una proposta fattuale, una completion e un
+  candidato external governato usano Evidence e Trajectory
 - `deny`, `require_human_review` e `ask_clarification` restano direttive OPA
 - `behavioral` e rischio operativo sono osservazioni shadow-only e non influenzano la direttiva
-- il `judge` è obbligatorio per ogni candidato `governed_external` non negato ed è
-  vincolato al digest della proposta
+- il `judge` è richiesto solo dopo l'ammissione deterministica OPA del candidato
+  `governed_external` non negato ed è vincolato al digest della proposta
 - il runtime valida e applica la direttiva OPA senza eseguire un secondo algoritmo decisionale in Python
 - il vincolo read-only resta esplicito nella trace e non viene indebolito dal routing
 
@@ -125,6 +130,7 @@ A fine run:
 2. la governance trace espone la direttiva OPA, i pillar, i reason code e le invarianti verificate
 3. `src/layer4_state_evidence_observability/infrastructure/runtime_artifacts.py` aggiorna gli artifact per dashboard e replay
 4. `src/layer4_state_evidence_observability/behavioral/service.py` aggiorna il read model storico locale
+5. il trace `layer2_trace.v6` e il runtime summary possono classificare la terminazione con `termination_reason`
 
 Questo chiude il ciclo e2e reale:
 

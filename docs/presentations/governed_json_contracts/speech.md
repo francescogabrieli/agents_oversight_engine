@@ -124,11 +124,11 @@ L’executor riceve digest corrente e digest autorizzato. L’operazione parte s
 
 L’idempotency key e il registro durevole garantiscono at-most-once. La receipt conserva esito, riferimento esterno, connector e diagnostica.
 
-## Slide 22: Trace v4: una proiezione osservabile
+## Slide 22: Trace v6: una proiezione osservabile
 
-Il trace v4 ricompone intake, piano, actor, tool, evidenze, governance, HITL e operazione esterna in una proiezione read-only.
+Il trace v6 ricompone intake, piano, actor, tool, evidenze, governance, HITL e operazione esterna in una proiezione read-only.
 
-Serve per audit, debugging ed evaluation, ma non influenza il runtime. I trace legacy vengono normalizzati soltanto al confine dell’evaluation service.
+Serve per audit, debugging ed evaluation, ma non influenza il runtime. Include anche `termination_reason` quando la run termina; i trace legacy vengono normalizzati soltanto al confine dell’evaluation service.
 
 ## Slide 23: Cosa è stato rimosso e cosa è rimasto
 

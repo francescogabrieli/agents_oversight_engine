@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Confidence, Risk &amp; Trajectory - Layer di supervisione adattiva</title>
+  <title>Storico — Confidence, Risk &amp; Trajectory - Layer di supervisione adattiva</title>
   <style>
     :root {
       --bg: #eef2f6;
@@ -42,6 +42,23 @@
     .deck-shell {
       min-height: 100vh;
       padding: 22px;
+    }
+
+    .historical-banner {
+      max-width: 1180px;
+      margin: 0 auto 18px;
+      padding: 12px 14px;
+      color: #6b4310;
+      background: #fff4d6;
+      border: 1px solid #e5c678;
+      border-radius: 12px;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .historical-banner a {
+      color: #5a3a0a;
+      font-weight: 600;
     }
 
     .topbar {
@@ -540,6 +557,11 @@
 </head>
 <body>
   <div class="deck-shell">
+    <div class="historical-banner" role="note">
+      <strong>Riferimento storico:</strong> questo deck descrive la precedente supervisione basata su score e fallback Python e non è il contratto operativo corrente. Per i pillar attivi fare riferimento a
+      <a href="../contracts_and_policy/evidence_trajectory_pillars_it_v2.md">Evidence/Trajectory v2</a> e alla
+      <a href="../architecture/architecturev3.md">specifica architetturale v3</a>.
+    </div>
     <header class="topbar" aria-label="Navigazione deck">
       <strong>Confidence, Risk &amp; Trajectory</strong>
       <nav>

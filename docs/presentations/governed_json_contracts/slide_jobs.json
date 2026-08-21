@@ -839,7 +839,7 @@
     {
       "slide_id": "slide_22",
       "number": 22,
-      "title": "Trace v5: una proiezione osservabile",
+      "title": "Trace v6: una proiezione osservabile",
       "job": "prompts/slide_22.json",
       "out": "origin_image/slide_22.png",
       "input_images": [
@@ -871,7 +871,7 @@
           "image_gen"
         ],
         "sample_generation_method_matched": true,
-        "qa_note": "Trace v5 top-level completo, read-only e non autoritativo.",
+        "qa_note": "Trace v6 top-level completo, read-only e non autoritativo; include termination_reason quando la run termina.",
         "recorded_at": "2026-07-27T11:57:50Z"
       },
       "blocker": null

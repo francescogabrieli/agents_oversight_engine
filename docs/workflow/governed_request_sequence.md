@@ -162,10 +162,12 @@ Sorgente: [`evidence_audit_flow.mmd`](evidence_audit_flow.mmd).
 
 2. Il PEP (`runtime/governance_service.py`) delega a `evaluate_opa_first_governance`. Prima costruisce fatti base, quindi interroga `required_pillars` in OPA. L’attivazione Rego è:
 
-   - `PROPOSE_ACTION`: nessun pillar attivo;
-   - `NEEDS_REPLAN`: solo `trajectory`;
+   - `INTERMEDIATE_OUTPUT`: solo `trajectory` per la liveness;
+   - `PROPOSE_ACTION` senza contenuto fattuale: solo `trajectory` per la liveness;
+   - `PROPOSE_ACTION` con contenuto fattuale: `evidence` e `trajectory`;
+   - `NEEDS_REPLAN`: `trajectory` per liveness e convergenza;
    - `STEP_COMPLETED` locale: `evidence` e `trajectory`;
-   - candidate `governed_external` non hard-denied: `evidence` e `trajectory`.
+   - candidate `governed_external` non hard-denied: `evidence` e `trajectory`, poi Judge se l'ammissione OPA lo richiede.
 
 3. `risk` viene raccolto quando esiste una proposta esterna, ma è shadow-only. `behavioral` è raccolto a una frontiera di audit stabile (`waiting_human_review`/`completed`) o quando esiste una proposta esterna; è anch’esso shadow-only. Entrambi vengono inclusi nel payload, ma Rego dichiara esplicitamente che non influenzano la direttiva.
 
@@ -185,7 +187,7 @@ Sorgente: [`evidence_audit_flow.mmd`](evidence_audit_flow.mmd).
 
 `RuntimeArtifactStore.persist` scrive per thread:
 
-- `full-trace-2.json` (`layer2_trace.v6`): intake, piano, ultimo actor turn, execution/scratchpad/validazioni, tool call e osservazioni, tutti i `governance_passes` (requisiti, risultati/errori dei pillar, direttiva, ragione e invarianti), HITL, comunicazione ed esecuzione esterna;
+- `full-trace-2.json` (`layer2_trace.v6`): intake, piano, ultimo actor turn, execution/scratchpad/validazioni, tool call e osservazioni, tutti i `governance_passes` (requisiti, risultati/errori dei pillar, direttiva, ragione e invarianti), HITL, comunicazione, esecuzione esterna e `termination_reason`;
 - `trace_summary.md`: vista Markdown del trace;
 - `dashboard_snapshot.json` e `runtime_summary.json`;
 - quando applicabile, il bundle di evidenze del judge, sia content-addressed sia come puntatore corrente.

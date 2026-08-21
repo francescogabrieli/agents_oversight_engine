@@ -568,8 +568,8 @@
             <p>L'uso dei tool e controllato tramite gateway. L'actor non chiama MCP direttamente e non ha autorita di esecuzione libera.</p>
           </div>
           <div class="card red">
-            <h3>Non implementato</h3>
-            <p>Nessuna esecuzione esterna reale per `external_communication`, nessun layer di autenticazione MCP per principal e nessun futuro nodo di giudizio semantico.</p>
+            <h3>Vincoli attuali</h3>
+            <p>Le capability produttive SMTP/database sono disabilitate di default; l'autenticazione MCP per principal resta differita. Il Judge semantico e il percorso external execution sono invece implementati e restano capability-bound.</p>
           </div>
         </div>
       </main>
@@ -808,7 +808,7 @@
               <li>Richieste e decisioni di human review tipizzate.</li>
               <li>Percorso LangGraph `interrupt / resume` tramite `human_review`.</li>
               <li>Dashboard snapshot sullo stesso contratto di review.</li>
-              <li>Auto-launch della dashboard locale al primo pause di review.</li>
+              <li>Control plane dashboard standalone e inbox durevole; il runtime owner resta separato dall'interfaccia.</li>
             </ul>
           </div>
         </div>
@@ -857,7 +857,7 @@
               <li>Checkpoint LangGraph locali e durevoli su disco.</li>
               <li>Runtime artifact per thread sotto <code>artifacts/runtime/&lt;thread_id&gt;/</code>.</li>
               <li>Payload HITL pendenti e dashboard snapshot.</li>
-              <li>Runtime summary e trace JSON esportate.</li>
+              <li>Runtime summary e trace JSON `layer2_trace.v6`, inclusa la classificazione `termination_reason` quando applicabile.</li>
             </ul>
           </div>
           <div class="card green">
@@ -894,18 +894,18 @@
         <div class="subflow">
           <div>
             <p class="lead">
-              `observability/` costruisce una trace di runtime tipizzata e JSON-safe a partire da `TaskState`.
+              `observability/` costruisce una trace di runtime tipizzata e JSON-safe a partire da `TaskState` (`layer2_trace.v6`).
               Viene usata per debugging, evidenza di tesi, payload dashboard, artifact persistiti e
               valutazione offline.
             </p>
             <ul class="tight-list">
-              <li>Include intake summary, plan steps, actor snapshot, tool calls, evidence, governance decisions, oversight assessments, dati HITL e summary di `external_communication`.</li>
+              <li>Include intake summary, plan steps, actor snapshot, tool calls, evidence, governance passes, oversight assessments, dati HITL, `termination_reason` e summary di `external_communication`.</li>
               <li>Preserva una separazione esplicita tra stato runtime live e viste di audit post-run.</li>
               <li>Supporta il compact trace export senza ridefinire il contratto runtime.</li>
             </ul>
           </div>
           <pre><code>{
-  "runtime": {"thread_id": "...", "current_state": "completed"},
+  "runtime": {"thread_id": "...", "current_state": "completed", "termination_reason": null},
   "plan_steps": [...],
   "tool_calls": [...],
   "observations": [...],
@@ -925,7 +925,7 @@
       <header class="slide-header">
         <div>
           <p class="kicker">Condizioni al Contorno</p>
-          <h2>`external_communication` esiste come stato, non come esecuzione esterna live</h2>
+          <h2>`external_communication` attraversa il percorso governato fino all'executor</h2>
         </div>
         <div class="slide-no">11 / 11</div>
       </header>
@@ -936,15 +936,15 @@
             <ul class="tight-list">
               <li>Il runtime traccia fasi tipizzate come `evidence_collection`, `draft_proposal`, `human_review_required`, `approved_for_execution` e `blocked`.</li>
               <li>Queste fasi sono visibili in `TaskState`, nel dashboard snapshot, negli artifact persistiti e nella trace esportata.</li>
-              <li>OPA puo richiedere review quando esiste una draft proposal locale.</li>
+              <li>OPA puo richiedere review quando esiste una draft proposal locale e autorizza solo il digest esatto.</li>
             </ul>
           </div>
           <div class="card red">
             <h3>Limite attuale</h3>
             <ul class="tight-list">
-              <li>Nessuna external send o write execution reale e ancora implementata.</li>
-              <li>`approved_for_execution` significa tracking di stato approvato, non consegna automatica.</li>
-              <li>Il boundary di review e implementato prima di qualunque futura superficie di azione outward.</li>
+              <li>Gli adapter SMTP/database sono disabilitati di default e richiedono configurazione infrastrutturale.</li>
+              <li>`approved_for_execution` autorizza il passaggio al preflight: receipt, digest e idempotency restano obbligatori.</li>
+              <li>Una receipt indeterminate entra in riconciliazione HITL e non viene ritentata automaticamente.</li>
             </ul>
           </div>
         </div>

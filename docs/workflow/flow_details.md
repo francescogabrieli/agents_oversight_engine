@@ -268,18 +268,21 @@ dedotte da parole chiave.
 `StepValidation.evidence_refs` è una selezione opzionale di identificatori. Se
 l'actor seleziona riferimenti, tutti devono esistere nello stato. L'assenza di
 riferimenti non è automaticamente un errore: una query o un effetto possono non
-dipendere da fatti raccolti in precedenza. Per le proposte esterne, il Judge valuta
-semanticamente contenuto, contesto, osservazioni e digest.
+dipendere da fatti raccolti in precedenza. Quando il `PlanStep` dichiara
+`produces_factual_claims=true` e un `evidence_burden`, però, una selezione vuota o
+insufficiente può produrre un deficit di copertura e una richiesta di ulteriore
+evidenza. Per le proposte esterne, il Judge valuta semanticamente contenuto,
+contesto, osservazioni e digest.
 
 ## 7. Governance OPA-first
 
 Il routing dipende dall'esito actor:
 
-- `INTERMEDIATE_OUTPUT` torna direttamente all'actor;
-- `PROPOSE_ACTION` passa dalla static policy prima del Tool Gateway;
-- `NEEDS_REPLAN` attiva trajectory;
-- `STEP_COMPLETED` attiva evidence e trajectory;
-- un `execution_candidate` governed-external attiva l’ammissione staged del Judge.
+- `INTERMEDIATE_OUTPUT` torna direttamente all'actor, ma Trajectory osserva la liveness;
+- `PROPOSE_ACTION` senza contenuto fattuale attiva Trajectory; con contenuto fattuale attiva anche Evidence;
+- `NEEDS_REPLAN` attiva Trajectory per liveness e convergenza;
+- `STEP_COMPLETED` attiva Evidence e Trajectory;
+- un `execution_candidate` governed-external non hard-denied attiva Evidence e Trajectory, poi l’ammissione staged del Judge.
 
 Ai confini governati, Python:
 
@@ -295,8 +298,8 @@ Python non possiede un secondo algoritmo di decisione finale.
 Pilastri:
 
 - static policy: vincoli deterministici e hard deny;
-- evidence: integrità, lineage e binding candidate/snapshot/selection delle
-  osservazioni concrete;
+- evidence: integrità, lineage, binding candidate/snapshot/selection, copertura del
+  burden dichiarato e ancoraggio letterale dei token estraibili;
 - trajectory: storia aggregata della run, richieste esplicite di replan, recovery
   tecnica, revisioni e churn osservabile;
 - judge: allineamento semantico dell'esatta proposta esterna;
@@ -321,7 +324,7 @@ difetto concreto, come un riferimento dichiarato ma inesistente.
 
 Il numero di turni narrativi, l'assenza temporanea di tool call e la confidence
 bassa non costituiscono degradazione. Dopo un replan, una richiesta equivalente
-senza nuove osservazioni, tool outcome, step completati, input umano o cambiamenti
+senza nuove osservazioni, tool outcome, step completati o cambiamenti
 del piano viene trattata come churn e portata a HITL.
 
 ## 8. Effetti esterni, Judge e HITL
@@ -400,7 +403,8 @@ Il trace live corrente è `layer2_trace.v6`. Espone:
 - tool call e relative osservazioni;
 - passaggi governance e pilastri;
 - HITL;
-- comunicazione ed esecuzione esterna.
+- comunicazione ed esecuzione esterna;
+- `termination_reason` nel runtime summary e nella proiezione di trace.
 
 Il trace è una proiezione read-only del `TaskState`, non una seconda autorità.
 Solo l'evaluation offline può normalizzare trace storiche nei contratti correnti.

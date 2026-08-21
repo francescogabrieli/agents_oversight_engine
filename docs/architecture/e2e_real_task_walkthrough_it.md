@@ -229,9 +229,12 @@ effettivamente osservato il risultato.
 
 ## Passo 6 — Completion ed evidence binding
 
-Per completare uno step, l'actor deve produrre una validazione tipizzata e scegliere
-esplicitamente gli `evidence_refs` tra gli ID presenti in `TaskState.observations`.
-`execution/result_builder.py` rifiuta riferimenti sconosciuti. Il runtime costruisce
+Per completare uno step, l'actor deve produrre una validazione tipizzata. Gli
+`evidence_refs` sono selezionati tra gli ID presenti in `TaskState.observations`:
+se vengono dichiarati, `execution/result_builder.py` rifiuta riferimenti sconosciuti.
+La selezione può restare vuota quando lo step non dichiara un onere fattuale; se il
+`PlanStep` imposta `produces_factual_claims=true` e un `evidence_burden`, Evidence
+valuta invece la copertura e può chiedere ulteriore evidenza. Il runtime costruisce
 poi digest stabili dello snapshot delle osservazioni e della selezione dichiarata.
 
 La self-confidence dell'actor è un segnale contestuale, non una dichiarazione di
@@ -246,13 +249,14 @@ applica senza ricostruire un secondo decision combiner.
 
 I requisiti cambiano con il confine:
 
-- un aggiornamento intermedio ritorna all'actor senza trattare la narrazione come
-  degrado della traiettoria;
-- una richiesta tool read-only richiede la policy statica;
-- un replan esplicito attiva i fatti di traiettoria;
-- una completion attiva evidenza e traiettoria;
-- un candidato `governed_external` non negato richiede anche il semantic judge
-  vincolato allo stesso payload digest.
+- un aggiornamento intermedio ritorna all'actor; Trajectory osserva comunque la
+  liveness senza trattare la narrazione come degrado;
+- una proposta senza contenuto fattuale usa Trajectory, mentre una proposta fattuale
+  usa Evidence e Trajectory;
+- un replan esplicito attiva i fatti di Trajectory per liveness e convergenza;
+- una completion attiva Evidence e Trajectory;
+- un candidato `governed_external` non negato attiva Evidence e Trajectory e, solo
+  dopo l'ammissione deterministica, il semantic Judge vincolato allo stesso payload digest.
 
 Rischio operativo e behavioral memory restano shadow-only, con
 `decision_influence=false`. Sono visibili in trace ma non possono modificare la

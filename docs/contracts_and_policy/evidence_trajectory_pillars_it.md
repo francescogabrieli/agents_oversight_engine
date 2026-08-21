@@ -1,4 +1,6 @@
-# Evidence e Trajectory pillar
+# Evidence e Trajectory pillar — v1 (storica)
+
+> **Stato del documento:** riferimento storico. Per il contratto corrente fare riferimento a [`evidence_trajectory_pillars_it_v2.md`](evidence_trajectory_pillars_it_v2.md). La matrice di attivazione e le regole operative qui riportate non descrivono più interamente il runtime attuale.
 
 ## Idea generale
 

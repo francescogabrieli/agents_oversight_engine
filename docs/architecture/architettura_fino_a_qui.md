@@ -1,5 +1,7 @@
 # Architettura fino a qui
 
+> **Stato del documento:** riepilogo storico di una baseline precedente. Non usare questo file per descrivere il runtime corrente: la governance OPA-first, il Judge, HITL, l'executor external e Layer 5 Evaluation sono evoluti oltre questa fotografia. Per il contratto attuale consultare [`architecturev3.md`](architecturev3.md) e [`architecture_analysis.md`](architecture_analysis.md).
+
 ### Layer 1
 
 Il primo layer normalizza il task e lo rende computabile dal runtime.
@@ -492,8 +494,10 @@ Il modulo legge `TaskState` in modo read-only e produce un artefatto tipizzato, 
 
 ### Perché è utile
 
-Permette di vedere la pipeline completa senza dover aprire subito ogni singolo modulo.
-Lo stesso contratto puo diventare base per payload HITL, per il futuro Layer 5 di evaluation e per un judge semantico futuro.
+Permetteva di vedere la pipeline completa senza dover aprire subito ogni singolo modulo.
+Nel checkpoint documentato lo stesso contratto era pensato come base per payload HITL,
+Layer 5 di evaluation e Judge semantico; queste evoluzioni sono ora descritte nei
+documenti correnti indicati in testa.
 
 ### Cosa controllare quando si debuga
 
@@ -507,7 +511,7 @@ Lo stesso contratto puo diventare base per payload HITL, per il futuro Layer 5 d
 
 ---
 
-## 14. Stato attuale della repo
+## 14. Stato della repo nel checkpoint storico
 
 Ad oggi il progetto copre già in modo consistente:
 

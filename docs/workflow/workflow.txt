@@ -92,7 +92,8 @@ L'actor riceve l'intero piano, ma può committare soltanto step_1. Propone:
 5. GOVERNANCE DELLA TOOL CALL
 
 La governance costruisce fatti deterministici. Per una tool call read-only OPA
-verifica la static policy; evidence e trajectory restano inattivi. Se la richiesta
+verifica la static policy; Trajectory resta attivo per la liveness, mentre Evidence
+è richiesto solo quando l'evento o lo step trasporta contenuto fattuale. Se la richiesta
 è ammessa:
 
 actor -> governance -> tool_gateway
@@ -176,7 +177,8 @@ governance
 finalize_bootstrap
 END
 
-Il trace v5 registra piano, actor, tool call, observations, governance e output.
+Il trace `layer2_trace.v6` registra piano, actor, tool call, observations, governance,
+output e la classificazione tipizzata della terminazione (`termination_reason`).
 Trace, dashboard e behavioral store sono proiezioni: TaskState resta la fonte di
 verità.
 
