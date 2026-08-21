@@ -83,14 +83,22 @@ class ActorActionSchemaTests(unittest.TestCase):
             [action["name"] for action in actions],
         )
 
-    # Production action binding must not disclose test-only MCP capabilities.
+    # Production action binding exposes the configured read-only capabilities, never test MCP tools.
     def test_production_registry_exposes_only_configured_capabilities(self) -> None:
         config = load_tool_gateway_config(
             config_path=REPO_ROOT / "configs" / "layer2_tool_gateway.json"
         )
         names = [str(action["name"]) for action in build_actor_runtime_tools(config)]
 
-        self.assertEqual(names[:2], ["request_web_search", "request_fetch_url_text"])
+        self.assertEqual(
+            names[:4],
+            [
+                "request_web_search",
+                "request_fetch_url_text",
+                "request_controlled_document",
+                "request_controlled_dataset",
+            ],
+        )
         self.assertFalse(any(name.startswith("request_mcp_") for name in names))
         self.assertNotIn("emit_final_output", names)
         self.assertIn("emit_needs_replan", names)

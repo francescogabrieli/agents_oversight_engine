@@ -15,7 +15,17 @@ Supported backends:
 - `mcp`: configured local MCP servers with explicit allowlists
 - `openai`: OpenAI-backed `web_search`
 - `http_fetch`: controlled URL text extraction
-- `local_runtime`: reserved for future local read-only tools
+- `local_runtime`: configuration-registered controlled documents and CSV snapshots
+
+Current local-runtime tools:
+
+- `controlled_document.read`
+- `controlled_dataset.read`
+
+Their source registry is `configs/layer2_controlled_corpus.json`. The actor may
+select only a registered stable ID; it cannot provide a filesystem path, SQL
+statement, or generic query language. Resources are confined to the tracked
+`evaluation_corpus/` directory and observations keep a `controlled-*://` locator.
 
 Current MCP test tools:
 

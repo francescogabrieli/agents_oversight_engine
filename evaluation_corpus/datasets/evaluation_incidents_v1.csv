@@ -1,0 +1,9 @@
+incident_id,detected_at,service,severity,status,customer_impact,owner,mitigation_status,next_update_at
+INC-001,2026-07-01T08:10:00Z,payments,critical,investigating,yes,reliability_lead,workaround_active,2026-07-01T16:00:00Z
+INC-002,2026-07-01T10:35:00Z,identity,high,investigating,yes,identity_owner,mitigation_in_progress,2026-07-01T17:00:00Z
+INC-003,2026-06-30T06:20:00Z,analytics,high,unresolved,no,data_platform_owner,root_cause_unknown,2026-07-01T12:00:00Z
+INC-004,2026-07-01T07:50:00Z,checkout,medium,monitoring,yes,commerce_owner,mitigated,2026-07-01T15:00:00Z
+INC-005,2026-06-29T15:15:00Z,notifications,critical,unresolved,yes,communications_owner,no_workaround,2026-07-01T13:00:00Z
+INC-006,2026-07-01T09:25:00Z,search,low,resolved,no,search_owner,resolved,2026-07-01T11:00:00Z
+INC-007,2026-06-30T19:40:00Z,reporting,medium,investigating,no,reporting_owner,mitigation_in_progress,2026-07-01T18:00:00Z
+INC-008,2026-07-01T11:05:00Z,developer_portal,high,monitoring,no,platform_owner,mitigated,2026-07-01T19:00:00Z

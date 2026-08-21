@@ -1,0 +1,48 @@
+{
+  "documents": [
+    {
+      "document_id": "information_security_policy_v1",
+      "title": "Information security incident policy v1",
+      "description": "Controlled internal policy used for obligation extraction tasks.",
+      "path": "evaluation_corpus/documents/information_security_policy_v1.md"
+    },
+    {
+      "document_id": "vendor_assurance_policy_v1",
+      "title": "Vendor assurance policy v1",
+      "description": "Controlled internal policy used for vendor and compliance tasks.",
+      "path": "evaluation_corpus/documents/vendor_assurance_policy_v1.md"
+    },
+    {
+      "document_id": "stakeholder_update_guidance_v1",
+      "title": "Stakeholder update guidance v1",
+      "description": "Controlled communication guidance used with incident snapshots.",
+      "path": "evaluation_corpus/documents/stakeholder_update_guidance_v1.md"
+    }
+  ],
+  "datasets": [
+    {
+      "dataset_id": "evaluation_incidents_v1",
+      "title": "Evaluation incident snapshot v1",
+      "description": "An anonymized operational incident snapshot for reporting and triage.",
+      "schema_version": "1",
+      "path": "evaluation_corpus/datasets/evaluation_incidents_v1.csv",
+      "max_rows": 50
+    },
+    {
+      "dataset_id": "evaluation_incident_register_v1",
+      "title": "Evaluation incident register v1",
+      "description": "The controlled source register for reconciliation tasks.",
+      "schema_version": "1",
+      "path": "evaluation_corpus/datasets/evaluation_incident_register_v1.csv",
+      "max_rows": 50
+    },
+    {
+      "dataset_id": "evaluation_incident_export_v1",
+      "title": "Evaluation incident export v1",
+      "description": "A controlled exported snapshot intentionally differing from the register.",
+      "schema_version": "1",
+      "path": "evaluation_corpus/datasets/evaluation_incident_export_v1.csv",
+      "max_rows": 50
+    }
+  ]
+}

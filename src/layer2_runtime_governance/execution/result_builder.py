@@ -151,9 +151,30 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
             ),
         )
 
+    if tool_name == "request_controlled_document":
+        _require_arguments(arguments, "summary", "reason", "document_id")
+        return _build_read_only_tool_actor_result(
+            actor_task=actor_task,
+            plan_step_id=plan_step_id,
+            arguments=arguments,
+            tool_name=ToolName.CONTROLLED_DOCUMENT_READ,
+            document_id=arguments["document_id"],
+        )
+
+    if tool_name == "request_controlled_dataset":
+        _require_arguments(arguments, "summary", "reason", "dataset_id")
+        return _build_read_only_tool_actor_result(
+            actor_task=actor_task,
+            plan_step_id=plan_step_id,
+            arguments=arguments,
+            tool_name=ToolName.CONTROLLED_DATASET_READ,
+            dataset_id=arguments["dataset_id"],
+            limit=int(arguments.get("max_rows", 50)),
+        )
+
     if tool_name == "request_mcp_echo":
         _require_arguments(arguments, "summary", "reason", "text")
-        return _build_mcp_actor_result(
+        return _build_read_only_tool_actor_result(
             actor_task=actor_task,
             plan_step_id=plan_step_id,
             arguments=arguments,
@@ -163,7 +184,7 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
 
     if tool_name == "request_mcp_read_fixture":
         _require_arguments(arguments, "summary", "reason", "path")
-        return _build_mcp_actor_result(
+        return _build_read_only_tool_actor_result(
             actor_task=actor_task,
             plan_step_id=plan_step_id,
             arguments=arguments,
@@ -173,7 +194,7 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
 
     if tool_name == "request_mcp_text_stats":
         _require_arguments(arguments, "summary", "reason", "text")
-        return _build_mcp_actor_result(
+        return _build_read_only_tool_actor_result(
             actor_task=actor_task,
             plan_step_id=plan_step_id,
             arguments=arguments,
@@ -184,7 +205,7 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
 
     if tool_name == "request_mcp_calculate_expression":
         _require_arguments(arguments, "summary", "reason", "expression")
-        return _build_mcp_actor_result(
+        return _build_read_only_tool_actor_result(
             actor_task=actor_task,
             plan_step_id=plan_step_id,
             arguments=arguments,
@@ -504,8 +525,8 @@ def _blocked_lookup_is_recoverable(*, actor_task: ActorTask, blocking_reason: st
     return any(marker in step_text for marker in source_need_markers)
 
 
-# Build one read-only ActorResult for configured MCP tool requests.
-def _build_mcp_actor_result(
+# Build one read-only ActorResult for a configured bounded capability request.
+def _build_read_only_tool_actor_result(
     *,
     actor_task: ActorTask,
     plan_step_id: str,
@@ -515,6 +536,8 @@ def _build_mcp_actor_result(
     path: object | None = None,
     expression: object | None = None,
     limit: int | None = None,
+    document_id: object | None = None,
+    dataset_id: object | None = None,
 ) -> ActorResult:
     return ActorResult(
         plan_step_id=plan_step_id,
@@ -530,6 +553,8 @@ def _build_mcp_actor_result(
             path=str(path) if path is not None else None,
             expression=str(expression) if expression is not None else None,
             limit=limit,
+            document_id=str(document_id) if document_id is not None else None,
+            dataset_id=str(dataset_id) if dataset_id is not None else None,
         ),
         scratchpad_entry=_build_scratchpad_entry(
             actor_task=actor_task,

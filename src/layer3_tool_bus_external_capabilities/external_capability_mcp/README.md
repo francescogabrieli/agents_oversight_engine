@@ -52,6 +52,8 @@ Shared:
 
 The database implementation currently supports SQLite profiles only. It uses an
 explicit transaction, AST single-statement validation, named parameters, busy timeout,
-rollback on deterministic database failure, and returns row count/transaction reference
-without result rows. SMTP returns provider acceptance and a stable Message-ID; partial
-recipient acceptance or lost confirmation is `indeterminate`.
+and rollback on deterministic database failure. For an allowed `SELECT`, the response
+contains the column names, total row count, and at most 100 result rows alongside the
+transaction reference; non-`SELECT` statements return the affected row count. SMTP
+returns provider acceptance and a stable Message-ID; partial recipient acceptance or
+lost confirmation is `indeterminate`.

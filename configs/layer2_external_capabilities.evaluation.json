@@ -1,0 +1,11 @@
+{
+  "extends": "layer2_external_capabilities.json",
+  "enabled_capabilities": [
+    "communication.email.send",
+    "database.statement.execute"
+  ],
+  "enabled_mcp_servers": [
+    "communication",
+    "database"
+  ]
+}

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from .adapters import HttpFetchAdapter, McpToolAdapter, OpenAIWebSearchAdapter
+from .adapters import (
+    ControlledCorpusAdapter,
+    HttpFetchAdapter,
+    McpToolAdapter,
+    OpenAIWebSearchAdapter,
+)
 from .contracts import ToolExecutionResult, ToolGatewayPort, ToolRequest
 from .models import OpenAIToolGatewaySettings, ToolBackend, ToolDefinition, ToolGatewayConfig
 from .registry import load_tool_gateway_config
@@ -20,6 +25,7 @@ class OpenAIToolGateway(ToolGatewayPort):
         web_search_adapter: OpenAIWebSearchAdapter | None = None,
         http_fetch_adapter: HttpFetchAdapter | None = None,
         mcp_adapter: McpToolAdapter | None = None,
+        controlled_corpus_adapter: ControlledCorpusAdapter | None = None,
     ) -> None:
         # Resolve dependencies once so each worker owns an explicit gateway instance.
         self._settings = settings or OpenAIToolGatewaySettings.from_env()
@@ -29,6 +35,12 @@ class OpenAIToolGateway(ToolGatewayPort):
         )
         self._http_fetch_adapter = http_fetch_adapter or HttpFetchAdapter()
         self._mcp_adapter = mcp_adapter or McpToolAdapter(config=self._config)
+        self._controlled_corpus_adapter = (
+            controlled_corpus_adapter
+            or ControlledCorpusAdapter(
+                config_path=self._settings.controlled_corpus_config_path
+            )
+        )
 
     # Validate and dispatch one typed request to its configured backend adapter.
     def execute(self, *, tool_request: ToolRequest) -> ToolExecutionResult:
@@ -54,6 +66,11 @@ class OpenAIToolGateway(ToolGatewayPort):
             )
         if definition.backend == ToolBackend.MCP:
             return self._mcp_adapter.execute(
+                tool_request=tool_request,
+                definition=definition,
+            )
+        if definition.backend == ToolBackend.LOCAL_RUNTIME:
+            return self._controlled_corpus_adapter.execute(
                 tool_request=tool_request,
                 definition=definition,
             )

@@ -1,0 +1,8 @@
+incident_id,service,severity,status,source_revision
+INC-001,payments,critical,investigating,export_v1
+INC-002,identity,high,investigating,export_v1
+INC-003,analytics,high,unresolved,export_v1
+INC-004,checkout,medium,monitoring,export_v1
+INC-006,search,low,resolved,export_v1
+INC-007,reporting,medium,investigating,export_v1
+INC-008,developer_portal,high,resolved,export_v1

@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "evaluation_reporting_read_only": {
+      "driver": "sqlite",
+      "dsn_env": "LAYER2_DATABASE_REPORTING_DSN",
+      "read_only": true,
+      "timeout_seconds": 10
+    }
+  }
+}

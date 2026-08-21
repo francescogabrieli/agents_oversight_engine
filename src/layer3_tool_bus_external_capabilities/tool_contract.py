@@ -10,6 +10,8 @@ from uuid import uuid4
 class ToolName(str, Enum):
     WEB_SEARCH = "web_search"
     FETCH_URL_TEXT = "fetch_url_text"
+    CONTROLLED_DOCUMENT_READ = "controlled_document.read"
+    CONTROLLED_DATASET_READ = "controlled_dataset.read"
     MCP_LOCAL_TEST_ECHO = "mcp.local_test.echo"
     MCP_LOCAL_TEST_READ_FIXTURE = "mcp.local_test.read_fixture"
     MCP_LOCAL_TEST_TEXT_STATS = "mcp.local_test.text_stats"
@@ -43,6 +45,8 @@ class ToolRequest:
     limit: int | None = None
     max_results: int = 5
     extractive_goal: str | None = None
+    document_id: str | None = None
+    dataset_id: str | None = None
 
 
 @dataclass(frozen=True)

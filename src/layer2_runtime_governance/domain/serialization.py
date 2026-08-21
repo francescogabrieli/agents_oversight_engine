@@ -616,6 +616,8 @@ def _coerce_tool_request(payload):
             else 5
         ),
         extractive_goal=_coerce_optional_string(payload.get("extractive_goal")),
+        document_id=_coerce_optional_string(payload.get("document_id")),
+        dataset_id=_coerce_optional_string(payload.get("dataset_id")),
     )
 
 

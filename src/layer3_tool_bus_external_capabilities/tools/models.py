@@ -86,6 +86,7 @@ class OpenAIToolGatewaySettings:
     timeout_seconds: float = 30.0
     fetch_timeout_seconds: float = 20.0
     config_path: Path | None = None
+    controlled_corpus_config_path: Path | None = None
 
     @classmethod
     def from_env(cls) -> "OpenAIToolGatewaySettings":
@@ -94,6 +95,10 @@ class OpenAIToolGatewaySettings:
         config_value = os.getenv(
             "LAYER2_TOOL_GATEWAY_CONFIG_PATH",
             env_file_values.get("LAYER2_TOOL_GATEWAY_CONFIG_PATH", ""),
+        )
+        controlled_corpus_config_value = os.getenv(
+            "LAYER2_CONTROLLED_CORPUS_CONFIG_PATH",
+            env_file_values.get("LAYER2_CONTROLLED_CORPUS_CONFIG_PATH", ""),
         )
         return cls(
             model=os.getenv(
@@ -114,6 +119,11 @@ class OpenAIToolGatewaySettings:
                 )
             ),
             config_path=Path(config_value) if config_value else None,
+            controlled_corpus_config_path=(
+                Path(controlled_corpus_config_value)
+                if controlled_corpus_config_value
+                else None
+            ),
         )
 
 

@@ -41,6 +41,10 @@ def canonical_action_key(request: ToolRequest) -> str:
         values = (_normalize_value(request.query), request.max_results)
     elif request.tool_name == ToolName.FETCH_URL_TEXT:
         values = (_normalize_url(request.url),)
+    elif request.tool_name == ToolName.CONTROLLED_DOCUMENT_READ:
+        values = (_normalize_value(request.document_id),)
+    elif request.tool_name == ToolName.CONTROLLED_DATASET_READ:
+        values = (_normalize_value(request.dataset_id), request.limit)
     elif request.tool_name == ToolName.MCP_LOCAL_TEST_TEXT_STATS:
         values = (_normalize_value(request.text), request.limit)
     elif request.tool_name == ToolName.MCP_LOCAL_TEST_ECHO:

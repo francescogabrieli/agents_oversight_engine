@@ -33,6 +33,40 @@
       "normalized_effect": "read",
       "capability_profile_id": "public_evidence.fetch_url_text",
       "capability_profile_version": "1"
+    },
+    {
+      "tool_name": "controlled_document.read",
+      "backend": "local_runtime",
+      "capability": "read",
+      "risk_level": "low",
+      "enabled": true,
+      "requires_human_review": false,
+      "timeout_seconds": 5,
+      "required_fields": ["document_id"],
+      "max_bytes": 60000,
+      "max_content_chars": 12000,
+      "operation_boundary": "local",
+      "operation_family": "generic",
+      "normalized_effect": "read",
+      "capability_profile_id": "controlled_corpus.document",
+      "capability_profile_version": "1"
+    },
+    {
+      "tool_name": "controlled_dataset.read",
+      "backend": "local_runtime",
+      "capability": "read",
+      "risk_level": "low",
+      "enabled": true,
+      "requires_human_review": false,
+      "timeout_seconds": 5,
+      "required_fields": ["dataset_id"],
+      "max_bytes": 60000,
+      "max_content_chars": 12000,
+      "operation_boundary": "local",
+      "operation_family": "generic",
+      "normalized_effect": "read",
+      "capability_profile_id": "controlled_corpus.dataset",
+      "capability_profile_version": "1"
     }
   ]
 }

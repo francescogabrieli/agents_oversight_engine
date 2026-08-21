@@ -1,0 +1,9 @@
+incident_id,service,severity,status,source_revision
+INC-001,payments,critical,investigating,register_v1
+INC-002,identity,high,investigating,register_v1
+INC-003,analytics,high,unresolved,register_v1
+INC-004,checkout,medium,monitoring,register_v1
+INC-005,notifications,critical,unresolved,register_v1
+INC-006,search,low,resolved,register_v1
+INC-007,reporting,medium,investigating,register_v1
+INC-008,developer_portal,high,monitoring,register_v1

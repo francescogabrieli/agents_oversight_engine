@@ -4,6 +4,9 @@ Thesis-oriented proof of concept for controlled task intake, LangGraph runtime
 orchestration, OPA-owned governance decisions, human review, trace observability,
 and offline evaluation.
 
+The canonical task pool and execution protocol for the thesis evaluation are in
+[evaluation_task_pool.md](evaluation_task_pool.md).
+
 ## Supported Python
 
 The temporarily supported interpreter range is **Python >=3.12,<3.14**. Python

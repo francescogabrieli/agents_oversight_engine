@@ -22,6 +22,33 @@ _CAPABILITY_ACTIONS: dict[ToolName, tuple[str, str, dict[str, object], tuple[str
         {"summary": {"type": "string"}, "reason": {"type": "string"}, "url": {"type": "string"}, "extractive_goal": {"type": "string"}},
         ("summary", "reason", "url"),
     ),
+    ToolName.CONTROLLED_DOCUMENT_READ: (
+        "request_controlled_document",
+        (
+            "Read one configured controlled document by its documented ID. "
+            "Use only when the task explicitly names a controlled corpus document."
+        ),
+        {
+            "summary": {"type": "string"},
+            "reason": {"type": "string"},
+            "document_id": {"type": "string"},
+        },
+        ("summary", "reason", "document_id"),
+    ),
+    ToolName.CONTROLLED_DATASET_READ: (
+        "request_controlled_dataset",
+        (
+            "Inspect one configured controlled CSV dataset by its documented ID. "
+            "The result contains a bounded raw snapshot, not arbitrary database access."
+        ),
+        {
+            "summary": {"type": "string"},
+            "reason": {"type": "string"},
+            "dataset_id": {"type": "string"},
+            "max_rows": {"type": "integer", "minimum": 1, "maximum": 50},
+        },
+        ("summary", "reason", "dataset_id"),
+    ),
     ToolName.MCP_LOCAL_TEST_ECHO: (
         "request_mcp_echo",
         "Request the configured read-only MCP echo tool.",
