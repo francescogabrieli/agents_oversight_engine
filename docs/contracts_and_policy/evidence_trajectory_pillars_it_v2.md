@@ -6,7 +6,7 @@
 
 I pillar **Evidence** e **Trajectory** forniscono a OPA fatti osservabili sulla run:
 
-- **Evidence** controlla che le affermazioni fattuali in uscita siano *verificabili*: che il supporto dichiarato esista, sia integro, sia sufficiente rispetto a quanto lo step richiedeva e che il contratto esponga i controlli di non-circolarità.
+- **Evidence** controlla che le affermazioni fattuali in uscita siano *verificabili*: che il supporto dichiarato esista, sia integro, sia sufficiente rispetto a quanto lo step richiedeva e che i controlli di freshness, non-circolarità e ancoraggio letterale siano applicati.
 - **Trajectory** controlla che la run *termini*: che l'agente avanzi, che non ripeta replan o proposte esterne senza una nuova base osservabile, e che non superi i limiti di convergenza configurati.
 
 Nessuno dei due valuta il significato. Evidence risponde a «il supporto c'è ed è controllabile?», Trajectory a «stiamo convergendo?». La domanda «ha senso ed è appropriato?» è del **Judge**.
@@ -33,7 +33,7 @@ Due cambi rispetto alla v1:
 
 ### L'onere probatorio dichiarato
 
-Evidence può decidere solo se sa **cosa** doveva essere dimostrato. Il criterio non è cablato nel pillar: è dichiarato dal planner in ogni plan step.
+Evidence può decidere solo se sa **cosa** doveva essere dimostrato. Il criterio non è cablato nel pillar: è dichiarato dal planner in ogni step che produce affermazioni fattuali.
 
 ```python
 PlanStep(
@@ -48,7 +48,7 @@ PlanStep(
 )
 ```
 
-Se `produces_factual_claims` è falso, Trajectory resta attivo per la liveness ma Evidence non è richiesto. Se lo step dichiara `produces_factual_claims=True` e un `evidence_burden`, Evidence è valutativo e la sua copertura entra nella decisione OPA. Un burden assente non abilita una verifica di copertura; non rende però “shadow” un Evidence richiesto. I controlli strutturali restano fail-closed quando il pillar è richiesto.
+Se `produces_factual_claims` è falso, Trajectory resta attivo per la liveness ma Evidence non ha un onere di copertura. Se è vero, `evidence_burden` è obbligatorio: il costruttore canonico di `PlanStep`, gli schema del planner/replanner e il preflight dei servizi runtime rifiutano lo step senza burden. Un checkpoint legacy già persistito che violi l'invariante non viene degradato silenziosamente: Evidence espone `missing_evidence_burden` e OPA richiede `WAIT_HUMAN_REVIEW`, perché l'Actor non può correggere retroattivamente il contratto semantico del piano.
 
 ### Come viene registrata un'evidenza
 
@@ -96,7 +96,7 @@ burden_satisfied = true
 
 L'indipendenza è strutturale: locator distinti per schema e dominio. Non è un giudizio sull'indipendenza editoriale delle fonti, che resta del Judge.
 
-**3. Qualità strutturale dell'osservazione.** Contenuto recuperato contro solo titolo di ricerca, schema del locator, flag di troncamento e il campo di freshness rispetto alla finestra dichiarata. Nel runtime corrente `freshness_satisfied` è esposto come fatto contrattuale ma resta predisposto per l'implementazione della verifica temporale.
+**3. Qualità strutturale dell'osservazione e freshness.** Evidence distingue la data attribuita alla fonte dal momento di retrieval. Quando il burden dichiara `freshness_window_days`, ogni osservazione selezionata deve avere una `source_timestamp` timezone-aware, non futura e compresa nella finestra calcolata rispetto al pass di governance; metadata assente, data obsoleta o futura producono un evidence gap. Il fetch HTTP corrente popola il campo solo dal header sorgente `Last-Modified`: il momento di retrieval non è mai usato come surrogato. Gli altri adapter devono emettere esplicitamente una data attribuita alla fonte per soddisfare un burden di freshness.
 
 ```text
 selected_evidence_all_title_only
@@ -104,20 +104,25 @@ retrieved_content_source_count
 freshness_satisfied
 ```
 
-**4. Non-circolarità.** Il contratto espone `circular_reference_detected` per rilevare riferimenti a file scritti nel workspace, draft precedenti o voci di scratchpad. Nel runtime corrente il fatto è inizializzato a `false`: il rilevamento effettivo è un'estensione dichiarata, non una verifica già attiva.
+Senza una finestra dichiarata, `freshness_evaluated=false`: il controllo temporale non viene inferito né simulato.
+
+**4. Non-circolarità.** Il controllo è attivo ma deliberatamente strutturale e limitato: rifiuta un'osservazione selezionata se proviene da un tool di trasformazione actor-derived (`mcp.local_test.echo` o `mcp.local_test.text_stats`) oppure se il locator tipizzato indica un artefatto auto-prodotto (`actor-output://`, `agent-output://`, `draft://`, `runtime-artifact://`, `scratchpad://`, `workspace://`). In questi casi `circular_reference_detected=true`, il deficit è `circular_evidence_reference` e OPA richiede altra evidenza.
 
 ```text
-circular_reference_detected = false
+circular_reference_detected = true
+circular_evidence_reasons = {"obs_21": "self_produced_locator"}
 ```
 
-**5. Ancoraggio letterale.** Sui soli token estraibili — numeri, date, importi, URL, indirizzi. Un letterale presente nel payload deve comparire verbatim in almeno un'osservazione.
+Il controllo non pretende di riconoscere una circolarità semantica o una parafrasi di un output dell'Actor: quei casi restano responsabilità del Judge o di un futuro detector con una nuova provenienza tipizzata.
+
+**5. Ancoraggio letterale.** Sui soli token estraibili — numeri, date, importi, URL, indirizzi. Un letterale presente nel payload deve comparire verbatim in almeno un'osservazione. Per un completamento fattuale, Rego consuma ora entrambi i fatti di ancoraggio: anche uno solo non vuoto apre `evidence_gap`.
 
 ```text
 unanchored_literals_in_selection = ["18%"]
 unanchored_literals_in_universe  = ["18%"]
 ```
 
-I due fatti sono distinti perché portano a decisioni diverse. Assente dalla selezione ma presente altrove nell'universo è un difetto di attribuzione. Assente da **ogni** osservazione è una cifra inventata.
+I due fatti restano distinti per diagnosi e feedback. Assente dalla selezione ma presente altrove nell'universo è un difetto di attribuzione; assente da **ogni** osservazione è una cifra non supportata. Entrambi producono `REQUEST_MORE_EVIDENCE` finché il tetto non trasferisce il caso a revisione umana.
 
 ### Cosa decide
 
@@ -125,13 +130,14 @@ I fatti di Evidence non producono direttamente una revisione semantica del paylo
 
 | Situazione | Fatti / condizione | Direttiva OPA | Reason code |
 |---|---|---|---|
-| **Gap strutturale o di copertura** | integrità non valida, contenuto recuperato mancante, onere non soddisfatto o letterali non ancorati | `REQUEST_MORE_EVIDENCE` | `invalid_or_missing_selected_evidence` |
+| **Contratto fattuale malformato** | step fattuale senza `evidence_burden` in un checkpoint legacy | `WAIT_HUMAN_REVIEW` | `missing_evidence_burden` |
+| **Gap strutturale o di copertura** | integrità non valida, contenuto recuperato mancante, freshness/non-circolarità non soddisfatte, onere non soddisfatto o letterali non ancorati | `REQUEST_MORE_EVIDENCE` | `invalid_or_missing_selected_evidence` |
 | **Tetto delle richieste raggiunto** | `evidence_request_count` oltre il limite configurato | `WAIT_HUMAN_REVIEW` | `evidence_request_limit_reached` |
 | **Pillar richiesto ma non disponibile** | errore del signal service | `WAIT_HUMAN_REVIEW` | `required_pillar_unavailable` |
 
 `REVISE_ACTION` resta invece una direttiva del percorso Judge quando la valutazione semantica richiede una modifica del candidato.
 
-Nota che nella v1 una selezione vuota non era automaticamente invalida. **Nella v2 lo è, ma solo quando lo step ha dichiarato un onere probatorio.** Su uno step che non produce affermazioni fattuali la selezione vuota resta legittima.
+Nota che nella v1 una selezione vuota non era automaticamente invalida. **Nel contratto corrente lo è per ogni step fattuale**, perché quell'onere deve ora essere dichiarato obbligatoriamente. Su uno step che non produce affermazioni fattuali la selezione vuota resta legittima.
 
 ### Il ciclo di `REQUEST_MORE_EVIDENCE`
 
@@ -338,12 +344,12 @@ In breve: **Evidence protegge la verificabilità del legame fra affermazione e o
 |---|---|---|
 | Attivazione Evidence | solo `STEP_COMPLETED` e candidato esterno | anche `PROPOSE_ACTION` con contenuto fattuale |
 | Attivazione Trajectory | `NEEDS_REPLAN` e `STEP_COMPLETED` | sempre, con modalità liveness e convergenza |
-| Criterio di Evidence | integrità dei riferimenti scelti | integrità **più** onere probatorio dichiarato dallo step |
-| Selezione vuota | mai invalida | invalida se lo step ha dichiarato un onere |
+| Criterio di Evidence | integrità dei riferimenti scelti | integrità **più** onere probatorio obbligatorio per lo step fattuale |
+| Selezione vuota | mai invalida | invalida per ogni step fattuale |
 | Esito di Evidence | un booleano, un reason code | fatti grezzi e deficit codes, con mapping OPA a direttive osservabili |
 | `REQUEST_MORE_EVIDENCE` | senza feedback, senza contatore, senza tetto | feedback all'Actor, contatore, escalation a revisione umana |
-| Ancoraggio del contenuto | assente | letterale sui token estraibili, con distinzione selezione/universo |
-| Non-circolarità | assente | esposta come fatto strutturale; `circular_reference_detected` è il punto di estensione per il rilevamento dei riferimenti auto-prodotti |
+| Ancoraggio del contenuto | assente | letterale attivo sui token estraibili, con distinzione selezione/universo |
+| Non-circolarità | assente | controllo strutturale attivo su provenienza actor-derived e locator auto-prodotti; la circolarità semantica resta fuori scope |
 | Regole di convergenza | solo liveness e ripresentazione | più tetto sui replan, fallimenti consecutivi, churn |
 | Interventi umani nella liveness | contano come nuova base | non contano |
 | Regole concorrenti | una sola riportata | decisiva riportata, altre in `rejected_alternatives` |
@@ -354,7 +360,7 @@ In breve: **Evidence protegge la verificabilità del legame fra affermazione e o
 L'ordine conta perché Evidence e Trajectory partecipano ora al percorso attivo con direttive OPA osservabili e tracciate.
 
 1. **Trajectory always-on**: produce fatti di liveness e convergenza su tutti gli eventi dell'Actor, con vincoli decisionali ai confini di replan, completamento e proposta esterna.
-2. **Evidence event-sensitive**: è richiesto per gli step fattuali con burden dichiarato, per gli step completati e per i candidati di external operation ammessi; resta non richiesto per output intermedi e proposte non fattuali.
+2. **Evidence event-sensitive**: è richiesto per gli step fattuali con burden obbligatorio, per gli step completati e per i candidati di external operation ammessi; resta non richiesto per output intermedi e proposte non fattuali.
 3. **Feedback e tetti**: `REQUEST_MORE_EVIDENCE` incrementa il contatore e si trasforma in `WAIT_HUMAN_REVIEW` al limite configurato.
 4. **Judge separato**: OPA ammette il candidato solo dopo Evidence e Trajectory; il Judge valuta poi il significato e l'appropriatezza del contenuto quando è richiesto.
 5. **Risk e Behavioral restano shadow-only**: forniscono segnali e conseguenze operative senza autorità sulla direttiva finale.

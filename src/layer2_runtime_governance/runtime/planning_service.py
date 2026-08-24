@@ -1,5 +1,10 @@
 from ..planning import PlannerPort
-from ..domain import PlanStepStatus, RuntimeState, TaskState
+from ..domain import (
+    PlanStepStatus,
+    RuntimeState,
+    TaskState,
+    validate_plan_steps_evidence_contract,
+)
 from .lifecycle_service import _append_step_record
 
 
@@ -10,6 +15,7 @@ def planner(state: TaskState, *, planner_service: PlannerPort) -> TaskState:
         return state
 
     decision = planner_service.plan(task_state=state)
+    validate_plan_steps_evidence_contract(decision.plan_steps)
     state.plan_steps = list(decision.plan_steps)
     state.current_plan_step_index = 0 if state.plan_steps else None
     state.planner_rationale = decision.rationale

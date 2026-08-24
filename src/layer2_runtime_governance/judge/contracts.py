@@ -163,6 +163,7 @@ class JudgeEvidenceContext:
     evidence_id: str
     locator: str | None
     content: str
+    source_timestamp: str | None = None
     plan_step_id: str | None = None
     selected_by_actor: bool = False
     content_truncated: bool = False
@@ -302,7 +303,7 @@ class JudgeContext:
     omitted_observation_ids: tuple[str, ...] = ()
     evidence_snapshot_digest: str | None = None
     evidence_selection_digest: str | None = None
-    serialization_version: str = "judge_context.v5"
+    serialization_version: str = "judge_context.v6"
     # Built deterministically from the fields above and used as the sole model-visible pool.
     evidence_bundle: JudgeEvidenceBundle | None = None
 

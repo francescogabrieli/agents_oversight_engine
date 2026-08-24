@@ -34,7 +34,7 @@ from layer4_state_evidence_observability.infrastructure.runtime_artifacts import
 from main_layer2 import _build_demo_intake_result, run_layer2_flow  # noqa: E402
 
 
-LIVE_THREAD_ID = "b6-live-evidence-burden"
+LIVE_THREAD_ID = "b6-live-evidence-burden-v2"
 LIVE_TASK = (
     "Prepare a concise factual comparison of NIST Cybersecurity Framework 2.0 "
     "and NIST AI Risk Management Framework 1.0. Follow this exact two-step plan: "
@@ -42,7 +42,9 @@ LIVE_TASK = (
     "sources (CSF 2.0, AI RMF 1.0, the Generative AI Profile, and SP 800-53 Rev. 5); "
     "step 2 is the final comparison and is the only step that produces factual claims. "
     "Use web_search only; do not call fetch_url_text and do not synthesize claims "
-    "during step 1. The step 2 contract "
+    "during step 1. Complete step 1 with the exact non-factual output text "
+    "'Source collection complete' and do not include any numeric literal in that "
+    "step output. The step 2 contract "
     "requirement: the final comparison step that produces factual claims MUST set "
     "produces_factual_claims=true and evidence_burden.min_independent_sources=4 "
     "with require_retrieved_content=true; do not use the default value 1 for that "
@@ -52,7 +54,8 @@ LIVE_CONTEXT = (
     "Use official NIST documentary material; every factual claim must remain grounded "
     "in retrieved search observations. The live provider preflight intentionally "
     "uses web_search only so the Evidence gate, rather than PDF extraction, is tested. "
-    "The run is an end-to-end live-provider B6 preflight."
+    "The run is an end-to-end live-provider B6 preflight. The constrained collection "
+    "completion keeps literal anchoring from masking the intended burden deficit."
 )
 
 

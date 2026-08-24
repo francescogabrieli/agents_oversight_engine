@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from email.message import Message
 from typing import Callable, Protocol
 from urllib.request import Request, urlopen
@@ -55,7 +57,7 @@ class HttpFetchAdapter:
         )
         if isinstance(fetch_result, tuple) and len(fetch_result) == 2 and isinstance(fetch_result[1], ToolErrorCode):
             return ToolExecutionResult(request=tool_request, success=False, summary="URL fetch failed.", error_message=str(fetch_result[0]), error_code=fetch_result[1], extractability_limited=True)
-        raw_body, charset, content_type, truncated = fetch_result
+        raw_body, charset, content_type, truncated, source_timestamp = fetch_result
         if truncated and content_type == "application/pdf":
             return ToolExecutionResult(request=tool_request, success=False, summary="PDF extraction exceeded the byte limit.", error_message="PDF byte limit prevents treating the document as complete.", error_code=ToolErrorCode.BYTE_LIMIT, extractability_limited=True)
         decoded_body = raw_body.decode(charset, errors="replace")
@@ -88,6 +90,7 @@ class HttpFetchAdapter:
                     observation_id=f"{tool_request.request_id}:document",
                     locator=tool_request.url or "",
                     content=content,
+                    source_timestamp=source_timestamp,
                 ),
             ),
         )
@@ -101,7 +104,7 @@ class HttpFetchAdapter:
         max_bytes: int,
         accept: str,
         accept_language: str | None = None,
-    ) -> tuple[bytes, str, str, bool] | tuple[str, ToolErrorCode]:
+    ) -> tuple[bytes, str, str, bool, datetime | None] | tuple[str, ToolErrorCode]:
         try:
             headers = {"User-Agent": "Layer2ToolGateway/1.0", "Accept": accept}
             if accept_language:
@@ -111,6 +114,7 @@ class HttpFetchAdapter:
                 raw_body = response.read(max_bytes + 1)
                 charset = response.headers.get_content_charset() or "utf-8"
                 content_type = response.headers.get_content_type()
+                source_timestamp = _parse_last_modified(response.headers)
         except HTTPError as exc:
             return (f"HTTP {exc.code}", ToolErrorCode.FORBIDDEN if exc.code == 403 else ToolErrorCode.UNAVAILABLE)
         except TimeoutError as exc:
@@ -122,7 +126,24 @@ class HttpFetchAdapter:
             return (str(exc), ToolErrorCode.UNAVAILABLE)
         truncated = len(raw_body) > max_bytes
         # HTML/text remains useful as an explicitly partial prefix; never claim a truncated PDF is complete.
-        return raw_body[:max_bytes], charset, content_type, truncated
+        return raw_body[:max_bytes], charset, content_type, truncated, source_timestamp
+
+
+# Parse a source-provided Last-Modified header without inventing a retrieval timestamp.
+def _parse_last_modified(headers: Message) -> datetime | None:
+    get_header = getattr(headers, "get", None)
+    if not callable(get_header):
+        return None
+    raw_value = get_header("Last-Modified")
+    if not isinstance(raw_value, str) or not raw_value.strip():
+        return None
+    try:
+        parsed_value = parsedate_to_datetime(raw_value)
+    except (IndexError, TypeError, ValueError):
+        return None
+    if parsed_value.tzinfo is None or parsed_value.utcoffset() is None:
+        return None
+    return parsed_value.astimezone(timezone.utc)
 
 
 # Resolve urllib at call time so tests and deployments can inject transport cleanly.

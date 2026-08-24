@@ -7,6 +7,8 @@ import os
 import unittest
 from unittest.mock import patch
 
+from pydantic import ValidationError
+
 from tests.layer2_runtime_fixtures import (
     CollidingReplanner,
     FakeReplannerClient,
@@ -31,6 +33,7 @@ from layer2_runtime_governance.actor_contract import (
     build_actor_task,
 )
 from layer2_runtime_governance.domain import (
+    EvidenceBurden,
     PlannerDecision,
     PlanStep,
     PlanStepStatus,
@@ -281,11 +284,14 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
             "rationale": "The initial plan assumed a broad evidence step was enough.",
             "expected_outcome": "A broad evidence base.",
             "status": "blocked",
+            "produces_factual_claims": False,
+            "evidence_burden": None,
         }
         expected_observation = {
             "observation_id": "step_1:tool:1:source:1",
             "locator": "https://example.org/source",
             "content": "A concrete observation used during recovery.",
+            "source_timestamp": None,
         }
         expected_scratchpad = {
             "turn_index": 1,
@@ -307,6 +313,93 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         self.assertEqual(
             actor_payload["scratchpad"][0]["evidence_refs"],
             ["step_1:tool:1:source:1"],
+        )
+
+    # Enforce the same factual burden invariant at every planner ingress.
+    def test_provider_payload_rejects_factual_step_without_burden(self) -> None:
+        from layer2_runtime_governance.planning import _PlanStepPayload
+        from layer2_runtime_governance.planning.replanning import _ReplanStepPayload
+
+        with self.assertRaises(ValueError):
+            PlanStep(
+                step_id="step_1",
+                objective="Make a factual claim.",
+                rationale="The test exercises the domain contract.",
+                expected_outcome="A grounded factual output.",
+                produces_factual_claims=True,
+            )
+        with self.assertRaises(ValidationError):
+            _PlanStepPayload(
+                objective="Make a factual claim.",
+                rationale="The test exercises the planner contract.",
+                expected_outcome="A grounded factual output.",
+                produces_factual_claims=True,
+            )
+        with self.assertRaises(ValidationError):
+            _ReplanStepPayload(
+                objective="Replace with a factual claim.",
+                rationale="The test exercises the replanner contract.",
+                expected_outcome="A grounded factual output.",
+                produces_factual_claims=True,
+            )
+
+    # Revalidate mutable output from a custom planner before execution begins.
+    def test_runtime_rejects_mutated_factual_step_without_burden(self) -> None:
+        class InvalidPlanner:
+            planner_name = "invalid_planner"
+            prompt_version = "invalid_v1"
+
+            # Emulate a legacy or custom port that mutates a valid step after construction.
+            def plan(self, *, task_state: TaskState) -> PlannerDecision:
+                invalid_step = PlanStep(
+                    step_id="step_1",
+                    objective="Make a factual claim.",
+                    rationale="The test exercises runtime revalidation.",
+                    expected_outcome="A grounded factual output.",
+                )
+                invalid_step.produces_factual_claims = True
+                return PlannerDecision(
+                    plan_steps=[invalid_step],
+                    rationale="Return an invalid legacy-style plan.",
+                    planner_name=self.planner_name,
+                    prompt_version=self.prompt_version,
+                )
+
+        task_state = TaskState.from_intake(_build_research_intake_result())
+        with self.assertRaises(ValueError):
+            planner(task_state, planner_service=InvalidPlanner())
+
+    # Make the declared proof obligation visible to the bounded executor.
+    def test_actor_prompt_projects_declared_evidence_burden(self) -> None:
+        task_state = TaskState.from_intake(_build_research_intake_result())
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Produce a current factual answer.",
+                rationale="The answer requires independently sourced evidence.",
+                expected_outcome="A source-backed factual answer.",
+                status=PlanStepStatus.IN_PROGRESS,
+                produces_factual_claims=True,
+                evidence_burden=EvidenceBurden(
+                    min_independent_sources=2,
+                    require_retrieved_content=True,
+                    freshness_window_days=7,
+                ),
+            )
+        ]
+        task_state.current_plan_step_index = 0
+
+        payload = build_actor_prompt_payload(
+            actor_task=build_actor_task(task_state=task_state)
+        )
+
+        self.assertEqual(
+            payload["plan"]["current_plan_step"]["evidence_burden"],
+            {
+                "min_independent_sources": 2,
+                "require_retrieved_content": True,
+                "freshness_window_days": 7,
+            },
         )
 
 

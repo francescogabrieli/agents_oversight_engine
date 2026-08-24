@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import datetime
 
 from .task_state import TaskState
 
@@ -56,6 +57,9 @@ def build_evidence_snapshot_manifest(
             "observation_id": item.observation_id,
             "content_digest": digest_text(item.content),
             "locator": item.locator,
+            "source_timestamp": _source_timestamp_iso(
+                getattr(item, "source_timestamp", None)
+            ),
             "plan_step_id": (
                 lineage[item.observation_id].plan_step_id
                 if item.observation_id in lineage
@@ -91,6 +95,11 @@ def build_evidence_snapshot_manifest(
             ),
         )
     ]
+
+
+# Preserve a source timestamp in the digest without exposing a Python datetime object.
+def _source_timestamp_iso(value: object) -> str | None:
+    return value.isoformat() if isinstance(value, datetime) else None
 
 
 # Bind actor-declared reliance and the external payload to one evidence snapshot.

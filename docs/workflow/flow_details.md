@@ -269,7 +269,7 @@ dedotte da parole chiave.
 l'actor seleziona riferimenti, tutti devono esistere nello stato. L'assenza di
 riferimenti non è automaticamente un errore: una query o un effetto possono non
 dipendere da fatti raccolti in precedenza. Quando il `PlanStep` dichiara
-`produces_factual_claims=true` e un `evidence_burden`, però, una selezione vuota o
+`produces_factual_claims=true` richiede obbligatoriamente un `evidence_burden`; una selezione vuota o
 insufficiente può produrre un deficit di copertura e una richiesta di ulteriore
 evidenza. Per le proposte esterne, il Judge valuta semanticamente contenuto,
 contesto, osservazioni e digest.

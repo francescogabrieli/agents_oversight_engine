@@ -5,10 +5,16 @@ import os
 from dataclasses import dataclass
 from typing import Protocol, cast
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from environment_config import load_env_file_values
-from ..domain import EvidenceBurden, PlanStep, PlanStepStatus, TaskState
+from ..domain import (
+    EvidenceBurden,
+    PlanStep,
+    PlanStepStatus,
+    TaskState,
+    validate_plan_step_evidence_contract,
+)
 from ..prompt_projection import (
     project_prompt_observation,
     project_prompt_plan_step,
@@ -86,6 +92,15 @@ class _ReplanStepPayload(BaseModel):
     produces_factual_claims: bool = Field(default=False)
     evidence_burden: _ReplanEvidenceBurdenPayload | None = Field(default=None)
 
+    # Keep replacement steps subject to the same proof-obligation invariant.
+    @model_validator(mode="after")
+    def validate_factual_evidence_burden(self) -> "_ReplanStepPayload":
+        validate_plan_step_evidence_contract(
+            produces_factual_claims=self.produces_factual_claims,
+            evidence_burden=self.evidence_burden,
+        )
+        return self
+
 
 class _ReplanningPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -110,7 +125,7 @@ Each replacement step must contain:
 - rationale
 - expected_outcome
 - produces_factual_claims (boolean: true if this step produces factual claims that leave the system or will be used for downstream decision-making, false otherwise)
-- evidence_burden (optional object when produces_factual_claims is true, with min_independent_sources [default 1], require_retrieved_content [default true], freshness_window_days [optional integer])
+- evidence_burden (required object when produces_factual_claims is true; omit it when produces_factual_claims is false. Fields: min_independent_sources [default 1], require_retrieved_content [default true], freshness_window_days [optional integer])
 
 Rules:
 - Do not modify or repeat completed steps.

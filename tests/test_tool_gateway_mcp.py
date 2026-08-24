@@ -239,6 +239,40 @@ class GatewayMCPTests(unittest.TestCase):
         self.assertEqual(result.observations[0].locator, "https://example.org/doc")
         self.assertIn("Hello source", result.content or "")
 
+    # Preserve only the source-provided HTTP modification timestamp.
+    def test_fetch_url_preserves_source_last_modified(self) -> None:
+        gateway = OpenAIToolGateway()
+        response = FakeHTTPResponse(
+            body=(
+                b"<html><body><p>Readable source content that is long enough to become "
+                b"meaningful evidence for the runtime.</p></body></html>"
+            ),
+            content_type="text/html",
+            last_modified="Fri, 22 Aug 2026 10:30:00 GMT",
+        )
+
+        with patch(
+            "layer3_tool_bus_external_capabilities.tools.security.is_blocked_host",
+            return_value=False,
+        ), patch(
+            "layer3_tool_bus_external_capabilities.tools.adapters.http_fetch.urlopen",
+            return_value=response,
+        ):
+            result = gateway.execute(
+                tool_request=ToolRequest(
+                    plan_step_id="step_1",
+                    tool_name=ToolName.FETCH_URL_TEXT,
+                    reason="Fetch source metadata.",
+                    url="https://example.org/doc",
+                )
+            )
+
+        self.assertTrue(result.success)
+        self.assertEqual(
+            result.observations[0].source_timestamp.isoformat(),
+            "2026-08-22T10:30:00+00:00",
+        )
+
     def test_fetch_url_empty_extracted_text_returns_failure(self) -> None:
         gateway = OpenAIToolGateway()
         response = FakeHTTPResponse(
@@ -369,8 +403,13 @@ class GatewayMCPTests(unittest.TestCase):
 
 
 class FakeHTTPHeaders:
-    def __init__(self, content_type: str) -> None:
+    def __init__(
+        self,
+        content_type: str,
+        last_modified: str | None = None,
+    ) -> None:
         self._content_type = content_type
+        self._last_modified = last_modified
 
     # Return the mocked response charset.
     def get_content_charset(self) -> str:
@@ -380,11 +419,21 @@ class FakeHTTPHeaders:
     def get_content_type(self) -> str:
         return self._content_type
 
+    # Return a source header when the test fixture declares one.
+    def get(self, name: str) -> str | None:
+        return self._last_modified if name.lower() == "last-modified" else None
+
 
 class FakeHTTPResponse:
-    def __init__(self, *, body: bytes, content_type: str) -> None:
+    def __init__(
+        self,
+        *,
+        body: bytes,
+        content_type: str,
+        last_modified: str | None = None,
+    ) -> None:
         self._body = body
-        self.headers = FakeHTTPHeaders(content_type)
+        self.headers = FakeHTTPHeaders(content_type, last_modified)
 
     # Enter the context manager used by urlopen.
     def __enter__(self) -> "FakeHTTPResponse":

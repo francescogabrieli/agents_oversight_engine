@@ -16,6 +16,7 @@ from layer2_runtime_governance import (
     EvidenceBurden,
     PlanStep,
     PlannerDecision,
+    PolicyEnginePort,
     ScratchpadEntry,
     ScratchpadEntryType,
     StepValidation,
@@ -402,36 +403,48 @@ def _annotate_replan_ceiling(*, output: dict[str, Any]) -> None:
     output["pillar_results"]["trajectory"] = trajectory
 
 
-# Run the deterministic Evidence-positive scenario through the official Layer 2 entry point.
-def run_b6_evidence_run(*, artifact_root: Path) -> dict[str, Any]:
+# Run the deterministic Evidence-positive scenario with an injectable policy boundary.
+def run_b6_evidence_run(
+    *,
+    artifact_root: Path,
+    thread_id: str = B6_EVIDENCE_THREAD_ID,
+    policy_engine_service: PolicyEnginePort | None = None,
+) -> dict[str, Any]:
+    resolved_policy_engine = policy_engine_service or B6PolicyEngine()
     return run_layer2_flow(
         raw_task_text="Produce a factual result that requires independent documentary sources.",
         context_hint="The deterministic B6 fixture supplies one source against a two-source burden.",
-        thread_id=B6_EVIDENCE_THREAD_ID,
+        thread_id=thread_id,
         demo_intake_profile="research",
         planner_service=B6EvidencePlanner(),
         actor_service=B6EvidenceActor(),
         tool_gateway_service=B6EvidenceToolGateway(),
         replanner_service=B6Replanner(),
-        policy_engine_service=B6PolicyEngine(),
+        policy_engine_service=resolved_policy_engine,
         behavioral_store_service=B6BehavioralStore(),
         checkpointer=InMemorySaver(serde=build_runtime_serializer()),
         artifact_store=RuntimeArtifactStore(root_path=artifact_root),
     )
 
 
-# Run the deterministic Trajectory-positive scenario through the official Layer 2 entry point.
-def run_b6_trajectory_run(*, artifact_root: Path) -> dict[str, Any]:
+# Run the deterministic Trajectory-positive scenario with an injectable policy boundary.
+def run_b6_trajectory_run(
+    *,
+    artifact_root: Path,
+    thread_id: str = B6_TRAJECTORY_THREAD_ID,
+    policy_engine_service: PolicyEnginePort | None = None,
+) -> dict[str, Any]:
+    resolved_policy_engine = policy_engine_service or B6PolicyEngine()
     return run_layer2_flow(
         raw_task_text="Reach a stable result despite repeated bounded recovery attempts.",
         context_hint="The deterministic B6 actor emits a new observation before every replan.",
-        thread_id=B6_TRAJECTORY_THREAD_ID,
+        thread_id=thread_id,
         demo_intake_profile="research",
         planner_service=B6TrajectoryPlanner(),
         actor_service=B6TrajectoryActor(),
         tool_gateway_service=B6TrajectoryToolGateway(),
         replanner_service=B6Replanner(),
-        policy_engine_service=B6PolicyEngine(),
+        policy_engine_service=resolved_policy_engine,
         behavioral_store_service=B6BehavioralStore(),
         checkpointer=InMemorySaver(serde=build_runtime_serializer()),
         artifact_store=RuntimeArtifactStore(root_path=artifact_root),

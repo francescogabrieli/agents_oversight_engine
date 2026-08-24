@@ -62,8 +62,10 @@
         "evidence_request_limit_reached",
         "invalid_evidence_ref", "missing_evidence_ref", "duplicate_evidence_ref",
         "empty_observation_content", "unresolvable_provenance", "unknown_step_lineage",
-        "candidate_digest_mismatch", "insufficient_independent_sources",
-        "retrieved_content_missing", "stale_evidence", "title_only_evidence_fragility",
+        "candidate_digest_mismatch", "missing_evidence_burden",
+        "insufficient_independent_sources", "retrieved_content_missing",
+        "freshness_metadata_missing", "stale_evidence", "future_source_timestamp",
+        "title_only_evidence_fragility",
         "circular_evidence_reference", "unanchored_literals_in_selection",
         "unanchored_literals_in_universe",
         "actor_requested_replan", "replan_request_stalled",
@@ -143,7 +145,24 @@
         "objective": { "$ref": "#/$defs/nonEmptyString" },
         "rationale": { "type": "string" },
         "expected_outcome": { "type": "string" },
-        "status": { "enum": ["pending", "in_progress", "completed", "blocked", "skipped"] }
+        "status": { "enum": ["pending", "in_progress", "completed", "blocked", "skipped"] },
+        "produces_factual_claims": { "type": "boolean" },
+        "evidence_burden": {
+          "oneOf": [
+            { "$ref": "#/$defs/evidenceBurden" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidenceBurden": {
+      "type": "object",
+      "required": ["min_independent_sources", "require_retrieved_content", "freshness_window_days"],
+      "properties": {
+        "min_independent_sources": { "type": "integer", "minimum": 1 },
+        "require_retrieved_content": { "type": "boolean" },
+        "freshness_window_days": { "type": ["integer", "null"], "minimum": 1 }
       },
       "additionalProperties": false
     },
@@ -216,7 +235,7 @@
     },
     "toolRequestFields": {
       "type": "object",
-      "required": ["request_id", "plan_step_id", "tool_name", "reason", "query", "url", "text", "path", "expression", "timezone", "limit", "max_results", "extractive_goal"],
+      "required": ["request_id", "plan_step_id", "tool_name", "reason", "query", "url", "text", "path", "expression", "timezone", "limit", "max_results", "extractive_goal", "document_id", "dataset_id"],
       "properties": {
         "request_id": { "$ref": "#/$defs/nonEmptyString" },
         "plan_step_id": { "$ref": "#/$defs/nonEmptyString" },
@@ -230,7 +249,9 @@
         "timezone": { "$ref": "#/$defs/nullableString" },
         "limit": { "type": ["integer", "null"], "minimum": 1, "maximum": 1000000 },
         "max_results": { "type": "integer", "minimum": 1, "maximum": 1000 },
-        "extractive_goal": { "$ref": "#/$defs/nullableString" }
+        "extractive_goal": { "$ref": "#/$defs/nullableString" },
+        "document_id": { "$ref": "#/$defs/nullableString" },
+        "dataset_id": { "$ref": "#/$defs/nullableString" }
       }
     },
     "toolRequest": {
@@ -263,7 +284,8 @@
       "properties": {
         "observation_id": { "$ref": "#/$defs/nonEmptyString" },
         "content": { "type": "string", "minLength": 1 },
-        "locator": { "$ref": "#/$defs/nullableString" }
+        "locator": { "$ref": "#/$defs/nullableString" },
+        "source_timestamp": { "type": ["string", "null"], "format": "date-time" }
       },
       "additionalProperties": false
     },

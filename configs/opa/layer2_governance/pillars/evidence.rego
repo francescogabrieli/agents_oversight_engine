@@ -21,7 +21,12 @@ max_evidence_requests_before_review := object.get(data.policy_config.thresholds,
 
 coverage_evaluated := object.get(facts, "coverage_evaluated", false)
 burden_satisfied := object.get(facts, "burden_satisfied", true)
+factual_step_missing_evidence_burden := object.get(facts, "factual_step_missing_evidence_burden", false)
+freshness_evaluated := object.get(facts, "freshness_evaluated", false)
+freshness_satisfied := object.get(facts, "freshness_satisfied", true)
 circular_reference_detected := object.get(facts, "circular_reference_detected", false)
+has_unanchored_literals_in_selection := object.get(facts, "has_unanchored_literals_in_selection", false)
+has_unanchored_literals_in_universe := object.get(facts, "has_unanchored_literals_in_universe", false)
 
 default evidence_request_ceiling_reached := false
 
@@ -67,6 +72,15 @@ evidence_gap if {
 }
 
 evidence_gap if {
+	factual_step_missing_evidence_burden == true
+}
+
+evidence_gap if {
+	freshness_evaluated == true
+	freshness_satisfied != true
+}
+
+evidence_gap if {
 	factual_completion == true
 	all_title_only == true
 }
@@ -93,6 +107,16 @@ evidence_gap if {
 
 evidence_gap if {
 	circular_reference_detected == true
+}
+
+evidence_gap if {
+	factual_completion == true
+	has_unanchored_literals_in_selection == true
+}
+
+evidence_gap if {
+	factual_completion == true
+	has_unanchored_literals_in_universe == true
 }
 
 active_reason_codes := [code |

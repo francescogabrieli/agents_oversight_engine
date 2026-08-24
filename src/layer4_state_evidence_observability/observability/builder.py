@@ -1,4 +1,4 @@
-
+from datetime import datetime
 from typing import Any
 
 from layer1_intake import IntakeResult
@@ -29,6 +29,7 @@ from .models import (
     Layer2RuntimeTrace,
     TraceActorTurn,
     TraceExecutionSummary,
+    TraceEvidenceBurden,
     TraceExternalCommunicationDraft,
     TraceExternalCommunicationSummary,
     TraceExternalExecutionReceipt,
@@ -123,12 +124,25 @@ def _build_intake_summary(*, intake_result: IntakeResult) -> TraceIntakeSummary:
 
 # Read-only observability component extracted from the trace facade.
 def _build_plan_step(*, step: Any, task_state: TaskState) -> TracePlanStep:
+    evidence_burden = getattr(step, "evidence_burden", None)
     return TracePlanStep(
         step_id=step.step_id,
         objective=step.objective,
         rationale=step.rationale,
         expected_outcome=step.expected_outcome,
         status=enum_value(step.status),
+        produces_factual_claims=bool(
+            getattr(step, "produces_factual_claims", False)
+        ),
+        evidence_burden=(
+            TraceEvidenceBurden(
+                min_independent_sources=evidence_burden.min_independent_sources,
+                require_retrieved_content=evidence_burden.require_retrieved_content,
+                freshness_window_days=evidence_burden.freshness_window_days,
+            )
+            if evidence_burden is not None
+            else None
+        ),
     )
 
 
@@ -249,6 +263,8 @@ def _tool_request_fields(request: ToolRequest) -> dict[str, Any]:
         "limit": request.limit,
         "max_results": request.max_results,
         "extractive_goal": request.extractive_goal,
+        "document_id": request.document_id,
+        "dataset_id": request.dataset_id,
     }
 
 
@@ -258,6 +274,7 @@ def _build_tool_observation_dict(observation: ToolObservation) -> dict[str, Any]
         "observation_id": observation.observation_id,
         "content": observation.content,
         "locator": observation.locator,
+        "source_timestamp": _source_timestamp_iso(observation),
     }
 
 
@@ -267,7 +284,14 @@ def _build_tool_observation(observation: ToolObservation) -> TraceToolObservatio
         observation_id=observation.observation_id,
         content=observation.content,
         locator=observation.locator,
+        source_timestamp=_source_timestamp_iso(observation),
     )
+
+
+# Serialize source metadata defensively so pre-existing checkpoint observations remain readable.
+def _source_timestamp_iso(observation: ToolObservation) -> str | None:
+    source_timestamp = getattr(observation, "source_timestamp", None)
+    return source_timestamp.isoformat() if isinstance(source_timestamp, datetime) else None
 
 
 # Collapse the former parallel governance histories into one audit record per OPA pass.

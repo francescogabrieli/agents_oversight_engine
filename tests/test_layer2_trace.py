@@ -4,6 +4,7 @@ import json
 import unittest
 from copy import deepcopy
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,7 @@ from layer2_runtime_governance import (
     ExternalCommunicationPhase,
     ExternalCommunicationState,
     EvidenceQualityAssessment,
+    EvidenceBurden,
     GovernanceDecision,
     GovernanceDirective,
     GovernanceReasonCode,
@@ -174,6 +176,84 @@ class Layer2TraceTests(unittest.TestCase):
         self.assertEqual(trace.governance_passes[0].directive, "continue_read_only")
         self.assertFalse(trace.governance_passes[0].requires_human_review)
         self.assertFalse(trace.governance_passes[1].requires_human_review)
+
+    # Preserve the proof obligation and source time in a replayable v6 trace.
+    def test_trace_binds_factual_burden_and_source_timestamp(self) -> None:
+        state = _complete_task_state()
+        state.plan_steps[0].produces_factual_claims = True
+        state.plan_steps[0].evidence_burden = EvidenceBurden(
+            min_independent_sources=2,
+            require_retrieved_content=True,
+            freshness_window_days=7,
+        )
+        state.observations[0] = ToolObservation(
+            observation_id=state.observations[0].observation_id,
+            locator=state.observations[0].locator,
+            content=state.observations[0].content,
+            source_timestamp=datetime(2026, 8, 22, 10, 30, tzinfo=timezone.utc),
+        )
+
+        trace = build_layer2_runtime_trace(
+            thread_id="trace-evidence-contract",
+            intake_result=state.intake_payload,
+            task_state=state,
+        )
+        payload = layer2_trace_to_dict(trace)
+
+        self.assertTrue(trace.plan_steps[0].produces_factual_claims)
+        self.assertEqual(trace.plan_steps[0].evidence_burden.min_independent_sources, 2)
+        self.assertEqual(
+            trace.observations[0].source_timestamp,
+            "2026-08-22T10:30:00+00:00",
+        )
+        _trace_schema_validator().validate(payload)
+
+    # Keep pending governed tool reviews aligned with the complete ToolRequest contract.
+    def test_pending_tool_review_trace_matches_schema_with_document_fields(self) -> None:
+        state = _complete_task_state()
+        tool_request = ToolRequest(
+            plan_step_id="step_1",
+            tool_name=ToolName.WEB_SEARCH,
+            reason="Collect a governed source.",
+            query="controlled source",
+            document_id="document-1",
+            dataset_id="dataset-1",
+        )
+        state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        state.current_plan_step_index = 0
+        state.current_tool_request = tool_request
+        pending_request = HumanReviewRequest(
+            request_id="trace-tool-review:human_review",
+            thread_id="trace-tool-review",
+            current_state=RuntimeState.WAITING_HUMAN_REVIEW,
+            resume_state=RuntimeState.READY_TOOL_EXECUTION,
+            current_plan_step_id="step_1",
+            current_plan_step_objective="Collect deterministic text stats.",
+            actor_result_type=ActorResultType.PROPOSE_ACTION,
+            current_tool_request=tool_request,
+            governance_directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
+            governance_summary="The governed read requires review.",
+            allowed_decisions=(HumanReviewDecisionType.APPROVE_CONTINUE,),
+        )
+        state.pending_human_review_request = pending_request
+        state.last_human_review_request = pending_request
+
+        payload = layer2_trace_to_dict(
+            build_layer2_runtime_trace(
+                thread_id="trace-tool-review",
+                intake_result=state.intake_payload,
+                task_state=state,
+            )
+        )
+
+        self.assertEqual(payload["tool_calls"][-1]["document_id"], "document-1")
+        self.assertEqual(
+            payload["human_review"]["pending_request"]["current_tool_request"][
+                "dataset_id"
+            ],
+            "dataset-1",
+        )
+        _trace_schema_validator().validate(payload)
 
     # Actor observability and governance facts must expose the same selected evidence.
     def test_actor_trace_and_governance_signal_share_selected_evidence(self) -> None:

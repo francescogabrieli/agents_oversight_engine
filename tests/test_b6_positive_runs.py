@@ -4,8 +4,15 @@ import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import Mock, patch
 
 from layer2_runtime_governance import GovernanceDirective, RuntimeState
+from scripts.generate_b6_positive_runs import (
+    B6_EVIDENCE_OFFICIAL_THREAD_ID,
+    B6_TRAJECTORY_OFFICIAL_THREAD_ID,
+    generate_official_b6_runs,
+)
+from scripts.run_b6_live_evidence import LIVE_TASK, LIVE_THREAD_ID
 
 from tests.b6_positive_fixtures import (
     B6_EVIDENCE_THREAD_ID,
@@ -16,6 +23,46 @@ from tests.b6_positive_fixtures import (
 
 
 class B6PositiveRunsTests(unittest.TestCase):
+    # Keep official artifact generation on versioned ids and the injected OPA adapter.
+    @patch("scripts.generate_b6_positive_runs.run_b6_trajectory_run")
+    @patch("scripts.generate_b6_positive_runs.run_b6_evidence_run")
+    @patch("scripts.generate_b6_positive_runs.build_default_policy_engine")
+    def test_official_generator_uses_real_policy_boundary_and_versioned_ids(
+        self,
+        build_policy_engine: Mock,
+        run_evidence: Mock,
+        run_trajectory: Mock,
+    ) -> None:
+        policy_engine = object()
+        build_policy_engine.return_value = policy_engine
+        run_evidence.return_value = {"thread_id": B6_EVIDENCE_OFFICIAL_THREAD_ID}
+        run_trajectory.return_value = {"thread_id": B6_TRAJECTORY_OFFICIAL_THREAD_ID}
+
+        with TemporaryDirectory(prefix="b6-official-") as temp_dir:
+            artifact_root = Path(temp_dir)
+            generated = generate_official_b6_runs(artifact_root=artifact_root)
+
+        self.assertEqual(
+            set(generated),
+            {B6_EVIDENCE_OFFICIAL_THREAD_ID, B6_TRAJECTORY_OFFICIAL_THREAD_ID},
+        )
+        run_evidence.assert_called_once_with(
+            artifact_root=artifact_root,
+            thread_id=B6_EVIDENCE_OFFICIAL_THREAD_ID,
+            policy_engine_service=policy_engine,
+        )
+        run_trajectory.assert_called_once_with(
+            artifact_root=artifact_root,
+            thread_id=B6_TRAJECTORY_OFFICIAL_THREAD_ID,
+            policy_engine_service=policy_engine,
+        )
+
+    # Keep the live B6 isolated from historical artifacts and early literal gating.
+    def test_live_b6_has_versioned_id_and_constrained_collection_completion(self) -> None:
+        self.assertEqual(LIVE_THREAD_ID, "b6-live-evidence-burden-v2")
+        self.assertIn("'Source collection complete'", LIVE_TASK)
+        self.assertIn("do not include any numeric literal", LIVE_TASK)
+
     # Verify the Evidence burden activates the request-more-evidence recovery path.
     def test_evidence_burden_runs_through_runtime_and_preserves_deficit_code(self) -> None:
         with TemporaryDirectory(prefix="b6-evidence-") as temp_dir:

@@ -36,9 +36,9 @@ def try_fetch_specialized_legal_document(
         accept="application/pdf",
         accept_language="eng",
     )
-    if not isinstance(fallback_result, tuple) or len(fallback_result) != 4:
+    if not isinstance(fallback_result, tuple) or len(fallback_result) != 5:
         return None
-    body, charset, content_type, truncated = fallback_result
+    body, charset, content_type, truncated, source_timestamp = fallback_result
     if not isinstance(body, bytes) or truncated:
         return None
     fallback_text = (
@@ -62,6 +62,7 @@ def try_fetch_specialized_legal_document(
                 observation_id=f"{tool_request.request_id}:document",
                 locator=fallback_url,
                 content=content,
+                source_timestamp=source_timestamp,
             ),
         ),
     )

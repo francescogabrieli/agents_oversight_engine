@@ -163,6 +163,35 @@ test_invalid_selected_evidence_requests_more_evidence if {
 	result.directive == "request_more_evidence"
 }
 
+test_unanchored_literal_requests_more_evidence if {
+	evidence := object.union(facts_evidence, {"raw_facts": object.union(facts_evidence.raw_facts, {"has_unanchored_literals_in_selection": true})})
+	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"evidence": evidence})})
+	result := decision with input as candidate
+	result.directive == "request_more_evidence"
+}
+
+test_stale_evidence_requests_more_evidence if {
+	evidence := object.union(facts_evidence, {"raw_facts": object.union(facts_evidence.raw_facts, {"freshness_evaluated": true, "freshness_satisfied": false})})
+	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"evidence": evidence})})
+	result := decision with input as candidate
+	result.directive == "request_more_evidence"
+}
+
+test_circular_evidence_requests_more_evidence if {
+	evidence := object.union(facts_evidence, {"raw_facts": object.union(facts_evidence.raw_facts, {"circular_reference_detected": true})})
+	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"evidence": evidence})})
+	result := decision with input as candidate
+	result.directive == "request_more_evidence"
+}
+
+test_missing_factual_burden_requires_human_review if {
+	evidence := object.union(facts_evidence, {"raw_facts": object.union(facts_evidence.raw_facts, {"factual_step_missing_evidence_burden": true})})
+	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"evidence": evidence})})
+	result := decision with input as candidate
+	result.directive == "wait_human_review"
+	"missing_evidence_burden" in result.reason_codes
+}
+
 test_external_candidate_without_selected_evidence_can_reach_judge if {
 	no_refs := object.union(facts_evidence, {"raw_facts": object.union(facts_evidence.raw_facts, {"selected_evidence_ref_count": 0, "external_operation_candidate": true})})
 	candidate := object.union(base_input, {"base_facts": object.union(base_facts, {"external_operation": governed_operation}), "pillar_requirements": {"require_evidence": true, "require_risk": false, "require_trajectory": true, "require_behavioral": false, "require_judge": true}, "pillars": object.union(base_input.pillars, {"evidence": no_refs, "judge": safe_judge})})

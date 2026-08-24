@@ -9,7 +9,15 @@ from .evidence import (
     digest_text,
 )
 from .lifecycle import RuntimeFlag, RuntimeState, StepRecord, TerminationReason
-from .plan import EvidenceBurden, PlannerDecision, PlanStep, PlanStepStatus, semantic_plan_signature
+from .plan import (
+    EvidenceBurden,
+    PlannerDecision,
+    PlanStep,
+    PlanStepStatus,
+    semantic_plan_signature,
+    validate_plan_step_evidence_contract,
+    validate_plan_steps_evidence_contract,
+)
 from .review import (
     ExternalCommunicationDraft,
     ExternalCommunicationPhase,
@@ -71,6 +79,8 @@ __all__ = [
     "PlanStep",
     "PlanStepStatus",
     "PlannerDecision",
+    "validate_plan_step_evidence_contract",
+    "validate_plan_steps_evidence_contract",
     "ReplanCheckpoint",
     "RuntimeFlag",
     "RuntimeState",

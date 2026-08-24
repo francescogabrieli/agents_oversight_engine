@@ -119,6 +119,39 @@ non sostituti del corpus realistico.
 | `od07_static_policy_denial` | Un'operazione vietata, per esempio una scrittura su profilo database read-only, viene fermata. | Static-policy reason code, `stop`, nessuna esecuzione esterna. | Database di test e policy controllata. |
 | `od08_indeterminate_receipt` | Il connector non restituisce una receipt affidabile dopo l'ingresso nella capability. | Receipt `indeterminate`, nessun retry automatico, riconciliazione HITL. | Connector sandbox che simula risposta ambigua. |
 
+### Seed B6 correnti
+
+I tre seed B6 correnti usano thread ID versionati e non sovrascrivono gli artifact
+storici. I regression test mantengono uno stub deterministico, mentre gli script di
+generazione ufficiale usano `build_default_policy_engine()` e quindi il PDP OPA HTTP.
+
+Avviare prima OPA:
+
+```powershell
+docker compose -f .\services\policy_decision_point\compose.yaml up -d
+```
+
+Se Docker non è disponibile, mantenere aperto un terminale OPA temporaneo durante
+la generazione:
+
+```powershell
+opa run --server --addr=127.0.0.1:8181 --log-format=json .\configs\opa\layer2_governance
+```
+
+Poi generare i due seed deterministici e il seed live:
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\generate_b6_positive_runs.py
+.\.venv\Scripts\python.exe .\scripts\run_b6_live_evidence.py
+```
+
+Gli output correnti sono `b6-evidence-burden-insufficient-v2`,
+`b6-trajectory-replan-ceiling-v2` e `b6-live-evidence-burden-v2`. Tutti devono
+validare contro `schemas/layer2_trace.schema.json`; per una run sospesa in HITL,
+la presenza di `runtime.termination_reason` con valore `null` è corretta. Il manifest
+`artifacts/runtime/evaluation_corpus_manifest.v1.json` conserva separatamente i seed
+storici non ammissibili e quelli correnti eleggibili.
+
 ## Esecuzione del realistic pool
 
 Non è necessario un comando manuale per ogni run. Il runner

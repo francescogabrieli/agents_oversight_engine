@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from typing import Protocol
 from uuid import uuid4
@@ -51,10 +52,11 @@ class ToolRequest:
 
 @dataclass(frozen=True)
 class ToolObservation:
-    # Adapters expose only content actually observed at the capability boundary.
+    # Adapters expose content and any source-attributed timestamp observed at the capability boundary.
     observation_id: str
     content: str
     locator: str | None = None
+    source_timestamp: datetime | None = None
 
 
 @dataclass(frozen=True)

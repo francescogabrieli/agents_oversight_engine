@@ -233,7 +233,7 @@ Per completare uno step, l'actor deve produrre una validazione tipizzata. Gli
 `evidence_refs` sono selezionati tra gli ID presenti in `TaskState.observations`:
 se vengono dichiarati, `execution/result_builder.py` rifiuta riferimenti sconosciuti.
 La selezione può restare vuota quando lo step non dichiara un onere fattuale; se il
-`PlanStep` imposta `produces_factual_claims=true` e un `evidence_burden`, Evidence
+`PlanStep` imposta `produces_factual_claims=true` (e quindi deve dichiarare un `evidence_burden`), Evidence
 valuta invece la copertura e può chiedere ulteriore evidenza. Il runtime costruisce
 poi digest stabili dello snapshot delle osservazioni e della selezione dichiarata.
 

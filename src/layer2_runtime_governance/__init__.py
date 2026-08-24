@@ -133,7 +133,7 @@ _EXPORT_GROUPS: dict[str, tuple[str, ...]] = {
         "TraceExternalCommunicationSummary", "TraceExternalExecutionReceipt",
         "TraceExternalExecutionSummary", "TraceGovernancePass",
         "TraceHumanReviewDecision", "TraceHumanReviewExternalEdit", "TraceHumanReviewRequest",
-        "TraceHumanReviewSummary", "TraceIntakeSummary", "TraceToolObservation",
+        "TraceHumanReviewSummary", "TraceIntakeSummary", "TraceEvidenceBurden", "TraceToolObservation",
         "TracePlanStep", "TraceRuntimeSummary", "TraceToolCall",
         "build_compact_trace_from_runtime_trace", "build_layer2_runtime_trace",
         "layer2_trace_to_dict", "layer2_trace_to_json",

@@ -5,10 +5,16 @@ import os
 from dataclasses import dataclass
 from typing import Protocol, cast
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from environment_config import load_env_file_values
-from ..domain import EvidenceBurden, PlannerDecision, PlanStep, TaskState
+from ..domain import (
+    EvidenceBurden,
+    PlannerDecision,
+    PlanStep,
+    TaskState,
+    validate_plan_step_evidence_contract,
+)
 from .openai_adapter import (
     ParsedOpenAIClient,
     build_parsed_openai_client,
@@ -72,6 +78,15 @@ class _PlanStepPayload(BaseModel):
     produces_factual_claims: bool = Field(default=False)
     evidence_burden: _EvidenceBurdenPayload | None = Field(default=None)
 
+    # Share the domain invariant so provider output cannot omit a factual burden.
+    @model_validator(mode="after")
+    def validate_factual_evidence_burden(self) -> "_PlanStepPayload":
+        validate_plan_step_evidence_contract(
+            produces_factual_claims=self.produces_factual_claims,
+            evidence_burden=self.evidence_burden,
+        )
+        return self
+
 
 class _PlanningPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -95,7 +110,7 @@ Each item in plan_steps must contain:
 - rationale
 - expected_outcome
 - produces_factual_claims (boolean: true if this step produces factual claims that leave the system or will be used for downstream decision-making, false otherwise)
-- evidence_burden (optional object when produces_factual_claims is true, with min_independent_sources [default 1], require_retrieved_content [default true], freshness_window_days [optional integer])
+- evidence_burden (required object when produces_factual_claims is true; omit it when produces_factual_claims is false. Fields: min_independent_sources [default 1], require_retrieved_content [default true], freshness_window_days [optional integer])
 
 Rules:
 - Stay at the semantic planning level.

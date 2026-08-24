@@ -120,6 +120,11 @@ else := revise_decision if {
 	judge.result.verdict == "needs_revision"
 }
 
+else := hitl_decision("missing_evidence_burden", "The factual plan step omitted its mandatory evidence burden and requires human correction.") if {
+	input.pillar_requirements.require_evidence == true
+	object.get(evidence.result.raw_facts, "factual_step_missing_evidence_burden", false) == true
+}
+
 else := hitl_decision("evidence_request_limit_reached", "The actor repeated completion without resolving required evidence and reached the request ceiling.") if {
 	input.pillar_requirements.require_evidence == true
 	evidence.result.evidence_gap
@@ -276,6 +281,13 @@ candidate_alternatives[code] := reason if {
 	reason := "The external payload requires semantic revision."
 	input.pillar_requirements.require_judge == true
 	judge.result.verdict == "needs_revision"
+}
+
+candidate_alternatives[code] := reason if {
+	code := "missing_evidence_burden"
+	reason := "The factual plan step omitted its mandatory evidence burden and requires human correction."
+	input.pillar_requirements.require_evidence == true
+	object.get(evidence.result.raw_facts, "factual_step_missing_evidence_burden", false) == true
 }
 
 candidate_alternatives[code] := reason if {

@@ -5,6 +5,7 @@ from ..domain import (
     RuntimeState,
     TaskState,
     semantic_plan_signature,
+    validate_plan_steps_evidence_contract,
 )
 from ..planning.replanning import ReplannerPort
 
@@ -34,6 +35,7 @@ def replanner(state: TaskState, *, replanner_service: ReplannerPort) -> TaskStat
         return state
 
     decision = replanner_service.replan(task_state=state)
+    validate_plan_steps_evidence_contract(decision.replacement_steps)
     # Completed steps are immutable history; only current and future trajectory is replaced.
     completed_steps = [
         step for step in state.plan_steps if step.status == PlanStepStatus.COMPLETED

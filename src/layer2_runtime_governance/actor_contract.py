@@ -8,6 +8,7 @@ from layer1_intake import ExecutionPolicy, IntakeMetadata, TaskSpec
 
 from .domain import (
     AgentWorkspace,
+    EvidenceBurden,
     ExternalCommunicationDraft,
     PlanStepStatus,
     RuntimeFlag,
@@ -64,6 +65,8 @@ class ActorPlanStep:
     rationale: str
     expected_outcome: str
     status: PlanStepStatus
+    produces_factual_claims: bool
+    evidence_burden: EvidenceBurden | None
 
 
 @dataclass(frozen=True)
@@ -168,6 +171,8 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
             rationale=step.rationale,
             expected_outcome=step.expected_outcome,
             status=step.status,
+            produces_factual_claims=step.produces_factual_claims,
+            evidence_burden=step.evidence_burden,
         )
         for step in task_state.plan_steps
     )

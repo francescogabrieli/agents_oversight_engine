@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse
 
@@ -15,6 +17,10 @@ from layer2_runtime_governance.domain import (
 from layer3_tool_bus_external_capabilities.external_operations import (
     CommunicationOperationPayload,
     DatabaseOperationPayload,
+)
+from layer3_tool_bus_external_capabilities.tool_contract import (
+    ToolName,
+    ToolObservation,
 )
 
 TOKEN_PATTERNS = [
@@ -31,6 +37,34 @@ TOKEN_PATTERNS = [
     # Numbers with decimals or >= 3 digits
     re.compile(r"\b\d+\.\d+\b|\b\d{3,}\b"),
 ]
+
+_ACTOR_DERIVED_TOOL_NAMES = frozenset(
+    {
+        ToolName.MCP_LOCAL_TEST_ECHO.value,
+        ToolName.MCP_LOCAL_TEST_TEXT_STATS.value,
+    }
+)
+_SELF_PRODUCED_LOCATOR_PREFIXES = (
+    "actor-output://",
+    "agent-output://",
+    "draft://",
+    "runtime-artifact://",
+    "scratchpad://",
+    "workspace://",
+)
+
+
+@dataclass(frozen=True)
+class _FreshnessAssessment:
+    # Retain every deterministic freshness outcome needed by OPA and the audit trace.
+    evaluated: bool
+    satisfied: bool
+    window_days: int | None
+    reference_time: str | None
+    source_timestamps: dict[str, str | None]
+    missing_observation_ids: tuple[str, ...]
+    stale_observation_ids: tuple[str, ...]
+    future_observation_ids: tuple[str, ...]
 
 
 def _extract_source_origin(locator: str | None) -> str:
@@ -76,8 +110,108 @@ def _get_target_text(task_state: TaskState) -> str:
     return " ".join(parts)
 
 
+# Normalize only source-attributed, timezone-aware timestamps for a freshness decision.
+def _normalize_source_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None or value.utcoffset() is None:
+        return None
+    return value.astimezone(timezone.utc)
+
+
+# Preserve an observed timestamp in audit facts even when it is unusable for freshness.
+def _source_timestamp_text(value: object) -> str | None:
+    return value.isoformat() if isinstance(value, datetime) else None
+
+
+# Evaluate a declared freshness window against source metadata, never retrieval time.
+def _evaluate_freshness(
+    *,
+    selected: list[ToolObservation],
+    freshness_window_days: int | None,
+    evaluated_at: datetime | None,
+) -> _FreshnessAssessment:
+    source_timestamps = {
+        item.observation_id: _source_timestamp_text(
+            getattr(item, "source_timestamp", None)
+        )
+        for item in selected
+    }
+    if freshness_window_days is None:
+        return _FreshnessAssessment(
+            evaluated=False,
+            satisfied=True,
+            window_days=None,
+            reference_time=None,
+            source_timestamps=source_timestamps,
+            missing_observation_ids=(),
+            stale_observation_ids=(),
+            future_observation_ids=(),
+        )
+
+    reference_time = evaluated_at or datetime.now(timezone.utc)
+    normalized_reference_time = _normalize_source_timestamp(reference_time)
+    if normalized_reference_time is None:
+        raise ValueError("Evidence freshness evaluation requires an aware UTC reference time.")
+
+    cutoff = normalized_reference_time - timedelta(days=freshness_window_days)
+    missing_observation_ids: list[str] = []
+    stale_observation_ids: list[str] = []
+    future_observation_ids: list[str] = []
+    for item in selected:
+        source_timestamp = _normalize_source_timestamp(
+            getattr(item, "source_timestamp", None)
+        )
+        if source_timestamp is None:
+            missing_observation_ids.append(item.observation_id)
+        elif source_timestamp > normalized_reference_time:
+            future_observation_ids.append(item.observation_id)
+        elif source_timestamp < cutoff:
+            stale_observation_ids.append(item.observation_id)
+
+    return _FreshnessAssessment(
+        evaluated=True,
+        satisfied=bool(selected)
+        and not missing_observation_ids
+        and not stale_observation_ids
+        and not future_observation_ids,
+        window_days=freshness_window_days,
+        reference_time=normalized_reference_time.isoformat(),
+        source_timestamps=source_timestamps,
+        missing_observation_ids=tuple(missing_observation_ids),
+        stale_observation_ids=tuple(stale_observation_ids),
+        future_observation_ids=tuple(future_observation_ids),
+    )
+
+
+# Reject typed actor-produced artifacts and echo-style transformations as evidence sources.
+def _detect_circular_evidence(
+    *,
+    selected: list[ToolObservation],
+    observation_lineage: dict[str, Any],
+) -> dict[str, str]:
+    circular_reasons: dict[str, str] = {}
+    for item in selected:
+        locator = (item.locator or "").lower()
+        if any(locator.startswith(prefix) for prefix in _SELF_PRODUCED_LOCATOR_PREFIXES):
+            circular_reasons[item.observation_id] = "self_produced_locator"
+            continue
+        lineage = observation_lineage.get(item.observation_id)
+        if (
+            lineage is not None
+            and lineage.tool_name in _ACTOR_DERIVED_TOOL_NAMES
+        ):
+            circular_reasons[item.observation_id] = "actor_derived_tool_output"
+    return circular_reasons
+
+
 # Build deterministic evidence facts across the 5 structural families.
-def build_evidence_signal(*, task_state: TaskState, thresholds_version: str) -> dict[str, Any]:
+def build_evidence_signal(
+    *,
+    task_state: TaskState,
+    thresholds_version: str,
+    evaluated_at: datetime | None = None,
+) -> dict[str, Any]:
     result = task_state.actor_result
     validation = result.step_validation if result is not None else None
     selected_refs = validation.evidence_refs if validation is not None else ()
@@ -162,10 +296,17 @@ def build_evidence_signal(*, task_state: TaskState, thresholds_version: str) -> 
         == external_operation_digest
     )
 
-    # Famiglia 2: Copertura dell'onere probatorio dichiarato (Fail-Open)
+    # Famiglia 2: Copertura dell'onere probatorio dichiarato (Fail-Closed)
     current_step = task_state.current_plan_step
-    produces_factual_claims = bool(current_step and getattr(current_step, "produces_factual_claims", False))
-    evidence_burden = getattr(current_step, "evidence_burden", None) if current_step else None
+    produces_factual_claims = bool(
+        current_step and getattr(current_step, "produces_factual_claims", False)
+    )
+    evidence_burden = (
+        getattr(current_step, "evidence_burden", None) if current_step else None
+    )
+    factual_step_missing_evidence_burden = (
+        produces_factual_claims and evidence_burden is None
+    )
 
     distinct_origins = {_extract_source_origin(item.locator) for item in selected if item.locator}
     distinct_independent_sources_count = len(distinct_origins) if distinct_origins else (1 if selected else 0)
@@ -180,30 +321,76 @@ def build_evidence_signal(*, task_state: TaskState, thresholds_version: str) -> 
     if produces_factual_claims and evidence_burden is not None:
         coverage_evaluated = True
         min_sources = evidence_burden.min_independent_sources
-        independent_sources_satisfied = (distinct_independent_sources_count >= min_sources)
+        independent_sources_satisfied = (
+            distinct_independent_sources_count >= min_sources
+        )
         if evidence_burden.require_retrieved_content:
             retrieved_content_satisfied = any(
-                not (item.content.startswith("Search result title:") or (item.locator and item.locator.startswith("search:")))
+                not (
+                    item.content.startswith("Search result title:")
+                    or (item.locator and item.locator.startswith("search:"))
+                )
                 for item in selected
             ) if selected else False
         else:
             retrieved_content_satisfied = True
-        freshness_satisfied = True
-        burden_satisfied = (independent_sources_satisfied and retrieved_content_satisfied and freshness_satisfied)
+        freshness = _evaluate_freshness(
+            selected=selected,
+            freshness_window_days=evidence_burden.freshness_window_days,
+            evaluated_at=evaluated_at,
+        )
+        freshness_satisfied = freshness.satisfied
+        burden_satisfied = (
+            independent_sources_satisfied
+            and retrieved_content_satisfied
+            and freshness_satisfied
+        )
+    elif produces_factual_claims:
+        # Legacy or malformed state must not silently downgrade the factual obligation.
+        coverage_evaluated = False
+        min_sources = 0
+        independent_sources_satisfied = False
+        retrieved_content_satisfied = False
+        freshness = _FreshnessAssessment(
+            evaluated=False,
+            satisfied=False,
+            window_days=None,
+            reference_time=None,
+            source_timestamps={},
+            missing_observation_ids=(),
+            stale_observation_ids=(),
+            future_observation_ids=(),
+        )
+        freshness_satisfied = freshness.satisfied
+        burden_satisfied = False
     else:
-        # Mandatory Fail-Open: no coverage constraints asserted
+        # Non-factual steps have no planner-declared coverage requirement.
         coverage_evaluated = False
         min_sources = 0
         independent_sources_satisfied = True
         retrieved_content_satisfied = True
-        freshness_satisfied = True
+        freshness = _FreshnessAssessment(
+            evaluated=False,
+            satisfied=True,
+            window_days=None,
+            reference_time=None,
+            source_timestamps={},
+            missing_observation_ids=(),
+            stale_observation_ids=(),
+            future_observation_ids=(),
+        )
+        freshness_satisfied = freshness.satisfied
         burden_satisfied = True
 
     # Famiglia 3: Qualità strutturale delle osservazioni
     selected_evidence_all_title_only = bool(selected) and search_title_only_ref_count == len(selected)
 
     # Famiglia 4: Non-circolarità
-    circular_reference_detected = False
+    circular_evidence_reasons = _detect_circular_evidence(
+        selected=selected,
+        observation_lineage=observation_lineage,
+    )
+    circular_reference_detected = bool(circular_evidence_reasons)
 
     # Famiglia 5: Ancoraggio letterale dei claim (solo token estraibili)
     target_text = _get_target_text(task_state)
@@ -232,10 +419,18 @@ def build_evidence_signal(*, task_state: TaskState, thresholds_version: str) -> 
         deficit_codes.append("unknown_step_lineage")
     if candidate_binding_required and not (candidate_snapshot_matches and candidate_selection_matches):
         deficit_codes.append("candidate_digest_mismatch")
+    if factual_step_missing_evidence_burden:
+        deficit_codes.append("missing_evidence_burden")
     if coverage_evaluated and not independent_sources_satisfied:
         deficit_codes.append("insufficient_independent_sources")
     if coverage_evaluated and not retrieved_content_satisfied:
         deficit_codes.append("retrieved_content_missing")
+    if freshness.evaluated and freshness.missing_observation_ids:
+        deficit_codes.append("freshness_metadata_missing")
+    if freshness.evaluated and freshness.stale_observation_ids:
+        deficit_codes.append("stale_evidence")
+    if freshness.evaluated and freshness.future_observation_ids:
+        deficit_codes.append("future_source_timestamp")
     if selected_evidence_all_title_only:
         deficit_codes.append("title_only_evidence_fragility")
     if circular_reference_detected:
@@ -270,15 +465,28 @@ def build_evidence_signal(*, task_state: TaskState, thresholds_version: str) -> 
         "external_operation_candidate": bool(task_state.external_operation_proposal and task_state.external_operation_proposal.execution_candidate),
         "evidence_request_count": getattr(task_state, "evidence_request_count", 0),
         # Famiglia 2 facts
+        "produces_factual_claims": produces_factual_claims,
+        "factual_step_missing_evidence_burden": factual_step_missing_evidence_burden,
         "coverage_evaluated": coverage_evaluated,
         "distinct_independent_sources_count": distinct_independent_sources_count,
         "min_independent_sources_required": min_sources,
         "independent_sources_satisfied": independent_sources_satisfied,
         "retrieved_content_satisfied": retrieved_content_satisfied,
+        "freshness_evaluated": freshness.evaluated,
+        "freshness_window_days": freshness.window_days,
+        "freshness_reference_time": freshness.reference_time,
+        "selected_source_timestamps": freshness.source_timestamps,
+        "freshness_missing_observation_ids": list(freshness.missing_observation_ids),
+        "stale_evidence_observation_ids": list(freshness.stale_observation_ids),
+        "future_source_timestamp_observation_ids": list(
+            freshness.future_observation_ids
+        ),
         "freshness_satisfied": freshness_satisfied,
         "burden_satisfied": burden_satisfied,
         # Famiglia 4 facts
         "circular_reference_detected": circular_reference_detected,
+        "circular_evidence_observation_ids": sorted(circular_evidence_reasons),
+        "circular_evidence_reasons": circular_evidence_reasons,
         # Famiglia 5 facts
         "target_literal_token_count": len(target_tokens),
         "unanchored_literals_in_selection": unanchored_literals_in_selection,

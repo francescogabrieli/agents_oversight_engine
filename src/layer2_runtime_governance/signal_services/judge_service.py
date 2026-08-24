@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime
 from typing import Any
 
 from layer2_runtime_governance.domain import (
@@ -29,6 +30,11 @@ from layer2_runtime_governance.judge import (
     JudgeVerdict,
     build_judge_evidence_bundle,
 )
+
+
+# Project a durable source timestamp only when checkpoint restoration preserved a datetime.
+def _source_timestamp_text(value: object) -> str | None:
+    return value.isoformat() if isinstance(value, datetime) else None
 
 
 # Build the exact semantic context for the actor step identified by actor_result.
@@ -81,6 +87,9 @@ def build_judge_context(
                 evidence_id=item.observation_id,
                 locator=item.locator,
                 content=item.content,
+                source_timestamp=_source_timestamp_text(
+                    getattr(item, "source_timestamp", None)
+                ),
                 plan_step_id=(
                     observation_lineage[item.observation_id].plan_step_id
                     if item.observation_id in observation_lineage
@@ -162,7 +171,7 @@ def build_judge_context(
         omitted_observation_ids=(),
         evidence_snapshot_digest=evidence_snapshot_digest,
         evidence_selection_digest=evidence_selection_digest,
-        serialization_version="judge_context.v5",
+        serialization_version="judge_context.v6",
     )
     return replace(
         context,

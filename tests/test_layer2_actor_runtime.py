@@ -844,7 +844,15 @@ class Layer2ActorExecutionTests(unittest.TestCase):
         self.assertEqual(actor_task.current_plan_step.objective, "Collect official sources.")
         self.assertEqual(
             set(vars(actor_task.current_plan_step)),
-            {"step_id", "objective", "rationale", "expected_outcome", "status"},
+            {
+                "step_id",
+                "objective",
+                "rationale",
+                "expected_outcome",
+                "status",
+                "produces_factual_claims",
+                "evidence_burden",
+            },
         )
 
 

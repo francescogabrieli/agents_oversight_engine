@@ -40,6 +40,15 @@ class TraceIntakeSummary:
 
 # Read-only observability component extracted from the trace facade.
 @dataclass(frozen=True)
+class TraceEvidenceBurden:
+    # Trace the planner's factual proof obligation beside the semantic plan step.
+    min_independent_sources: int
+    require_retrieved_content: bool
+    freshness_window_days: int | None
+
+
+# Read-only observability component extracted from the trace facade.
+@dataclass(frozen=True)
 class TracePlanStep:
     # TracePlanStep is one semantic planner step as seen by runtime governance.
     step_id: str
@@ -47,6 +56,8 @@ class TracePlanStep:
     rationale: str
     expected_outcome: str
     status: str
+    produces_factual_claims: bool = False
+    evidence_burden: TraceEvidenceBurden | None = None
 
 
 # Read-only observability component extracted from the trace facade.
@@ -85,6 +96,8 @@ class TraceToolCall:
     limit: int | None
     max_results: int
     extractive_goal: str | None
+    document_id: str | None
+    dataset_id: str | None
     success: bool | None
     summary: str | None
     content: str | None
@@ -102,6 +115,7 @@ class TraceToolObservation:
     observation_id: str
     content: str
     locator: str | None
+    source_timestamp: str | None = None
 
 
 # Read-only canonical governance record; pillar outputs are stored exactly once per pass.
@@ -287,6 +301,7 @@ class Layer2RuntimeTrace:
 __all__ = [
     "TraceRuntimeSummary",
     "TraceIntakeSummary",
+    "TraceEvidenceBurden",
     "TracePlanStep",
     "TraceActorTurn",
     "TraceToolCall",
