@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import Callable
 
-from ...tool_contract import ToolExecutionResult, ToolObservation, ToolRequest
+from ...tool_contract import (
+    RetrievalKind,
+    ToolExecutionResult,
+    ToolObservation,
+    ToolRequest,
+)
 from ..models import ToolDefinition
 from ..text import is_meaningful_extracted_text, truncate_text
 from ..extractors import extract_visible_text
@@ -63,6 +68,7 @@ def try_fetch_specialized_legal_document(
                 locator=fallback_url,
                 content=content,
                 source_timestamp=None,
+                retrieval_kind=RetrievalKind.FETCHED_DOCUMENT,
             ),
         ),
     )

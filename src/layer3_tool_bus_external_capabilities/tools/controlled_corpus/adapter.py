@@ -6,6 +6,7 @@ from io import StringIO
 from pathlib import Path
 
 from ..contracts import (
+    RetrievalKind,
     ToolErrorCode,
     ToolExecutionResult,
     ToolName,
@@ -92,6 +93,7 @@ class ControlledCorpusAdapter:
                     observation_id=f"{tool_request.request_id}:document",
                     locator=f"controlled-document://{document_id}",
                     content=content or "",
+                    retrieval_kind=RetrievalKind.CONTROLLED_RESOURCE,
                 ),
             ),
             truncated=content_truncated,
@@ -165,6 +167,7 @@ class ControlledCorpusAdapter:
                     observation_id=f"{tool_request.request_id}:dataset",
                     locator=f"controlled-dataset://{dataset_id}",
                     content=content,
+                    retrieval_kind=RetrievalKind.CONTROLLED_RESOURCE,
                 ),
             ),
             truncated=content_truncated,

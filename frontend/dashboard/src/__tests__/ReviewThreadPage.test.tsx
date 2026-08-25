@@ -44,6 +44,15 @@ describe("ReviewThreadPage", () => {
                 phase: "human_review_required",
               },
               human_review: {
+                judge_findings: ["The recipient scope is not supported by the draft evidence."],
+                selected_evidence_references: [
+                  {
+                    observation_id: "obs-1",
+                    locator: "https://example.test/source",
+                    source_timestamp: "2026-08-01T10:00:00+00:00",
+                    content_excerpt: "The source supports the reviewed claim.",
+                  },
+                ],
                 pending_request: {
                   request_id: "thread-1:hitl",
                   review_summary: "Review the stalled trajectory before continuing.",
@@ -151,6 +160,12 @@ describe("ReviewThreadPage", () => {
     expect(screen.getByText("Replan Count")).toBeInTheDocument();
     expect(screen.getByText("Consecutive Tool Failures")).toBeInTheDocument();
     expect(screen.getByText("Evidence pillar inactive (not required).")).toBeInTheDocument();
+    expect(screen.getByText("Judge findings")).toBeInTheDocument();
+    expect(
+      screen.getByText("The recipient scope is not supported by the draft evidence."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Selected evidence")).toBeInTheDocument();
+    expect(screen.getByText("The source supports the reviewed claim.")).toBeInTheDocument();
     expect(screen.getByText("Produced text")).toBeInTheDocument();
     expect((await screen.findAllByText("Collect evidence.")).length).toBeGreaterThan(0);
     for (const label of [

@@ -108,6 +108,7 @@ class ActorTask:
     # The evidence burden gate uses this counter to re-enable completions when the
     # governance system has exhausted its bounded evidence-request retries.
     evidence_request_episode_count: int = 0
+    evidence_request_ceiling_reached: bool = False
     attempted_action_keys: tuple[str, ...] = ()
     # Set only for the one bounded local retry after a provider protocol failure.
     protocol_retry_feedback: ActorProtocolFeedback | str | None = None
@@ -217,6 +218,7 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
         workspace=task_state.workspace,
         progress_epoch=task_state.progress_epoch,
         evidence_request_episode_count=task_state.evidence_request_episode_count,
+        evidence_request_ceiling_reached=task_state.evidence_request_ceiling_reached,
         attempted_action_keys=tuple(
             item.action_key if hasattr(item, "action_key") else item.get("action_key", "")
             for item in task_state.tool_attempts

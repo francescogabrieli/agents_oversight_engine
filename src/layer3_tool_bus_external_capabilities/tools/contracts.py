@@ -8,6 +8,7 @@ from ..tool_contract import (
     ToolName,
     ToolObservation,
     ToolRequest,
+    RetrievalKind,
 )
 
 __all__ = [
@@ -17,4 +18,5 @@ __all__ = [
     "ToolName",
     "ToolObservation",
     "ToolRequest",
+    "RetrievalKind",
 ]

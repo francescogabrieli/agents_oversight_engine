@@ -128,6 +128,15 @@ class DashboardPillarDiagnostic:
     facts: dict[str, Any]
 
 
+# DashboardEvidenceReference exposes only bounded, already-persisted selected evidence.
+@dataclass(frozen=True)
+class DashboardEvidenceReference:
+    observation_id: str
+    locator: str | None
+    source_timestamp: str | None
+    content_excerpt: str
+
+
 # DashboardHumanReviewPanel captures the review payload and resume path.
 @dataclass(frozen=True)
 class DashboardHumanReviewPanel:
@@ -145,6 +154,7 @@ class DashboardHumanReviewPanel:
     operation_proposal_summary: str | None
     operation_target: str | None
     judge_findings: tuple[str, ...]
+    selected_evidence_references: tuple[DashboardEvidenceReference, ...]
     evidence_diagnostic: DashboardPillarDiagnostic | None
     trajectory_diagnostic: DashboardPillarDiagnostic | None
 
@@ -202,6 +212,8 @@ class GovernanceHitlDashboardSnapshot:
 _EVIDENCE_REVIEW_FACTS = (
     "completion_attempt",
     "factual_completion_attempt",
+    "evidence_completion_attempt",
+    "evidence_families_active",
     "coverage_evaluated",
     "burden_satisfied",
     "evidence_gap",
@@ -211,6 +223,7 @@ _EVIDENCE_REVIEW_FACTS = (
     "evidence_request_episode_id",
     "selected_evidence_ref_count",
     "distinct_independent_sources_count",
+    "retrieved_independent_sources_count",
     "min_independent_sources_required",
     "independent_sources_satisfied",
     "retrieved_content_satisfied",
@@ -227,6 +240,9 @@ _EVIDENCE_REVIEW_FACTS = (
     "has_unanchored_literals_in_selection",
     "has_unanchored_literals_in_universe",
     "factual_step_missing_evidence_burden",
+    "literals_anchored_to_task",
+    "insufficiency_declaration_permitted",
+    "insufficiency_declared_in_payload",
 )
 
 _TRAJECTORY_REVIEW_FACTS = (
@@ -492,6 +508,7 @@ def _build_human_review_panel(*, task_state: TaskState) -> DashboardHumanReviewP
     ):
         return None
 
+    review_request = pending_request or last_request
     return DashboardHumanReviewPanel(
         pending_request=pending_request,
         last_request=last_request,
@@ -542,7 +559,10 @@ def _build_human_review_panel(*, task_state: TaskState) -> DashboardHumanReviewP
             pending_request.operation_target if pending_request is not None else None
         ),
         judge_findings=(
-            pending_request.judge_findings if pending_request is not None else ()
+            review_request.judge_findings if review_request is not None else ()
+        ),
+        selected_evidence_references=_build_selected_evidence_references(
+            task_state=task_state,
         ),
         evidence_diagnostic=_build_pillar_diagnostic(
             governance_decision=task_state.last_governance_decision,
@@ -555,6 +575,39 @@ def _build_human_review_panel(*, task_state: TaskState) -> DashboardHumanReviewP
             fact_names=_TRAJECTORY_REVIEW_FACTS,
         ),
     )
+
+
+# Project selected evidence from TaskState without performing runtime or connector calls.
+def _build_selected_evidence_references(
+    *,
+    task_state: TaskState,
+) -> tuple[DashboardEvidenceReference, ...]:
+    selected_ids: tuple[str, ...] = ()
+    if task_state.pending_completion_candidate is not None:
+        selected_ids = task_state.pending_completion_candidate.evidence_refs
+    elif task_state.actor_result is not None and task_state.actor_result.step_validation is not None:
+        selected_ids = task_state.actor_result.step_validation.evidence_refs
+    observations = {
+        observation.observation_id: observation for observation in task_state.observations
+    }
+    references: list[DashboardEvidenceReference] = []
+    for observation_id in dict.fromkeys(selected_ids):
+        observation = observations.get(observation_id)
+        if observation is None:
+            continue
+        references.append(
+            DashboardEvidenceReference(
+                observation_id=observation.observation_id,
+                locator=observation.locator,
+                source_timestamp=(
+                    observation.source_timestamp.isoformat()
+                    if observation.source_timestamp is not None
+                    else None
+                ),
+                content_excerpt=" ".join(observation.content.split())[:320],
+            )
+        )
+    return tuple(references)
 
 
 # Project one OPA pillar result into a compact, typed operator-facing diagnostic.

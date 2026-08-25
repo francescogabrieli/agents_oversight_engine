@@ -4,85 +4,252 @@
   "title": "Layer2RuntimeTraceV6",
   "type": "object",
   "required": [
-    "trace_version", "runtime", "intake", "planner_name", "planner_prompt_version",
-    "planner_rationale", "planning_source", "plan_steps", "current_plan_step_index",
-    "current_plan_step_id", "actor", "execution", "tool_calls", "observations",
-    "governance_passes", "human_review", "external_communication", "external_execution"
+    "trace_version",
+    "runtime",
+    "intake",
+    "planner_name",
+    "planner_prompt_version",
+    "planner_rationale",
+    "planning_source",
+    "plan_steps",
+    "current_plan_step_index",
+    "current_plan_step_id",
+    "actor",
+    "execution",
+    "tool_calls",
+    "observations",
+    "governance_passes",
+    "human_review",
+    "external_communication",
+    "external_execution"
   ],
   "properties": {
-    "trace_version": { "const": "layer2_trace.v6" },
-    "runtime": { "$ref": "#/$defs/runtime" },
-    "intake": { "$ref": "#/$defs/intake" },
-    "planner_name": { "$ref": "#/$defs/nullableString" },
-    "planner_prompt_version": { "$ref": "#/$defs/nullableString" },
-    "planner_rationale": { "$ref": "#/$defs/nullableString" },
-    "planning_source": { "type": ["string", "null"], "enum": ["planner", "replanner", null] },
-    "plan_steps": { "type": "array", "items": { "$ref": "#/$defs/planStep" }, "maxItems": 10000 },
-    "current_plan_step_index": { "type": ["integer", "null"], "minimum": 0, "maximum": 999999 },
-    "current_plan_step_id": { "$ref": "#/$defs/nullableString" },
-    "actor": { "$ref": "#/$defs/actor" },
-    "execution": { "$ref": "#/$defs/execution" },
-    "tool_calls": { "type": "array", "items": { "$ref": "#/$defs/toolCall" }, "maxItems": 1000000 },
-    "observations": { "type": "array", "items": { "$ref": "#/$defs/toolObservation" }, "maxItems": 1000000 },
-    "governance_passes": { "type": "array", "items": { "$ref": "#/$defs/governancePass" }, "maxItems": 1000000 },
-    "human_review": { "$ref": "#/$defs/humanReview" },
-    "external_communication": {
-      "oneOf": [{ "$ref": "#/$defs/externalCommunication" }, { "type": "null" }]
+    "trace_version": {
+      "const": "layer2_trace.v6"
     },
-    "external_execution": { "$ref": "#/$defs/externalExecution" }
+    "runtime": {
+      "$ref": "#/$defs/runtime"
+    },
+    "intake": {
+      "$ref": "#/$defs/intake"
+    },
+    "planner_name": {
+      "$ref": "#/$defs/nullableString"
+    },
+    "planner_prompt_version": {
+      "$ref": "#/$defs/nullableString"
+    },
+    "planner_rationale": {
+      "$ref": "#/$defs/nullableString"
+    },
+    "planning_source": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "planner",
+        "replanner",
+        null
+      ]
+    },
+    "plan_steps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/planStep"
+      },
+      "maxItems": 10000
+    },
+    "current_plan_step_index": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 999999
+    },
+    "current_plan_step_id": {
+      "$ref": "#/$defs/nullableString"
+    },
+    "actor": {
+      "$ref": "#/$defs/actor"
+    },
+    "execution": {
+      "$ref": "#/$defs/execution"
+    },
+    "tool_calls": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/toolCall"
+      },
+      "maxItems": 1000000
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/toolObservation"
+      },
+      "maxItems": 1000000
+    },
+    "governance_passes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/governancePass"
+      },
+      "maxItems": 1000000
+    },
+    "human_review": {
+      "$ref": "#/$defs/humanReview"
+    },
+    "external_communication": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/externalCommunication"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "external_execution": {
+      "$ref": "#/$defs/externalExecution"
+    }
   },
   "$defs": {
-    "nullableString": { "type": ["string", "null"] },
-    "nonEmptyString": { "type": "string", "minLength": 1 },
-    "stringArray": { "type": "array", "items": { "type": "string" }, "maxItems": 1000000 },
+    "nullableString": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stringArray": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 1000000
+    },
     "runtimeState": {
-      "enum": ["planning", "acting", "ready_next_step", "ready_tool_execution", "ready_governance", "ready_external_execution", "replanning", "waiting_human_review", "completed", "aborted"]
+      "enum": [
+        "planning",
+        "acting",
+        "ready_next_step",
+        "ready_tool_execution",
+        "ready_governance",
+        "ready_external_execution",
+        "replanning",
+        "waiting_human_review",
+        "completed",
+        "aborted"
+      ]
     },
     "actorResultType": {
-      "enum": ["propose_action", "intermediate_output", "step_completed", "ask_clarification", "blocked", "needs_replan"]
+      "enum": [
+        "propose_action",
+        "intermediate_output",
+        "step_completed",
+        "ask_clarification",
+        "blocked",
+        "needs_replan"
+      ]
     },
     "governanceReasonCode": {
       "enum": [
-        "allowed_by_policy", "read_only_allowed", "write_capability_blocked",
-        "read_only_mode_enforced", "local_output_allowed", "replan_allowed",
-        "ask_clarification_required", "human_review_required", "denied_by_policy",
-        "no_tool_request", "external_capability_requested",
-        "external_communication_review_required", "trajectory_degraded",
-        "evidence_gap_and_trajectory_degraded", "high_operational_risk_external",
-        "provider_failures_repeated", "repeated_recovery",
-        "behavioral_anomaly_needs_corroboration", "behavioral_corroborated_risk",
-        "judge_reject_output", "judge_reject_external_or_high_risk",
-        "judge_flag_external_draft", "policy_version_mismatch",
-        "required_pillar_unavailable", "opa_failure_fail_closed",
-        "static_policy_hard_deny", "read_only_mutation_blocked",
-        "database_profile_mutation_blocked", "sql_ambiguous_or_multiple",
-        "prohibited_destination", "judge_required_unavailable",
-        "judge_needs_revision", "judge_unsafe", "judge_uncertain",
-        "provider_runtime_action_missing", "invalid_or_missing_selected_evidence",
+        "allowed_by_policy",
+        "read_only_allowed",
+        "write_capability_blocked",
+        "read_only_mode_enforced",
+        "local_output_allowed",
+        "replan_allowed",
+        "ask_clarification_required",
+        "human_review_required",
+        "denied_by_policy",
+        "no_tool_request",
+        "external_capability_requested",
+        "external_communication_review_required",
+        "trajectory_degraded",
+        "evidence_gap_and_trajectory_degraded",
+        "high_operational_risk_external",
+        "provider_failures_repeated",
+        "repeated_recovery",
+        "behavioral_anomaly_needs_corroboration",
+        "behavioral_corroborated_risk",
+        "judge_reject_output",
+        "judge_reject_external_or_high_risk",
+        "judge_flag_external_draft",
+        "policy_version_mismatch",
+        "required_pillar_unavailable",
+        "opa_failure_fail_closed",
+        "static_policy_hard_deny",
+        "read_only_mutation_blocked",
+        "database_profile_mutation_blocked",
+        "sql_ambiguous_or_multiple",
+        "prohibited_destination",
+        "judge_required_unavailable",
+        "judge_needs_revision",
+        "judge_unsafe",
+        "judge_uncertain",
+        "provider_runtime_action_missing",
+        "invalid_or_missing_selected_evidence",
         "evidence_request_limit_reached",
-        "invalid_evidence_ref", "missing_evidence_ref", "duplicate_evidence_ref",
-        "empty_observation_content", "unresolvable_provenance", "unknown_step_lineage",
-        "candidate_digest_mismatch", "missing_evidence_burden",
-        "insufficient_independent_sources", "retrieved_content_missing",
-        "freshness_metadata_missing", "stale_evidence", "future_source_timestamp",
+        "invalid_evidence_ref",
+        "missing_evidence_ref",
+        "duplicate_evidence_ref",
+        "empty_observation_content",
+        "unresolvable_provenance",
+        "unknown_step_lineage",
+        "candidate_digest_mismatch",
+        "missing_evidence_burden",
+        "insufficient_independent_sources",
+        "retrieved_content_missing",
+        "freshness_metadata_missing",
+        "stale_evidence",
+        "future_source_timestamp",
         "title_only_evidence_fragility",
-        "circular_evidence_reference", "unanchored_literals_in_selection",
+        "circular_evidence_reference",
+        "unanchored_literals_in_selection",
         "unanchored_literals_in_universe",
-        "actor_requested_replan", "replan_request_stalled",
-        "replan_ceiling_reached", "consecutive_tool_failures", "action_churn",
-        "unchanged_candidate_resubmission", "rejected_candidate_resubmitted",
+        "actor_requested_replan",
+        "replan_request_stalled",
+        "replan_ceiling_reached",
+        "consecutive_tool_failures",
+        "action_churn",
+        "unchanged_candidate_resubmission",
+        "rejected_candidate_resubmitted",
+        "unresolvable_revision",
         "external_low_actor_self_confidence",
-        "action_revision_limit_reached", "capability_approval_required"
+        "action_revision_limit_reached",
+        "capability_approval_required"
       ]
     },
     "runtime": {
       "type": "object",
-      "required": ["thread_id", "current_state", "termination_reason", "bootstrap_completed", "runtime_flags", "step_history", "actor_turn_count", "tool_call_count"],
+      "required": [
+        "thread_id",
+        "current_state",
+        "termination_reason",
+        "bootstrap_completed",
+        "runtime_flags",
+        "step_history",
+        "actor_turn_count",
+        "tool_call_count"
+      ],
       "properties": {
-        "thread_id": { "$ref": "#/$defs/nonEmptyString" },
-        "current_state": { "$ref": "#/$defs/runtimeState" },
+        "thread_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "current_state": {
+          "$ref": "#/$defs/runtimeState"
+        },
         "termination_reason": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "enum": [
             "governance_denied",
             "human_abort",
@@ -93,65 +260,190 @@
             null
           ]
         },
-        "bootstrap_completed": { "type": "boolean" },
+        "bootstrap_completed": {
+          "type": "boolean"
+        },
         "runtime_flags": {
           "type": "array",
-          "items": { "enum": ["clarification_required", "incomplete_intake", "read_only_execution", "high_sensitivity", "extractability_limited", "external_execution_reconciliation_required"] },
+          "items": {
+            "enum": [
+              "clarification_required",
+              "incomplete_intake",
+              "read_only_execution",
+              "high_sensitivity",
+              "extractability_limited",
+              "external_execution_reconciliation_required"
+            ]
+          },
           "uniqueItems": true,
           "maxItems": 6
         },
-        "step_history": { "type": "array", "items": { "$ref": "#/$defs/stepRecord" }, "maxItems": 1000000 },
-        "actor_turn_count": { "type": "integer", "minimum": 0, "maximum": 1000000 },
-        "tool_call_count": { "type": "integer", "minimum": 0, "maximum": 1000000 }
+        "step_history": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/stepRecord"
+          },
+          "maxItems": 1000000
+        },
+        "actor_turn_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "tool_call_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        }
       },
       "additionalProperties": false
     },
     "stepRecord": {
       "type": "object",
-      "required": ["step_index", "runtime_state", "node_name", "summary"],
+      "required": [
+        "step_index",
+        "runtime_state",
+        "node_name",
+        "summary"
+      ],
       "properties": {
-        "step_index": { "type": "integer", "minimum": 0, "maximum": 1000000 },
-        "runtime_state": { "$ref": "#/$defs/runtimeState" },
-        "node_name": { "$ref": "#/$defs/nonEmptyString" },
-        "summary": { "type": "string" }
+        "step_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "runtime_state": {
+          "$ref": "#/$defs/runtimeState"
+        },
+        "node_name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "summary": {
+          "type": "string"
+        }
       },
       "additionalProperties": false
     },
     "intake": {
       "type": "object",
-      "required": ["goal", "context", "sensitivity", "success_criteria", "constraints", "parse_status", "parser_name", "prompt_version", "schema_version", "policy_profile_name", "confidence_threshold", "read_only_mode", "execution_intent"],
+      "required": [
+        "goal",
+        "context",
+        "sensitivity",
+        "success_criteria",
+        "constraints",
+        "parse_status",
+        "parser_name",
+        "prompt_version",
+        "schema_version",
+        "policy_profile_name",
+        "confidence_threshold",
+        "read_only_mode",
+        "execution_intent"
+      ],
       "properties": {
-        "goal": { "$ref": "#/$defs/nonEmptyString" },
-        "context": { "type": "string" },
-        "sensitivity": { "enum": ["low", "medium", "high", "critical"] },
-        "success_criteria": { "$ref": "#/$defs/stringArray" },
-        "constraints": { "$ref": "#/$defs/stringArray" },
-        "parse_status": { "enum": ["complete", "partial", "needs_clarification", "failed"] },
-        "parser_name": { "$ref": "#/$defs/nonEmptyString" },
-        "prompt_version": { "$ref": "#/$defs/nonEmptyString" },
-        "schema_version": { "$ref": "#/$defs/nonEmptyString" },
-        "policy_profile_name": { "$ref": "#/$defs/nonEmptyString" },
-        "confidence_threshold": { "type": "number", "minimum": 0, "maximum": 1 },
-        "read_only_mode": { "type": "boolean" },
-        "execution_intent": { "enum": ["proposal_only", "execute_after_governance"] }
+        "goal": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "context": {
+          "type": "string"
+        },
+        "sensitivity": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "success_criteria": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "constraints": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "parse_status": {
+          "enum": [
+            "complete",
+            "partial",
+            "needs_clarification",
+            "failed"
+          ]
+        },
+        "parser_name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "prompt_version": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "schema_version": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "policy_profile_name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "confidence_threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "read_only_mode": {
+          "type": "boolean"
+        },
+        "execution_intent": {
+          "enum": [
+            "proposal_only",
+            "execute_after_governance"
+          ]
+        }
       },
       "additionalProperties": false
     },
     "planStep": {
       "type": "object",
-      "required": ["step_id", "objective", "rationale", "expected_outcome", "status"],
+      "required": [
+        "step_id",
+        "objective",
+        "rationale",
+        "expected_outcome",
+        "status"
+      ],
       "properties": {
-        "step_id": { "$ref": "#/$defs/nonEmptyString" },
-        "objective": { "$ref": "#/$defs/nonEmptyString" },
-        "rationale": { "type": "string" },
-        "expected_outcome": { "type": "string" },
-        "status": { "enum": ["pending", "in_progress", "completed", "blocked", "skipped"] },
-        "produces_factual_claims": { "type": "boolean" },
-        "produces_governed_external_effect_proposal": { "type": "boolean" },
+        "step_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "objective": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "rationale": {
+          "type": "string"
+        },
+        "expected_outcome": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "in_progress",
+            "completed",
+            "blocked",
+            "skipped"
+          ]
+        },
+        "produces_factual_claims": {
+          "type": "boolean"
+        },
+        "produces_governed_external_effect_proposal": {
+          "type": "boolean"
+        },
         "evidence_burden": {
           "oneOf": [
-            { "$ref": "#/$defs/evidenceBurden" },
-            { "type": "null" }
+            {
+              "$ref": "#/$defs/evidenceBurden"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -159,121 +451,399 @@
     },
     "evidenceBurden": {
       "type": "object",
-      "required": ["min_independent_sources", "require_retrieved_content", "freshness_window_days"],
+      "required": [
+        "min_independent_sources",
+        "require_retrieved_content",
+        "freshness_window_days"
+      ],
       "properties": {
-        "min_independent_sources": { "type": "integer", "minimum": 1 },
-        "require_retrieved_content": { "type": "boolean" },
-        "freshness_window_days": { "type": ["integer", "null"], "minimum": 1 }
+        "min_independent_sources": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "require_retrieved_content": {
+          "type": "boolean"
+        },
+        "freshness_window_days": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "insufficiency_declaration_permitted": {
+          "type": "boolean"
+        }
       },
       "additionalProperties": false
     },
     "actor": {
       "type": "object",
-      "required": ["actor_name", "actor_prompt_version", "result_type", "plan_step_id", "summary", "capability_mode", "external_impact", "output_text", "blocking_reason", "proposed_tool_name", "actor_self_confidence", "selected_evidence_refs"],
+      "required": [
+        "actor_name",
+        "actor_prompt_version",
+        "result_type",
+        "plan_step_id",
+        "summary",
+        "capability_mode",
+        "external_impact",
+        "output_text",
+        "blocking_reason",
+        "proposed_tool_name",
+        "actor_self_confidence",
+        "selected_evidence_refs"
+      ],
       "properties": {
-        "actor_name": { "$ref": "#/$defs/nullableString" },
-        "actor_prompt_version": { "$ref": "#/$defs/nullableString" },
-        "result_type": { "oneOf": [{ "$ref": "#/$defs/actorResultType" }, { "type": "null" }] },
-        "plan_step_id": { "$ref": "#/$defs/nullableString" },
-        "summary": { "$ref": "#/$defs/nullableString" },
-        "capability_mode": { "type": ["string", "null"], "enum": ["none", "read_only", "write", null] },
-        "external_impact": { "type": ["boolean", "null"] },
-        "output_text": { "$ref": "#/$defs/nullableString" },
-        "blocking_reason": { "$ref": "#/$defs/nullableString" },
-        "proposed_tool_name": { "$ref": "#/$defs/nullableString" },
-        "actor_self_confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
-        "selected_evidence_refs": { "$ref": "#/$defs/stringArray" },
-        "external_operation": { "oneOf": [{ "$ref": "#/$defs/externalOperationProposal" }, { "type": "null" }] }
+        "actor_name": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "actor_prompt_version": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "result_type": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/actorResultType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "plan_step_id": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "summary": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "capability_mode": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "none",
+            "read_only",
+            "write",
+            null
+          ]
+        },
+        "external_impact": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "output_text": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "blocking_reason": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "proposed_tool_name": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "actor_self_confidence": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "selected_evidence_refs": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "external_operation": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/externalOperationProposal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
       },
       "additionalProperties": false
     },
     "execution": {
       "type": "object",
-      "required": ["final_output_text", "executed_steps", "scratchpad", "step_validations"],
+      "required": [
+        "final_output_text",
+        "executed_steps",
+        "scratchpad",
+        "step_validations"
+      ],
       "properties": {
-        "final_output_text": { "$ref": "#/$defs/nullableString" },
-        "executed_steps": { "type": "array", "items": { "$ref": "#/$defs/executedStep" }, "maxItems": 1000000 },
-        "scratchpad": { "type": "array", "items": { "$ref": "#/$defs/scratchpadEntry" }, "maxItems": 1000000 },
-        "step_validations": { "type": "array", "items": { "$ref": "#/$defs/stepValidation" }, "maxItems": 1000000 }
+        "final_output_text": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "executed_steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/executedStep"
+          },
+          "maxItems": 1000000
+        },
+        "scratchpad": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/scratchpadEntry"
+          },
+          "maxItems": 1000000
+        },
+        "step_validations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/stepValidation"
+          },
+          "maxItems": 1000000
+        }
       },
       "additionalProperties": false
     },
     "executedStep": {
       "type": "object",
-      "required": ["step_id", "objective", "result_type", "summary", "output_text"],
+      "required": [
+        "step_id",
+        "objective",
+        "result_type",
+        "summary",
+        "output_text"
+      ],
       "properties": {
-        "step_id": { "$ref": "#/$defs/nonEmptyString" },
-        "objective": { "$ref": "#/$defs/nonEmptyString" },
-        "result_type": { "$ref": "#/$defs/actorResultType" },
-        "summary": { "type": "string" },
-        "output_text": { "$ref": "#/$defs/nullableString" }
+        "step_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "objective": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "result_type": {
+          "$ref": "#/$defs/actorResultType"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "output_text": {
+          "$ref": "#/$defs/nullableString"
+        }
       },
       "additionalProperties": false
     },
     "scratchpadEntry": {
       "type": "object",
-      "required": ["turn_index", "plan_step_id", "entry_type", "summary", "evidence_refs"],
+      "required": [
+        "turn_index",
+        "plan_step_id",
+        "entry_type",
+        "summary",
+        "evidence_refs"
+      ],
       "properties": {
-        "turn_index": { "type": "integer", "minimum": 1, "maximum": 1000000 },
-        "plan_step_id": { "$ref": "#/$defs/nonEmptyString" },
-        "entry_type": { "enum": ["observation", "tool_decision", "progress_note", "uncertainty", "completion_rationale"] },
-        "summary": { "type": "string" },
-        "evidence_refs": { "$ref": "#/$defs/stringArray" }
+        "turn_index": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "plan_step_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "entry_type": {
+          "enum": [
+            "observation",
+            "tool_decision",
+            "progress_note",
+            "uncertainty",
+            "completion_rationale"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "evidence_refs": {
+          "$ref": "#/$defs/stringArray"
+        }
       },
       "additionalProperties": false
     },
     "stepValidation": {
       "type": "object",
-      "required": ["plan_step_id", "actor_self_confidence", "evidence_refs", "rationale_summary", "residual_uncertainty"],
+      "required": [
+        "plan_step_id",
+        "actor_self_confidence",
+        "evidence_refs",
+        "rationale_summary",
+        "residual_uncertainty"
+      ],
       "properties": {
-        "plan_step_id": { "$ref": "#/$defs/nonEmptyString" },
-        "actor_self_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
-        "evidence_refs": { "$ref": "#/$defs/stringArray" },
-        "rationale_summary": { "type": "string" },
-        "residual_uncertainty": { "$ref": "#/$defs/nullableString" }
+        "plan_step_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "actor_self_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "evidence_refs": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "rationale_summary": {
+          "type": "string"
+        },
+        "residual_uncertainty": {
+          "$ref": "#/$defs/nullableString"
+        }
       },
       "additionalProperties": false
     },
     "toolRequestFields": {
       "type": "object",
-      "required": ["request_id", "plan_step_id", "tool_name", "reason", "query", "url", "text", "path", "expression", "timezone", "limit", "max_results", "extractive_goal", "document_id", "dataset_id"],
+      "required": [
+        "request_id",
+        "plan_step_id",
+        "tool_name",
+        "reason",
+        "query",
+        "url",
+        "text",
+        "path",
+        "expression",
+        "timezone",
+        "limit",
+        "max_results",
+        "extractive_goal",
+        "document_id",
+        "dataset_id"
+      ],
       "properties": {
-        "request_id": { "$ref": "#/$defs/nonEmptyString" },
-        "plan_step_id": { "$ref": "#/$defs/nonEmptyString" },
-        "tool_name": { "$ref": "#/$defs/nonEmptyString" },
-        "reason": { "type": "string" },
-        "query": { "$ref": "#/$defs/nullableString" },
-        "url": { "$ref": "#/$defs/nullableString" },
-        "text": { "$ref": "#/$defs/nullableString" },
-        "path": { "$ref": "#/$defs/nullableString" },
-        "expression": { "$ref": "#/$defs/nullableString" },
-        "timezone": { "$ref": "#/$defs/nullableString" },
-        "limit": { "type": ["integer", "null"], "minimum": 1, "maximum": 1000000 },
-        "max_results": { "type": "integer", "minimum": 1, "maximum": 1000 },
-        "extractive_goal": { "$ref": "#/$defs/nullableString" },
-        "document_id": { "$ref": "#/$defs/nullableString" },
-        "dataset_id": { "$ref": "#/$defs/nullableString" }
+        "request_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "plan_step_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "tool_name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "query": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "url": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "text": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "path": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "expression": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "timezone": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "limit": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "max_results": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "extractive_goal": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "document_id": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "dataset_id": {
+          "$ref": "#/$defs/nullableString"
+        }
       }
     },
     "toolRequest": {
-      "allOf": [{ "$ref": "#/$defs/toolRequestFields" }],
+      "allOf": [
+        {
+          "$ref": "#/$defs/toolRequestFields"
+        }
+      ],
       "unevaluatedProperties": false
     },
     "toolCall": {
       "allOf": [
-        { "$ref": "#/$defs/toolRequestFields" },
+        {
+          "$ref": "#/$defs/toolRequestFields"
+        },
         {
           "type": "object",
-          "required": ["success", "summary", "content", "error_message", "error_code", "truncated", "extractability_limited", "observations"],
+          "required": [
+            "success",
+            "summary",
+            "content",
+            "error_message",
+            "error_code",
+            "truncated",
+            "extractability_limited",
+            "observations"
+          ],
           "properties": {
-            "success": { "type": ["boolean", "null"] },
-            "summary": { "$ref": "#/$defs/nullableString" },
-            "content": { "$ref": "#/$defs/nullableString" },
-            "error_message": { "$ref": "#/$defs/nullableString" },
-            "error_code": { "type": ["string", "null"], "enum": ["forbidden", "byte_limit", "bot_challenge", "empty_extraction", "timeout", "circuit_open", "duplicate_request", "unavailable", null] },
-            "truncated": { "type": "boolean" },
-            "extractability_limited": { "type": "boolean" },
-            "observations": { "type": "array", "items": { "$ref": "#/$defs/toolObservation" }, "maxItems": 1000000 }
+            "success": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "summary": {
+              "$ref": "#/$defs/nullableString"
+            },
+            "content": {
+              "$ref": "#/$defs/nullableString"
+            },
+            "error_message": {
+              "$ref": "#/$defs/nullableString"
+            },
+            "error_code": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "forbidden",
+                "byte_limit",
+                "bot_challenge",
+                "empty_extraction",
+                "timeout",
+                "circuit_open",
+                "duplicate_request",
+                "target_not_found",
+                "unanchored_target",
+                "unavailable",
+                null
+              ]
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "extractability_limited": {
+              "type": "boolean"
+            },
+            "observations": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/toolObservation"
+              },
+              "maxItems": 1000000
+            }
           }
         }
       ],
@@ -281,49 +851,173 @@
     },
     "toolObservation": {
       "type": "object",
-      "required": ["observation_id", "content", "locator"],
+      "required": [
+        "observation_id",
+        "content",
+        "locator"
+      ],
       "properties": {
-        "observation_id": { "$ref": "#/$defs/nonEmptyString" },
-        "content": { "type": "string", "minLength": 1 },
-        "locator": { "$ref": "#/$defs/nullableString" },
-        "source_timestamp": { "type": ["string", "null"], "format": "date-time" }
+        "observation_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1
+        },
+        "locator": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "retrieval_kind": {
+          "enum": [
+            "search_snippet",
+            "fetched_document",
+            "controlled_resource",
+            "mcp_result",
+            "capability_result"
+          ]
+        },
+        "source_timestamp": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
       },
       "additionalProperties": false
     },
     "governancePass": {
       "type": "object",
-      "required": ["pass_index", "evaluated_plan_step_id", "evaluated_actor_result_type", "evaluated_tool_name", "evaluated_operation_digest", "governance_input_schema_version", "policy_bundle_version", "policy_config_version", "pillar_requirements", "pillar_results", "pillar_errors", "directive", "policy_decision", "requires_human_review", "reason_codes", "selected_reason", "rejected_alternatives", "safety_invariants", "judge_admission"],
+      "required": [
+        "pass_index",
+        "evaluated_plan_step_id",
+        "evaluated_actor_result_type",
+        "evaluated_tool_name",
+        "evaluated_operation_digest",
+        "governance_input_schema_version",
+        "policy_bundle_version",
+        "policy_config_version",
+        "pillar_requirements",
+        "pillar_results",
+        "pillar_errors",
+        "directive",
+        "policy_decision",
+        "requires_human_review",
+        "reason_codes",
+        "selected_reason",
+        "rejected_alternatives",
+        "safety_invariants",
+        "judge_admission"
+      ],
       "properties": {
-        "pass_index": { "type": "integer", "minimum": 1, "maximum": 1000000 },
-        "evaluated_plan_step_id": { "$ref": "#/$defs/nullableString" },
-        "evaluated_actor_result_type": { "$ref": "#/$defs/actorResultType" },
-        "evaluated_tool_name": { "$ref": "#/$defs/nullableString" },
-        "evaluated_operation_digest": { "$ref": "#/$defs/nullableString" },
-        "governance_input_schema_version": { "$ref": "#/$defs/nullableString" },
-        "policy_bundle_version": { "$ref": "#/$defs/nonEmptyString" },
-        "policy_config_version": { "$ref": "#/$defs/nullableString" },
-        "pillar_requirements": { "type": "object", "additionalProperties": { "type": "boolean" } },
-        "pillar_results": { "type": "object", "additionalProperties": { "type": "object" } },
-        "pillar_errors": { "type": "object", "additionalProperties": { "type": "string" } },
-        "directive": { "enum": ["continue", "continue_read_only", "revise_action", "request_more_evidence", "replan", "ask_user_clarification", "wait_human_review", "stop"] },
-        "policy_decision": { "enum": ["allow", "allow_read_only", "ask_clarification", "require_human_review", "deny"] },
-        "requires_human_review": { "type": "boolean" },
-        "reason_codes": { "type": "array", "items": { "$ref": "#/$defs/governanceReasonCode" }, "maxItems": 1000000 },
-        "selected_reason": { "type": "string" },
-        "rejected_alternatives": { "type": "object", "additionalProperties": { "type": "string" } },
-        "safety_invariants": { "$ref": "#/$defs/stringArray" },
+        "pass_index": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "evaluated_plan_step_id": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "evaluated_actor_result_type": {
+          "$ref": "#/$defs/actorResultType"
+        },
+        "evaluated_tool_name": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "evaluated_operation_digest": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "governance_input_schema_version": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "policy_bundle_version": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "policy_config_version": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "pillar_requirements": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        },
+        "pillar_results": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        },
+        "pillar_errors": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "directive": {
+          "enum": [
+            "continue",
+            "continue_read_only",
+            "revise_action",
+            "request_more_evidence",
+            "replan",
+            "ask_user_clarification",
+            "wait_human_review",
+            "stop"
+          ]
+        },
+        "policy_decision": {
+          "enum": [
+            "allow",
+            "allow_read_only",
+            "ask_clarification",
+            "require_human_review",
+            "deny"
+          ]
+        },
+        "requires_human_review": {
+          "type": "boolean"
+        },
+        "reason_codes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/governanceReasonCode"
+          },
+          "maxItems": 1000000
+        },
+        "selected_reason": {
+          "type": "string"
+        },
+        "rejected_alternatives": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "safety_invariants": {
+          "$ref": "#/$defs/stringArray"
+        },
         "judge_admission": {
           "oneOf": [
             {
               "type": "object",
-              "required": ["required", "reason"],
+              "required": [
+                "required",
+                "reason"
+              ],
               "properties": {
-                "required": { "type": "boolean" },
-                "reason": { "$ref": "#/$defs/nonEmptyString" }
+                "required": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "$ref": "#/$defs/nonEmptyString"
+                }
               },
               "additionalProperties": false
             },
-            { "type": "null" }
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -331,225 +1025,701 @@
     },
     "externalCommunicationDraft": {
       "type": "object",
-      "required": ["channel", "recipient", "subject", "body", "cc", "bcc", "metadata"],
+      "required": [
+        "channel",
+        "recipient",
+        "subject",
+        "body",
+        "cc",
+        "bcc",
+        "metadata"
+      ],
       "properties": {
-        "channel": { "$ref": "#/$defs/nonEmptyString" },
-        "recipient": { "$ref": "#/$defs/nullableString" },
-        "subject": { "$ref": "#/$defs/nullableString" },
-        "body": { "$ref": "#/$defs/nullableString" },
-        "cc": { "$ref": "#/$defs/stringArray" },
-        "bcc": { "$ref": "#/$defs/stringArray" },
-        "metadata": { "type": "object" }
+        "channel": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "recipient": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "subject": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "body": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "cc": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "bcc": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "metadata": {
+          "type": "object"
+        }
       },
       "additionalProperties": false
     },
     "humanReviewExternalEdit": {
       "type": "object",
-      "required": ["draft", "note"],
+      "required": [
+        "draft",
+        "note"
+      ],
       "properties": {
-        "draft": { "$ref": "#/$defs/externalCommunicationDraft" },
-        "note": { "$ref": "#/$defs/nullableString" }
+        "draft": {
+          "$ref": "#/$defs/externalCommunicationDraft"
+        },
+        "note": {
+          "$ref": "#/$defs/nullableString"
+        }
       },
       "additionalProperties": false
     },
     "humanReviewRequest": {
       "type": "object",
-      "required": ["request_id", "thread_id", "current_state", "resume_state", "current_plan_step_id", "current_plan_step_objective", "actor_result_type", "current_tool_request", "governance_directive", "governance_summary", "static_policy_summary", "dynamic_policy_summary", "behavioral_summary", "judge_summary", "oversight_summary", "external_communication_target_type", "external_communication_draft", "reason_codes", "allowed_decisions", "review_summary"],
+      "required": [
+        "request_id",
+        "thread_id",
+        "current_state",
+        "resume_state",
+        "current_plan_step_id",
+        "current_plan_step_objective",
+        "actor_result_type",
+        "current_tool_request",
+        "governance_directive",
+        "governance_summary",
+        "static_policy_summary",
+        "dynamic_policy_summary",
+        "behavioral_summary",
+        "judge_summary",
+        "oversight_summary",
+        "external_communication_target_type",
+        "external_communication_draft",
+        "reason_codes",
+        "allowed_decisions",
+        "review_summary"
+      ],
       "properties": {
-        "request_id": { "$ref": "#/$defs/nonEmptyString" },
-        "thread_id": { "$ref": "#/$defs/nonEmptyString" },
-        "current_state": { "$ref": "#/$defs/runtimeState" },
-        "resume_state": { "$ref": "#/$defs/runtimeState" },
-        "current_plan_step_id": { "$ref": "#/$defs/nullableString" },
-        "current_plan_step_objective": { "$ref": "#/$defs/nullableString" },
-        "actor_result_type": { "oneOf": [{ "$ref": "#/$defs/actorResultType" }, { "type": "null" }] },
-        "current_tool_request": { "oneOf": [{ "$ref": "#/$defs/toolRequest" }, { "type": "null" }] },
-        "governance_directive": { "type": ["string", "null"], "enum": ["continue", "continue_read_only", "revise_action", "request_more_evidence", "replan", "ask_user_clarification", "wait_human_review", "stop", null] },
-        "governance_summary": { "$ref": "#/$defs/nullableString" },
-        "static_policy_summary": { "$ref": "#/$defs/nullableString" },
-        "dynamic_policy_summary": { "$ref": "#/$defs/nullableString" },
-        "behavioral_summary": { "$ref": "#/$defs/nullableString" },
-        "judge_summary": { "$ref": "#/$defs/nullableString" },
-        "oversight_summary": { "$ref": "#/$defs/nullableString" },
-        "external_communication_target_type": { "$ref": "#/$defs/nullableString" },
-        "external_communication_draft": { "oneOf": [{ "$ref": "#/$defs/externalCommunicationDraft" }, { "type": "null" }] },
-        "reason_codes": { "$ref": "#/$defs/stringArray" },
+        "request_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "thread_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "current_state": {
+          "$ref": "#/$defs/runtimeState"
+        },
+        "resume_state": {
+          "$ref": "#/$defs/runtimeState"
+        },
+        "current_plan_step_id": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "current_plan_step_objective": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "actor_result_type": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/actorResultType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "current_tool_request": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/toolRequest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "governance_directive": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "continue",
+            "continue_read_only",
+            "revise_action",
+            "request_more_evidence",
+            "replan",
+            "ask_user_clarification",
+            "wait_human_review",
+            "stop",
+            null
+          ]
+        },
+        "governance_summary": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "static_policy_summary": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "dynamic_policy_summary": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "behavioral_summary": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "judge_summary": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "oversight_summary": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "external_communication_target_type": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "external_communication_draft": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/externalCommunicationDraft"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason_codes": {
+          "$ref": "#/$defs/stringArray"
+        },
         "allowed_decisions": {
           "type": "array",
-          "items": { "enum": ["approve_continue", "approve_continue_read_only", "modify_and_continue", "request_more_evidence", "replan", "ask_clarification", "abort"] },
+          "items": {
+            "enum": [
+              "approve_continue",
+              "approve_continue_read_only",
+              "modify_and_continue",
+              "request_more_evidence",
+              "replan",
+              "ask_clarification",
+              "abort"
+            ]
+          },
           "uniqueItems": true,
           "maxItems": 7
         },
-        "review_summary": { "$ref": "#/$defs/nullableString" },
-        "operation_id": { "$ref": "#/$defs/nullableString" },
-        "operation_payload_digest": { "$ref": "#/$defs/nullableString" },
-        "operation_proposal_summary": { "$ref": "#/$defs/nullableString" },
-        "operation_target": { "$ref": "#/$defs/nullableString" },
-        "external_operation_proposal": { "oneOf": [{ "$ref": "#/$defs/externalOperationProposal" }, { "type": "null" }] },
-        "judge_findings": { "$ref": "#/$defs/stringArray" }
+        "review_summary": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "operation_id": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "operation_payload_digest": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "operation_proposal_summary": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "operation_target": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "external_operation_proposal": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/externalOperationProposal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "judge_findings": {
+          "$ref": "#/$defs/stringArray"
+        }
       },
       "additionalProperties": false
     },
     "humanReviewDecision": {
       "type": "object",
-      "required": ["request_id", "decision_type", "note", "clarification_text", "external_communication_edit", "reviewer_id"],
+      "required": [
+        "request_id",
+        "decision_type",
+        "note",
+        "clarification_text",
+        "external_communication_edit",
+        "reviewer_id"
+      ],
       "properties": {
-        "request_id": { "$ref": "#/$defs/nonEmptyString" },
-        "decision_type": { "enum": ["approve_continue", "approve_continue_read_only", "modify_and_continue", "request_more_evidence", "replan", "ask_clarification", "abort"] },
-        "note": { "$ref": "#/$defs/nullableString" },
-        "clarification_text": { "$ref": "#/$defs/nullableString" },
-        "external_communication_edit": { "oneOf": [{ "$ref": "#/$defs/humanReviewExternalEdit" }, { "type": "null" }] },
-        "reviewer_id": { "$ref": "#/$defs/nullableString" },
-        "approved_operation_digest": { "$ref": "#/$defs/nullableString" },
-        "external_operation_edit": { "type": ["object", "null"] }
+        "request_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "decision_type": {
+          "enum": [
+            "approve_continue",
+            "approve_continue_read_only",
+            "modify_and_continue",
+            "request_more_evidence",
+            "replan",
+            "ask_clarification",
+            "abort"
+          ]
+        },
+        "note": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "clarification_text": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "external_communication_edit": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/humanReviewExternalEdit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reviewer_id": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "approved_operation_digest": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "external_operation_edit": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
       },
       "additionalProperties": false
     },
     "externalOperationProposal": {
       "type": "object",
       "required": [
-        "operation_id", "plan_step_id", "capability_id", "boundary",
-        "operation_family", "normalized_effect", "execution_candidate", "target",
-        "payload", "payload_preview", "payload_digest", "facts_provenance",
-        "capability_profile_id", "capability_profile_version", "modifiable"
+        "operation_id",
+        "plan_step_id",
+        "capability_id",
+        "boundary",
+        "operation_family",
+        "normalized_effect",
+        "execution_candidate",
+        "target",
+        "payload",
+        "payload_preview",
+        "payload_digest",
+        "facts_provenance",
+        "capability_profile_id",
+        "capability_profile_version",
+        "modifiable"
       ],
       "properties": {
-        "operation_id": { "$ref": "#/$defs/nonEmptyString" },
-        "plan_step_id": { "$ref": "#/$defs/nonEmptyString" },
-        "capability_id": { "$ref": "#/$defs/nonEmptyString" },
-        "boundary": { "enum": ["local", "evidence_read", "governed_external"] },
-        "operation_family": { "enum": ["communication", "database", "generic"] },
-        "normalized_effect": { "enum": ["read", "create", "update", "delete", "truncate", "send", "publish", "execute", "unknown"] },
-        "execution_candidate": { "type": "boolean" },
-        "target": { "type": "object" },
-        "payload": { "type": "object" },
-        "payload_preview": { "type": "string", "maxLength": 4096 },
-        "payload_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "facts_provenance": { "type": "object" },
-        "capability_profile_id": { "$ref": "#/$defs/nullableString" },
-        "capability_profile_version": { "$ref": "#/$defs/nullableString" },
-        "modifiable": { "type": "boolean" }
+        "operation_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "plan_step_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "capability_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "boundary": {
+          "enum": [
+            "local",
+            "evidence_read",
+            "governed_external"
+          ]
+        },
+        "operation_family": {
+          "enum": [
+            "communication",
+            "database",
+            "generic"
+          ]
+        },
+        "normalized_effect": {
+          "enum": [
+            "read",
+            "create",
+            "update",
+            "delete",
+            "truncate",
+            "send",
+            "publish",
+            "execute",
+            "unknown"
+          ]
+        },
+        "execution_candidate": {
+          "type": "boolean"
+        },
+        "target": {
+          "type": "object"
+        },
+        "payload": {
+          "type": "object"
+        },
+        "payload_preview": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "payload_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "facts_provenance": {
+          "type": "object"
+        },
+        "capability_profile_id": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "capability_profile_version": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "modifiable": {
+          "type": "boolean"
+        }
       },
       "additionalProperties": false
     },
     "humanReview": {
       "type": "object",
-      "required": ["pending_request", "last_request", "last_decision", "decision_history"],
+      "required": [
+        "pending_request",
+        "last_request",
+        "last_decision",
+        "decision_history"
+      ],
       "properties": {
-        "pending_request": { "oneOf": [{ "$ref": "#/$defs/humanReviewRequest" }, { "type": "null" }] },
-        "last_request": { "oneOf": [{ "$ref": "#/$defs/humanReviewRequest" }, { "type": "null" }] },
-        "last_decision": { "oneOf": [{ "$ref": "#/$defs/humanReviewDecision" }, { "type": "null" }] },
-        "decision_history": { "type": "array", "items": { "$ref": "#/$defs/humanReviewDecision" }, "maxItems": 1000000 }
+        "pending_request": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/humanReviewRequest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_request": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/humanReviewRequest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_decision": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/humanReviewDecision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decision_history": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/humanReviewDecision"
+          },
+          "maxItems": 1000000
+        }
       },
       "additionalProperties": false
     },
     "externalCommunication": {
       "type": "object",
-      "required": ["phase", "draft", "last_applied_edit", "edit_history", "last_transition_summary"],
+      "required": [
+        "phase",
+        "draft",
+        "last_applied_edit",
+        "edit_history",
+        "last_transition_summary"
+      ],
       "properties": {
-        "phase": { "enum": ["evidence_collection", "draft_in_progress", "draft_proposal", "human_review_required", "approved_draft", "approved_for_execution", "executed", "execution_failed", "indeterminate", "blocked"] },
-        "draft": { "oneOf": [{ "$ref": "#/$defs/externalCommunicationDraft" }, { "type": "null" }] },
-        "last_applied_edit": { "oneOf": [{ "$ref": "#/$defs/humanReviewExternalEdit" }, { "type": "null" }] },
-        "edit_history": { "type": "array", "items": { "$ref": "#/$defs/humanReviewExternalEdit" }, "maxItems": 1000000 },
-        "last_transition_summary": { "$ref": "#/$defs/nullableString" }
+        "phase": {
+          "enum": [
+            "evidence_collection",
+            "draft_in_progress",
+            "draft_proposal",
+            "human_review_required",
+            "approved_draft",
+            "approved_for_execution",
+            "executed",
+            "execution_failed",
+            "indeterminate",
+            "blocked"
+          ]
+        },
+        "draft": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/externalCommunicationDraft"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_applied_edit": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/humanReviewExternalEdit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "edit_history": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/humanReviewExternalEdit"
+          },
+          "maxItems": 1000000
+        },
+        "last_transition_summary": {
+          "$ref": "#/$defs/nullableString"
+        }
       },
       "additionalProperties": false
     },
     "externalExecutionRequest": {
       "type": "object",
       "required": [
-        "operation_id", "capability_id", "proposal", "current_payload_digest",
-        "authorized_payload_digest", "execution_intent", "idempotency_key",
-        "authorization_source", "reviewer_id", "governance_decision_reference",
+        "operation_id",
+        "capability_id",
+        "proposal",
+        "current_payload_digest",
+        "authorized_payload_digest",
+        "execution_intent",
+        "idempotency_key",
+        "authorization_source",
+        "reviewer_id",
+        "governance_decision_reference",
         "attempt_scope"
       ],
       "properties": {
-        "operation_id": { "$ref": "#/$defs/nonEmptyString" },
-        "capability_id": { "$ref": "#/$defs/nonEmptyString" },
-        "proposal": { "$ref": "#/$defs/externalOperationProposal" },
-        "current_payload_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "authorized_payload_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "execution_intent": { "const": "execute_after_governance" },
-        "idempotency_key": { "$ref": "#/$defs/nonEmptyString" },
-        "authorization_source": { "enum": ["opa", "human_review"] },
-        "reviewer_id": { "$ref": "#/$defs/nullableString" },
-        "governance_decision_reference": { "$ref": "#/$defs/nullableString" },
-        "attempt_scope": { "$ref": "#/$defs/nonEmptyString" }
+        "operation_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "capability_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "proposal": {
+          "$ref": "#/$defs/externalOperationProposal"
+        },
+        "current_payload_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "authorized_payload_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "execution_intent": {
+          "const": "execute_after_governance"
+        },
+        "idempotency_key": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "authorization_source": {
+          "enum": [
+            "opa",
+            "human_review"
+          ]
+        },
+        "reviewer_id": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "governance_decision_reference": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "attempt_scope": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
       },
       "additionalProperties": false
     },
     "externalExecutionReceipt": {
       "type": "object",
       "required": [
-        "operation_id", "capability_id", "payload_digest", "status",
-        "idempotency_key", "started_at", "completed_at", "external_reference",
-        "summary", "error_code", "retryable", "connector_kind", "connector_id",
-        "server_id", "tool_name", "connector_metadata", "attempt_number"
+        "operation_id",
+        "capability_id",
+        "payload_digest",
+        "status",
+        "idempotency_key",
+        "started_at",
+        "completed_at",
+        "external_reference",
+        "summary",
+        "error_code",
+        "retryable",
+        "connector_kind",
+        "connector_id",
+        "server_id",
+        "tool_name",
+        "connector_metadata",
+        "attempt_number"
       ],
       "properties": {
-        "operation_id": { "$ref": "#/$defs/nonEmptyString" },
-        "capability_id": { "$ref": "#/$defs/nonEmptyString" },
-        "payload_digest": { "type": "string" },
-        "status": { "enum": ["executed", "rejected_before_execution", "failed", "indeterminate"] },
-        "idempotency_key": { "type": "string" },
-        "started_at": { "type": "string", "format": "date-time" },
-        "completed_at": { "type": "string", "format": "date-time" },
-        "external_reference": { "$ref": "#/$defs/nullableString" },
-        "summary": { "type": "string" },
-        "error_code": {
+        "operation_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "capability_id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "payload_digest": {
+          "type": "string"
+        },
+        "status": {
           "enum": [
-            "none", "missing_proposal", "invalid_execution_intent",
-            "not_execution_candidate", "authorization_missing", "digest_mismatch",
-            "capability_unknown", "capability_disabled", "connector_unsupported",
-            "read_only_violation", "idempotency_key_missing", "duplicate_execution",
-            "input_schema_invalid", "tool_not_allowlisted", "connector_timeout",
-            "connector_failure", "connector_response_invalid",
-            "outcome_indeterminate", "retry_limit_exceeded"
+            "executed",
+            "rejected_before_execution",
+            "failed",
+            "indeterminate"
           ]
         },
-        "retryable": { "type": "boolean" },
-        "connector_kind": { "$ref": "#/$defs/nullableString" },
-        "connector_id": { "$ref": "#/$defs/nullableString" },
-        "server_id": { "$ref": "#/$defs/nullableString" },
-        "tool_name": { "$ref": "#/$defs/nullableString" },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "external_reference": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "error_code": {
+          "enum": [
+            "none",
+            "missing_proposal",
+            "invalid_execution_intent",
+            "not_execution_candidate",
+            "authorization_missing",
+            "digest_mismatch",
+            "capability_unknown",
+            "capability_disabled",
+            "connector_unsupported",
+            "read_only_violation",
+            "idempotency_key_missing",
+            "duplicate_execution",
+            "input_schema_invalid",
+            "tool_not_allowlisted",
+            "connector_timeout",
+            "connector_failure",
+            "connector_response_invalid",
+            "outcome_indeterminate",
+            "retry_limit_exceeded"
+          ]
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "connector_kind": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "connector_id": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "server_id": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "tool_name": {
+          "$ref": "#/$defs/nullableString"
+        },
         "connector_metadata": {
           "type": "array",
           "items": {
             "type": "object",
-            "required": ["name", "value"],
+            "required": [
+              "name",
+              "value"
+            ],
             "properties": {
-              "name": { "type": "string" },
-              "value": { "type": "string" }
+              "name": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
             },
             "additionalProperties": false
           }
         },
-        "attempt_number": { "type": "integer", "minimum": 1, "maximum": 2 }
+        "attempt_number": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2
+        }
       },
       "additionalProperties": false
     },
     "externalExecution": {
       "type": "object",
       "required": [
-        "execution_intent", "capability_id", "current_payload_digest",
-        "current_request", "last_receipt", "receipt_history", "attempt_count"
+        "execution_intent",
+        "capability_id",
+        "current_payload_digest",
+        "current_request",
+        "last_receipt",
+        "receipt_history",
+        "attempt_count"
       ],
       "properties": {
-        "execution_intent": { "enum": ["proposal_only", "execute_after_governance"] },
-        "capability_id": { "$ref": "#/$defs/nullableString" },
-        "current_payload_digest": { "$ref": "#/$defs/nullableString" },
+        "execution_intent": {
+          "enum": [
+            "proposal_only",
+            "execute_after_governance"
+          ]
+        },
+        "capability_id": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "current_payload_digest": {
+          "$ref": "#/$defs/nullableString"
+        },
         "current_request": {
-          "oneOf": [{ "$ref": "#/$defs/externalExecutionRequest" }, { "type": "null" }]
+          "oneOf": [
+            {
+              "$ref": "#/$defs/externalExecutionRequest"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "last_receipt": {
-          "oneOf": [{ "$ref": "#/$defs/externalExecutionReceipt" }, { "type": "null" }]
+          "oneOf": [
+            {
+              "$ref": "#/$defs/externalExecutionReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "receipt_history": {
           "type": "array",
-          "items": { "$ref": "#/$defs/externalExecutionReceipt" },
+          "items": {
+            "$ref": "#/$defs/externalExecutionReceipt"
+          },
           "maxItems": 100
         },
-        "attempt_count": { "type": "integer", "minimum": 0, "maximum": 100 }
+        "attempt_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        }
       },
       "additionalProperties": false
     }

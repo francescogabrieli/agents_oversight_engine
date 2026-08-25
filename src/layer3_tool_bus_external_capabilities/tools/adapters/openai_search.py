@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from llm_retry import llm_retry
 
-from ..contracts import ToolExecutionResult, ToolObservation, ToolRequest
+from ..contracts import RetrievalKind, ToolExecutionResult, ToolObservation, ToolRequest
 from ..models import OpenAIToolGatewaySettings, ToolDefinition
 from ..results import failure_result
 from ..text import truncate_text
@@ -117,6 +117,7 @@ def _extract_web_observation_projection(
                 observation_id=f"{request_id}:source:{index}",
                 locator=url,
                 content=snippet,
+                retrieval_kind=RetrievalKind.SEARCH_SNIPPET,
             )
             for index, (url, snippet) in enumerate(deduped.items(), start=1)
         ),

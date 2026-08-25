@@ -13,6 +13,7 @@ policy_fact_names := [
 	"external_action_revision_count",
 	"unchanged_resubmission",
 	"repeated_rejected_payload_digest",
+	"unresolvable_revision",
 	"replan_episode_count",
 	"consecutive_tool_failures",
 	"action_churn_count",
@@ -48,6 +49,7 @@ observable_change_since_last_replan := object.get(facts, "observable_change_sinc
 action_revision_count := object.get(facts, "external_action_revision_count", 0)
 unchanged_resubmission := object.get(facts, "unchanged_resubmission", false)
 repeated_rejected_payload_digest := object.get(facts, "repeated_rejected_payload_digest", false)
+unresolvable_revision := object.get(facts, "unresolvable_revision", false)
 replan_episode_count := object.get(facts, "replan_episode_count", 0)
 consecutive_tool_failures := object.get(facts, "consecutive_tool_failures", 0)
 action_churn_count := object.get(facts, "action_churn_count", 0)
@@ -127,6 +129,7 @@ result := {
 	"action_churn": action_churn,
 	"unchanged_resubmission": unchanged_resubmission,
 	"repeated_rejected_payload_digest": repeated_rejected_payload_digest,
+	"unresolvable_revision": unresolvable_revision,
 	"diagnostic_score": object.get(object.get(input.pillars, "trajectory", {}), "diagnostic_score", null),
 	"diagnostic_level": object.get(object.get(input.pillars, "trajectory", {}), "diagnostic_level", "observed"),
 	"reason_facts": object.get(object.get(input.pillars, "trajectory", {}), "reason_facts", []),

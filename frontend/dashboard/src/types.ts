@@ -50,6 +50,13 @@ export type DashboardPillarDiagnostic = {
   facts: Record<string, unknown>;
 };
 
+export type DashboardEvidenceReference = {
+  observation_id: string;
+  locator?: string | null;
+  source_timestamp?: string | null;
+  content_excerpt: string;
+};
+
 export type HumanReviewPendingRequest = {
   request_id: string;
   review_summary?: string | null;
@@ -114,6 +121,8 @@ export type DashboardSnapshot = {
     allowed_decisions?: string[];
     review_summary?: string | null;
     resume_state?: string | null;
+    judge_findings?: string[];
+    selected_evidence_references?: DashboardEvidenceReference[];
     evidence_diagnostic?: DashboardPillarDiagnostic | null;
     trajectory_diagnostic?: DashboardPillarDiagnostic | null;
   } | null;

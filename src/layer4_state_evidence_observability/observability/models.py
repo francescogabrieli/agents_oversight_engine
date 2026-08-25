@@ -45,6 +45,7 @@ class TraceEvidenceBurden:
     min_independent_sources: int
     require_retrieved_content: bool
     freshness_window_days: int | None
+    insufficiency_declaration_permitted: bool
 
 
 # Read-only observability component extracted from the trace facade.
@@ -116,6 +117,7 @@ class TraceToolObservation:
     observation_id: str
     content: str
     locator: str | None
+    retrieval_kind: str
     source_timestamp: str | None = None
 
 

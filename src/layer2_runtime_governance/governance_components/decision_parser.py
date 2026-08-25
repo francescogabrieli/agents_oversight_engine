@@ -305,10 +305,8 @@ def _build_dynamic_assessment_from_signals(
         trajectory_health=trajectory_assessment,
         recommended_directive=recommended,
         summary=(
-            f"OPA-first diagnostics: evidence {evidence_assessment.level.value} "
+            f"OPA-first active diagnostics: evidence {evidence_assessment.level.value} "
             f"({_format_optional_score(evidence_assessment.score)}), "
-            f"risk-shadow {risk_assessment.level.value} "
-            f"({_format_optional_score(risk_assessment.score)}), "
             f"trajectory {trajectory_assessment.level.value} "
             f"({_format_optional_score(trajectory_assessment.score)})."
         ),

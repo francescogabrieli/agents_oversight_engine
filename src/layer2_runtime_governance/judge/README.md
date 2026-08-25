@@ -9,6 +9,9 @@ summaries, exact immutable proposal and digest, and every canonical `ToolObserva
 available at the evaluated boundary. Observations are bounded typed projections, not raw
 tool transcripts. `selected_by_actor` records declared reliance but never limits the
 evidence the Judge can examine. Process narration and execution counters are excluded.
+The bundle intentionally does not expose the Tool Bus `retrieval_kind`; the Judge
+receives the bounded observation content and provenance identifiers, while retrieval
+classification remains an Evidence/governance fact outside this semantic contract.
 
 The runtime deterministically materializes those observations as a typed
 `judge_evidence_bundle.v1`. The same JSON object is embedded in the Judge request and

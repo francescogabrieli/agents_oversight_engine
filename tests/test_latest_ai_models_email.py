@@ -176,7 +176,13 @@ def _research_email_intake(*, with_email: bool = True) -> IntakeResult:
         structured_task=StructuredTask(
             task_spec=TaskSpec(
                 goal="Research the latest AI models and email a concise report.",
-                context="Use deterministic source fixtures; do not alter the recipient.",
+                context=(
+                    "Use deterministic source fixtures; do not alter the recipient. "
+                    "The bounded extraction candidates are "
+                    "https://sources.example/forbidden, "
+                    "https://sources.example/large, and "
+                    "https://sources.example/alternative."
+                ),
                 constraints=[
                     "Keep the report concise.",
                     "Send only to recipient@example.com.",

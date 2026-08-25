@@ -125,6 +125,7 @@ class TaskState:
     evidence_request_count: int = 0
     evidence_request_episode_count: int = 0
     evidence_request_episode_id: str | None = None
+    evidence_request_ceiling_reached: bool = False
     external_operation_revision_count: int = 0
     current_external_execution_request: ExternalExecutionRequest | None = None
     last_external_execution_receipt: ExternalExecutionReceipt | None = None

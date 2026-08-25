@@ -84,9 +84,10 @@ test_trajectory_fact_usage_manifest_is_explicit if {
 		"first_replan_request",
 		"observable_change_since_last_replan",
 		"external_action_revision_count",
-		"unchanged_resubmission",
-		"repeated_rejected_payload_digest",
-		"replan_episode_count",
+                "unchanged_resubmission",
+                "repeated_rejected_payload_digest",
+                "unresolvable_revision",
+                "replan_episode_count",
 		"consecutive_tool_failures",
 		"action_churn_count",
 		"external_candidate",
@@ -193,10 +194,10 @@ test_freshness_deficit_remains_diagnostic_while_enforcement_disabled if {
 	evidence := object.union(facts_evidence, {"raw_facts": object.union(facts_evidence.raw_facts, {"coverage_evaluated": true, "burden_satisfied": false, "independent_sources_satisfied": true, "retrieved_content_satisfied": true, "freshness_evaluated": true, "freshness_satisfied": false, "deficit_codes": ["freshness_metadata_missing"]})})
 	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"evidence": evidence})})
 	result := decision with input as candidate
-	result.directive == "continue"
-	result.pillar_results.evidence.evidence_gap == false
-	result.pillar_results.evidence.freshness_enforcement_enabled == false
-	"freshness_metadata_missing" in result.pillar_results.evidence.reason_codes
+        result.directive == "continue"
+        result.pillar_results.evidence.evidence_gap == false
+        result.pillar_results.evidence.freshness_enforcement_enabled == false
+        not "freshness_metadata_missing" in result.pillar_results.evidence.reason_codes
 }
 
 test_stale_evidence_requests_more_evidence_when_enforcement_enabled if {
@@ -204,6 +205,15 @@ test_stale_evidence_requests_more_evidence_when_enforcement_enabled if {
 	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"evidence": evidence})})
 	result := decision with input as candidate with data.policy_config.evidence.freshness_enforcement_enabled as true
 	result.directive == "request_more_evidence"
+}
+
+test_explicit_insufficiency_remains_valid_when_freshness_enforcement_enabled if {
+    raw_facts := object.union(facts_evidence.raw_facts, {"coverage_evaluated": true, "independent_sources_satisfied": false, "retrieved_content_satisfied": false, "freshness_evaluated": false, "insufficiency_declaration_permitted": true, "insufficiency_declared_in_payload": true})
+    evidence := object.union(facts_evidence, {"raw_facts": raw_facts})
+    candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"evidence": evidence})})
+    result := decision with input as candidate with data.policy_config.evidence.freshness_enforcement_enabled as true
+    result.directive == "continue"
+    result.pillar_results.evidence.evidence_gap == false
 }
 
 test_circular_evidence_requests_more_evidence if {
@@ -288,11 +298,20 @@ test_rejected_external_candidate_does_not_admit_judge if {
 }
 
 test_rejected_external_candidate_requires_non_authorizing_review if {
-	trajectory := object.union(facts_trajectory, {"raw_facts": object.union(facts_trajectory.raw_facts, {"external_candidate": true, "repeated_rejected_payload_digest": true})})
-	candidate := object.union(base_input, {"base_facts": object.union(base_facts, {"external_operation": governed_operation}), "pillars": object.union(base_input.pillars, {"trajectory": trajectory})})
-	result := decision with input as candidate
-	result.directive == "wait_human_review"
-	"rejected_candidate_resubmitted" in result.reason_codes
+        trajectory := object.union(facts_trajectory, {"raw_facts": object.union(facts_trajectory.raw_facts, {"external_candidate": true, "repeated_rejected_payload_digest": true})})
+        candidate := object.union(base_input, {"base_facts": object.union(base_facts, {"external_operation": governed_operation}), "pillars": object.union(base_input.pillars, {"trajectory": trajectory})})
+        result := decision with input as candidate
+        result.directive == "wait_human_review"
+        "rejected_candidate_resubmitted" in result.reason_codes
+}
+
+test_unresolvable_revision_precedes_rejected_candidate_resubmission if {
+        trajectory := object.union(facts_trajectory, {"raw_facts": object.union(facts_trajectory.raw_facts, {"external_candidate": true, "unresolvable_revision": true, "repeated_rejected_payload_digest": true})})
+        candidate := object.union(base_input, {"base_facts": object.union(base_facts, {"external_operation": governed_operation}), "pillars": object.union(base_input.pillars, {"trajectory": trajectory})})
+        result := decision with input as candidate
+        result.directive == "wait_human_review"
+        "unresolvable_revision" in result.reason_codes
+        "rejected_candidate_resubmitted" in object.keys(result.rejected_alternatives)
 }
 
 test_action_revision_below_limit_allows_revision if {

@@ -84,6 +84,7 @@ class _ReplanEvidenceBurdenPayload(BaseModel):
     min_independent_sources: int = Field(default=1, ge=1)
     require_retrieved_content: bool = Field(default=True)
     freshness_window_days: int | None = Field(default=None, ge=1)
+    insufficiency_declaration_permitted: bool = Field(default=False)
 
 
 class _ReplanStepPayload(BaseModel):
@@ -129,7 +130,7 @@ Each replacement step must contain:
 - rationale
 - expected_outcome
 - produces_factual_claims (boolean: true if this step produces factual claims that leave the system or will be used for downstream decision-making, false otherwise)
-- evidence_burden (required object when produces_factual_claims is true; omit it when produces_factual_claims is false. Fields: min_independent_sources [default 1], require_retrieved_content [default true], freshness_window_days [optional integer])
+- evidence_burden (required object when produces_factual_claims is true; omit it when produces_factual_claims is false. Fields: min_independent_sources [default 1], require_retrieved_content [default true], freshness_window_days [optional integer], insufficiency_declaration_permitted [default false])
 - produces_governed_external_effect_proposal (boolean: true only for the terminal remaining step that prepares the exact governed external operation requested by an execute-after-governance task)
 
 Rules:
@@ -334,9 +335,12 @@ class OpenAIReplanner(ReplannerPort):
                                 require_retrieved_content=(
                                     step.evidence_burden.require_retrieved_content
                                 ),
-                                    freshness_window_days=(
-                                        step.evidence_burden.freshness_window_days
-                                    ),
+                                freshness_window_days=(
+                                    step.evidence_burden.freshness_window_days
+                                ),
+                                insufficiency_declaration_permitted=(
+                                    step.evidence_burden.insufficiency_declaration_permitted
+                                ),
                             )
                             if step.evidence_burden is not None
                             else None

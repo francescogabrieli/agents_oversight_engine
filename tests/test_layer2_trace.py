@@ -95,6 +95,31 @@ class Layer2TraceTests(unittest.TestCase):
         _trace_schema_validator().validate(payload)
         _trace_schema_validator().validate(external_payload)
 
+    # Fields added after v6 shipped stay optional, so artifacts already exported under
+    # the same version label keep validating instead of silently splitting the contract.
+    def test_v6_schema_accepts_traces_without_post_v6_optional_fields(self) -> None:
+        state = _complete_task_state()
+        payload = layer2_trace_to_dict(
+            build_layer2_runtime_trace(
+                thread_id="schema-valid-without-optional-fields",
+                intake_result=state.intake_payload,
+                task_state=state,
+            )
+        )
+        legacy = deepcopy(payload)
+        for observation in legacy["observations"]:
+            observation.pop("retrieval_kind", None)
+        for call in legacy["tool_calls"]:
+            for observation in call.get("observations", []):
+                observation.pop("retrieval_kind", None)
+        for step in legacy["plan_steps"]:
+            burden = step.get("evidence_burden")
+            if isinstance(burden, dict):
+                burden.pop("insufficiency_declaration_permitted", None)
+
+        self.assertEqual(legacy["trace_version"], payload["trace_version"])
+        _trace_schema_validator().validate(legacy)
+
     # The v6 schema must reject a v2 artifact before evaluation normalization.
     def test_v6_schema_rejects_v2_trace(self) -> None:
         payload = json.loads(

@@ -339,6 +339,7 @@ class Layer2OversightRawFactsTests(unittest.TestCase):
                 "external_action_revision_count",
                 "repeated_rejected_payload_digest",
                 "unchanged_resubmission",
+                "unresolvable_revision",
                 "provider_recovery_active",
                 "provider_protocol_retry_exhausted",
             },

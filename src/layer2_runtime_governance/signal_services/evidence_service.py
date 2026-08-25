@@ -6,13 +6,16 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse, urlsplit
 
+from layer1_intake import TaskSpec
 from layer2_runtime_governance.actor_contract import ActorResultType
 from layer2_runtime_governance.domain import (
     TaskState,
     build_evidence_selection_digest,
     build_evidence_snapshot_manifest,
     build_observation_lineage,
+    derive_task_evidence_floor,
     digest_json,
+    lift_evidence_burden_to_floor,
 )
 from layer2_runtime_governance.domain.step_recovery import resolve_evidence_episode_id
 from layer3_tool_bus_external_capabilities.external_operations import (
@@ -20,6 +23,7 @@ from layer3_tool_bus_external_capabilities.external_operations import (
     DatabaseOperationPayload,
 )
 from layer3_tool_bus_external_capabilities.tool_contract import (
+    RetrievalKind,
     ToolName,
     ToolObservation,
     canonical_web_locator,
@@ -46,8 +50,42 @@ _STRUCTURAL_NUMBER_PREFIX = re.compile(
     r"(?:articolo|capitolo|fonte|sezione|step)\s+$",
     re.IGNORECASE,
 )
+_STRUCTURAL_NUMBER_LINE_START = re.compile(
+    r"^\s*\d+(?:\.\d+)*[.)]\s"
+)
 _LOCALIZED_CURRENCY = re.compile(
     r"^(?P<symbol>[\$€£¥])\s*(?P<whole>\d+)(?P<separator>[\.,])(?P<fraction>\d{1,2})$"
+)
+
+# A task states a date in prose ("24 agosto 2026"); an agent renders it numerically.
+# Both denote the same authoritative value, so the corpus index must carry every
+# rendering a literal token can take.
+_MONTH_NAMES = {
+    "gennaio": 1, "january": 1, "jan": 1,
+    "febbraio": 2, "february": 2, "feb": 2,
+    "marzo": 3, "march": 3, "mar": 3,
+    "aprile": 4, "april": 4, "apr": 4,
+    "maggio": 5, "may": 5,
+    "giugno": 6, "june": 6, "jun": 6,
+    "luglio": 7, "july": 7, "jul": 7,
+    "agosto": 8, "august": 8, "aug": 8,
+    "settembre": 9, "september": 9, "sep": 9, "sept": 9,
+    "ottobre": 10, "october": 10, "oct": 10,
+    "novembre": 11, "november": 11, "nov": 11,
+    "dicembre": 12, "december": 12, "dec": 12,
+}
+_MONTH_NAME_ALTERNATION = "|".join(sorted(_MONTH_NAMES, key=len, reverse=True))
+_PROSE_DATE_PATTERNS = (
+    # "24 agosto 2026" / "24 August 2026"
+    re.compile(
+        rf"\b(?P<day>\d{{1,2}})\s+(?P<month>{_MONTH_NAME_ALTERNATION})\.?\s+(?P<year>\d{{4}})\b",
+        re.IGNORECASE,
+    ),
+    # "August 24, 2026"
+    re.compile(
+        rf"\b(?P<month>{_MONTH_NAME_ALTERNATION})\.?\s+(?P<day>\d{{1,2}}),?\s+(?P<year>\d{{4}})\b",
+        re.IGNORECASE,
+    ),
 )
 
 _ACTOR_DERIVED_TOOL_NAMES = frozenset(
@@ -64,6 +102,36 @@ _SELF_PRODUCED_LOCATOR_PREFIXES = (
     "scratchpad://",
     "workspace://",
 )
+# The declaration is recognized per sentence and is order-insensitive: an author may
+# write "declare the insufficiency" or "the sources are insufficient, stated explicitly".
+# A sentence must name the sources and assert their shortfall; a conditional clause that
+# merely restates the task rule ("if fewer than three sources, declare it") is not a
+# declaration and is excluded.
+_SENTENCE_SPLIT = re.compile(r"[.!?\n]+")
+_INSUFFICIENCY_SOURCE_TERM = re.compile(r"\b(?:fonti|sources?)\b", re.IGNORECASE)
+_INSUFFICIENCY_SHORTFALL = re.compile(
+    r"\b(?:insufficien\w*|non\s+sufficient\w*|not\s+enough|"
+    r"(?:fewer|less)\s+than\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)|"
+    r"(?:meno|inferiore|inferiori)\s+(?:di|a|alle|ai)?\s*(?:\d+|uno|due|tre|quattro|"
+    r"cinque|sei|sette|otto|nove|dieci)|"
+    r"(?:solo|soltanto|solamente|only)\s+(?:\d+|uno|una|due|tre|one|two|three))\b",
+    re.IGNORECASE,
+)
+_INSUFFICIENCY_CONDITIONAL = re.compile(
+    r"^\W*(?:se|qualora|nel\s+caso|if|when|where)\b", re.IGNORECASE
+)
+
+
+# Detect an explicit, assertive statement that the valid sources fall short.
+def _declares_insufficiency(target_text: str) -> bool:
+    for sentence in _SENTENCE_SPLIT.split(target_text):
+        if _INSUFFICIENCY_CONDITIONAL.match(sentence):
+            continue
+        if _INSUFFICIENCY_SOURCE_TERM.search(
+            sentence
+        ) and _INSUFFICIENCY_SHORTFALL.search(sentence):
+            return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -79,7 +147,7 @@ class _FreshnessAssessment:
     future_observation_ids: tuple[str, ...]
 
 
-def _extract_source_origin(locator: str | None) -> str:
+def extract_source_origin(locator: str | None) -> str:
     if not locator:
         return "unknown_origin"
     parsed = urlparse(locator)
@@ -94,7 +162,13 @@ def _extract_source_origin(locator: str | None) -> str:
 # Exclude document structure labels such as "Articolo 1.1" from factual literals.
 def _is_structural_number(*, text: str, start: int) -> bool:
     prefix = text[max(0, start - 32):start]
-    return _STRUCTURAL_NUMBER_PREFIX.search(prefix) is not None
+    line_start = text.rfind("\n", 0, start) + 1
+    line_prefix = text[line_start:start]
+    # Prefer a false negative when a number begins a list or section heading.
+    return (
+        _STRUCTURAL_NUMBER_PREFIX.search(prefix) is not None
+        or _STRUCTURAL_NUMBER_LINE_START.match(line_prefix) is not None
+    )
 
 
 def _extract_literal_tokens(text: str) -> list[str]:
@@ -140,14 +214,60 @@ def _literal_evidence_corpus(observations: list[ToolObservation]) -> str:
     return " ".join(parts)
 
 
-# Admit prose punctuation only when its stripped URL is an exact observed locator.
-def _unanchored_literal_tokens(
+# Build the same URL and literal identity index for task and observation corpora.
+@dataclass(frozen=True)
+class _LiteralCorpusIndex:
+    locators: frozenset[str]
+    corpus_urls: frozenset[str]
+    parsed_urls: tuple[object, ...]
+    origins: frozenset[str]
+    literal_keys: frozenset[str]
+    corpus_text: str
+
+
+# Build a task corpus without materializing intake text as a tool observation.
+def _task_literal_corpus(task_spec: TaskSpec) -> str:
+    return " ".join(
+        [
+            task_spec.goal,
+            task_spec.context,
+            *task_spec.constraints,
+            *task_spec.success_criteria,
+        ]
+    )
+
+
+# Expand every prose date into the numeric renderings a literal token can use, so a
+# date stated authoritatively by the task is recognized however the agent formats it.
+def _prose_date_renderings(corpus: str) -> set[str]:
+    renderings: set[str] = set()
+    for pattern in _PROSE_DATE_PATTERNS:
+        for match in pattern.finditer(corpus):
+            month = _MONTH_NAMES[match.group("month").casefold()]
+            day = int(match.group("day"))
+            year = int(match.group("year"))
+            if not 1 <= day <= 31:
+                continue
+            renderings.update(
+                {
+                    f"{year:04d}-{month:02d}-{day:02d}",
+                    f"{year:04d}/{month:02d}/{day:02d}",
+                    f"{day:02d}/{month:02d}/{year:04d}",
+                    f"{day:02d}-{month:02d}-{year:04d}",
+                    f"{day}/{month}/{year}",
+                    f"{day}-{month}-{year}",
+                }
+            )
+    return renderings
+
+
+# Normalize URL identity and non-URL literal keys once for both anchoring domains.
+def _build_literal_corpus_index(
     *,
-    target_tokens: list[str],
-    observations: list[ToolObservation],
-) -> list[str]:
-    corpus = _literal_evidence_corpus(observations)
-    locators = {
+    corpus: str,
+    observations: list[ToolObservation] = (),
+) -> _LiteralCorpusIndex:
+    locator_values = {
         canonical_web_locator(item.locator)
         for item in observations
         if item.locator
@@ -158,59 +278,83 @@ def _unanchored_literal_tokens(
         for item in _extract_literal_tokens(corpus)
         if item.casefold().startswith(("http://", "https://"))
     }
-    parsed_observed_urls = tuple(
-        urlsplit(locator) for locator in locators | corpus_urls
+    parsed_urls = tuple(
+        urlsplit(locator) for locator in locator_values | corpus_urls
     )
-    observed_origins = {
-        f"{parsed.scheme}://{parsed.netloc}"
-        for parsed in parsed_observed_urls
+    origins = frozenset(
+        f"{parsed.scheme}://{parsed.netloc.lower()}"
+        for parsed in parsed_urls
         if parsed.scheme and parsed.netloc
-    }
-    corpus_literal_keys = {
-        _literal_comparison_key(item)
-        for item in _extract_literal_tokens(corpus)
-        if not item.casefold().startswith(("http://", "https://"))
-    }
+    )
+    literal_keys = frozenset(
+        {
+            _literal_comparison_key(item)
+            for item in _extract_literal_tokens(corpus)
+            if not item.casefold().startswith(("http://", "https://"))
+        }
+        | _prose_date_renderings(corpus)
+    )
+    return _LiteralCorpusIndex(
+        locators=frozenset(locator_values),
+        corpus_urls=frozenset(corpus_urls),
+        parsed_urls=parsed_urls,
+        origins=origins,
+        literal_keys=literal_keys,
+        corpus_text=corpus,
+    )
+
+
+# Admit prose punctuation only when its stripped URL is an exact observed locator.
+def _literal_is_anchored(token: str, index: _LiteralCorpusIndex) -> bool:
+    if token.casefold().startswith(("http://", "https://")):
+        canonical_token = canonical_web_locator(token)
+        if canonical_token in index.locators or canonical_token in index.corpus_urls:
+            return True
+        parsed_token = urlsplit(canonical_token)
+        token_origin = f"{parsed_token.scheme}://{parsed_token.netloc.lower()}"
+        if (
+            parsed_token.path in {"", "/"}
+            and not parsed_token.query
+            and token_origin in index.origins
+        ):
+            return True
+        token_path = parsed_token.path.rstrip("/")
+        if token_path and not parsed_token.query and any(
+            observed.scheme == parsed_token.scheme
+            and observed.netloc.lower() == parsed_token.netloc.lower()
+            and (
+                observed.path.rstrip("/") == token_path
+                or observed.path.startswith(f"{token_path}/")
+            )
+            for observed in index.parsed_urls
+        ):
+            return True
+        stripped = token.rstrip(".,")
+        return stripped != token and canonical_web_locator(stripped) in index.locators
+    return token in index.corpus_text or _literal_comparison_key(token) in index.literal_keys
+
+
+# Return task-anchored and truly unanchored literals in stable target-token order.
+def _unanchored_literal_tokens(
+    *,
+    target_tokens: list[str],
+    observations: list[ToolObservation],
+    task_corpus: str,
+) -> tuple[list[str], list[str]]:
+    task_index = _build_literal_corpus_index(corpus=task_corpus)
+    observation_index = _build_literal_corpus_index(
+        corpus=_literal_evidence_corpus(observations),
+        observations=observations,
+    )
+    task_anchored: list[str] = []
     unanchored: list[str] = []
     for token in target_tokens:
-        if token.casefold().startswith(("http://", "https://")):
-            # URLs use exact token identity; substring matches such as /doc
-            # versus /document are not evidence anchoring.
-            canonical_token = canonical_web_locator(token)
-            if canonical_token in locators or canonical_token in corpus_urls:
-                continue
-            parsed_token = urlsplit(canonical_token)
-            token_origin = f"{parsed_token.scheme}://{parsed_token.netloc}"
-            # A cited origin is grounded by an observed page on that exact host;
-            # non-root paths and meaningful queries still require exact identity.
-            if (
-                parsed_token.path in {"", "/"}
-                and not parsed_token.query
-                and token_origin in observed_origins
-            ):
-                continue
-            token_path = parsed_token.path.rstrip("/")
-            # A channel/index URL is grounded by an observed descendant only at
-            # a complete path-segment boundary, never by an arbitrary prefix.
-            if token_path and not parsed_token.query and any(
-                observed.scheme == parsed_token.scheme
-                and observed.netloc == parsed_token.netloc
-                and (
-                    observed.path.rstrip("/") == token_path
-                    or observed.path.startswith(f"{token_path}/")
-                )
-                for observed in parsed_observed_urls
-            ):
-                continue
-            # A final full stop or comma is commonly prose. Characters such as
-            # !, ?, ; and : remain part of a valid URL and are never discarded.
-            stripped = token.rstrip(".,")
-            if stripped != token and canonical_web_locator(stripped) in locators:
-                continue
-        elif token in corpus or _literal_comparison_key(token) in corpus_literal_keys:
+        if _literal_is_anchored(token, task_index):
+            task_anchored.append(token)
             continue
-        unanchored.append(token)
-    return unanchored
+        if not _literal_is_anchored(token, observation_index):
+            unanchored.append(token)
+    return task_anchored, unanchored
 
 
 def _get_target_text(task_state: TaskState) -> str:
@@ -345,10 +489,18 @@ def build_evidence_signal(
     produces_factual_claims = bool(
         current_step and getattr(current_step, "produces_factual_claims", False)
     )
+    produces_external_effect_proposal = bool(
+        current_step
+        and getattr(current_step, "produces_governed_external_effect_proposal", False)
+    )
+    evidence_families_active = (
+        produces_factual_claims or produces_external_effect_proposal
+    )
     completion_attempt = bool(
         result and result.result_type == ActorResultType.STEP_COMPLETED
     )
     factual_completion_attempt = completion_attempt and produces_factual_claims
+    evidence_completion_attempt = completion_attempt and evidence_families_active
     unique_selected = tuple(dict.fromkeys(selected_refs))
     available_obs_ids = {item.observation_id for item in task_state.observations}
     selected_evidence_ref_ratio = (
@@ -424,37 +576,62 @@ def build_evidence_signal(
     )
 
     # Famiglia 2: Copertura dell'onere probatorio dichiarato (Fail-Closed)
-    evidence_burden = (
+    declared_evidence_burden = (
         getattr(current_step, "evidence_burden", None) if current_step else None
     )
+    task_evidence_floor = derive_task_evidence_floor(task_state.task_spec)
+    evidence_burden = lift_evidence_burden_to_floor(
+        declared_evidence_burden,
+        task_evidence_floor if evidence_families_active else None,
+    )
     factual_step_missing_evidence_burden = (
-        produces_factual_claims and evidence_burden is None
+        produces_factual_claims and declared_evidence_burden is None
     )
 
-    distinct_origins = {_extract_source_origin(item.locator) for item in selected if item.locator}
-    distinct_independent_sources_count = len(distinct_origins) if distinct_origins else (1 if selected else 0)
+    # The declared burden belongs to the claim, so coverage is measured on the
+    # actor-selected references. The retrieved universe stays a separate diagnostic:
+    # it distinguishes "the run never found the sources" from "the actor did not cite
+    # the sources it already had", which are different remediations.
+    # The pre-turn actor gate can only observe the universe, and is therefore strictly
+    # weaker than this check: a universe below the minimum implies a selection below it.
+    retrieved_universe = [
+        item
+        for item in task_state.observations
+        if item.retrieval_kind != RetrievalKind.SEARCH_SNIPPET
+    ]
+    retrieved_independent_sources_count = len(
+        {
+            extract_source_origin(item.locator)
+            for item in retrieved_universe
+            if item.locator
+        }
+    )
+    selected_retrieved = [
+        item
+        for item in selected
+        if item.retrieval_kind != RetrievalKind.SEARCH_SNIPPET
+    ]
+    distinct_origins = {
+        extract_source_origin(item.locator)
+        for item in selected_retrieved
+        if item.locator
+    }
+    distinct_independent_sources_count = len(distinct_origins)
 
     search_title_only_ref_count = sum(
         1
         for item in selected
-        if item.content.startswith("Search result title:")
-        or (item.locator and item.locator.startswith("search:"))
+        if item.retrieval_kind == RetrievalKind.SEARCH_SNIPPET
     )
 
-    if produces_factual_claims and evidence_burden is not None:
+    if evidence_families_active and evidence_burden is not None:
         coverage_evaluated = True
         min_sources = evidence_burden.min_independent_sources
         independent_sources_satisfied = (
             distinct_independent_sources_count >= min_sources
         )
         if evidence_burden.require_retrieved_content:
-            retrieved_content_satisfied = any(
-                not (
-                    item.content.startswith("Search result title:")
-                    or (item.locator and item.locator.startswith("search:"))
-                )
-                for item in selected
-            ) if selected else False
+            retrieved_content_satisfied = bool(selected_retrieved)
         else:
             retrieved_content_satisfied = True
         freshness = _evaluate_freshness(
@@ -487,7 +664,7 @@ def build_evidence_signal(
         freshness_satisfied = freshness.satisfied
         burden_satisfied = False
     else:
-        # Non-factual steps have no planner-declared coverage requirement.
+        # An external proposal may activate the families without declaring a burden.
         coverage_evaluated = False
         min_sources = 0
         independent_sources_satisfied = True
@@ -517,15 +694,19 @@ def build_evidence_signal(
 
     # Famiglia 5: Ancoraggio letterale dei claim (solo token estraibili)
     target_text = _get_target_text(task_state)
+    task_corpus = _task_literal_corpus(task_state.task_spec)
     target_tokens = _extract_literal_tokens(target_text)
-    unanchored_literals_in_selection = _unanchored_literal_tokens(
+    literals_anchored_to_task, unanchored_literals_in_selection = _unanchored_literal_tokens(
         target_tokens=target_tokens,
         observations=selected,
+        task_corpus=task_corpus,
     )
-    unanchored_literals_in_universe = _unanchored_literal_tokens(
+    _, unanchored_literals_in_universe = _unanchored_literal_tokens(
         target_tokens=target_tokens,
         observations=task_state.observations,
+        task_corpus=task_corpus,
     )
+    insufficiency_declared_in_payload = _declares_insufficiency(target_text)
 
     # Deterministic deficit codes collection
     deficit_codes: list[str] = []
@@ -553,13 +734,13 @@ def build_evidence_signal(
         deficit_codes.append("stale_evidence")
     if freshness.evaluated and freshness.future_observation_ids:
         deficit_codes.append("future_source_timestamp")
-    if factual_completion_attempt and selected_evidence_all_title_only:
+    if evidence_completion_attempt and selected_evidence_all_title_only:
         deficit_codes.append("title_only_evidence_fragility")
-    if factual_completion_attempt and circular_reference_detected:
+    if evidence_completion_attempt and circular_reference_detected:
         deficit_codes.append("circular_evidence_reference")
-    if factual_completion_attempt and unanchored_literals_in_selection:
+    if evidence_completion_attempt and unanchored_literals_in_selection:
         deficit_codes.append("unanchored_literals_in_selection")
-    if factual_completion_attempt and unanchored_literals_in_universe:
+    if evidence_completion_attempt and unanchored_literals_in_universe:
         deficit_codes.append("unanchored_literals_in_universe")
 
     current_evidence_episode_id = resolve_evidence_episode_id(task_state)
@@ -600,15 +781,23 @@ def build_evidence_signal(
         "candidate_external_operation_digest_matches": candidate_operation_matches,
         "completion_attempt": completion_attempt,
         "factual_completion_attempt": factual_completion_attempt,
+        "evidence_completion_attempt": evidence_completion_attempt,
         "external_operation_candidate": bool(task_state.external_operation_proposal and task_state.external_operation_proposal.execution_candidate),
         "evidence_request_count": getattr(task_state, "evidence_request_count", 0),
         "evidence_request_episode_count": evidence_request_episode_count,
         "evidence_request_episode_id": current_evidence_episode_id,
         # Famiglia 2 facts
         "produces_factual_claims": produces_factual_claims,
+        "produces_governed_external_effect_proposal": produces_external_effect_proposal,
+        "evidence_families_active": evidence_families_active,
+        "evidence_burden_declared": declared_evidence_burden is not None,
+        "evidence_burden_derived_from_task": (
+            declared_evidence_burden is None and evidence_burden is not None
+        ),
         "factual_step_missing_evidence_burden": factual_step_missing_evidence_burden,
         "coverage_evaluated": coverage_evaluated,
         "distinct_independent_sources_count": distinct_independent_sources_count,
+        "retrieved_independent_sources_count": retrieved_independent_sources_count,
         "min_independent_sources_required": min_sources,
         "independent_sources_satisfied": independent_sources_satisfied,
         "retrieved_content_satisfied": retrieved_content_satisfied,
@@ -623,12 +812,17 @@ def build_evidence_signal(
         ),
         "freshness_satisfied": freshness_satisfied,
         "burden_satisfied": burden_satisfied,
+        "insufficiency_declaration_permitted": bool(
+            evidence_burden and evidence_burden.insufficiency_declaration_permitted
+        ),
+        "insufficiency_declared_in_payload": insufficiency_declared_in_payload,
         # Famiglia 4 facts
         "circular_reference_detected": circular_reference_detected,
         "circular_evidence_observation_ids": sorted(circular_evidence_reasons),
         "circular_evidence_reasons": circular_evidence_reasons,
         # Famiglia 5 facts
         "target_literal_token_count": len(target_tokens),
+        "literals_anchored_to_task": literals_anchored_to_task,
         "unanchored_literals_in_selection": unanchored_literals_in_selection,
         "unanchored_literals_in_universe": unanchored_literals_in_universe,
         "has_unanchored_literals_in_selection": len(unanchored_literals_in_selection) > 0,
@@ -651,4 +845,4 @@ def build_evidence_signal(
     }
 
 
-__all__ = ["build_evidence_signal"]
+__all__ = ["build_evidence_signal", "extract_source_origin"]

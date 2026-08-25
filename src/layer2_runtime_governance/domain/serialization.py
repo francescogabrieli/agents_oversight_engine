@@ -32,6 +32,12 @@ from layer3_tool_bus_external_capabilities.external_operations.contracts import 
     OperationFactsProvenance,
     SQLStatementClass,
 )
+from layer3_tool_bus_external_capabilities.tool_contract import (
+    RetrievalKind,
+    ToolErrorCode,
+    ToolExecutionResult,
+    ToolObservation,
+)
 from .lifecycle import RuntimeState, TerminationReason
 from .review import (
     ExternalCommunicationDraft,
@@ -122,6 +128,8 @@ def normalize_task_state_serialization(task_state: TaskState) -> TaskState:
             if current_step is not None and normalized.evidence_request_episode_count
             else None
         )
+    if not hasattr(normalized, "evidence_request_ceiling_reached"):
+        normalized.evidence_request_ceiling_reached = False
     if not hasattr(normalized, "actor_protocol_retry_count"):
         normalized.actor_protocol_retry_count = 0
     if not hasattr(normalized, "actor_protocol_retry_progress_epoch"):
@@ -148,11 +156,33 @@ def normalize_task_state_serialization(task_state: TaskState) -> TaskState:
     ]
     if not hasattr(normalized, "pending_tool_requests"):
         normalized.pending_tool_requests = []
+    normalized.current_tool_request = _coerce_tool_request(
+        getattr(normalized, "current_tool_request", None)
+    )
     normalized.pending_tool_requests = [
         request for request in (
             _coerce_tool_request(item)
             for item in normalized.pending_tool_requests
         ) if request is not None
+    ]
+    normalized.observations = [
+        item
+        for item in (
+            _coerce_tool_observation(observation)
+            for observation in getattr(normalized, "observations", [])
+        )
+        if item is not None
+    ]
+    normalized.last_tool_result = _coerce_tool_result(
+        getattr(normalized, "last_tool_result", None)
+    )
+    normalized.tool_results_history = [
+        item
+        for item in (
+            _coerce_tool_result(result)
+            for result in getattr(normalized, "tool_results_history", [])
+        )
+        if item is not None
     ]
     normalized.execution_intent = _coerce_enum(
         ExecutionIntent,
@@ -632,6 +662,68 @@ def _coerce_tool_request(payload):
         extractive_goal=_coerce_optional_string(payload.get("extractive_goal")),
         document_id=_coerce_optional_string(payload.get("document_id")),
         dataset_id=_coerce_optional_string(payload.get("dataset_id")),
+    )
+
+
+# Recover one typed observation, including the retrieval-kind discriminator.
+def _coerce_tool_observation(
+    payload: ToolObservation | dict[str, Any] | None,
+) -> ToolObservation | None:
+    if payload is None or isinstance(payload, ToolObservation):
+        return payload
+    if not isinstance(payload, dict):
+        return None
+    source_timestamp = payload.get("source_timestamp")
+    if source_timestamp is not None and not isinstance(source_timestamp, datetime):
+        source_timestamp = _coerce_datetime(source_timestamp, "observation.source_timestamp")
+    return ToolObservation(
+        observation_id=_required_text(
+            payload.get("observation_id"), "observation.observation_id"
+        ),
+        content=str(payload.get("content") or ""),
+        locator=_coerce_optional_string(payload.get("locator")),
+        source_timestamp=source_timestamp,
+        retrieval_kind=(
+            _coerce_enum(RetrievalKind, payload["retrieval_kind"])
+            if payload.get("retrieval_kind") is not None
+            else RetrievalKind.CAPABILITY_RESULT
+        ),
+    )
+
+
+# Recover a result and its nested observations through the same typed boundary.
+def _coerce_tool_result(
+    payload: ToolExecutionResult | dict[str, Any] | None,
+) -> ToolExecutionResult | None:
+    if payload is None or isinstance(payload, ToolExecutionResult):
+        return payload
+    if not isinstance(payload, dict):
+        return None
+    request = _coerce_tool_request(payload.get("request"))
+    if request is None:
+        return None
+    observations = tuple(
+        item
+        for item in (
+            _coerce_tool_observation(observation)
+            for observation in payload.get("observations", [])
+        )
+        if item is not None
+    )
+    return ToolExecutionResult(
+        request=request,
+        success=bool(payload.get("success", False)),
+        summary=str(payload.get("summary") or ""),
+        content=_coerce_optional_string(payload.get("content")),
+        observations=observations,
+        error_message=_coerce_optional_string(payload.get("error_message")),
+        error_code=(
+            _coerce_optional_enum(ToolErrorCode, payload.get("error_code"))
+            if payload.get("error_code") is not None
+            else None
+        ),
+        truncated=bool(payload.get("truncated", False)),
+        extractability_limited=bool(payload.get("extractability_limited", False)),
     )
 
 

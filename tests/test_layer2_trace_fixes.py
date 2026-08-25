@@ -67,6 +67,7 @@ from layer2_runtime_governance.signal_services.trajectory_service import (
     build_trajectory_signal,
 )
 from layer3_tool_bus_external_capabilities.tool_contract import (
+    RetrievalKind,
     ToolExecutionResult,
     ToolName,
     ToolObservation,
@@ -216,8 +217,18 @@ class TraceFixesIntegrationTests(unittest.TestCase):
             success=True,
             summary="Found search results",
             observations=(
-                ToolObservation(observation_id="obs-search-1", content="Search result title: Top AI Models 2026", locator="search:ai-news"),
-                ToolObservation(observation_id="obs-search-2", content="Search result title: Benchmark Report", locator="search:benchmarks"),
+                ToolObservation(
+                    observation_id="obs-search-1",
+                    content="Search result title: Top AI Models 2026",
+                    locator="search:ai-news",
+                    retrieval_kind=RetrievalKind.SEARCH_SNIPPET,
+                ),
+                ToolObservation(
+                    observation_id="obs-search-2",
+                    content="Search result title: Benchmark Report",
+                    locator="search:benchmarks",
+                    retrieval_kind=RetrievalKind.SEARCH_SNIPPET,
+                ),
             ),
         )
         fetch_tr = ToolExecutionResult(
@@ -225,7 +236,12 @@ class TraceFixesIntegrationTests(unittest.TestCase):
             success=True,
             summary="Fetched full text",
             observations=(
-                ToolObservation(observation_id="obs-fetch-1", content="Detailed full text of AI benchmarks...", locator="url:https://example.com/article"),
+                ToolObservation(
+                    observation_id="obs-fetch-1",
+                    content="Detailed full text of AI benchmarks...",
+                    locator="url:https://example.com/article",
+                    retrieval_kind=RetrievalKind.FETCHED_DOCUMENT,
+                ),
             ),
         )
         state.tool_results_history.extend([search_tr, fetch_tr])

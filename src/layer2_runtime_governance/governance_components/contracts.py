@@ -94,6 +94,7 @@ class GovernanceReasonCode(str, Enum):
     ACTION_CHURN = "action_churn"
     UNCHANGED_CANDIDATE_RESUBMISSION = "unchanged_candidate_resubmission"
     REJECTED_CANDIDATE_RESUBMITTED = "rejected_candidate_resubmitted"
+    UNRESOLVABLE_REVISION = "unresolvable_revision"
     EXTERNAL_LOW_ACTOR_SELF_CONFIDENCE = "external_low_actor_self_confidence"
     ACTION_REVISION_LIMIT_REACHED = "action_revision_limit_reached"
     CAPABILITY_APPROVAL_REQUIRED = "capability_approval_required"

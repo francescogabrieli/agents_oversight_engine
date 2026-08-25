@@ -3,6 +3,7 @@ from typing import Any
 from layer2_runtime_governance.actor_contract import ActorResultType
 from layer2_runtime_governance.governance_components import PolicyEvaluationInput
 from layer2_runtime_governance.domain import TaskState, ToolDisposition
+from layer2_runtime_governance.judge import JudgeAssessmentStatus, JudgeVerdict
 from layer3_tool_bus_external_capabilities.external_operations import OperationBoundary
 
 
@@ -79,6 +80,9 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
                 break
 
     action_churn_count = _current_operation_churn_count(task_state=task_state)
+    unresolvable_revision = _judge_revision_has_no_new_observational_basis(
+        task_state=task_state,
+    )
 
     raw_facts = {
         "actor_turn_count": task_state.actor_turn_count,
@@ -137,6 +141,7 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
                 for feedback in task_state.governance_action_feedback
             )
         ),
+        "unresolvable_revision": unresolvable_revision,
         "unchanged_resubmission": bool(
             task_state.external_operation_proposal
             and task_state.pending_completion_candidate is not None
@@ -166,6 +171,43 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
         "score_formula_version": "trajectory_health_v1",
         "thresholds_version": thresholds_version,
     }
+
+
+# Detect a repeated needs_revision verdict without turning the fact into a Python directive.
+def _judge_revision_has_no_new_observational_basis(*, task_state: TaskState) -> bool:
+    proposal = task_state.external_operation_proposal
+    latest_judge = task_state.last_judge_assessment
+    if (
+        proposal is None
+        or latest_judge is None
+        or latest_judge.status != JudgeAssessmentStatus.ACTIVE
+        or latest_judge.verdict != JudgeVerdict.NEEDS_REVISION
+        or latest_judge.evaluated_operation_digest != proposal.payload_digest
+    ):
+        return False
+    current_basis = (
+        task_state.tool_call_count,
+        len(task_state.observations),
+        len(task_state.executed_steps),
+    )
+    for decision in reversed(task_state.governance_history):
+        if decision.evaluated_operation_digest != proposal.payload_digest:
+            continue
+        judge_result = (decision.pillar_results or {}).get("judge", {})
+        trajectory_result = (decision.pillar_results or {}).get("trajectory", {})
+        judge_facts = judge_result.get("raw_facts", judge_result)
+        trajectory_facts = trajectory_result.get("raw_facts", trajectory_result)
+        if not isinstance(judge_facts, dict) or not isinstance(trajectory_facts, dict):
+            continue
+        if judge_facts.get("verdict") != JudgeVerdict.NEEDS_REVISION.value:
+            continue
+        prior_basis = (
+            int(trajectory_facts.get("tool_call_count", 0)),
+            int(trajectory_facts.get("observation_count", 0)),
+            int(trajectory_facts.get("completed_step_count", 0)),
+        )
+        return current_basis == prior_basis
+    return False
 
 
 # Match a resubmission on both payload and Evidence reliance, not payload alone.

@@ -19,13 +19,14 @@ from layer2_runtime_governance.domain import (
     RuntimeState,
 )
 from layer2_runtime_governance.execution.action_schemas import (
+    _evidence_burden_unsatisfied,
     build_actor_runtime_tools,
     build_json_actor_output_shape,
     select_actor_runtime_tools_for_turn,
 )
 from layer2_runtime_governance.execution.errors import ActorExecutionError
 from layer2_runtime_governance.execution.response_parser import convert_json_payload_to_tool_call
-from layer3_tool_bus_external_capabilities.tool_contract import ToolObservation
+from layer3_tool_bus_external_capabilities.tool_contract import RetrievalKind, ToolObservation
 from layer3_tool_bus_external_capabilities.tools import load_tool_gateway_config
 
 
@@ -159,6 +160,7 @@ class ActorActionSchemaTests(unittest.TestCase):
         evidence_burden: EvidenceBurden | None = None,
         observations: tuple[ToolObservation, ...] = (),
         evidence_request_episode_count: int = 0,
+        evidence_request_ceiling_reached: bool = False,
     ) -> ActorTask:
         task_spec = TaskSpec(
             goal="Test goal",
@@ -193,6 +195,7 @@ class ActorActionSchemaTests(unittest.TestCase):
             current_plan_step_index=0,
             current_plan_step=plan_step,
             evidence_request_episode_count=evidence_request_episode_count,
+            evidence_request_ceiling_reached=evidence_request_ceiling_reached,
         )
 
     # When evidence burden is unsatisfied, completion actions must be stripped from tools.
@@ -235,13 +238,41 @@ class ActorActionSchemaTests(unittest.TestCase):
         self.assertIn("emit_step_completed", names)
         self.assertIn("emit_external_communication_draft", names)
 
+    # The pre-turn gate sees only the retrieved universe while Evidence measures the
+    # actor selection, so the gate must stay strictly weaker: whenever it blocks, the
+    # selection is necessarily below the minimum too. This forbids the deadlock where
+    # the gate opens on a completion Evidence would still reject as uncovered.
+    def test_evidence_burden_gate_is_weaker_than_evidence_coverage(self) -> None:
+        observations = (
+            ToolObservation(observation_id="obs_1", content="OpenAI announcement", locator="https://openai.com/blog/1"),
+            ToolObservation(observation_id="obs_2", content="Google announcement", locator="https://google.com/blog/2"),
+            ToolObservation(observation_id="obs_3", content="Anthropic announcement", locator="https://anthropic.com/blog/3"),
+        )
+        for universe_size in range(len(observations) + 1):
+            for minimum in range(1, len(observations) + 2):
+                with self.subTest(universe=universe_size, minimum=minimum):
+                    task = self._build_test_actor_task(
+                        evidence_burden=EvidenceBurden(min_independent_sources=minimum),
+                        observations=observations[:universe_size],
+                    )
+                    gate_blocks = _evidence_burden_unsatisfied(task)
+                    # The largest selection possible is the whole retrieved universe.
+                    best_possible_selection = universe_size
+                    if gate_blocks:
+                        self.assertLess(best_possible_selection, minimum)
+
     # Search result title stubs alone do not satisfy retrieved content requirements.
     def test_evidence_burden_gate_ignores_search_title_stubs(self) -> None:
         task = self._build_test_actor_task(
             evidence_burden=EvidenceBurden(min_independent_sources=2),
             observations=(
                 ToolObservation(observation_id="obs_1", content="OpenAI real content", locator="https://openai.com/blog/1"),
-                ToolObservation(observation_id="obs_2", content="Search result title: Google", locator="https://google.com/search_stub"),
+                ToolObservation(
+                    observation_id="obs_2",
+                    content="Search result title: Google",
+                    locator="https://google.com/search_stub",
+                    retrieval_kind=RetrievalKind.SEARCH_SNIPPET,
+                ),
             ),
         )
         actions = select_actor_runtime_tools_for_turn(
@@ -254,14 +285,15 @@ class ActorActionSchemaTests(unittest.TestCase):
         self.assertNotIn("emit_step_completed", names)
         self.assertNotIn("emit_external_communication_draft", names)
 
-    # Safety valve: after reaching the threshold of evidence request retries, completion is re-enabled.
-    def test_evidence_burden_gate_safety_valve_allows_completion_after_retries(self) -> None:
+    # The actor surface opens only from the validated OPA ceiling result, not a local count.
+    def test_evidence_burden_gate_uses_opa_ceiling_result(self) -> None:
         task = self._build_test_actor_task(
             evidence_burden=EvidenceBurden(min_independent_sources=3),
             observations=(
                 ToolObservation(observation_id="obs_1", content="OpenAI announcement", locator="https://openai.com/blog/1"),
             ),
-            evidence_request_episode_count=3,
+            evidence_request_episode_count=0,
+            evidence_request_ceiling_reached=True,
         )
         actions = select_actor_runtime_tools_for_turn(
             build_actor_runtime_tools(),

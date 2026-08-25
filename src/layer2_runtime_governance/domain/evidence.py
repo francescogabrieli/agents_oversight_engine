@@ -57,6 +57,7 @@ def build_evidence_snapshot_manifest(
             "observation_id": item.observation_id,
             "content_digest": digest_text(item.content),
             "locator": item.locator,
+            "retrieval_kind": getattr(item.retrieval_kind, "value", item.retrieval_kind),
             "source_timestamp": _source_timestamp_iso(
                 getattr(item, "source_timestamp", None)
             ),
@@ -92,6 +93,7 @@ def build_evidence_snapshot_manifest(
                 value.observation_id,
                 digest_text(value.content),
                 value.locator or "",
+                getattr(value.retrieval_kind, "value", value.retrieval_kind) or "",
             ),
         )
     ]

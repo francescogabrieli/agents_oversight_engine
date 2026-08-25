@@ -1,4 +1,5 @@
 from dataclasses import replace
+import re
 from urllib.parse import urlparse
 
 from ..actor_contract import ActorResult, ActorResultType, CapabilityAccessMode
@@ -12,6 +13,7 @@ from layer3_tool_bus_external_capabilities.tool_contract import (
     ToolObservation,
     ToolRequest,
     canonical_tool_request_identity,
+    canonical_web_locator,
 )
 from .lifecycle_service import _append_step_record
 
@@ -55,6 +57,16 @@ def _guarded_tool_result(*, state: TaskState, request: ToolRequest, action_key: 
         return _synthetic_result(request, "Equivalent capability failed terminally in this progress epoch.", ToolErrorCode.DUPLICATE_REQUEST), ToolDisposition.REJECTED_DUPLICATE, False
     if _retryable_failure_for_action(state, action_key):
         return _synthetic_result(request, "Equivalent capability already exhausted its local retry for this progress epoch.", ToolErrorCode.DUPLICATE_REQUEST), ToolDisposition.REJECTED_DUPLICATE, False
+    if _fetch_target_is_unanchored(state=state, request=request):
+        return (
+            _synthetic_result(
+                request,
+                "The requested URL is not anchored to a task or observed locator.",
+                ToolErrorCode.UNANCHORED_TARGET,
+            ),
+            ToolDisposition.REJECTED_UNANCHORED_TARGET,
+            False,
+        )
     if _circuit_open(state, request, action_key):
         return _synthetic_result(request, "Capability circuit is open after retryable backend failures.", ToolErrorCode.CIRCUIT_OPEN), ToolDisposition.REJECTED_CIRCUIT, False
     result = tool_gateway_service.execute(tool_request=request)
@@ -72,7 +84,11 @@ def _synthetic_result(request: ToolRequest, summary: str, error_code: ToolErrorC
 
 # Identify retryability only from an executed backend response.
 def _is_retryable_backend_failure(result: ToolExecutionResult) -> bool:
-    return not result.success and result.error_code in {ToolErrorCode.TIMEOUT, ToolErrorCode.UNAVAILABLE}
+    # Only explicitly transient backend outcomes may consume retry budget.
+    return not result.success and result.error_code in {
+        ToolErrorCode.TIMEOUT,
+        ToolErrorCode.UNAVAILABLE,
+    }
 
 
 # Count same-epoch attempts after adding the current rejected duplicate.
@@ -104,8 +120,20 @@ def _successful_result_for_action(state: TaskState, action_key: str) -> ToolExec
 
 # Terminal failures are not retried until progress changes.
 def _terminal_failure_for_action(state: TaskState, action_key: str) -> bool:
+    terminal_target_codes = {
+        ToolErrorCode.TARGET_NOT_FOUND,
+        ToolErrorCode.FORBIDDEN,
+    }
+    if any(
+        canonical_tool_request_identity(result.request) == action_key
+        and not result.success
+        and result.error_code in terminal_target_codes
+        for result in state.tool_results_history
+    ):
+        return True
     return any(
-        item.action_key == action_key and item.progress_epoch == state.progress_epoch
+        item.action_key == action_key
+        and item.progress_epoch == state.progress_epoch
         and item.disposition == ToolDisposition.EXECUTED_TERMINAL_FAILURE
         for item in state.tool_attempts
     )
@@ -225,6 +253,31 @@ def _tool_result_indicates_extractability_limit(result: ToolExecutionResult) -> 
     if result.error_code in {ToolErrorCode.FORBIDDEN, ToolErrorCode.BYTE_LIMIT, ToolErrorCode.BOT_CHALLENGE, ToolErrorCode.EMPTY_EXTRACTION, ToolErrorCode.TIMEOUT}:
         return True
     return not result.success and "empty" in " ".join(part or "" for part in (result.summary, result.error_message)).casefold()
+
+
+_TASK_URL_PATTERN = re.compile(r"https?://[^\s<>\"'()]+", re.IGNORECASE)
+
+
+# Enforce URL provenance before the Tool Gateway can reach a backend.
+def _fetch_target_is_unanchored(*, state: TaskState, request: ToolRequest) -> bool:
+    if request.tool_name != ToolName.FETCH_URL_TEXT or not request.url:
+        return False
+    requested_locator = canonical_web_locator(request.url)
+    observed_locators = {
+        canonical_web_locator(observation.locator)
+        for observation in state.observations
+        if observation.locator
+    }
+    if requested_locator in observed_locators:
+        return False
+    task_spec = state.task_spec
+    task_text = " ".join(
+        [task_spec.goal, task_spec.context, *task_spec.constraints, *task_spec.success_criteria]
+    )
+    return requested_locator not in {
+        canonical_web_locator(match.group(0).rstrip(".,"))
+        for match in _TASK_URL_PATTERN.finditer(task_text)
+    }
 
 
 # Add only request-local evidence references to the audit trail.

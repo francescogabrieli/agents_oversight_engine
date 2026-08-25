@@ -1284,12 +1284,16 @@ class _ThreadIdInjectingGraph:
 def _build_research_intake_result(
     *,
     read_only_mode: bool = False,
+    explicit_url: str | None = None,
 ) -> IntakeResult:
+    context = "Use official EU sources."
+    if explicit_url:
+        context = f"{context} The explicit source URL is {explicit_url}."
     return IntakeResult(
         structured_task=StructuredTask(
             task_spec=TaskSpec(
                 goal="Find official sources about the Digital Markets Act and summarize them.",
-                context="Use official EU sources.",
+                context=context,
                 constraints=["Use official EU sources."],
                 sensitivity=SensitivityLevel.LOW,
                 success_criteria=["Produce a grounded short summary."],

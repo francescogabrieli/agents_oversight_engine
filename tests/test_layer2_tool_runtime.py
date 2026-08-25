@@ -218,7 +218,7 @@ class Layer2ToolRuntimeTests(unittest.TestCase):
             policy_engine_service=StubPolicyEngine(),
         )
         result = graph.invoke(
-            {"intake_result": _build_research_intake_result()},
+            {"intake_result": _build_research_intake_result(explicit_url="https://example.org/source")},
             config={"configurable": {"thread_id": "layer2-duplicate-fetch-blocked"}},
         )
 

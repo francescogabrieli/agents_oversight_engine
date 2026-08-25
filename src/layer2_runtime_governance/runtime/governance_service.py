@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import replace
+from urllib.parse import urlsplit
 
 from layer1_intake import ExecutionIntent
 from layer3_tool_bus_external_capabilities.external_operations import (
@@ -11,6 +12,10 @@ from layer3_tool_bus_external_capabilities.external_operations import (
     build_external_execution_request,
 )
 from layer3_tool_bus_external_capabilities.tools import ToolGatewayConfig
+from layer3_tool_bus_external_capabilities.tool_contract import (
+    RetrievalKind,
+    canonical_web_locator,
+)
 from layer4_state_evidence_observability.behavioral import (
     BehavioralStorePort,
     persist_behavioral_runtime_snapshot,
@@ -125,27 +130,39 @@ def _build_evidence_feedback_findings(
             f"Resolve the observed Evidence deficit '{code}' before resubmission.",
         )
         if code == "insufficient_independent_sources":
-            current_count = facts.get('distinct_independent_sources_count', 0)
-            required_count = facts.get('min_independent_sources_required', 0)
+            current_count = int(facts.get('distinct_independent_sources_count', 0) or 0)
+            required_count = int(facts.get('min_independent_sources_required', 0) or 0)
+            retrieved_count = int(
+                facts.get('retrieved_independent_sources_count', current_count) or 0
+            )
             summary = (
                 f"{summary} Current distinct sources: "
                 f"{current_count}; required: "
                 f"{required_count}."
             )
-            # Enrich with actionable guidance: how many search results remain unexplored.
-            unexplored = _count_unexplored_search_results(observations)
-            if unexplored > 0:
-                gap = max(0, int(required_count) - int(current_count)) if required_count else 0
+            gap = max(0, required_count - current_count)
+            # The burden is measured on the selected references, so a run that already
+            # holds enough retrieved origins needs a wider selection, not more fetching.
+            if retrieved_count >= required_count > current_count:
                 summary += (
-                    f" You have {unexplored} unfetched search results available."
-                    f" Open at least {max(gap, 1)} more from different source origins"
-                    f" before completing the step."
+                    f" You already retrieved {retrieved_count} distinct source origins"
+                    f" but selected only {current_count}. Cite at least"
+                    f" {max(gap, 1)} more of the evidence you already hold instead of"
+                    " retrieving new sources."
                 )
             else:
-                summary += (
-                    " No unfetched search results remain; consider issuing a"
-                    " new web_search with alternative queries to find additional sources."
-                )
+                unexplored = _count_unexplored_search_results(observations)
+                if unexplored > 0:
+                    summary += (
+                        f" You have {unexplored} unfetched search results available."
+                        f" Open at least {max(gap, 1)} more from different source origins"
+                        f" before completing the step."
+                    )
+                else:
+                    summary += (
+                        " No unfetched search results remain; consider issuing a"
+                        " new web_search with alternative queries to find additional sources."
+                    )
         findings.append(
             JudgeFindingSnapshot(
                 category="evidence",
@@ -164,28 +181,22 @@ def _count_unexplored_search_results(
 ) -> int:
     """Count search-result observations whose URLs have not been fetched yet.
 
-    A search-result observation is identified by its content starting with
-    ``Search result title:`` or lacking a locator with an http(s) scheme while
-    still carrying a URL-shaped locator. A fetched observation has a locator
-    that was also used as a ``fetch_url_text`` target (i.e. appears on a
-    non-search observation). This is a lightweight heuristic consistent with
-    the adapter contracts in Layer 3.
+    Retrieval kind is the adapter-owned distinction; canonical locators prevent
+    tracking parameters and trailing slashes from hiding an existing fetch.
     """
-    from urllib.parse import urlparse
-
     search_urls: set[str] = set()
     fetched_urls: set[str] = set()
     for obs in observations:
         locator = getattr(obs, "locator", None) or ""
-        is_search_stub = obs.content.startswith("Search result title:")
+        is_search_stub = obs.retrieval_kind == RetrievalKind.SEARCH_SNIPPET
         if is_search_stub:
-            if locator:
-                search_urls.add(locator)
+            if urlsplit(locator).scheme.casefold() in {"http", "https"}:
+                search_urls.add(canonical_web_locator(locator))
             continue
-        # Non-stub observations with an http(s) locator are fetched content.
-        parsed = urlparse(locator)
-        if parsed.scheme in {"http", "https"} and parsed.netloc:
-            fetched_urls.add(locator)
+        # Only concrete non-search web observations count as explored results.
+        parsed = urlsplit(locator)
+        if parsed.scheme.casefold() in {"http", "https"} and parsed.netloc:
+            fetched_urls.add(canonical_web_locator(locator))
 
     return len(search_urls - fetched_urls)
 
@@ -311,6 +322,12 @@ def _apply_governance_decision(
     governance_decision: GovernanceDecision,
     policy_input: PolicyEvaluationInput,
 ) -> None:
+    evidence_result = (governance_decision.pillar_results or {}).get("evidence", {})
+    evidence_result = evidence_result if isinstance(evidence_result, dict) else {}
+    # Persist only the validated OPA result; no local request-count threshold is duplicated.
+    state.evidence_request_ceiling_reached = bool(
+        evidence_result.get("evidence_request_ceiling_reached", False)
+    )
     if governance_decision.directive == GovernanceDirective.STOP:
         set_external_communication_phase(
             state,

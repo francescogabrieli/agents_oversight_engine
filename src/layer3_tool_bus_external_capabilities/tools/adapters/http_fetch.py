@@ -7,7 +7,13 @@ from typing import Callable, Protocol
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
-from ..contracts import ToolErrorCode, ToolExecutionResult, ToolObservation, ToolRequest
+from ..contracts import (
+    RetrievalKind,
+    ToolErrorCode,
+    ToolExecutionResult,
+    ToolObservation,
+    ToolRequest,
+)
 from ..eu_legal import try_fetch_specialized_legal_document
 from ..extractors import (
     extract_html_publication_timestamp,
@@ -33,6 +39,33 @@ class _HttpResponse(Protocol):
 
 HttpOpener = Callable[..., _HttpResponse]
 PdfExtractor = Callable[[bytes], str]
+
+# These markers identify browser, consent, paywall, or bot interstitials rather than source content.
+_BOT_CHALLENGE_MARKERS = (
+    "client challenge",
+    "required part of this site",
+    "captcha",
+    "security check",
+    "human verification",
+    "cloudflare",
+    "checking your browser",
+    "verify you are human",
+    "verify you're human",
+    "enable javascript",
+    "enable cookies",
+    "browser verification",
+    "cookie consent",
+    "accept cookies to continue",
+    "subscribe to continue",
+    "sign in to continue",
+    "access denied",
+    "just a moment",
+    "paywall",
+    "this content is for subscribers",
+    "purchase a subscription",
+)
+_BOT_CHALLENGE_LONG_TEXT_LIMIT = 2000
+_BOT_CHALLENGE_MARKER_RATIO = 0.18
 
 
 class HttpFetchAdapter:
@@ -79,6 +112,18 @@ class HttpFetchAdapter:
             source_timestamp = None
         content = truncate_text(extracted_text, definition.max_content_chars)
         content_truncated = truncated or len(content or "") < len(extracted_text)
+        if _looks_like_bot_challenge(extracted_text):
+            return ToolExecutionResult(
+                request=tool_request,
+                success=False,
+                summary="URL fetch returned a bot challenge or access interstitial.",
+                error_message=(
+                    "The response body is challenge/interstitial boilerplate rather "
+                    "than a source document."
+                ),
+                error_code=ToolErrorCode.BOT_CHALLENGE,
+                extractability_limited=True,
+            )
         specialized_result = try_fetch_specialized_legal_document(
             tool_request=tool_request,
             definition=definition,
@@ -110,6 +155,7 @@ class HttpFetchAdapter:
                     locator=tool_request.url or "",
                     content=content,
                     source_timestamp=source_timestamp,
+                    retrieval_kind=RetrievalKind.FETCHED_DOCUMENT,
                 ),
             ),
         )
@@ -135,7 +181,15 @@ class HttpFetchAdapter:
                 content_type = response.headers.get_content_type()
                 source_timestamp = _parse_last_modified(response.headers)
         except HTTPError as exc:
-            return (f"HTTP {exc.code}", ToolErrorCode.FORBIDDEN if exc.code == 403 else ToolErrorCode.UNAVAILABLE)
+            if exc.code in {404, 410}:
+                error_code = ToolErrorCode.TARGET_NOT_FOUND
+            elif exc.code == 429:
+                error_code = ToolErrorCode.UNAVAILABLE
+            elif exc.code == 403 or 400 <= exc.code < 500:
+                error_code = ToolErrorCode.FORBIDDEN
+            else:
+                error_code = ToolErrorCode.UNAVAILABLE
+            return (f"HTTP {exc.code}", error_code)
         except TimeoutError as exc:
             return (str(exc), ToolErrorCode.TIMEOUT)
         except URLError as exc:  # pragma: no cover - network errors are normalized.
@@ -146,6 +200,22 @@ class HttpFetchAdapter:
         truncated = len(raw_body) > max_bytes
         # HTML/text remains useful as an explicitly partial prefix; never claim a truncated PDF is complete.
         return raw_body[:max_bytes], charset, content_type, truncated, source_timestamp
+
+
+# Detect challenge/interstitial boilerplate before it can become factual evidence.
+def _looks_like_bot_challenge(extracted_text: str) -> bool:
+    normalized = " ".join(extracted_text.casefold().split())
+    if not normalized:
+        return False
+    matched_markers = [marker for marker in _BOT_CHALLENGE_MARKERS if marker in normalized]
+    if not matched_markers:
+        return False
+    word_count = max(len(normalized.split()), 1)
+    marker_word_count = sum(len(marker.split()) for marker in matched_markers)
+    return (
+        len(normalized) <= _BOT_CHALLENGE_LONG_TEXT_LIMIT
+        or marker_word_count / word_count >= _BOT_CHALLENGE_MARKER_RATIO
+    )
 
 
 # Parse a source-provided Last-Modified header without inventing a retrieval timestamp.

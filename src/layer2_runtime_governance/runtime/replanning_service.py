@@ -4,6 +4,7 @@ from ..domain import (
     ReplanCheckpoint,
     RuntimeState,
     TaskState,
+    apply_task_evidence_floor,
     semantic_plan_signature,
     validate_external_effect_plan_contract,
     validate_plan_steps_evidence_contract,
@@ -39,6 +40,10 @@ def replanner(state: TaskState, *, replanner_service: ReplannerPort) -> TaskStat
     replaced_steps = list(state.plan_steps[state.current_plan_step_index :])
     decision = replanner_service.replan(task_state=state)
     validate_plan_steps_evidence_contract(decision.replacement_steps)
+    evidence_floor_corrections = apply_task_evidence_floor(
+        steps=decision.replacement_steps,
+        task_spec=state.task_spec,
+    )
     validate_replacement_evidence_obligation(
         replaced_steps=replaced_steps,
         replacement_steps=decision.replacement_steps,
@@ -98,6 +103,15 @@ def replanner(state: TaskState, *, replanner_service: ReplannerPort) -> TaskStat
         node_name="replanner",
         summary="Replanner replaced the current/pending trajectory after actor replan request.",
     )
+    if evidence_floor_corrections:
+        _append_step_record(
+            state,
+            node_name="replanner",
+            summary=(
+                "Replacement evidence burdens were lifted to the deterministic task floor: "
+                + ", ".join(evidence_floor_corrections)
+            ),
+        )
     return state
 
 # Replace only the current and pending semantic trajectory.

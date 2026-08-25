@@ -22,7 +22,6 @@ from layer3_tool_bus_external_capabilities.external_operations import (
     normalize_sql_operation,
     replace_external_operation_payload,
 )
-from layer4_state_evidence_observability.behavioral import BehavioralAssessment
 from layer4_state_evidence_observability.oversight.contracts import (
     DynamicPolicyAssessment,
     OversightAssessment,
@@ -119,7 +118,6 @@ def build_human_review_request(*, state: TaskState, thread_id: str) -> HumanRevi
         review_summary=_build_review_summary(
             governance_decision=governance_decision,
             dynamic_policy_assessment=dynamic_policy_assessment,
-            behavioral_assessment=behavioral_assessment,
             judge_assessment=judge_assessment,
             resume_state=resume_state,
             external_communication_draft=external_draft,
@@ -538,7 +536,6 @@ def _build_review_summary(
     *,
     governance_decision: Any,
     dynamic_policy_assessment: DynamicPolicyAssessment | OversightAssessment | None,
-    behavioral_assessment: BehavioralAssessment | None,
     judge_assessment: Any,
     resume_state: RuntimeState,
     external_communication_draft: ExternalCommunicationDraft | None = None,
@@ -557,8 +554,6 @@ def _build_review_summary(
             normalized_parts,
             dynamic_policy_assessment.summary,
         )
-    if behavioral_assessment is not None and behavioral_assessment.summary:
-        _append_unique_review_part(parts, normalized_parts, behavioral_assessment.summary)
     if judge_assessment is not None and getattr(judge_assessment, "summary", None):
         _append_unique_review_part(parts, normalized_parts, judge_assessment.summary)
     if external_communication_draft is not None:
@@ -611,6 +606,7 @@ def _resolve_allowed_human_review_decisions(
         "action_revision_limit_reached",
         "unchanged_candidate_resubmission",
         "rejected_candidate_resubmitted",
+        "unresolvable_revision",
         "external_low_actor_self_confidence",
     } & reason_codes:
         return (
@@ -713,6 +709,7 @@ def human_review_reasons_authorize_external_execution(
         "action_revision_limit_reached",
         "unchanged_candidate_resubmission",
         "rejected_candidate_resubmitted",
+        "unresolvable_revision",
         "external_low_actor_self_confidence",
         "replan_ceiling_reached",
         "replan_request_stalled",
@@ -765,8 +762,11 @@ def _append_unique_review_part(
         return
 
     normalized_part = " ".join(part.split()).strip()
+    normalized_part = normalized_part.rstrip(" ,;:")
     if not normalized_part:
         return
+    if normalized_part[-1] not in ".!?":
+        normalized_part += "."
 
     joined_parts = " ".join(normalized_parts)
     if normalized_part in joined_parts:

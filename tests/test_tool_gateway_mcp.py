@@ -51,6 +51,10 @@ from layer3_tool_bus_external_capabilities.tools import (
     ToolRiskLevel,
     load_tool_gateway_config,
 )
+from layer3_tool_bus_external_capabilities.tool_contract import (
+    RetrievalKind,
+    ToolErrorCode,
+)
 from layer4_state_evidence_observability.infrastructure.checkpointing import (
     build_runtime_serializer,
 )
@@ -237,7 +241,42 @@ class GatewayMCPTests(unittest.TestCase):
 
         self.assertTrue(result.success)
         self.assertEqual(result.observations[0].locator, "https://example.org/doc")
+        self.assertEqual(
+            result.observations[0].retrieval_kind,
+            RetrievalKind.FETCHED_DOCUMENT,
+        )
         self.assertIn("Hello source", result.content or "")
+
+    # Browser, consent, and bot interstitials are retryable extraction failures.
+    def test_fetch_url_detects_client_challenge_marker(self) -> None:
+        gateway = OpenAIToolGateway()
+        response = FakeHTTPResponse(
+            body=(
+                b"<html><body>Client Challenge A required part of this site could not "
+                b"load. Please enable JavaScript to continue.</body></html>"
+            ),
+            content_type="text/html",
+        )
+
+        with patch(
+            "layer3_tool_bus_external_capabilities.tools.security.is_blocked_host",
+            return_value=False,
+        ), patch(
+            "layer3_tool_bus_external_capabilities.tools.adapters.http_fetch.urlopen",
+            return_value=response,
+        ):
+            result = gateway.execute(
+                tool_request=ToolRequest(
+                    plan_step_id="step_1",
+                    tool_name=ToolName.FETCH_URL_TEXT,
+                    reason="Fetch a document behind a client challenge.",
+                    url="https://example.org/challenge",
+                )
+            )
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error_code, ToolErrorCode.BOT_CHALLENGE)
+        self.assertTrue(result.extractability_limited)
 
     # HTML Last-Modified is transport metadata, not semantic publication evidence.
     def test_fetch_url_excludes_html_last_modified_from_publication_timestamp(self) -> None:

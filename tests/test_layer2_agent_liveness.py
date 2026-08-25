@@ -62,8 +62,15 @@ class _Gateway:
 
 class Layer2AgentLivenessTests(unittest.TestCase):
     # Build one minimal tool-ready state for local guard tests.
-    def _tool_state(self, request: ToolRequest) -> TaskState:
-        state = TaskState.from_intake(_build_research_intake_result())
+    def _tool_state(self, request: ToolRequest, *, anchor_url: bool = True) -> TaskState:
+        explicit_url = (
+            request.url
+            if anchor_url and request.tool_name == ToolName.FETCH_URL_TEXT
+            else None
+        )
+        state = TaskState.from_intake(
+            _build_research_intake_result(explicit_url=explicit_url)
+        )
         state.plan_steps = [PlanStep("step_1", "Collect material.", "Needed.", "Material.", PlanStepStatus.IN_PROGRESS)]
         state.current_plan_step_index = 0
         state.current_state = RuntimeState.READY_TOOL_EXECUTION
@@ -140,6 +147,51 @@ class Layer2AgentLivenessTests(unittest.TestCase):
         self.assertEqual(terminal.calls, 1)
         self.assertEqual(state.tool_call_count, 1)
         self.assertEqual(state.tool_invocations[0].retryable_failure, False)
+
+    # Fetch targets must be anchored by an observed locator or an explicit task URL.
+    def test_unanchored_fetch_is_rejected_before_backend_invocation(self) -> None:
+        request = ToolRequest(
+            "step_1",
+            ToolName.FETCH_URL_TEXT,
+            "Fetch an invented target.",
+            url="https://invented.example/404",
+        )
+        gateway = _Gateway(ToolExecutionResult(request, True, "backend must not run"))
+
+        result = tool_gateway(
+            self._tool_state(request, anchor_url=False),
+            tool_gateway_service=gateway,
+        )
+
+        self.assertEqual(gateway.calls, 0)
+        self.assertEqual(result.tool_call_count, 0)
+        self.assertEqual(result.last_tool_result.error_code, ToolErrorCode.UNANCHORED_TARGET)
+
+    # A target-not-found result is terminal across progress epochs.
+    def test_target_not_found_is_remembered_across_progress_epoch(self) -> None:
+        request = ToolRequest(
+            "step_1",
+            ToolName.FETCH_URL_TEXT,
+            "Fetch the explicit target.",
+            url="https://example.test/missing",
+        )
+        gateway = _Gateway(
+            ToolExecutionResult(
+                request,
+                False,
+                "not found",
+                error_code=ToolErrorCode.TARGET_NOT_FOUND,
+            )
+        )
+
+        state = tool_gateway(self._tool_state(request), tool_gateway_service=gateway)
+        state.current_state = RuntimeState.READY_TOOL_EXECUTION
+        state.current_tool_request = request
+        state.progress_epoch += 1
+        state = tool_gateway(state, tool_gateway_service=gateway)
+
+        self.assertEqual(gateway.calls, 1)
+        self.assertEqual(state.last_tool_result.error_code, ToolErrorCode.DUPLICATE_REQUEST)
 
     # A legacy checkpoint with nested dicts must be normalized before Tool Gateway guards inspect it.
     def test_legacy_checkpoint_tool_history_is_normalized_at_runtime_boundary(self) -> None:

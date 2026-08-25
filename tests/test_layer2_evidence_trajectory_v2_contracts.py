@@ -14,6 +14,15 @@ from layer1_intake import (
     StructuredTask,
     TaskSpec,
 )
+from layer2_runtime_governance.runtime.governance_service import (
+    _build_evidence_feedback_findings,
+)
+from layer2_runtime_governance.signal_services.evidence_service import (
+    _build_literal_corpus_index,
+    _declares_insufficiency,
+    _literal_is_anchored,
+    _task_literal_corpus,
+)
 from layer2_runtime_governance.actor_contract import (
     ActorResult,
     ActorResultType,
@@ -28,6 +37,7 @@ from layer2_runtime_governance.domain import (
     TaskState,
     build_evidence_selection_digest,
     build_evidence_snapshot_manifest,
+    derive_task_evidence_floor,
     digest_json,
     normalize_task_state_serialization,
 )
@@ -43,13 +53,21 @@ from layer3_tool_bus_external_capabilities.tool_contract import (
     ToolName,
     ToolObservation,
     ToolRequest,
+    RetrievalKind,
 )
 
 
-def _build_test_task_state(*, produces_factual_claims: bool = False, evidence_burden: EvidenceBurden | None = None) -> TaskState:
+def _build_test_task_state(
+    *,
+    produces_factual_claims: bool = False,
+    produces_external_effect_proposal: bool = False,
+    evidence_burden: EvidenceBurden | None = None,
+    task_spec: TaskSpec | None = None,
+) -> TaskState:
     intake = IntakeResult(
         structured_task=StructuredTask(
-            task_spec=TaskSpec(
+            task_spec=task_spec
+            or TaskSpec(
                 goal="Test evidence and trajectory contracts v2",
                 context="Unit test fixtures",
                 constraints=["Deterministic execution"],
@@ -79,6 +97,7 @@ def _build_test_task_state(*, produces_factual_claims: bool = False, evidence_bu
         expected_outcome="Data collected",
         status=PlanStepStatus.IN_PROGRESS,
         produces_factual_claims=produces_factual_claims,
+        produces_governed_external_effect_proposal=produces_external_effect_proposal,
         evidence_burden=evidence_burden,
     )
     state.plan_steps.append(step)
@@ -87,6 +106,120 @@ def _build_test_task_state(*, produces_factual_claims: bool = False, evidence_bu
 
 
 class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
+    # Derive only explicit proof language from constraints and success criteria.
+    def test_task_floor_parses_word_counts_freshness_and_explicit_fallback(self) -> None:
+        task_spec = TaskSpec(
+            goal="Ignore any source count mentioned in the goal.",
+            context="The context may mention at least nine sources, but it is not binding.",
+            constraints=[
+                "Use at least three valid independent sources within 30 days.",
+                "If fewer than three sources are available, explicitly declare insufficiency.",
+            ],
+            sensitivity=SensitivityLevel.LOW,
+            success_criteria=["At least three sources support the result."],
+            execution_intent=ExecutionIntent.PROPOSAL_ONLY,
+        )
+
+        floor = derive_task_evidence_floor(task_spec)
+
+        self.assertIsNotNone(floor)
+        self.assertEqual(floor.min_independent_sources, 3)
+        self.assertTrue(floor.require_retrieved_content)
+        self.assertEqual(floor.freshness_window_days, 30)
+        self.assertTrue(floor.insufficiency_declaration_permitted)
+
+        no_floor = TaskSpec(
+            goal="The goal says at least ninety-nine sources, but this is not a proof contract.",
+            context="No explicit evidence requirement.",
+            constraints=[],
+            sensitivity=SensitivityLevel.LOW,
+            success_criteria=[],
+            execution_intent=ExecutionIntent.PROPOSAL_ONLY,
+        )
+        self.assertIsNone(derive_task_evidence_floor(no_floor))
+
+    # A weaker declared burden cannot hide a stronger task-level minimum.
+    def test_task_floor_lifts_declared_burden_in_evidence_signal(self) -> None:
+        task_spec = TaskSpec(
+            goal="Produce a grounded answer.",
+            context="",
+            constraints=["Use at least three reliable sources."],
+            sensitivity=SensitivityLevel.LOW,
+            success_criteria=["State the result."],
+            execution_intent=ExecutionIntent.PROPOSAL_ONLY,
+        )
+        state = _build_test_task_state(
+            produces_factual_claims=True,
+            evidence_burden=EvidenceBurden(
+                min_independent_sources=1,
+                require_retrieved_content=False,
+            ),
+            task_spec=task_spec,
+        )
+
+        facts = build_evidence_signal(task_state=state, thresholds_version="v1")["raw_facts"]
+
+        self.assertEqual(facts["min_independent_sources_required"], 3)
+        self.assertFalse(facts["retrieved_content_satisfied"])
+        self.assertFalse(facts["insufficiency_declaration_permitted"])
+
+    # External-effect proposals activate structural evidence families even without factual claims.
+    def test_external_effect_proposal_activates_evidence_families(self) -> None:
+        state = _build_test_task_state(produces_external_effect_proposal=True)
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.STEP_COMPLETED,
+            summary="Prepared a governed external proposal.",
+            output_text="The proposal is ready for human review.",
+        )
+
+        facts = build_evidence_signal(task_state=state, thresholds_version="v1")["raw_facts"]
+
+        self.assertFalse(facts["produces_factual_claims"])
+        self.assertTrue(facts["produces_governed_external_effect_proposal"])
+        self.assertTrue(facts["evidence_families_active"])
+        self.assertTrue(facts["evidence_completion_attempt"])
+
+    # Search snippets do not count as independently retrieved source coverage.
+    def test_search_snippet_does_not_satisfy_independent_source_coverage(self) -> None:
+        burden = EvidenceBurden(min_independent_sources=2, require_retrieved_content=True)
+        state = _build_test_task_state(produces_factual_claims=True, evidence_burden=burden)
+        state.observations.extend(
+            [
+                ToolObservation(
+                    observation_id="obs-search",
+                    content="Search result title",
+                    locator="https://source-a.org/search-result",
+                    retrieval_kind=RetrievalKind.SEARCH_SNIPPET,
+                ),
+                ToolObservation(
+                    observation_id="obs-fetch",
+                    content="Fetched source content",
+                    locator="https://source-b.org/article",
+                    retrieval_kind=RetrievalKind.FETCHED_DOCUMENT,
+                ),
+            ]
+        )
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.STEP_COMPLETED,
+            summary="Claim uses a search result and one fetched source.",
+            output_text="The result is supported by the available material.",
+            step_validation=StepValidation(
+                plan_step_id="step_1",
+                actor_self_confidence=0.9,
+                evidence_refs=("obs-search", "obs-fetch"),
+                rationale_summary="The observation set is intentionally mixed.",
+            ),
+        )
+
+        facts = build_evidence_signal(task_state=state, thresholds_version="v1")["raw_facts"]
+
+        self.assertEqual(facts["distinct_independent_sources_count"], 1)
+        self.assertTrue(facts["retrieved_content_satisfied"])
+        self.assertFalse(facts["independent_sources_satisfied"])
+        self.assertIn("insufficient_independent_sources", facts["deficit_codes"])
+
     def test_nonfactual_step_has_no_declared_coverage_requirement(self) -> None:
         state = _build_test_task_state(produces_factual_claims=False, evidence_burden=None)
         state.actor_result = ActorResult(
@@ -731,6 +864,150 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
         self.assertEqual(facts["evidence_request_count"], 7)
         self.assertEqual(facts["evidence_request_episode_count"], 0)
         self.assertEqual(facts["evidence_request_episode_id"], "step_2")
+
+
+class TaskLiteralAndInsufficiencyRecognitionTests(unittest.TestCase):
+    # A date the task states in prose must anchor whichever rendering the actor writes.
+    def test_task_prose_date_anchors_every_numeric_rendering(self) -> None:
+        spec = TaskSpec(
+            goal="Produce a briefing.",
+            context="Data corrente indicata: 24 agosto 2026.",
+            constraints=["Usare solo fonti pubblicate entro gli ultimi 30 giorni."],
+            success_criteria=["Ogni fonte riporta la data."],
+            sensitivity=SensitivityLevel.LOW,
+            execution_intent=ExecutionIntent.PROPOSAL_ONLY,
+        )
+        index = _build_literal_corpus_index(corpus=_task_literal_corpus(spec))
+
+        for rendering in ("2026-08-24", "24/08/2026", "2026/08/24", "24-08-2026"):
+            with self.subTest(rendering=rendering):
+                self.assertTrue(_literal_is_anchored(rendering, index))
+
+    # A publication date belongs to the observations, never to the task corpus.
+    def test_source_publication_date_is_not_task_anchored(self) -> None:
+        spec = TaskSpec(
+            goal="Produce a briefing.",
+            context="Data corrente indicata: 24 agosto 2026.",
+            constraints=[],
+            success_criteria=[],
+            sensitivity=SensitivityLevel.LOW,
+            execution_intent=ExecutionIntent.PROPOSAL_ONLY,
+        )
+        index = _build_literal_corpus_index(corpus=_task_literal_corpus(spec))
+
+        self.assertFalse(_literal_is_anchored("2026-07-15", index))
+        self.assertFalse(_literal_is_anchored("987654", index))
+
+    # The declaration is assertive and order-insensitive, never a restated task rule.
+    def test_insufficiency_declaration_is_order_insensitive(self) -> None:
+        declaring = (
+            "Sono state individuate solo 2 fonti valide.",
+            "Le fonti valide sono insufficienti e questo viene dichiarato esplicitamente.",
+            "Le fonti valide risultano inferiori a tre.",
+            "Only two valid sources were found within the window.",
+            "The available sources are insufficient, as stated explicitly.",
+        )
+        for text in declaring:
+            with self.subTest(text=text):
+                self.assertTrue(_declares_insufficiency(text))
+
+    def test_conditional_task_rule_is_not_a_declaration(self) -> None:
+        not_declaring = (
+            "Se le fonti valide sono meno di tre, va dichiarato esplicitamente.",
+            "If fewer than three sources are available, declare it.",
+            "Il briefing confronta tre fonti ufficiali con date verificate.",
+        )
+        for text in not_declaring:
+            with self.subTest(text=text):
+                self.assertFalse(_declares_insufficiency(text))
+
+
+class SelectionScopedCoverageTests(unittest.TestCase):
+    def _state_with_observations(self, *, minimum: int) -> TaskState:
+        state = _build_test_task_state(
+            produces_factual_claims=True,
+            evidence_burden=EvidenceBurden(min_independent_sources=minimum),
+        )
+        state.observations.extend(
+            ToolObservation(
+                observation_id=f"obs_{index}",
+                content=f"Retrieved body {index}",
+                locator=f"https://source-{index}.example/article",
+                retrieval_kind=RetrievalKind.FETCHED_DOCUMENT,
+            )
+            for index in range(1, 4)
+        )
+        return state
+
+    def _complete_with(self, state: TaskState, refs: tuple[str, ...]) -> dict:
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.STEP_COMPLETED,
+            summary="Completed the factual step.",
+            output_text="A grounded statement.",
+            step_validation=StepValidation(
+                plan_step_id="step_1",
+                rationale_summary="Selected the supporting evidence.",
+                evidence_refs=refs,
+                actor_self_confidence=0.9,
+            ),
+        )
+        return build_evidence_signal(task_state=state, thresholds_version="v1")["raw_facts"]
+
+    # The declared burden belongs to the claim: retrieving three sources but citing one
+    # must not satisfy coverage.
+    def test_coverage_counts_the_actor_selection_not_the_universe(self) -> None:
+        state = self._state_with_observations(minimum=3)
+
+        facts = self._complete_with(state, ("obs_1",))
+
+        self.assertEqual(facts["distinct_independent_sources_count"], 1)
+        self.assertEqual(facts["retrieved_independent_sources_count"], 3)
+        self.assertFalse(facts["independent_sources_satisfied"])
+        self.assertIn("insufficient_independent_sources", facts["deficit_codes"])
+
+    def test_coverage_is_satisfied_when_the_selection_reaches_the_minimum(self) -> None:
+        state = self._state_with_observations(minimum=3)
+
+        facts = self._complete_with(state, ("obs_1", "obs_2", "obs_3"))
+
+        self.assertEqual(facts["distinct_independent_sources_count"], 3)
+        self.assertEqual(facts["retrieved_independent_sources_count"], 3)
+        self.assertTrue(facts["independent_sources_satisfied"])
+        self.assertNotIn("insufficient_independent_sources", facts["deficit_codes"])
+
+    # A run that already holds enough origins must be told to widen its citations,
+    # never to fetch more, otherwise the remediation loops on the wrong action.
+    def test_remediation_asks_to_cite_already_retrieved_sources(self) -> None:
+        findings = _build_evidence_feedback_findings(
+            codes=("insufficient_independent_sources",),
+            facts={
+                "distinct_independent_sources_count": 1,
+                "retrieved_independent_sources_count": 3,
+                "min_independent_sources_required": 3,
+            },
+            observations=(),
+        )
+
+        summary = findings[0].summary
+        self.assertIn("already retrieved 3 distinct source origins", summary)
+        self.assertIn("Cite at least 2 more", summary)
+        self.assertNotIn("new web_search", summary)
+
+    def test_remediation_asks_to_retrieve_when_origins_are_missing(self) -> None:
+        findings = _build_evidence_feedback_findings(
+            codes=("insufficient_independent_sources",),
+            facts={
+                "distinct_independent_sources_count": 1,
+                "retrieved_independent_sources_count": 1,
+                "min_independent_sources_required": 3,
+            },
+            observations=(),
+        )
+
+        summary = findings[0].summary
+        self.assertNotIn("already retrieved", summary)
+        self.assertIn("new web_search", summary)
 
 
 if __name__ == "__main__":

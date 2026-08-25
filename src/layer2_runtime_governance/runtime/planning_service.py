@@ -3,6 +3,7 @@ from ..domain import (
     PlanStepStatus,
     RuntimeState,
     TaskState,
+    apply_task_evidence_floor,
     validate_external_effect_plan_contract,
     validate_plan_steps_evidence_contract,
 )
@@ -17,6 +18,10 @@ def planner(state: TaskState, *, planner_service: PlannerPort) -> TaskState:
 
     decision = planner_service.plan(task_state=state)
     validate_plan_steps_evidence_contract(decision.plan_steps)
+    evidence_floor_corrections = apply_task_evidence_floor(
+        steps=decision.plan_steps,
+        task_spec=state.task_spec,
+    )
     validate_external_effect_plan_contract(
         steps=decision.plan_steps,
         execution_intent=state.execution_intent,
@@ -34,6 +39,15 @@ def planner(state: TaskState, *, planner_service: PlannerPort) -> TaskState:
         node_name="planner",
         summary="Initial semantic full plan created from the current task state.",
     )
+    if evidence_floor_corrections:
+        _append_step_record(
+            state,
+            node_name="planner",
+            summary=(
+                "Planner evidence burdens were lifted to the deterministic task floor: "
+                + ", ".join(evidence_floor_corrections)
+            ),
+        )
     return state
 
 

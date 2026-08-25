@@ -5,7 +5,13 @@ import subprocess
 import time
 from typing import Any
 
-from ..contracts import ToolExecutionResult, ToolName, ToolObservation, ToolRequest
+from ..contracts import (
+    RetrievalKind,
+    ToolExecutionResult,
+    ToolName,
+    ToolObservation,
+    ToolRequest,
+)
 from ..models import McpServerDefinition, ToolDefinition, ToolExecutionError, ToolGatewayConfig
 from ..results import failure_result
 from ..text import truncate_text
@@ -92,6 +98,7 @@ def normalize_mcp_result(
                 observation_id=f"{tool_request.request_id}:result",
                 locator=f"mcp://{definition.mcp_server_id}/{definition.mcp_tool_name}",
                 content=content,
+                retrieval_kind=RetrievalKind.MCP_RESULT,
             ),
         )
         if content

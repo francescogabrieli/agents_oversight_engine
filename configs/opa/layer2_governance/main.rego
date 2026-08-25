@@ -91,6 +91,8 @@ else := hitl_decision("action_churn", "The actor oscillated between variants of 
 
 else := hitl_decision("replan_request_stalled", "The actor repeated a replan request without a new observable execution basis.") if trajectory.result.replan_request_stalled
 
+else := hitl_decision("unresolvable_revision", "The latest semantic revision request has no new observational basis and cannot be resolved by repeating the candidate.") if trajectory.result.unresolvable_revision
+
 else := hitl_decision("rejected_candidate_resubmitted", "The actor resubmitted a payload digest already rejected by semantic governance.") if trajectory.result.repeated_rejected_payload_digest
 
 else := hitl_decision("unchanged_candidate_resubmission", "The actor resubmitted the same external candidate without a substantive state or payload change.") if trajectory.result.unchanged_resubmission
@@ -220,6 +222,12 @@ candidate_alternatives[code] := reason if {
 	code := "replan_request_stalled"
 	reason := "The actor repeated a replan request without a new observable execution basis."
 	trajectory.result.replan_request_stalled
+}
+
+candidate_alternatives[code] := reason if {
+	code := "unresolvable_revision"
+	reason := "The latest semantic revision request has no new observational basis and cannot be resolved by repeating the candidate."
+	trajectory.result.unresolvable_revision
 }
 
 candidate_alternatives[code] := reason if {

@@ -80,6 +80,8 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
     "The runtime requires an operator decision.";
   const governanceSummary = governance?.summary;
   const reasonCodes = pendingRequest?.reason_codes ?? snapshot.reason_codes;
+  const judgeFindings = pendingRequest?.judge_findings ?? humanReview?.judge_findings ?? [];
+  const selectedEvidenceReferences = humanReview?.selected_evidence_references ?? [];
   const allowedDecisions =
     pendingRequest?.allowed_decisions ?? humanReview?.allowed_decisions ?? [];
   const resumeState =
@@ -122,6 +124,33 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
               </span>
             ))}
           </div>
+        ) : null}
+
+        {judgeFindings.length > 0 ? (
+          <article className="review-diagnostic" aria-label="Judge findings">
+            <p className="review-diagnostic-title">Judge findings</p>
+            <div className="review-reason-chips">
+              {judgeFindings.map((finding, index) => (
+                <span className="action-chip" key={`${finding}-${index}`}>
+                  {finding}
+                </span>
+              ))}
+            </div>
+          </article>
+        ) : null}
+
+        {selectedEvidenceReferences.length > 0 ? (
+          <article className="review-diagnostic" aria-label="Selected evidence references">
+            <p className="review-diagnostic-title">Selected evidence</p>
+            {selectedEvidenceReferences.map((reference) => (
+              <div className="review-context-summary" key={reference.observation_id}>
+                <strong>{reference.observation_id}</strong>
+                {reference.locator ? <div>{reference.locator}</div> : null}
+                {reference.source_timestamp ? <div>{reference.source_timestamp}</div> : null}
+                <div>{reference.content_excerpt}</div>
+              </div>
+            ))}
+          </article>
         ) : null}
 
         <KeyValueGrid

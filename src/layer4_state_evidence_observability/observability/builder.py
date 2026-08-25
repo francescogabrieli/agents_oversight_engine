@@ -142,6 +142,9 @@ def _build_plan_step(*, step: Any, task_state: TaskState) -> TracePlanStep:
                 min_independent_sources=evidence_burden.min_independent_sources,
                 require_retrieved_content=evidence_burden.require_retrieved_content,
                 freshness_window_days=evidence_burden.freshness_window_days,
+                insufficiency_declaration_permitted=(
+                    evidence_burden.insufficiency_declaration_permitted
+                ),
             )
             if evidence_burden is not None
             else None
@@ -277,6 +280,7 @@ def _build_tool_observation_dict(observation: ToolObservation) -> dict[str, Any]
         "observation_id": observation.observation_id,
         "content": observation.content,
         "locator": observation.locator,
+        "retrieval_kind": _enum_or_string_value(observation.retrieval_kind),
         "source_timestamp": _source_timestamp_iso(observation),
     }
 
@@ -287,6 +291,7 @@ def _build_tool_observation(observation: ToolObservation) -> TraceToolObservatio
         observation_id=observation.observation_id,
         content=observation.content,
         locator=observation.locator,
+        retrieval_kind=_enum_or_string_value(observation.retrieval_kind) or "capability_result",
         source_timestamp=_source_timestamp_iso(observation),
     )
 

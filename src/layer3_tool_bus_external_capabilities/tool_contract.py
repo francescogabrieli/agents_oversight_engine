@@ -41,6 +41,17 @@ class ToolErrorCode(str, Enum):
     CIRCUIT_OPEN = "circuit_open"
     DUPLICATE_REQUEST = "duplicate_request"
     UNAVAILABLE = "unavailable"
+    TARGET_NOT_FOUND = "target_not_found"
+    UNANCHORED_TARGET = "unanchored_target"
+
+
+# RetrievalKind separates search discovery from source content at the Tool Bus boundary.
+class RetrievalKind(str, Enum):
+    SEARCH_SNIPPET = "search_snippet"
+    FETCHED_DOCUMENT = "fetched_document"
+    CONTROLLED_RESOURCE = "controlled_resource"
+    MCP_RESULT = "mcp_result"
+    CAPABILITY_RESULT = "capability_result"
 
 
 @dataclass(frozen=True)
@@ -168,6 +179,16 @@ class ToolObservation:
     content: str
     locator: str | None = None
     source_timestamp: datetime | None = None
+    retrieval_kind: RetrievalKind = RetrievalKind.CAPABILITY_RESULT
+
+    # Normalize persisted enum strings without inferring provenance from untrusted content.
+    def __post_init__(self) -> None:
+        retrieval_kind = self.retrieval_kind
+        if retrieval_kind is None:
+            retrieval_kind = RetrievalKind.CAPABILITY_RESULT
+        elif not isinstance(retrieval_kind, RetrievalKind):
+            retrieval_kind = RetrievalKind(str(retrieval_kind))
+        object.__setattr__(self, "retrieval_kind", retrieval_kind)
 
 
 @dataclass(frozen=True)
@@ -191,6 +212,7 @@ class ToolGatewayPort(Protocol):
 
 
 __all__ = [
+    "RetrievalKind",
     "ToolErrorCode",
     "ToolExecutionResult",
     "ToolGatewayPort",
