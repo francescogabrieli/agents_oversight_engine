@@ -293,6 +293,15 @@ def _external_communication_draft_action() -> dict[str, object]:
             "recipient": _string(),
             "subject": _string(),
             "body": _string(),
+            "body_format": {
+                "type": "string",
+                "enum": ["plain", "markdown"],
+                "description": (
+                    "How the body is written. Declare 'markdown' only when the body "
+                    "actually uses Markdown structure; the recipient client renders "
+                    "accordingly. Default is 'plain'."
+                ),
+            },
             "cc": {"type": "array", "items": _string(), "maxItems": 20},
             "bcc": {"type": "array", "items": _string(), "maxItems": 20},
             "completion_rationale": _string(),

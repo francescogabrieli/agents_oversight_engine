@@ -10,16 +10,17 @@
       "connector_kind": "mcp",
       "mcp_server_id": "communication",
       "mcp_tool_name": "send_email",
-      "input_schema_version": "communication.email.send.input.v2",
+      "input_schema_version": "communication.email.send.input.v3",
       "input_schema": {
         "required": ["recipient", "subject", "body", "idempotency_key"],
-        "optional": ["cc", "bcc"],
+        "optional": ["cc", "bcc", "body_format"],
         "properties": {
           "recipient": {"type": "string", "min_length": 3, "max_length": 320},
           "subject": {"type": "string", "min_length": 1, "max_length": 998},
           "body": {"type": "string", "min_length": 1, "max_length": 50000},
           "cc": {"type": "array", "max_items": 19, "item_type": "string"},
           "bcc": {"type": "array", "max_items": 19, "item_type": "string"},
+          "body_format": {"type": "string", "min_length": 5, "max_length": 8},
           "idempotency_key": {"type": "string", "min_length": 1, "max_length": 256}
         }
       },

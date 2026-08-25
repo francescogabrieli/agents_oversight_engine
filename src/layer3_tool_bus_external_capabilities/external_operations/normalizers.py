@@ -12,6 +12,7 @@ from sqlglot import exp, parse
 from sqlglot.errors import ParseError
 
 from .contracts import (
+    CommunicationBodyFormat,
     CommunicationOperationPayload,
     DatabaseOperationPayload,
     DestinationClass,
@@ -31,6 +32,14 @@ if TYPE_CHECKING:
     from layer2_runtime_governance.domain.review import ExternalCommunicationDraft
 
 _NORMALIZER_VERSION = "external_operation_normalizers.v2"
+
+
+# Accept only a declared, known rendering contract; anything else is plain text.
+def _normalized_body_format(value: object) -> CommunicationBodyFormat:
+    try:
+        return CommunicationBodyFormat(str(value).strip().lower())
+    except ValueError:
+        return CommunicationBodyFormat.PLAIN
 
 
 # Normalize an external communication without making semantic claims about its tone.
@@ -76,6 +85,7 @@ def normalize_communication_operation(
         destination_class=destination_class,
         cc=cc,
         bcc=bcc,
+        body_format=_normalized_body_format(getattr(draft, "body_format", None)),
     )
     target_value = recipient or channel
     return ExternalOperationProposal(

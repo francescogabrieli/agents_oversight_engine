@@ -6,6 +6,8 @@ import smtplib
 import socket
 from datetime import datetime, timezone
 from email.message import EmailMessage
+
+from .markdown_email import render_markdown_email_html
 from email.utils import getaddresses
 from functools import partial
 from typing import Any
@@ -41,6 +43,7 @@ def build_email_server(
         idempotency_key: str,
         cc: list[str] | None = None,
         bcc: list[str] | None = None,
+        body_format: str = "plain",
     ) -> dict[str, Any]:
         """Send one configured SMTP email after typed registry authorization."""
         return _send_email(
@@ -51,6 +54,7 @@ def build_email_server(
             bcc=tuple(bcc or ()),
             idempotency_key=idempotency_key,
             ledger=resolved_ledger,
+            body_format=body_format,
         )
 
     return server
@@ -66,6 +70,7 @@ def _send_email(
     bcc: tuple[str, ...],
     idempotency_key: str,
     ledger: ServerIdempotencyLedger,
+    body_format: str = "plain",
 ) -> dict[str, Any]:
     started = datetime.now(timezone.utc)
     settings_error = _validate_email_settings()
@@ -119,7 +124,12 @@ def _send_email(
         message["Cc"] = ", ".join(cc)
     message["Subject"] = subject
     message["Message-ID"] = message_id
+    # The text/plain part stays byte-identical to the approved canonical body; an HTML
+    # alternative is only a deterministic rendering of that same content, so what the
+    # judge approved and what the recipient receives can never diverge in substance.
     message.set_content(body)
+    if body_format.strip().lower() == "markdown":
+        message.add_alternative(render_markdown_email_html(body), subtype="html")
     try:
         refused = _smtp_send(message=message, envelope_recipients=recipients)
         if refused:

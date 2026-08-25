@@ -222,6 +222,7 @@ def _communication_arguments(request: ExternalExecutionRequest) -> dict[str, obj
         "body": payload.body,
         "cc": list(payload.cc),
         "bcc": list(payload.bcc),
+        "body_format": payload.body_format.value,
         "idempotency_key": request.idempotency_key,
     }
 

@@ -285,9 +285,10 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
                 body=completion_arguments["output_text"],
                 cc=tuple(str(item).strip() for item in arguments.get("cc", [])),
                 bcc=tuple(str(item).strip() for item in arguments.get("bcc", [])),
+                body_format=_declared_body_format(arguments),
                 metadata={
                     "source": "actor_typed_draft",
-                    "content_format": "plain_text",
+                    "content_format": _declared_body_format(arguments),
                 },
             ),
             scratchpad_entry=_build_scratchpad_entry(
@@ -565,6 +566,12 @@ def _build_read_only_tool_actor_result(
 
 
 # Create one audit-safe scratchpad entry for the current actor turn.
+# Trust only the declared enum values; an absent or unknown declaration is plain text.
+def _declared_body_format(arguments: dict) -> str:
+    declared = str(arguments.get("body_format", "") or "").strip().lower()
+    return declared if declared in {"plain", "markdown"} else "plain"
+
+
 def _build_scratchpad_entry(
     *,
     actor_task: ActorTask,

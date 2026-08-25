@@ -1,4 +1,5 @@
 from .contracts import (
+    CommunicationBodyFormat,
     CommunicationOperationPayload,
     DatabaseOperationPayload,
     DatabaseOperationParameter,
@@ -50,6 +51,7 @@ from .normalizers import (
 from .profiles import CapabilityConsequenceProfile, load_capability_consequence_profiles
 
 __all__ = [
+    "CommunicationBodyFormat",
     "CommunicationOperationPayload",
     "CapabilityConsequenceProfile",
     "DatabaseOperationPayload",

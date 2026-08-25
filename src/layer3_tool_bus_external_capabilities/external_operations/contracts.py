@@ -117,6 +117,14 @@ class OperationFactsProvenance:
     fact_notes: tuple[str, ...] = ()
 
 
+# The author declares how the canonical body is written so the connector can render it
+# faithfully. The declaration is part of the payload, therefore part of the digest,
+# therefore reviewed by the judge and visible to the operator.
+class CommunicationBodyFormat(str, Enum):
+    PLAIN = "plain"
+    MARKDOWN = "markdown"
+
+
 @dataclass(frozen=True)
 class CommunicationOperationPayload:
     # Communication payloads preserve exact outbound fields without semantic labeling.
@@ -127,6 +135,7 @@ class CommunicationOperationPayload:
     destination_class: DestinationClass
     cc: tuple[str, ...] = ()
     bcc: tuple[str, ...] = ()
+    body_format: CommunicationBodyFormat = CommunicationBodyFormat.PLAIN
 
 
 DatabaseParameterValue: TypeAlias = str | int | float | bool | None

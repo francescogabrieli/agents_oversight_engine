@@ -55,6 +55,8 @@ class ExternalCommunicationDraft:
     body: str | None = None
     cc: tuple[str, ...] = ()
     bcc: tuple[str, ...] = ()
+    # Declared by the author; the connector renders accordingly instead of guessing.
+    body_format: str = "plain"
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

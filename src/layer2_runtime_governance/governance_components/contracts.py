@@ -98,6 +98,9 @@ class GovernanceReasonCode(str, Enum):
     EXTERNAL_LOW_ACTOR_SELF_CONFIDENCE = "external_low_actor_self_confidence"
     ACTION_REVISION_LIMIT_REACHED = "action_revision_limit_reached"
     CAPABILITY_APPROVAL_REQUIRED = "capability_approval_required"
+    # Runtime-owned review boundary: the connector outcome is unknown and only a
+    # human can settle it. It never authorizes a new external execution.
+    EXTERNAL_EXECUTION_RECONCILIATION_REQUIRED = "external_execution_reconciliation_required"
 
 
 # Recover stable audit codes from checkpoints whose newly added enum member decoded as None.

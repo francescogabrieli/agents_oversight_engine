@@ -223,7 +223,8 @@
         "unresolvable_revision",
         "external_low_actor_self_confidence",
         "action_revision_limit_reached",
-        "capability_approval_required"
+        "capability_approval_required",
+        "external_execution_reconciliation_required"
       ]
     },
     "runtime": {
@@ -1055,6 +1056,12 @@
         },
         "metadata": {
           "type": "object"
+        },
+        "body_format": {
+          "enum": [
+            "plain",
+            "markdown"
+          ]
         }
       },
       "additionalProperties": false

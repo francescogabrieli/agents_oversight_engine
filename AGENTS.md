@@ -441,6 +441,7 @@ Current relevant files:
 - governance evaluates semantic and operational boundaries, not thought boundaries: `INTERMEDIATE_OUTPUT` returns directly to the actor and neither evidence nor trajectory may classify narration length as degradation
 - external communication drafts are explicit runtime state; partial draft assembly does not invoke the judge, while each review-ready execution candidate is projected into a digest-bound `ExternalOperationProposal`
 - communication proposal bodies are canonical and complete: normalization may standardize line endings but must never silently truncate semantic content. Only `payload_preview` is bounded; the capability schema rejects bodies above its explicit limit before connector invocation.
+- `CommunicationOperationPayload.body_format` (`plain` | `markdown`) is author-declared, part of the payload and therefore of the digest, so the judge assesses it and the operator reviews it. An unknown declaration degrades to `plain` rather than being trusted. The connector renders accordingly: the `text/plain` part stays byte-identical to the approved canonical body and any HTML alternative is a deterministic presentation-only rendering of that same content, so what governance approved and what the recipient receives can never diverge in substance. The renderer escapes all embedded markup and links only `http(s)` targets.
 - `execute_after_governance` is a terminal runtime invariant: a plain local
   `STEP_COMPLETED` cannot satisfy the task, and `COMPLETED` requires a typed
   external-operation receipt with status `executed`, or an `indeterminate`
@@ -523,6 +524,7 @@ Current relevant files:
 ### HITL Rules
 
 - HITL decisions are reason-scoped: unsafe/uncertain semantic review exposes modify/replan/abort; capability approval exposes approve/modify/abort; clarification and indeterminate-receipt reconciliation expose only their applicable typed actions.
+- An indeterminate-receipt reconciliation review carries its own `external_execution_reconciliation_required` reason and its own summary built from the persisted receipt (connector reference, error code); it must never inherit the preceding governance reason codes, because the approval gate asks whether the effect may happen while reconciliation asks whether it already did. The reason is listed among the codes that cannot authorize external execution: reconciliation settles an outcome and never re-authorizes the connector.
 - HITL payloads must remain readable, compact, and include exact operation/digest/findings when an external proposal exists.
 - Human decisions should remain canonical and typed.
 - `modify_and_continue` is available for every modifiable external proposal, creates a new digest, invalidates prior approval/judge state, and returns to governance.

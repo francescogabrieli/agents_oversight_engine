@@ -48,7 +48,7 @@ from ..domain import (
     set_external_communication_phase,
 )
 from ..domain.step_recovery import restore_actor_step_for_more_evidence
-from ..governance_components import governance_reason_code_values
+from ..governance_components import GovernanceReasonCode, governance_reason_code_values
 
 
 # Build the canonical human review request from the current runtime state.
@@ -69,11 +69,22 @@ def build_human_review_request(*, state: TaskState, thread_id: str) -> HumanRevi
         for finding in (judge_assessment.findings if judge_assessment is not None else ())
     )
 
+    # Reconciliation asks a different question from the approval gate that preceded it:
+    # not "may this be sent" but "did the send actually happen". Inheriting the prior
+    # governance reason would show the operator the wrong question for the same digest.
+    reconciliation = _is_indeterminate_reconciliation(state)
     reason_codes: list[str] = []
-    if governance_decision is not None:
-        reason_codes.extend(governance_reason_code_values(governance_decision))
-    if dynamic_policy_assessment is not None:
-        reason_codes.extend(code.value for code in dynamic_policy_assessment.reason_codes)
+    if reconciliation:
+        reason_codes.append(
+            GovernanceReasonCode.EXTERNAL_EXECUTION_RECONCILIATION_REQUIRED.value
+        )
+    else:
+        if governance_decision is not None:
+            reason_codes.extend(governance_reason_code_values(governance_decision))
+        if dynamic_policy_assessment is not None:
+            reason_codes.extend(
+                code.value for code in dynamic_policy_assessment.reason_codes
+            )
     if not reason_codes:
         reason_codes.append("human_review_required")
 
@@ -121,6 +132,9 @@ def build_human_review_request(*, state: TaskState, thread_id: str) -> HumanRevi
             judge_assessment=judge_assessment,
             resume_state=resume_state,
             external_communication_draft=external_draft,
+            reconciliation_receipt=(
+                state.last_external_execution_receipt if reconciliation else None
+            ),
         ),
         operation_id=external_proposal.operation_id if external_proposal else None,
         operation_payload_digest=(
@@ -532,6 +546,29 @@ def _resolve_resume_state(state: TaskState) -> RuntimeState:
 
 
 # Summarize the review for trace and dashboard display.
+# State the unresolved delivery outcome in the operator's own terms, with the concrete
+# connector evidence needed to check the external system before deciding.
+def _reconciliation_review_text(receipt: Any) -> str:
+    parts = [
+        "The external operation was attempted but its outcome could not be confirmed, "
+        "so the runtime stopped instead of retrying and risking a duplicate effect.",
+    ]
+    summary = getattr(receipt, "summary", None)
+    if summary:
+        parts.append(str(summary))
+    reference = getattr(receipt, "external_reference", None)
+    if reference:
+        parts.append(f"Connector reference: {reference}.")
+    error_code = getattr(receipt, "error_code", None)
+    if error_code:
+        parts.append(f"Connector error code: {error_code}.")
+    parts.append(
+        "Verify the external system, then confirm the operation as terminal or abort. "
+        "This decision records the outcome and never authorizes a new execution."
+    )
+    return " ".join(parts)
+
+
 def _build_review_summary(
     *,
     governance_decision: Any,
@@ -539,9 +576,24 @@ def _build_review_summary(
     judge_assessment: Any,
     resume_state: RuntimeState,
     external_communication_draft: ExternalCommunicationDraft | None = None,
+    reconciliation_receipt: Any = None,
 ) -> str | None:
     parts: list[str] = []
     normalized_parts: list[str] = []
+    # A reconciliation summary must describe the unresolved outcome, not the approval
+    # that authorized the attempt; reusing the governance text asks the wrong question.
+    if reconciliation_receipt is not None:
+        _append_unique_review_part(
+            parts,
+            normalized_parts,
+            _reconciliation_review_text(reconciliation_receipt),
+        )
+        _append_unique_review_part(
+            parts,
+            normalized_parts,
+            f"A permitted review decision would resume to '{resume_state.value}'.",
+        )
+        return " ".join(parts)
     if governance_decision is not None:
         _append_unique_review_part(
             parts,
@@ -723,6 +775,9 @@ def human_review_reasons_authorize_external_execution(
         "opa_failure_fail_closed",
         "provider_failures_repeated",
         "repeated_recovery",
+        # Reconciliation settles an outcome that already happened; it is never
+        # authorization to invoke the connector again.
+        "external_execution_reconciliation_required",
     }
     return (
         "capability_approval_required" in reasons
