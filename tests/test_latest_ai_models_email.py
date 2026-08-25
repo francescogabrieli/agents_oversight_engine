@@ -223,6 +223,7 @@ class _ResearchEmailPlanner(PlannerPort):
                     objective="Prepare the requested email draft containing the report.",
                     rationale="The requested operation is reviewable communication, not direct sending.",
                     expected_outcome="A typed email proposal for human review.",
+                    produces_governed_external_effect_proposal=True,
                 ),
             ],
             rationale="Research first, then prepare the governed communication draft.",

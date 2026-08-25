@@ -2,24 +2,53 @@ from typing import Any
 
 from layer2_runtime_governance.actor_contract import ActorResultType
 from layer2_runtime_governance.governance_components import PolicyEvaluationInput
-from layer2_runtime_governance.domain import TaskState
+from layer2_runtime_governance.domain import TaskState, ToolDisposition
+from layer3_tool_bus_external_capabilities.external_operations import OperationBoundary
 
 
 # Export whole-run observable facts only at a semantic or operational boundary.
 def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvaluationInput, thresholds_version: str) -> dict[str, Any]:
     result = task_state.actor_result
-    successful_tool_calls = sum(
-        1 for item in task_state.tool_results_history if item.success
-    )
-    failed_tool_calls = len(task_state.tool_results_history) - successful_tool_calls
+    executed_dispositions = {
+        ToolDisposition.EXECUTED_SUCCESS,
+        ToolDisposition.EXECUTED_RETRYABLE_FAILURE,
+        ToolDisposition.EXECUTED_TERMINAL_FAILURE,
+    }
+    executed_attempts = [
+        attempt
+        for attempt in task_state.tool_attempts
+        if attempt.disposition in executed_dispositions
+    ]
+    if task_state.tool_attempts:
+        successful_tool_calls = sum(
+            1
+            for attempt in executed_attempts
+            if attempt.disposition == ToolDisposition.EXECUTED_SUCCESS
+        )
+        failed_tool_calls = len(executed_attempts) - successful_tool_calls
+        synthetic_tool_results = len(task_state.tool_attempts) - len(executed_attempts)
+    else:
+        # Legacy checkpoints predate typed attempts; their persisted results all
+        # represented backend calls, so retain that replay interpretation.
+        successful_tool_calls = sum(
+            1 for item in task_state.tool_results_history if item.success
+        )
+        failed_tool_calls = len(task_state.tool_results_history) - successful_tool_calls
+        synthetic_tool_results = 0
     replan_count = sum(
         1 for item in task_state.step_history if item.node_name == "replanner"
     )
-    last_replan = (
-        task_state.replan_checkpoints[-1]
-        if task_state.replan_checkpoints
-        else None
-    )
+    current_review_count = len(task_state.human_review_history)
+    # A completed human intervention closes the prior replanning episode. Each
+    # checkpoint records the review count at installation, so the active episode
+    # can be reconstructed without resetting or hiding the whole-run counter.
+    episode_replans = [
+        checkpoint
+        for checkpoint in task_state.replan_checkpoints
+        if checkpoint.human_review_count == current_review_count
+    ]
+    replan_episode_count = len(episode_replans)
+    last_replan = episode_replans[-1] if episode_replans else None
     # A new observable basis means new execution events since the checkpoint.
     # progress_epoch and plan_signature are bumped by the replanner itself, so
     # comparing them would let every replan self-admit the next one.
@@ -31,24 +60,25 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
         or len(task_state.executed_steps) > getattr(last_replan, "completed_step_count", 0)
     )
     consecutive_tool_failures = 0
-    for item in reversed(task_state.tool_results_history):
-        if not item.success:
-            consecutive_tool_failures += 1
-        else:
-            break
+    if task_state.tool_attempts:
+        current_epoch_attempts = [
+            attempt
+            for attempt in executed_attempts
+            if attempt.progress_epoch == task_state.progress_epoch
+        ]
+        for attempt in reversed(current_epoch_attempts):
+            if attempt.disposition != ToolDisposition.EXECUTED_SUCCESS:
+                consecutive_tool_failures += 1
+            else:
+                break
+    elif not task_state.human_review_history:
+        for item in reversed(task_state.tool_results_history):
+            if not item.success:
+                consecutive_tool_failures += 1
+            else:
+                break
 
-    seen_digests: list[str] = []
-    action_churn_count = 0
-    for decision in task_state.governance_history:
-        d = decision.evaluated_operation_digest
-        if d:
-            if d in seen_digests and seen_digests[-1] != d:
-                action_churn_count += 1
-            seen_digests.append(d)
-    if task_state.external_operation_proposal is not None:
-        curr_d = task_state.external_operation_proposal.payload_digest
-        if curr_d and curr_d in seen_digests and (not seen_digests or seen_digests[-1] != curr_d):
-            action_churn_count += 1
+    action_churn_count = _current_operation_churn_count(task_state=task_state)
 
     raw_facts = {
         "actor_turn_count": task_state.actor_turn_count,
@@ -57,10 +87,12 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
         "tool_call_count": task_state.tool_call_count,
         "successful_tool_call_count": successful_tool_calls,
         "failed_tool_call_count": failed_tool_calls,
+        "synthetic_tool_result_count": synthetic_tool_results,
         "consecutive_tool_failures": consecutive_tool_failures,
         "action_churn_count": action_churn_count,
         "observation_count": len(task_state.observations),
         "replan_count": replan_count,
+        "replan_episode_count": replan_episode_count,
         "consecutive_provider_protocol_failures": task_state.consecutive_provider_protocol_failures,
         "needs_replan_signal": bool(
             result and result.result_type == ActorResultType.NEEDS_REPLAN
@@ -80,6 +112,8 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
         "external_candidate": bool(
             task_state.external_operation_proposal
             and task_state.external_operation_proposal.execution_candidate
+            and task_state.external_operation_proposal.boundary
+            == OperationBoundary.GOVERNED_EXTERNAL
         ),
         # Count revisions per operation; unrelated proposals never consume this cycle's allowance.
         "external_action_revision_count": sum(
@@ -157,3 +191,43 @@ def _candidate_binding_seen_in_governance(
         ):
             return True
     return False
+
+
+# Count oscillation only inside the current operation and post-review edit episode.
+def _current_operation_churn_count(*, task_state: TaskState) -> int:
+    current_proposal = task_state.external_operation_proposal
+    if (
+        current_proposal is None
+        or not current_proposal.execution_candidate
+        or current_proposal.boundary != OperationBoundary.GOVERNED_EXTERNAL
+    ):
+        return 0
+
+    operation_history = [
+        proposal
+        for proposal in task_state.external_operation_history
+        if proposal.operation_id == current_proposal.operation_id
+        and proposal.execution_candidate
+        and proposal.boundary == OperationBoundary.GOVERNED_EXTERNAL
+    ]
+    if (
+        not operation_history
+        or operation_history[-1].payload_digest != current_proposal.payload_digest
+    ):
+        operation_history.append(current_proposal)
+
+    # A normalized human edit is an explicit correction boundary and starts a
+    # fresh churn episode for the same logical operation.
+    episode_start = 0
+    for index, proposal in enumerate(operation_history):
+        if proposal.facts_provenance.source_kind == "human_review_edit":
+            episode_start = index
+
+    seen_digests: list[str] = []
+    churn_count = 0
+    for proposal in operation_history[episode_start:]:
+        digest = proposal.payload_digest
+        if digest in seen_digests and seen_digests[-1] != digest:
+            churn_count += 1
+        seen_digests.append(digest)
+    return churn_count

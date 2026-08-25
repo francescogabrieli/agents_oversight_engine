@@ -239,8 +239,8 @@ class GatewayMCPTests(unittest.TestCase):
         self.assertEqual(result.observations[0].locator, "https://example.org/doc")
         self.assertIn("Hello source", result.content or "")
 
-    # Preserve only the source-provided HTTP modification timestamp.
-    def test_fetch_url_preserves_source_last_modified(self) -> None:
+    # HTML Last-Modified is transport metadata, not semantic publication evidence.
+    def test_fetch_url_excludes_html_last_modified_from_publication_timestamp(self) -> None:
         gateway = OpenAIToolGateway()
         response = FakeHTTPResponse(
             body=(
@@ -268,10 +268,121 @@ class GatewayMCPTests(unittest.TestCase):
             )
 
         self.assertTrue(result.success)
+        self.assertIsNone(result.observations[0].source_timestamp)
+        self.assertIn(
+            "excluded from semantic publication freshness",
+            result.summary,
+        )
+
+    # Transport timestamps cannot satisfy editorial freshness for plain text either.
+    def test_fetch_url_excludes_plain_text_last_modified_from_publication_timestamp(
+        self,
+    ) -> None:
+        gateway = OpenAIToolGateway()
+        response = FakeHTTPResponse(
+            body=(
+                b"Readable plain-text source content that is long enough to become "
+                b"meaningful evidence for the runtime."
+            ),
+            content_type="text/plain",
+            last_modified="Fri, 22 Aug 2026 10:30:00 GMT",
+        )
+
+        with patch(
+            "layer3_tool_bus_external_capabilities.tools.security.is_blocked_host",
+            return_value=False,
+        ), patch(
+            "layer3_tool_bus_external_capabilities.tools.adapters.http_fetch.urlopen",
+            return_value=response,
+        ):
+            result = gateway.execute(
+                tool_request=ToolRequest(
+                    plan_step_id="step_1",
+                    tool_name=ToolName.FETCH_URL_TEXT,
+                    reason="Fetch plain-text source metadata.",
+                    url="https://example.org/source.txt",
+                )
+            )
+
+        self.assertTrue(result.success)
+        self.assertIsNone(result.observations[0].source_timestamp)
+        self.assertIn(
+            "excluded from semantic publication freshness",
+            result.summary,
+        )
+
+    # Semantic publication metadata overrides a conflicting HTTP modification time.
+    def test_fetch_url_prefers_html_publication_metadata(self) -> None:
+        gateway = OpenAIToolGateway()
+        response = FakeHTTPResponse(
+            body=(
+                b"<html><head><meta property='article:published_time' "
+                b"content='2026-08-06T09:15:00Z'></head><body><p>Readable source "
+                b"content that is long enough to become meaningful evidence.</p></body></html>"
+            ),
+            content_type="text/html",
+            last_modified="Fri, 22 Aug 2026 10:30:00 GMT",
+        )
+
+        with patch(
+            "layer3_tool_bus_external_capabilities.tools.security.is_blocked_host",
+            return_value=False,
+        ), patch(
+            "layer3_tool_bus_external_capabilities.tools.adapters.http_fetch.urlopen",
+            return_value=response,
+        ):
+            result = gateway.execute(
+                tool_request=ToolRequest(
+                    plan_step_id="step_1",
+                    tool_name=ToolName.FETCH_URL_TEXT,
+                    reason="Fetch semantic publication metadata.",
+                    url="https://example.org/openai-like-article",
+                )
+            )
+
+        self.assertTrue(result.success)
         self.assertEqual(
             result.observations[0].source_timestamp.isoformat(),
-            "2026-08-22T10:30:00+00:00",
+            "2026-08-06T09:15:00+00:00",
         )
+        self.assertIn("html_meta:article:published_time", result.summary)
+
+    # XHTML carries the same semantic publication metadata contract as HTML.
+    def test_fetch_url_extracts_xhtml_publication_metadata(self) -> None:
+        gateway = OpenAIToolGateway()
+        response = FakeHTTPResponse(
+            body=(
+                b"<html xmlns='http://www.w3.org/1999/xhtml'><head>"
+                b"<meta property='article:published_time' content='2026-08-07T11:00:00Z' />"
+                b"</head><body><p>Readable XHTML source content that is long enough "
+                b"to become meaningful evidence.</p></body></html>"
+            ),
+            content_type="application/xhtml+xml",
+            last_modified="Fri, 22 Aug 2026 10:30:00 GMT",
+        )
+
+        with patch(
+            "layer3_tool_bus_external_capabilities.tools.security.is_blocked_host",
+            return_value=False,
+        ), patch(
+            "layer3_tool_bus_external_capabilities.tools.adapters.http_fetch.urlopen",
+            return_value=response,
+        ):
+            result = gateway.execute(
+                tool_request=ToolRequest(
+                    plan_step_id="step_1",
+                    tool_name=ToolName.FETCH_URL_TEXT,
+                    reason="Fetch semantic XHTML publication metadata.",
+                    url="https://example.org/openai-like-article.xhtml",
+                )
+            )
+
+        self.assertTrue(result.success)
+        self.assertEqual(
+            result.observations[0].source_timestamp.isoformat(),
+            "2026-08-07T11:00:00+00:00",
+        )
+        self.assertIn("html_meta:article:published_time", result.summary)
 
     def test_fetch_url_empty_extracted_text_returns_failure(self) -> None:
         gateway = OpenAIToolGateway()
@@ -305,7 +416,11 @@ class GatewayMCPTests(unittest.TestCase):
             ),
             content_type="text/html",
         )
-        cellar_response = FakeHTTPResponse(body=b"%PDF-1.7 mock", content_type="application/pdf")
+        cellar_response = FakeHTTPResponse(
+            body=b"%PDF-1.7 mock",
+            content_type="application/pdf",
+            last_modified="Fri, 22 Aug 2026 10:30:00 GMT",
+        )
 
         with patch("layer3_tool_bus_external_capabilities.tools.security.is_blocked_host", return_value=False):
             with patch(
@@ -345,6 +460,7 @@ class GatewayMCPTests(unittest.TestCase):
             result.observations[0].locator,
             "http://publications.europa.eu/resource/celex/32022R1925",
         )
+        self.assertIsNone(result.observations[0].source_timestamp)
 
     def test_disabled_tool_returns_structured_failure(self) -> None:
         disabled_config = ToolGatewayConfig(
@@ -518,7 +634,7 @@ class MCPThenCompleteActor(ActorPort):
 
 class AllowPolicyEngine(PolicyEnginePort):
     policy_engine_name = "allow_policy_engine"
-    policy_bundle_version = "layer2_governance_v4"
+    policy_bundle_version = "layer2_governance_v5"
     policy_config_version = "layer2_governance_thresholds_v2"
 
     # Request deterministic pillars without invoking a semantic judge in this tool test.

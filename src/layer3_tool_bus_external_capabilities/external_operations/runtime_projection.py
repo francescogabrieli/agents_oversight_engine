@@ -4,6 +4,7 @@ from dataclasses import replace
 
 from layer2_runtime_governance.actor_contract import CapabilityAccessMode
 from layer2_runtime_governance.domain import TaskState
+from ..tool_contract import tool_request_execution_arguments
 from ..tools import ToolGatewayConfig, build_default_tool_gateway_config
 from .contracts import (
     ExternalOperationEffect,
@@ -26,14 +27,16 @@ def prepare_external_operation_proposal(
     if actor_result is None:
         return None
 
-    proposal = _proposal_from_current_canonical_state(task_state=task_state)
+    # A queued tool request is the exact candidate at this governance boundary.
+    # It must supersede the prior request's proposal even within the same actor turn.
+    proposal = _proposal_from_tool_request(
+        task_state=task_state,
+        tool_gateway_config=tool_gateway_config,
+    )
+    if proposal is None:
+        proposal = _proposal_from_current_canonical_state(task_state=task_state)
     if proposal is None:
         proposal = _proposal_from_review_ready_communication(task_state=task_state)
-    if proposal is None:
-        proposal = _proposal_from_tool_request(
-            task_state=task_state,
-            tool_gateway_config=tool_gateway_config,
-        )
     if proposal is None:
         proposal = _proposal_from_legacy_external_action(task_state=task_state)
 
@@ -105,30 +108,24 @@ def _proposal_from_tool_request(
     tool_gateway_config: ToolGatewayConfig | None,
 ) -> ExternalOperationProposal | None:
     actor_result = task_state.actor_result
-    request = task_state.current_tool_request or (
-        actor_result.tool_request if actor_result is not None else None
-    )
+    request = task_state.current_tool_request
     if actor_result is None or request is None:
         return None
 
     config = tool_gateway_config or build_default_tool_gateway_config()
     definition = config.tools.get(request.tool_name)
     capability_id = request.tool_name.value
+    execution_arguments = tool_request_execution_arguments(request)
     proposal = normalize_generic_external_operation(
         operation_id=_operation_id(task_state=task_state, suffix=capability_id),
         plan_step_id=actor_result.plan_step_id,
         capability_id=capability_id,
         action=capability_id,
-        target=request.url or request.query or request.path or capability_id,
-        fields=tuple(
-            (name, value)
-            for name, value in (
-                ("reason", request.reason),
-                ("query", request.query),
-                ("url", request.url),
-            )
-            if value
+        target=_tool_request_target(
+            capability_id=capability_id,
+            execution_arguments=execution_arguments,
         ),
+        fields=execution_arguments,
         effect=(
             definition.normalized_effect
             if definition is not None
@@ -164,6 +161,20 @@ def _proposal_from_tool_request(
             registry_entry_id=capability_id,
         ),
     )
+
+
+# Select a bounded operational target without treating actor rationale as executable data.
+def _tool_request_target(
+    *,
+    capability_id: str,
+    execution_arguments: tuple[tuple[str, str], ...],
+) -> str:
+    values = dict(execution_arguments)
+    for name in ("url", "query", "document_id", "dataset_id", "path"):
+        value = values.get(name)
+        if value:
+            return value
+    return capability_id
 
 
 # Normalize compatibility-only legacy external signals as unknown governed operations.

@@ -33,6 +33,9 @@ Rules:
 - When execution_intent is execute_after_governance, the task cannot finish through
   emit_step_completed alone. The terminal outcome must use the typed action that
   represents the requested external effect so governance can assess and execute it.
+- When the current step has produces_governed_external_effect_proposal=true, emit the
+  exact typed external-operation proposal once its prerequisites are satisfied. A step
+  marked false must not claim that the requested external effect has been prepared.
 - A statement that an external effect was prepared, sent, executed, or completed is
   invalid unless the corresponding typed external-operation action is emitted.
 - For a complete external communication draft, use emit_external_communication_draft
@@ -65,11 +68,13 @@ Rules:
   proposed draft and let governance decide whether it may continue.
 - If the payload contains protocol_correction, your previous output was discarded for
   the stated protocol reason. Correct exactly that error and emit one valid runtime action.
-- If governance_feedback is present, governance invalidated your previous external
-  payload. Revise the existing external_communication_draft instead of rewriting it
-  blindly, address every listed finding explicitly in the revised payload or in the
-  completion rationale, and never resubmit an unchanged payload or re-assert compliance
-  without substantive correction.
+- If governance_feedback is present, governance invalidated the previous candidate.
+  Address every typed finding and never resubmit an unchanged payload, completion, or
+  evidence selection. For evidence findings, remove stale or unsupported observation
+  IDs, fetch specific dated documents when a landing/index page has no source timestamp,
+  and complete the step only after the declared burden is actually satisfied. For an
+  external-payload finding, revise the existing external_communication_draft instead of
+  rewriting it blindly.
 - Do not expose hidden chain-of-thought. Audit-safe summaries of observations,
   decisions, uncertainty, and next intent are allowed.
 - Do not emit concrete shell commands or raw implementation details.

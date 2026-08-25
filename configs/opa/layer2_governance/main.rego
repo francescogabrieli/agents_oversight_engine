@@ -83,13 +83,11 @@ else := unavailable_required_pillar_decision if active_required_pillar_unavailab
 
 else := clarification_decision if static_policy.result.clarification_signaled
 
-else := hitl_decision("replan_ceiling_reached", "The total number of replan requests reached the configured ceiling.") if trajectory.result.replan_ceiling_reached
+else := hitl_decision("replan_ceiling_reached", "The current replanning episode reached the configured ceiling while the actor requested another replan.") if trajectory.result.replan_ceiling_reached
 
 else := hitl_decision("consecutive_tool_failures", "Consecutive tool failures exceeded the human review threshold.") if trajectory.result.consecutive_tool_failures_review_threshold_reached
 
-else := replan_decision("consecutive_tool_failures", "Consecutive tool failures require a replan.") if trajectory.result.consecutive_tool_failures_replan_threshold_reached
-
-else := hitl_decision("action_churn", "The actor oscillated between previously seen candidate variants without converging.") if trajectory.result.action_churn
+else := hitl_decision("action_churn", "The actor oscillated between variants of the current external operation without converging.") if trajectory.result.action_churn
 
 else := hitl_decision("replan_request_stalled", "The actor repeated a replan request without a new observable execution basis.") if trajectory.result.replan_request_stalled
 
@@ -118,11 +116,6 @@ else := hitl_decision("action_revision_limit_reached", "The external proposal ex
 else := revise_decision if {
 	input.pillar_requirements.require_judge == true
 	judge.result.verdict == "needs_revision"
-}
-
-else := hitl_decision("missing_evidence_burden", "The factual plan step omitted its mandatory evidence burden and requires human correction.") if {
-	input.pillar_requirements.require_evidence == true
-	object.get(evidence.result.raw_facts, "factual_step_missing_evidence_burden", false) == true
 }
 
 else := hitl_decision("evidence_request_limit_reached", "The actor repeated completion without resolving required evidence and reached the request ceiling.") if {
@@ -207,7 +200,7 @@ judge_binding_valid if {
 
 candidate_alternatives[code] := reason if {
 	code := "replan_ceiling_reached"
-	reason := "The total number of replan requests reached the configured ceiling."
+	reason := "The current replanning episode reached the configured ceiling while the actor requested another replan."
 	trajectory.result.replan_ceiling_reached
 }
 
@@ -218,15 +211,8 @@ candidate_alternatives[code] := reason if {
 }
 
 candidate_alternatives[code] := reason if {
-	code := "consecutive_tool_failures"
-	reason := "Consecutive tool failures require a replan."
-	trajectory.result.consecutive_tool_failures_replan_threshold_reached
-	not trajectory.result.consecutive_tool_failures_review_threshold_reached
-}
-
-candidate_alternatives[code] := reason if {
 	code := "action_churn"
-	reason := "The actor oscillated between previously seen candidate variants without converging."
+	reason := "The actor oscillated between variants of the current external operation without converging."
 	trajectory.result.action_churn
 }
 
@@ -281,13 +267,6 @@ candidate_alternatives[code] := reason if {
 	reason := "The external payload requires semantic revision."
 	input.pillar_requirements.require_judge == true
 	judge.result.verdict == "needs_revision"
-}
-
-candidate_alternatives[code] := reason if {
-	code := "missing_evidence_burden"
-	reason := "The factual plan step omitted its mandatory evidence burden and requires human correction."
-	input.pillar_requirements.require_evidence == true
-	object.get(evidence.result.raw_facts, "factual_step_missing_evidence_burden", false) == true
 }
 
 candidate_alternatives[code] := reason if {

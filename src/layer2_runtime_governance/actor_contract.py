@@ -67,6 +67,7 @@ class ActorPlanStep:
     status: PlanStepStatus
     produces_factual_claims: bool
     evidence_burden: EvidenceBurden | None
+    produces_governed_external_effect_proposal: bool = False
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,9 @@ class ActorTask:
     governance_feedback: tuple[GovernanceActionFeedback, ...] = ()
     workspace: AgentWorkspace | None = None
     progress_epoch: int = 0
+    # The evidence burden gate uses this counter to re-enable completions when the
+    # governance system has exhausted its bounded evidence-request retries.
+    evidence_request_episode_count: int = 0
     attempted_action_keys: tuple[str, ...] = ()
     # Set only for the one bounded local retry after a provider protocol failure.
     protocol_retry_feedback: ActorProtocolFeedback | str | None = None
@@ -173,6 +177,7 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
             status=step.status,
             produces_factual_claims=step.produces_factual_claims,
             evidence_burden=step.evidence_burden,
+            produces_governed_external_effect_proposal=step.produces_governed_external_effect_proposal,
         )
         for step in task_state.plan_steps
     )
@@ -211,6 +216,7 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
         governance_feedback=tuple(task_state.governance_action_feedback),
         workspace=task_state.workspace,
         progress_epoch=task_state.progress_epoch,
+        evidence_request_episode_count=task_state.evidence_request_episode_count,
         attempted_action_keys=tuple(
             item.action_key if hasattr(item, "action_key") else item.get("action_key", "")
             for item in task_state.tool_attempts

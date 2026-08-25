@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { fetchReviewDetail, resumeReviewThread } from "../api";
 import { DecisionForm } from "../components/DecisionForm";
 import { KeyValueGrid } from "../components/KeyValueGrid";
+import { ReviewContextPanel } from "../components/ReviewContextPanel";
 import { runtimeStateBadgeClass } from "../components/runtimeStatePresentation";
 import { usePolledResource } from "../hooks";
 import type { ReviewDetailResponse } from "../types";
@@ -64,6 +65,10 @@ export function ReviewThreadPage() {
 
       {detail && snapshot ? (
         <>
+          {pendingRequest ? (
+            <ReviewContextPanel taskGoal={taskGoal} snapshot={snapshot} />
+          ) : null}
+
           {draftBody ? (
             <section className="card card-info">
               <div className="card-header">

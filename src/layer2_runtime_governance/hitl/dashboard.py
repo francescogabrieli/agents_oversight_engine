@@ -116,6 +116,18 @@ class DashboardBehavioralPanel:
     status: str
 
 
+# DashboardPillarDiagnostic exposes only review-relevant policy facts to the operator.
+@dataclass(frozen=True)
+class DashboardPillarDiagnostic:
+    pillar_name: str
+    required: bool
+    mode: str | None
+    level: str | None
+    summary: str | None
+    reason_codes: tuple[str, ...]
+    facts: dict[str, Any]
+
+
 # DashboardHumanReviewPanel captures the review payload and resume path.
 @dataclass(frozen=True)
 class DashboardHumanReviewPanel:
@@ -133,6 +145,8 @@ class DashboardHumanReviewPanel:
     operation_proposal_summary: str | None
     operation_target: str | None
     judge_findings: tuple[str, ...]
+    evidence_diagnostic: DashboardPillarDiagnostic | None
+    trajectory_diagnostic: DashboardPillarDiagnostic | None
 
 
 @dataclass(frozen=True)
@@ -182,6 +196,60 @@ class GovernanceHitlDashboardSnapshot:
     is_terminal: bool
     external_communication: DashboardExternalCommunicationPanel | None
     external_execution: DashboardExternalExecutionPanel
+
+
+# Keep the prominent HITL panel bounded to facts an operator can act on.
+_EVIDENCE_REVIEW_FACTS = (
+    "completion_attempt",
+    "factual_completion_attempt",
+    "coverage_evaluated",
+    "burden_satisfied",
+    "evidence_gap",
+    "evidence_request_ceiling_reached",
+    "evidence_request_count",
+    "evidence_request_episode_count",
+    "evidence_request_episode_id",
+    "selected_evidence_ref_count",
+    "distinct_independent_sources_count",
+    "min_independent_sources_required",
+    "independent_sources_satisfied",
+    "retrieved_content_satisfied",
+    "selected_evidence_refs_valid",
+    "selected_evidence_refs_unique",
+    "selected_observations_have_content",
+    "selected_observations_provenance_resolvable",
+    "freshness_evaluated",
+    "freshness_satisfied",
+    "freshness_missing_observation_ids",
+    "stale_evidence_observation_ids",
+    "future_source_timestamp_observation_ids",
+    "circular_reference_detected",
+    "has_unanchored_literals_in_selection",
+    "has_unanchored_literals_in_universe",
+    "factual_step_missing_evidence_burden",
+)
+
+_TRAJECTORY_REVIEW_FACTS = (
+    "replan_count",
+    "replan_episode_count",
+    "max_replans_before_review",
+    "replan_ceiling_reached",
+    "replan_request_admissible",
+    "replan_request_stalled",
+    "consecutive_tool_failures",
+    "consecutive_tool_failures_review_threshold_reached",
+    "failed_tool_call_count",
+    "successful_tool_call_count",
+    "tool_call_count",
+    "action_churn_count",
+    "action_churn",
+    "external_action_revision_count",
+    "action_revision_limit_reached",
+    "unchanged_resubmission",
+    "repeated_rejected_payload_digest",
+    "observable_change_since_last_replan",
+    "progress_epoch",
+)
 
 
 
@@ -476,6 +544,60 @@ def _build_human_review_panel(*, task_state: TaskState) -> DashboardHumanReviewP
         judge_findings=(
             pending_request.judge_findings if pending_request is not None else ()
         ),
+        evidence_diagnostic=_build_pillar_diagnostic(
+            governance_decision=task_state.last_governance_decision,
+            pillar_name="evidence",
+            fact_names=_EVIDENCE_REVIEW_FACTS,
+        ),
+        trajectory_diagnostic=_build_pillar_diagnostic(
+            governance_decision=task_state.last_governance_decision,
+            pillar_name="trajectory",
+            fact_names=_TRAJECTORY_REVIEW_FACTS,
+        ),
+    )
+
+
+# Project one OPA pillar result into a compact, typed operator-facing diagnostic.
+def _build_pillar_diagnostic(
+    *,
+    governance_decision: GovernanceDecision | None,
+    pillar_name: str,
+    fact_names: tuple[str, ...],
+) -> DashboardPillarDiagnostic | None:
+    if governance_decision is None or governance_decision.pillar_results is None:
+        return None
+
+    result = governance_decision.pillar_results.get(pillar_name)
+    if not isinstance(result, dict):
+        return None
+
+    raw_facts = result.get("raw_facts")
+    raw_fact_values = raw_facts if isinstance(raw_facts, dict) else {}
+    facts: dict[str, Any] = {}
+    for fact_name in fact_names:
+        if fact_name in result and result[fact_name] is not None:
+            facts[fact_name] = result[fact_name]
+        elif fact_name in raw_fact_values and raw_fact_values[fact_name] is not None:
+            facts[fact_name] = raw_fact_values[fact_name]
+
+    reason_codes = result.get("reason_codes")
+    if not isinstance(reason_codes, list | tuple):
+        reason_codes = result.get("reason_facts")
+    normalized_reason_codes = (
+        tuple(str(code) for code in reason_codes)
+        if isinstance(reason_codes, list | tuple)
+        else tuple()
+    )
+    requirements = governance_decision.pillar_requirements or {}
+    level = result.get("diagnostic_level", result.get("level"))
+    return DashboardPillarDiagnostic(
+        pillar_name=pillar_name,
+        required=bool(requirements.get(f"require_{pillar_name}", False)),
+        mode=str(result["mode"]) if result.get("mode") is not None else None,
+        level=str(level) if level is not None else None,
+        summary=str(result["summary"]) if result.get("summary") is not None else None,
+        reason_codes=normalized_reason_codes,
+        facts=facts,
     )
 
 

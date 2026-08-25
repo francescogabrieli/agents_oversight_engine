@@ -42,21 +42,26 @@ from layer2_runtime_governance.domain import (
     HumanReviewExternalEdit,
     PlanStep,
     PlanStepStatus,
+    ReplanCheckpoint,
     RuntimeFlag,
     RuntimeState,
     ScratchpadEntry,
     ScratchpadEntryType,
     StepValidation,
+    StepRecord,
     TaskState,
     TerminationReason,
 )
 from layer2_runtime_governance.governance_components import (
+    GovernanceDecision,
     GovernanceDirective,
+    GovernanceReasonCode,
     PolicyDecision,
     build_opa_input_document,
     build_policy_evaluation_input,
     evaluate_opa_first_governance,
 )
+from layer2_runtime_governance.signal_services import build_trajectory_signal
 from layer2_runtime_governance.hitl import (
     _apply_human_review_decision,
     build_human_review_request,
@@ -89,6 +94,199 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
                 HumanReviewDecisionType.ABORT,
             ),
         )
+
+    # A ceiling approval closes only the reviewed replan episode and releases normal progress.
+    def test_replan_ceiling_approval_starts_a_fresh_trajectory_episode(self) -> None:
+        task_state = TaskState.from_intake(_build_research_intake_result())
+        task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        task_state.human_review_resume_state = RuntimeState.REPLANNING
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Recover the evidence collection trajectory.",
+                rationale="The current path cannot complete the task.",
+                expected_outcome="A replacement evidence path.",
+                status=PlanStepStatus.BLOCKED,
+            )
+        ]
+        task_state.current_plan_step_index = 0
+        task_state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.NEEDS_REPLAN,
+            summary="Another replacement trajectory is required.",
+            capability_mode=CapabilityAccessMode.NONE,
+            external_impact=False,
+            blocking_reason="The current evidence source remains unavailable.",
+        )
+        for index in range(3):
+            task_state.replan_checkpoints.append(
+                ReplanCheckpoint(
+                    actor_turn_count=index + 1,
+                    tool_result_count=index,
+                    observation_count=index,
+                    completed_step_count=0,
+                    human_review_count=0,
+                    plan_signature=f"plan-{index}",
+                    request_reason="Source unavailable.",
+                )
+            )
+            task_state.step_history.append(
+                StepRecord(
+                    step_index=index,
+                    runtime_state=RuntimeState.REPLANNING,
+                    node_name="replanner",
+                    summary="Installed a replacement trajectory.",
+                )
+            )
+        task_state.last_governance_decision = GovernanceDecision(
+            directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
+            policy_decision=PolicyDecision.REQUIRE_HUMAN_REVIEW,
+            reason_codes=(GovernanceReasonCode.REPLAN_CEILING_REACHED,),
+            summary="The current replanning episode reached its ceiling.",
+            constrains_capability_use=False,
+            evaluated_actor_result_type=ActorResultType.NEEDS_REPLAN,
+            evaluated_tool_name=None,
+            policy_engine_name="opa",
+            policy_bundle_version="layer2_governance_v5",
+            policy_directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
+            oversight_recommended_directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
+            requires_human_review=True,
+        )
+
+        before_review = build_trajectory_signal(
+            task_state=task_state,
+            policy_input=build_policy_evaluation_input(task_state=task_state),
+            thresholds_version="test",
+        )
+        self.assertEqual(before_review["raw_facts"]["replan_count"], 3)
+        self.assertEqual(before_review["raw_facts"]["replan_episode_count"], 3)
+
+        pending_request = build_human_review_request(
+            state=task_state,
+            thread_id="replan-ceiling-release",
+        )
+        self.assertEqual(
+            pending_request.allowed_decisions,
+            (
+                HumanReviewDecisionType.APPROVE_CONTINUE,
+                HumanReviewDecisionType.REPLAN,
+                HumanReviewDecisionType.ABORT,
+            ),
+        )
+        task_state.pending_human_review_request = pending_request
+        with patch(
+            "layer2_runtime_governance.hitl.interrupt",
+            return_value={
+                "request_id": pending_request.request_id,
+                "decision_type": "approve_continue",
+            },
+        ):
+            resumed_state = human_review(
+                task_state,
+                thread_id="replan-ceiling-release",
+            )
+
+        self.assertEqual(resumed_state.current_state, RuntimeState.REPLANNING)
+        self.assertEqual(len(resumed_state.human_review_history), 1)
+        resumed_state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.INTERMEDIATE_OUTPUT,
+            summary="Normal actor progress resumed.",
+            capability_mode=CapabilityAccessMode.NONE,
+            external_impact=False,
+            output_text="Continuing after the approved boundary.",
+        )
+        after_review = build_trajectory_signal(
+            task_state=resumed_state,
+            policy_input=build_policy_evaluation_input(task_state=resumed_state),
+            thresholds_version="test",
+        )
+        self.assertEqual(after_review["raw_facts"]["replan_count"], 3)
+        self.assertEqual(after_review["raw_facts"]["replan_episode_count"], 0)
+        self.assertFalse(after_review["raw_facts"]["needs_replan_signal"])
+
+    # Evidence review opens a new remediation episode and never blindly approves the gap.
+    def test_evidence_ceiling_review_exposes_recovery_choices_without_continue(self) -> None:
+        task_state = TaskState.from_intake(_build_research_intake_result())
+        task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        task_state.human_review_resume_state = RuntimeState.ACTING
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Verify dated official sources.",
+                rationale="The evidence burden remains unsatisfied.",
+                expected_outcome="A valid evidence selection.",
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        task_state.current_plan_step_index = 0
+        task_state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.STEP_COMPLETED,
+            summary="Repeated the invalid evidence selection.",
+            output_text="The same unsupported completion.",
+        )
+        task_state.evidence_request_count = 7
+        task_state.evidence_request_episode_count = 3
+        task_state.evidence_request_episode_id = "step_1"
+        task_state.last_governance_decision = GovernanceDecision(
+            directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
+            policy_decision=PolicyDecision.REQUIRE_HUMAN_REVIEW,
+            reason_codes=(GovernanceReasonCode.EVIDENCE_REQUEST_LIMIT_REACHED,),
+            summary="The Evidence remediation episode reached its ceiling.",
+            constrains_capability_use=True,
+            evaluated_actor_result_type=ActorResultType.STEP_COMPLETED,
+            evaluated_tool_name=None,
+            policy_engine_name="opa",
+            policy_bundle_version="layer2_governance_v5",
+            policy_directive=GovernanceDirective.CONTINUE,
+            oversight_recommended_directive=GovernanceDirective.REQUEST_MORE_EVIDENCE,
+            requires_human_review=True,
+        )
+
+        pending_request = build_human_review_request(
+            state=task_state,
+            thread_id="evidence-ceiling-release",
+        )
+        self.assertEqual(
+            pending_request.allowed_decisions,
+            (
+                HumanReviewDecisionType.REQUEST_MORE_EVIDENCE,
+                HumanReviewDecisionType.REPLAN,
+                HumanReviewDecisionType.ABORT,
+            ),
+        )
+
+        legacy_request = replace(
+            pending_request,
+            allowed_decisions=(
+                HumanReviewDecisionType.APPROVE_CONTINUE,
+                HumanReviewDecisionType.REPLAN,
+                HumanReviewDecisionType.ABORT,
+            ),
+        )
+        task_state.pending_human_review_request = legacy_request
+        with self.assertRaisesRegex(ValueError, "cannot be bypassed"):
+            _apply_human_review_decision(
+                task_state,
+                HumanReviewDecision(
+                    request_id=legacy_request.request_id,
+                    decision_type=HumanReviewDecisionType.APPROVE_CONTINUE,
+                ),
+            )
+
+        task_state.pending_human_review_request = pending_request
+        _apply_human_review_decision(
+            task_state,
+            HumanReviewDecision(
+                request_id=pending_request.request_id,
+                decision_type=HumanReviewDecisionType.REQUEST_MORE_EVIDENCE,
+            ),
+        )
+        self.assertEqual(task_state.current_state, RuntimeState.ACTING)
+        self.assertEqual(task_state.evidence_request_count, 7)
+        self.assertEqual(task_state.evidence_request_episode_count, 0)
+        self.assertIsNone(task_state.evidence_request_episode_id)
 
     # Scenarios remain grouped by the capability whose behavior they verify.
     def test_needs_clarification_skips_actor(self) -> None:

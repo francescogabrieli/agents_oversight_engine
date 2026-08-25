@@ -21,7 +21,7 @@ from layer2_runtime_governance.domain import (
     ToolInvocation,
 )
 from layer2_runtime_governance.runtime.actor_service import _enforce_actor_runtime_contract, _record_actor_execution
-from layer2_runtime_governance.runtime.tool_service import canonical_action_key, tool_gateway
+from layer2_runtime_governance.runtime.tool_service import tool_gateway
 from layer2_runtime_governance.execution.prompt_projection import build_actor_prompt_payload
 from layer2_runtime_governance.domain.serialization import normalize_task_state_serialization
 from layer3_tool_bus_external_capabilities.external_operations.contracts import GovernanceActionFeedback
@@ -32,6 +32,7 @@ from layer3_tool_bus_external_capabilities.tool_contract import (
     ToolExecutionResult,
     ToolName,
     ToolRequest,
+    canonical_tool_request_identity,
 )
 from main_layer2 import parse_cli_args
 from layer2_runtime_governance.runtime.routing import route_after_actor
@@ -111,7 +112,10 @@ class Layer2AgentLivenessTests(unittest.TestCase):
     def test_request_paraphrase_does_not_bypass_canonical_deduplication(self) -> None:
         first = ToolRequest("step_1", ToolName.WEB_SEARCH, "Find material.", query="A   stable query", max_results=3)
         second = ToolRequest("step_1", ToolName.WEB_SEARCH, "Please locate the same material differently.", query="a stable query", max_results=3)
-        self.assertEqual(canonical_action_key(first), canonical_action_key(second))
+        self.assertEqual(
+            canonical_tool_request_identity(first),
+            canonical_tool_request_identity(second),
+        )
 
     # Equivalent success is reused rather than sent again to the backend.
     def test_identical_success_is_a_cache_hit_without_second_invocation(self) -> None:
@@ -146,7 +150,7 @@ class Layer2AgentLivenessTests(unittest.TestCase):
             url="https://example.test/a",
         )
         state = self._tool_state(request)
-        action_key = canonical_action_key(request)
+        action_key = canonical_tool_request_identity(request)
         state.tool_attempts = [
             {
                 "action_key": action_key,

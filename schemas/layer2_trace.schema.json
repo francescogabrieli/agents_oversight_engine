@@ -147,6 +147,7 @@
         "expected_outcome": { "type": "string" },
         "status": { "enum": ["pending", "in_progress", "completed", "blocked", "skipped"] },
         "produces_factual_claims": { "type": "boolean" },
+        "produces_governed_external_effect_proposal": { "type": "boolean" },
         "evidence_burden": {
           "oneOf": [
             { "$ref": "#/$defs/evidenceBurden" },

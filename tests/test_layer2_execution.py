@@ -7,8 +7,16 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 from layer1_intake import (
+    ExecutionPolicy,
+    IntakeMetadata,
     SensitivityLevel,
     TaskSpec,
+)
+from layer2_runtime_governance.actor_contract import ActorPlanStep, ActorTask
+from layer2_runtime_governance.domain import (
+    EvidenceBurden,
+    PlanStepStatus,
+    RuntimeState,
 )
 from layer2_runtime_governance.execution.action_schemas import (
     build_actor_runtime_tools,
@@ -17,6 +25,7 @@ from layer2_runtime_governance.execution.action_schemas import (
 )
 from layer2_runtime_governance.execution.errors import ActorExecutionError
 from layer2_runtime_governance.execution.response_parser import convert_json_payload_to_tool_call
+from layer3_tool_bus_external_capabilities.tool_contract import ToolObservation
 from layer3_tool_bus_external_capabilities.tools import load_tool_gateway_config
 
 
@@ -143,6 +152,125 @@ class ActorActionSchemaTests(unittest.TestCase):
                 },
                 allowed_action_names=allowed_names,
             )
+
+    @staticmethod
+    def _build_test_actor_task(
+        *,
+        evidence_burden: EvidenceBurden | None = None,
+        observations: tuple[ToolObservation, ...] = (),
+        evidence_request_episode_count: int = 0,
+    ) -> ActorTask:
+        task_spec = TaskSpec(
+            goal="Test goal",
+            context="Test context",
+            constraints=[],
+            sensitivity=SensitivityLevel.LOW,
+            success_criteria=["Test criteria"],
+        )
+        plan_step = ActorPlanStep(
+            step_id="step_1",
+            objective="Collect evidence and synthesize.",
+            rationale="Test rationale",
+            expected_outcome="Test outcome",
+            status=PlanStepStatus.IN_PROGRESS,
+            produces_factual_claims=evidence_burden is not None,
+            evidence_burden=evidence_burden,
+        )
+        return ActorTask(
+            task_spec=task_spec,
+            execution_policy=ExecutionPolicy(confidence_threshold=0.8),
+            intake_metadata=IntakeMetadata(),
+            current_state=RuntimeState.ACTING,
+            runtime_flags=(),
+            plan_steps=(plan_step,),
+            past_steps=(),
+            observations=observations,
+            scratchpad=(),
+            step_validations=(),
+            last_tool_result=None,
+            tool_call_count=0,
+            actor_turn_count=1,
+            current_plan_step_index=0,
+            current_plan_step=plan_step,
+            evidence_request_episode_count=evidence_request_episode_count,
+        )
+
+    # When evidence burden is unsatisfied, completion actions must be stripped from tools.
+    def test_evidence_burden_gate_suppresses_completion_when_unsatisfied(self) -> None:
+        task = self._build_test_actor_task(
+            evidence_burden=EvidenceBurden(min_independent_sources=3),
+            observations=(
+                ToolObservation(observation_id="obs_1", content="OpenAI announcement", locator="https://openai.com/blog/1"),
+                ToolObservation(observation_id="obs_2", content="Google announcement", locator="https://google.com/blog/2"),
+            ),
+        )
+        actions = select_actor_runtime_tools_for_turn(
+            build_actor_runtime_tools(),
+            task_spec=task.task_spec,
+            actor_task=task,
+        )
+        names = {str(action["name"]) for action in actions}
+        self.assertNotIn("emit_step_completed", names)
+        self.assertNotIn("emit_external_communication_draft", names)
+        self.assertNotIn("emit_database_statement", names)
+        self.assertIn("request_web_search", names)
+        self.assertIn("request_fetch_url_text", names)
+
+    # When enough independent sources with retrieved content are present, completion is enabled.
+    def test_evidence_burden_gate_allows_completion_when_satisfied(self) -> None:
+        task = self._build_test_actor_task(
+            evidence_burden=EvidenceBurden(min_independent_sources=3),
+            observations=(
+                ToolObservation(observation_id="obs_1", content="OpenAI announcement", locator="https://openai.com/blog/1"),
+                ToolObservation(observation_id="obs_2", content="Google announcement", locator="https://google.com/blog/2"),
+                ToolObservation(observation_id="obs_3", content="Anthropic announcement", locator="https://anthropic.com/blog/3"),
+            ),
+        )
+        actions = select_actor_runtime_tools_for_turn(
+            build_actor_runtime_tools(),
+            task_spec=task.task_spec,
+            actor_task=task,
+        )
+        names = {str(action["name"]) for action in actions}
+        self.assertIn("emit_step_completed", names)
+        self.assertIn("emit_external_communication_draft", names)
+
+    # Search result title stubs alone do not satisfy retrieved content requirements.
+    def test_evidence_burden_gate_ignores_search_title_stubs(self) -> None:
+        task = self._build_test_actor_task(
+            evidence_burden=EvidenceBurden(min_independent_sources=2),
+            observations=(
+                ToolObservation(observation_id="obs_1", content="OpenAI real content", locator="https://openai.com/blog/1"),
+                ToolObservation(observation_id="obs_2", content="Search result title: Google", locator="https://google.com/search_stub"),
+            ),
+        )
+        actions = select_actor_runtime_tools_for_turn(
+            build_actor_runtime_tools(),
+            task_spec=task.task_spec,
+            actor_task=task,
+        )
+        names = {str(action["name"]) for action in actions}
+        # Only 1 retrieved content origin (openai.com), so 2 min sources is unsatisfied
+        self.assertNotIn("emit_step_completed", names)
+        self.assertNotIn("emit_external_communication_draft", names)
+
+    # Safety valve: after reaching the threshold of evidence request retries, completion is re-enabled.
+    def test_evidence_burden_gate_safety_valve_allows_completion_after_retries(self) -> None:
+        task = self._build_test_actor_task(
+            evidence_burden=EvidenceBurden(min_independent_sources=3),
+            observations=(
+                ToolObservation(observation_id="obs_1", content="OpenAI announcement", locator="https://openai.com/blog/1"),
+            ),
+            evidence_request_episode_count=3,
+        )
+        actions = select_actor_runtime_tools_for_turn(
+            build_actor_runtime_tools(),
+            task_spec=task.task_spec,
+            actor_task=task,
+        )
+        names = {str(action["name"]) for action in actions}
+        self.assertIn("emit_step_completed", names)
+        self.assertIn("emit_external_communication_draft", names)
 
 
 if __name__ == "__main__":

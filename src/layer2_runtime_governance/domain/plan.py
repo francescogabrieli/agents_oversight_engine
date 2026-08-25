@@ -41,6 +41,7 @@ class PlanStep:
     status: PlanStepStatus = PlanStepStatus.PENDING
     produces_factual_claims: bool = False
     evidence_burden: EvidenceBurden | None = None
+    produces_governed_external_effect_proposal: bool = False
 
     # Enforce the declared proof obligation at the canonical semantic-plan boundary.
     def __post_init__(self) -> None:
@@ -71,6 +72,109 @@ def validate_plan_steps_evidence_contract(steps: Iterable[PlanStep]) -> None:
         )
 
 
+# Require an explicit terminal proposal step whenever the intake requests execution.
+def validate_external_effect_plan_contract(
+    *,
+    steps: Iterable[PlanStep],
+    execution_intent: str | Enum,
+) -> None:
+    step_list = list(steps)
+    intent_value = (
+        execution_intent.value
+        if isinstance(execution_intent, Enum)
+        else execution_intent
+    )
+    if intent_value not in {"proposal_only", "execute_after_governance"}:
+        raise ValueError(f"Unsupported execution intent: {intent_value!r}.")
+    marked_indexes = [
+        index
+        for index, step in enumerate(step_list)
+        if step.produces_governed_external_effect_proposal
+    ]
+
+    if intent_value == "execute_after_governance":
+        if len(marked_indexes) != 1:
+            raise ValueError(
+                "An execute-after-governance plan must declare exactly one "
+                "governed external-effect proposal step."
+            )
+        if marked_indexes[0] != len(step_list) - 1:
+            raise ValueError(
+                "The governed external-effect proposal must be the terminal semantic step."
+            )
+        return
+
+    if marked_indexes:
+        raise ValueError(
+            "A proposal-only plan cannot declare a governed external-effect proposal step."
+        )
+
+
+# Derive the strongest remaining proof dimensions without assigning them to one step.
+def derive_evidence_obligation_floor(
+    steps: Iterable[PlanStep],
+) -> EvidenceBurden | None:
+    step_list = list(steps)
+    validate_plan_steps_evidence_contract(step_list)
+    burdens = [
+        step.evidence_burden
+        for step in step_list
+        if step.produces_factual_claims and step.evidence_burden is not None
+    ]
+    if not burdens:
+        return None
+
+    freshness_windows = [
+        burden.freshness_window_days
+        for burden in burdens
+        if burden.freshness_window_days is not None
+    ]
+    return EvidenceBurden(
+        min_independent_sources=max(
+            burden.min_independent_sources for burden in burdens
+        ),
+        require_retrieved_content=any(
+            burden.require_retrieved_content for burden in burdens
+        ),
+        freshness_window_days=(min(freshness_windows) if freshness_windows else None),
+    )
+
+
+# Prevent replanning from silently downgrading an already-governed proof obligation.
+def validate_replacement_evidence_obligation(
+    *,
+    replaced_steps: Iterable[PlanStep],
+    replacement_steps: Iterable[PlanStep],
+) -> None:
+    required = derive_evidence_obligation_floor(replaced_steps)
+    if required is None:
+        validate_plan_steps_evidence_contract(replacement_steps)
+        return
+
+    proposed = derive_evidence_obligation_floor(replacement_steps)
+    if proposed is None:
+        raise ValueError(
+            "Replacement trajectory removed the remaining factual evidence obligation."
+        )
+
+    weakened_dimensions: list[str] = []
+    if proposed.min_independent_sources < required.min_independent_sources:
+        weakened_dimensions.append("min_independent_sources")
+    if required.require_retrieved_content and not proposed.require_retrieved_content:
+        weakened_dimensions.append("require_retrieved_content")
+    if required.freshness_window_days is not None and (
+        proposed.freshness_window_days is None
+        or proposed.freshness_window_days > required.freshness_window_days
+    ):
+        weakened_dimensions.append("freshness_window_days")
+    if weakened_dimensions:
+        raise ValueError(
+            "Replacement trajectory weakened the remaining evidence obligation: "
+            + ", ".join(weakened_dimensions)
+            + "."
+        )
+
+
 # Canonical domain contract extracted from the legacy state facade.
 @dataclass
 class PlannerDecision:
@@ -90,6 +194,9 @@ def semantic_plan_signature(steps: Iterable[PlanStep]) -> str:
             "rationale": step.rationale,
             "expected_outcome": step.expected_outcome,
             "produces_factual_claims": step.produces_factual_claims,
+            "produces_governed_external_effect_proposal": (
+                step.produces_governed_external_effect_proposal
+            ),
             "evidence_burden": (
                 {
                     "min_independent_sources": step.evidence_burden.min_independent_sources,
@@ -116,7 +223,10 @@ __all__ = [
     "EvidenceBurden",
     "PlanStep",
     "PlannerDecision",
+    "derive_evidence_obligation_floor",
     "semantic_plan_signature",
+    "validate_external_effect_plan_contract",
     "validate_plan_step_evidence_contract",
     "validate_plan_steps_evidence_contract",
+    "validate_replacement_evidence_obligation",
 ]

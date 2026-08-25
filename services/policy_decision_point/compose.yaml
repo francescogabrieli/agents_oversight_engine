@@ -6,6 +6,7 @@ services:
       - --server
       - --addr=0.0.0.0:8181
       - --log-format=json
+      - --watch
       - /policy
     ports:
       - "8181:8181"

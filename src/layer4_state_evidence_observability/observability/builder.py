@@ -134,6 +134,9 @@ def _build_plan_step(*, step: Any, task_state: TaskState) -> TracePlanStep:
         produces_factual_claims=bool(
             getattr(step, "produces_factual_claims", False)
         ),
+        produces_governed_external_effect_proposal=bool(
+            getattr(step, "produces_governed_external_effect_proposal", False)
+        ),
         evidence_burden=(
             TraceEvidenceBurden(
                 min_independent_sources=evidence_burden.min_independent_sources,

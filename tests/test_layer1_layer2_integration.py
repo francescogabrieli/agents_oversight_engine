@@ -92,7 +92,7 @@ class StubPlanner:
 
 class StubPolicyEngine(PolicyEnginePort):
     policy_engine_name = "stub_policy_engine"
-    policy_bundle_version = "layer2_governance_v4"
+    policy_bundle_version = "layer2_governance_v5"
     policy_config_version = "layer2_governance_thresholds_v2"
 
     # Select deterministic OPA-first pillars without contacting a policy service.

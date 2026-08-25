@@ -114,6 +114,10 @@ class StubPlanner:
                     objective="Synthesize the grounded result.",
                     rationale="The runtime should synthesize only after evidence collection.",
                     expected_outcome="A concise grounded output.",
+                    produces_governed_external_effect_proposal=(
+                        task_state.execution_intent
+                        == ExecutionIntent.EXECUTE_AFTER_GOVERNANCE
+                    ),
                 ),
             ],
             rationale="The stub planner selected a short evidence-first trajectory.",
@@ -336,7 +340,7 @@ class OverDecomposedSourceSummaryPlanner:
 
 class StubPolicyEngine(PolicyEnginePort):
     policy_engine_name = "stub_policy_engine"
-    policy_bundle_version = "layer2_governance_v4"
+    policy_bundle_version = "layer2_governance_v5"
     policy_config_version = "layer2_governance_thresholds_v2"
 
     # Model OPA's inexpensive first pass so graph tests never contact a live policy engine.
@@ -453,7 +457,7 @@ class JudgeRequiredPolicyEngine(StubPolicyEngine):
 
 class ReviewPolicyEngine(PolicyEnginePort):
     policy_engine_name = "review_policy_engine"
-    policy_bundle_version = "layer2_governance_v4"
+    policy_bundle_version = "layer2_governance_v5"
     policy_config_version = "layer2_governance_thresholds_v2"
 
     # Keep required-pillar selection deterministic for HITL graph tests.
@@ -849,6 +853,9 @@ class StubReplanner(ReplannerPort):
                     objective="Complete a narrower recovery step after the actor requested replanning.",
                     rationale="The actor reported that the previous step was too broad.",
                     expected_outcome="A completed recovery output.",
+                    produces_governed_external_effect_proposal=(
+                        _remaining_external_proposal_required(task_state)
+                    ),
                 )
             ],
             rationale="The stub replanner replaced the blocked trajectory with one recovery step.",
@@ -870,12 +877,26 @@ class CollidingReplanner(ReplannerPort):
                     objective="Replacement step with a generated ID that already exists.",
                     rationale="The OpenAI replanner starts IDs from one for each replan call.",
                     expected_outcome="A replacement step with a unique runtime ID.",
+                    produces_governed_external_effect_proposal=(
+                        _remaining_external_proposal_required(task_state)
+                    ),
                 )
             ],
             rationale="Returned an intentionally colliding replacement ID.",
             replanner_name=self.replanner_name,
             prompt_version=self.prompt_version,
         )
+
+
+# Preserve the terminal-effect marker across generic deterministic replanner fixtures.
+def _remaining_external_proposal_required(task_state: TaskState) -> bool:
+    current_index = task_state.current_plan_step_index
+    if current_index is None:
+        return False
+    return any(
+        step.produces_governed_external_effect_proposal
+        for step in task_state.plan_steps[current_index:]
+    )
 
 
 class FakeParsedReplanResponse:
@@ -889,10 +910,20 @@ class FakeReplannerResponses:
     def __init__(self, output_parsed) -> None:
         self.output_parsed = output_parsed
         self.last_kwargs = None
+        self.all_kwargs = []
+        self.call_count = 0
 
     def parse(self, **kwargs):
+        self.call_count += 1
         self.last_kwargs = kwargs
-        return FakeParsedReplanResponse(self.output_parsed)
+        self.all_kwargs.append(kwargs)
+        # A list supplies successive semantic-contract correction responses.
+        if isinstance(self.output_parsed, list):
+            output_index = min(self.call_count - 1, len(self.output_parsed) - 1)
+            output_parsed = self.output_parsed[output_index]
+        else:
+            output_parsed = self.output_parsed
+        return FakeParsedReplanResponse(output_parsed)
 
 
 class FakeReplannerClient:

@@ -387,6 +387,9 @@ class Layer2TraceTests(unittest.TestCase):
 
         self.assertIsNotNone(trace.human_review)
         self.assertIsNotNone(trace.external_communication)
+        self.assertTrue(
+            trace.plan_steps[0].produces_governed_external_effect_proposal
+        )
         self.assertEqual(trace.external_communication.phase, "approved_for_execution")
         self.assertEqual(trace.external_communication.draft.channel, "email")
         self.assertEqual(
@@ -571,6 +574,7 @@ def _external_communication_task_state() -> TaskState:
             rationale="The draft must remain local until review is complete.",
             expected_outcome="A reviewable external draft.",
             status=PlanStepStatus.IN_PROGRESS,
+            produces_governed_external_effect_proposal=True,
         )
     ]
     state.current_plan_step_index = 0

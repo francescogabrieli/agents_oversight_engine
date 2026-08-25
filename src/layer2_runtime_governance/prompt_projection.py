@@ -19,6 +19,9 @@ def project_prompt_plan_step(*, step: PlanStep) -> dict[str, object]:
         "produces_factual_claims": bool(
             getattr(step, "produces_factual_claims", False)
         ),
+        "produces_governed_external_effect_proposal": bool(
+            getattr(step, "produces_governed_external_effect_proposal", False)
+        ),
         "evidence_burden": (
             {
                 "min_independent_sources": evidence_burden.min_independent_sources,

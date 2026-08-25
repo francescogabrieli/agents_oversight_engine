@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from dataclasses import replace
 
 from layer1_intake import (
     ExecutionIntent,
@@ -88,6 +89,67 @@ class Layer2HitlDashboardTests(unittest.TestCase):
         self.assertEqual(decoded["human_review"]["pending_request"]["request_id"], "thread-1:hitl")
         self.assertEqual(decoded["reason_codes"], ["human_review_required", "tool_requires_human_review"])
         self.assertIsNone(snapshot.external_communication)
+
+    # Verify non-external reviews expose bounded Evidence and Trajectory diagnostics.
+    def test_dashboard_snapshot_exposes_generic_review_diagnostics(self) -> None:
+        task_state = TaskState.from_intake(_intake_result())
+        task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        task_state.pending_human_review_request = _human_review_request()
+        task_state.last_governance_decision = replace(
+            build_dashboard_governance_decision(),
+            pillar_requirements={
+                "require_evidence": False,
+                "require_trajectory": True,
+            },
+            pillar_results={
+                "evidence": {
+                    "mode": "inactive",
+                    "diagnostic_level": "unscored",
+                    "summary": "Evidence pillar inactive (not required).",
+                    "reason_codes": [],
+                    "raw_facts": {"coverage_evaluated": False},
+                },
+                "trajectory": {
+                    "mode": "active",
+                    "diagnostic_level": "degraded",
+                    "summary": "The replan ceiling requires an operator decision.",
+                    "reason_codes": ["replan_ceiling_reached"],
+                    "replan_ceiling_reached": True,
+                    "raw_facts": {
+                        "replan_count": 3,
+                        "max_replans_before_review": 3,
+                        "consecutive_tool_failures": 3,
+                        "secret_internal_debug": "must not reach the compact panel",
+                    },
+                },
+            },
+        )
+
+        snapshot = build_governance_hitl_dashboard_snapshot(task_state)
+        human_review = snapshot.human_review
+
+        self.assertIsNotNone(human_review)
+        self.assertFalse(human_review.evidence_diagnostic.required)
+        self.assertEqual(human_review.evidence_diagnostic.mode, "inactive")
+        self.assertTrue(human_review.trajectory_diagnostic.required)
+        self.assertEqual(
+            human_review.trajectory_diagnostic.reason_codes,
+            ("replan_ceiling_reached",),
+        )
+        self.assertEqual(
+            human_review.trajectory_diagnostic.facts,
+            {
+                "replan_count": 3,
+                "max_replans_before_review": 3,
+                "replan_ceiling_reached": True,
+                "consecutive_tool_failures": 3,
+            },
+        )
+        payload = governance_hitl_dashboard_snapshot_to_dict(snapshot)
+        self.assertEqual(
+            payload["human_review"]["trajectory_diagnostic"]["facts"]["replan_count"],
+            3,
+        )
 
     def test_dashboard_snapshot_marks_terminal_states_explicitly(self) -> None:
         task_state = TaskState.from_intake(_intake_result())

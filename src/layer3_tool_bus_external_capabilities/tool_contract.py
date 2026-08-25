@@ -4,7 +4,20 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Protocol
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
+
+
+_TRACKING_QUERY_KEYS = frozenset(
+    {
+        "dclid",
+        "fbclid",
+        "gclid",
+        "mc_cid",
+        "mc_eid",
+        "msclkid",
+    }
+)
 
 
 # ToolName keeps the tool surface explicit and audit-friendly.
@@ -50,6 +63,104 @@ class ToolRequest:
     dataset_id: str | None = None
 
 
+# Project only arguments that can change capability execution; actor rationale is not payload.
+def tool_request_execution_arguments(
+    request: ToolRequest,
+) -> tuple[tuple[str, str], ...]:
+    if request.tool_name == ToolName.WEB_SEARCH:
+        return (
+            ("query", request.query or ""),
+            ("max_results", str(request.max_results)),
+        )
+    if request.tool_name == ToolName.FETCH_URL_TEXT:
+        return (("url", request.url or ""),)
+    if request.tool_name == ToolName.CONTROLLED_DOCUMENT_READ:
+        return (("document_id", request.document_id or ""),)
+    if request.tool_name == ToolName.CONTROLLED_DATASET_READ:
+        return (
+            ("dataset_id", request.dataset_id or ""),
+            ("limit", "" if request.limit is None else str(request.limit)),
+        )
+    if request.tool_name == ToolName.MCP_LOCAL_TEST_TEXT_STATS:
+        return (
+            ("text", request.text or ""),
+            ("limit", "" if request.limit is None else str(request.limit)),
+        )
+    if request.tool_name == ToolName.MCP_LOCAL_TEST_ECHO:
+        return (("text", request.text or ""),)
+    if request.tool_name == ToolName.MCP_LOCAL_TEST_READ_FIXTURE:
+        return (("path", request.path or ""),)
+    if request.tool_name == ToolName.MCP_LOCAL_TEST_CALCULATE_EXPRESSION:
+        return (("expression", request.expression or ""),)
+    return ()
+
+
+# Normalize a web locator for operational identity and evidence equivalence only.
+def canonical_web_locator(locator: str) -> str:
+    stripped = locator.strip()
+    parsed = urlsplit(stripped)
+    if parsed.scheme.casefold() not in {"http", "https"} or not parsed.netloc:
+        return stripped
+
+    scheme = parsed.scheme.casefold()
+    hostname = (parsed.hostname or "").casefold()
+    try:
+        port = parsed.port
+    except ValueError:
+        return stripped
+    if port is not None and not (
+        (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
+    ):
+        hostname = f"{hostname}:{port}"
+
+    # Tracking-only parameters do not change the fetched document or support a
+    # different factual claim; every other query parameter remains significant.
+    query_items = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if not key.casefold().startswith("utm_")
+        and key.casefold() not in _TRACKING_QUERY_KEYS
+    ]
+    normalized_query = urlencode(sorted(query_items), doseq=True)
+    path = parsed.path
+    if path == "/":
+        path = ""
+    elif path.endswith("/"):
+        path = path.rstrip("/")
+    return urlunsplit((scheme, hostname, path, normalized_query, ""))
+
+
+# Build a stable capability identity from normalized executable arguments only.
+def canonical_tool_request_identity(request: ToolRequest) -> str:
+    arguments = tool_request_execution_arguments(request)
+    if request.tool_name in {
+        ToolName.WEB_SEARCH,
+        ToolName.CONTROLLED_DOCUMENT_READ,
+        ToolName.CONTROLLED_DATASET_READ,
+        ToolName.MCP_LOCAL_TEST_TEXT_STATS,
+        ToolName.MCP_LOCAL_TEST_ECHO,
+        ToolName.MCP_LOCAL_TEST_READ_FIXTURE,
+        ToolName.MCP_LOCAL_TEST_CALCULATE_EXPRESSION,
+    }:
+        normalized = tuple(
+            (
+                name,
+                value
+                if name in {"limit", "max_results"}
+                else " ".join(value.split()).casefold(),
+            )
+            for name, value in arguments
+        )
+    elif request.tool_name == ToolName.FETCH_URL_TEXT:
+        normalized = tuple(
+            (name, canonical_web_locator(value))
+            for name, value in arguments
+        )
+    else:
+        normalized = arguments
+    return f"{request.tool_name.value}:{normalized!r}"
+
+
 @dataclass(frozen=True)
 class ToolObservation:
     # Adapters expose content and any source-attributed timestamp observed at the capability boundary.
@@ -86,4 +197,7 @@ __all__ = [
     "ToolName",
     "ToolObservation",
     "ToolRequest",
+    "canonical_tool_request_identity",
+    "canonical_web_locator",
+    "tool_request_execution_arguments",
 ]

@@ -128,7 +128,7 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
         self.assertEqual(result.reason_codes, (GovernanceReasonCode.READ_ONLY_ALLOWED,))
         self.assertEqual(result.summary, "Read-only capability use is allowed.")
         self.assertEqual(result.policy_engine_name, "opa_http_policy_engine")
-        self.assertEqual(result.policy_bundle_version, "layer2_governance_v4")
+        self.assertEqual(result.policy_bundle_version, "layer2_governance_v5")
 
 
     def test_read_only_tool_request_routes_through_governance(self) -> None:
@@ -189,7 +189,9 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
         decision = GovernanceDecision(
             directive=GovernanceDirective.REQUEST_MORE_EVIDENCE,
             policy_decision=PolicyDecision.ALLOW,
-            reason_codes=(GovernanceReasonCode.ALLOWED_BY_POLICY,),
+            reason_codes=(
+                GovernanceReasonCode.INVALID_OR_MISSING_SELECTED_EVIDENCE,
+            ),
             summary="Evidence support is below the current step requirement.",
             constrains_capability_use=True,
             evaluated_actor_result_type=ActorResultType.PROPOSE_ACTION,
@@ -198,6 +200,18 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
             policy_bundle_version="test_v1",
             policy_directive=GovernanceDirective.CONTINUE_READ_ONLY,
             oversight_recommended_directive=GovernanceDirective.REQUEST_MORE_EVIDENCE,
+            pillar_results={
+                "evidence": {
+                    "raw_facts": {
+                        "deficit_codes": [
+                            "freshness_metadata_missing",
+                            "stale_evidence",
+                        ],
+                        "freshness_missing_observation_ids": ["obs-undated"],
+                        "stale_evidence_observation_ids": ["obs-stale"],
+                    }
+                }
+            },
         )
 
         _apply_governance_decision(
@@ -209,6 +223,47 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
         self.assertEqual(task_state.current_state, RuntimeState.READY_TOOL_EXECUTION)
         self.assertIsNotNone(task_state.current_tool_request)
         self.assertEqual(task_state.current_tool_request.tool_name, ToolName.WEB_SEARCH)
+        self.assertEqual(task_state.evidence_request_count, 1)
+        self.assertEqual(task_state.evidence_request_episode_count, 1)
+        self.assertEqual(task_state.evidence_request_episode_id, "step_1")
+        feedback = task_state.governance_action_feedback[-1]
+        self.assertEqual(feedback.invalidated_payload_digest, None)
+        self.assertEqual(
+            feedback.findings[0].evidence_refs,
+            ("obs-undated",),
+        )
+        self.assertIn("specific dated documents", feedback.findings[0].summary)
+        self.assertEqual(
+            feedback.findings[1].evidence_refs,
+            ("obs-stale",),
+        )
+
+        _apply_governance_decision(
+            task_state,
+            governance_decision=decision,
+            policy_input=policy_input,
+        )
+        self.assertEqual(task_state.evidence_request_count, 2)
+        self.assertEqual(task_state.evidence_request_episode_count, 2)
+
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_2",
+                objective="Verify replacement evidence.",
+                rationale="A new step owns a fresh bounded remediation episode.",
+                expected_outcome="A valid dated source.",
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        task_state.current_plan_step_index = 0
+        _apply_governance_decision(
+            task_state,
+            governance_decision=decision,
+            policy_input=policy_input,
+        )
+        self.assertEqual(task_state.evidence_request_count, 3)
+        self.assertEqual(task_state.evidence_request_episode_count, 1)
+        self.assertEqual(task_state.evidence_request_episode_id, "step_2")
 
 
     def test_behavioral_store_is_populated_and_second_run_sees_history(self) -> None:

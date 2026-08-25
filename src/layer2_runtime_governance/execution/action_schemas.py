@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import urlparse
 
 from layer1_intake import TaskSpec
 from ..actor_contract import ActorTask
@@ -117,16 +118,93 @@ def select_actor_runtime_tools_for_turn(
 ) -> list[dict[str, object]]:
     # Keep the provider surface bounded to capabilities still actionable in this turn.
     del task_spec
-    if actor_task is None or actor_task.last_tool_result is None:
-        return list(runtime_tools)
-    last_name = actor_task.last_tool_result.request.tool_name
-    action_name = _CAPABILITY_ACTIONS.get(last_name, (None,))[0]
-    if action_name is None:
-        return list(runtime_tools)
-    # The result and its observations are already in context; repeating the exact
-    # capability family is not the default next action. The actor can still complete,
-    # replan, clarify, or use another capability.
-    return [tool for tool in runtime_tools if tool.get("name") != action_name]
+    filtered = list(runtime_tools)
+
+    # Anti-spin filter: suppress the capability family just executed when its observations
+    # are already in context, nudging the actor to process results before repeating.
+    if actor_task is not None and actor_task.last_tool_result is not None:
+        last_name = actor_task.last_tool_result.request.tool_name
+        action_name = _CAPABILITY_ACTIONS.get(last_name, (None,))[0]
+        if action_name is not None:
+            filtered = [tool for tool in filtered if tool.get("name") != action_name]
+
+    # Evidence burden gate: when the current step declares an evidence burden that is not
+    # yet satisfied by the available observations, remove completion actions so the actor
+    # cannot converge prematurely. The safety valve re-enables completions when the
+    # governance system has already issued multiple evidence requests without progress
+    # (evidence_request_episode_count >= _EVIDENCE_GATE_SAFETY_VALVE_THRESHOLD),
+    # indicating that additional tool calls are unlikely to close the gap.
+    if actor_task is not None and _evidence_burden_unsatisfied(actor_task):
+        completion_actions = frozenset({
+            "emit_step_completed",
+            "emit_external_communication_draft",
+            "emit_database_statement",
+        })
+        filtered = [tool for tool in filtered if tool.get("name") not in completion_actions]
+
+    return filtered
+
+
+# Threshold after which the evidence burden gate re-enables completions so the actor
+# can declare best-effort output instead of spinning on unreachable evidence.
+_EVIDENCE_GATE_SAFETY_VALVE_THRESHOLD = 3
+
+
+def _evidence_burden_unsatisfied(actor_task: ActorTask) -> bool:
+    """True when the current step's evidence burden is not yet met by available observations.
+
+    The gate counts distinct source origins across *all* observations that carry
+    retrieved page content (not search-result titles), matching the evidence service's
+    independent-source counting logic.
+
+    When the actor has already been sent back for more evidence at least
+    _EVIDENCE_GATE_SAFETY_VALVE_THRESHOLD times in the current episode without
+    satisfying the burden, the gate opens so the actor can declare best-effort
+    completion rather than spinning indefinitely.
+    """
+    step = actor_task.current_plan_step
+    if not step.produces_factual_claims or step.evidence_burden is None:
+        return False
+    required = step.evidence_burden.min_independent_sources
+    if required <= 0:
+        return False
+
+    # Safety valve: after repeated governance-directed evidence requests without
+    # progress, allow the actor to converge with an explicit best-effort declaration.
+    if actor_task.evidence_request_episode_count >= _EVIDENCE_GATE_SAFETY_VALVE_THRESHOLD:
+        return False
+
+    # Count distinct source origins from observations that carry retrieved document
+    # content, excluding search-result title stubs that lack factual support.
+    origins: set[str] = set()
+    for obs in actor_task.observations:
+        if obs.locator is None:
+            continue
+        # Search-result title stubs are not retrieved content.
+        if obs.content.startswith("Search result title:"):
+            continue
+        origin = _extract_observation_origin(obs.locator)
+        if origin and origin != "unknown_origin":
+            origins.add(origin)
+
+    return len(origins) < required
+
+
+def _extract_observation_origin(locator: str) -> str:
+    """Extract a normalized source origin from an observation locator.
+
+    Mirrors the logic in ``evidence_service._extract_source_origin`` so the gate
+    uses the same origin equivalence as governance evaluation.
+    """
+    if not locator:
+        return "unknown_origin"
+    parsed = urlparse(locator)
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc.lower()}"
+    parts = locator.split(":", 1)
+    if len(parts) == 2:
+        return f"{parts[0].lower()}:{parts[1].split('/')[0].lower()}"
+    return locator.lower().strip()
 
 
 # Build the JSON envelope described to providers without native tool calling.

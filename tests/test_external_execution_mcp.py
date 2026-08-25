@@ -528,6 +528,7 @@ class MCPExternalExecutorIntegrationTests(unittest.TestCase):
                             rationale="Check admin user existence.",
                             expected_outcome="User data.",
                             status=PlanStepStatus.PENDING,
+                            produces_governed_external_effect_proposal=True,
                         )
                     ],
                     rationale="Query admin user.",

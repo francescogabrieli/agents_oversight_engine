@@ -18,13 +18,25 @@ from layer2_runtime_governance.domain import (
     RuntimeState,
     TaskState,
 )
+from layer2_runtime_governance.actor_contract import ActorResult, ActorResultType
+from layer2_runtime_governance.governance_components import (
+    build_policy_evaluation_input,
+)
+from layer2_runtime_governance.signal_services import build_trajectory_signal
 from layer2_runtime_governance.runtime.tool_service import observe_tool_result
+from layer3_tool_bus_external_capabilities.external_operations.runtime_projection import (
+    prepare_external_operation_proposal,
+)
 from layer3_tool_bus_external_capabilities.tool_contract import (
     ToolErrorCode,
     ToolExecutionResult,
     ToolName,
     ToolObservation,
     ToolRequest,
+    canonical_tool_request_identity,
+)
+from layer3_tool_bus_external_capabilities.tools import (
+    build_default_tool_gateway_config,
 )
 from layer3_tool_bus_external_capabilities.tools.adapters.openai_search import (
     extract_web_observations,
@@ -42,6 +54,161 @@ class Layer2ToolRuntimeTests(unittest.TestCase):
         self.assertEqual(task_state.current_state, RuntimeState.COMPLETED)
         self.assertEqual(task_state.tool_call_count, 1)
         self.assertEqual(len(task_state.observations), 1)
+
+    # A pending batch item replaces the prior item's governed proposal and digest.
+    def test_batch_advance_rebinds_governance_to_current_tool_request(self) -> None:
+        state = TaskState.from_intake(_build_research_intake_result())
+        state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Validate two official sources.",
+                rationale="Both pages need direct inspection.",
+                expected_outcome="Two source observations.",
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        state.current_plan_step_index = 0
+        anthropic = ToolRequest(
+            plan_step_id="step_1",
+            tool_name=ToolName.FETCH_URL_TEXT,
+            reason="Verify the Anthropic publication date.",
+            url="https://www.anthropic.com/news/how-claudes-text-watermark-works",
+        )
+        fda = ToolRequest(
+            plan_step_id="step_1",
+            tool_name=ToolName.FETCH_URL_TEXT,
+            reason="Verify the FDA publication date.",
+            url=(
+                "https://www.fda.gov/news-events/press-announcements/"
+                "fda-seeks-public-feedback-inform-regulatory-approach-"
+                "generative-ai-enabled-medical-devices"
+            ),
+        )
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.PROPOSE_ACTION,
+            summary="Fetch both official announcements.",
+            tool_request=anthropic,
+            tool_requests=(anthropic, fda),
+        )
+        state.current_tool_request = anthropic
+        state.pending_tool_requests = [fda]
+        config = build_default_tool_gateway_config()
+
+        anthropic_proposal = prepare_external_operation_proposal(
+            task_state=state,
+            tool_gateway_config=config,
+        )
+        state.current_state = RuntimeState.ACTING
+        state.current_tool_request = None
+        state.last_tool_result = ToolExecutionResult(
+            request=anthropic,
+            success=False,
+            summary="The first source could not be fetched.",
+            error_code=ToolErrorCode.FORBIDDEN,
+        )
+
+        observe_tool_result(state)
+        fda_proposal = prepare_external_operation_proposal(
+            task_state=state,
+            tool_gateway_config=config,
+        )
+
+        self.assertEqual(state.current_tool_request, fda)
+        self.assertEqual(fda_proposal.target.value, fda.url)
+        self.assertIn(fda.url, fda_proposal.payload_preview)
+        self.assertNotIn(anthropic.url, fda_proposal.payload_preview)
+        self.assertNotEqual(
+            anthropic_proposal.payload_digest,
+            fda_proposal.payload_digest,
+        )
+        self.assertEqual(
+            state.actor_result.external_operation_proposal,
+            fda_proposal,
+        )
+        trajectory = build_trajectory_signal(
+            task_state=state,
+            policy_input=build_policy_evaluation_input(task_state=state),
+            thresholds_version="policy.v1",
+        )["raw_facts"]
+        self.assertTrue(
+            all(
+                proposal.boundary.value == "evidence_read"
+                for proposal in state.external_operation_history
+            )
+        )
+        self.assertEqual(trajectory["action_churn_count"], 0)
+        self.assertFalse(trajectory["external_candidate"])
+
+    # Wording-only changes cannot create a new operational fetch identity or digest.
+    def test_fetch_reason_paraphrase_keeps_operational_identity(self) -> None:
+        first = ToolRequest(
+            plan_step_id="step_1",
+            tool_name=ToolName.FETCH_URL_TEXT,
+            reason="Verify the publication date.",
+            url="https://example.org/official-announcement",
+        )
+        second = ToolRequest(
+            plan_step_id="step_1",
+            tool_name=ToolName.FETCH_URL_TEXT,
+            reason="Please inspect this page for its date.",
+            url="https://example.org/official-announcement",
+        )
+
+        self.assertEqual(
+            canonical_tool_request_identity(first),
+            canonical_tool_request_identity(second),
+        )
+
+        state = TaskState.from_intake(_build_research_intake_result())
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.PROPOSE_ACTION,
+            summary="Fetch the announcement.",
+            tool_request=first,
+        )
+        state.current_tool_request = first
+        first_proposal = prepare_external_operation_proposal(
+            task_state=state,
+            tool_gateway_config=build_default_tool_gateway_config(),
+        )
+        state.current_tool_request = second
+        second_proposal = prepare_external_operation_proposal(
+            task_state=state,
+            tool_gateway_config=build_default_tool_gateway_config(),
+        )
+
+        self.assertEqual(first_proposal.payload_digest, second_proposal.payload_digest)
+
+    # Tracking parameters do not create a second operational fetch identity.
+    def test_fetch_tracking_parameter_keeps_operational_identity(self) -> None:
+        tracked = ToolRequest(
+            plan_step_id="step_1",
+            tool_name=ToolName.FETCH_URL_TEXT,
+            reason="Fetch the tracked result.",
+            url="https://Example.org/announcement/?utm_source=openai&utm_campaign=test",
+        )
+        clean = ToolRequest(
+            plan_step_id="step_1",
+            tool_name=ToolName.FETCH_URL_TEXT,
+            reason="Fetch the canonical result.",
+            url="https://example.org/announcement",
+        )
+        distinct_query = ToolRequest(
+            plan_step_id="step_1",
+            tool_name=ToolName.FETCH_URL_TEXT,
+            reason="Fetch a materially different view.",
+            url="https://example.org/announcement?version=2",
+        )
+
+        self.assertEqual(
+            canonical_tool_request_identity(tracked),
+            canonical_tool_request_identity(clean),
+        )
+        self.assertNotEqual(
+            canonical_tool_request_identity(clean),
+            canonical_tool_request_identity(distinct_query),
+        )
 
 
     def test_duplicate_fetch_request_is_blocked_before_reexecution(self) -> None:

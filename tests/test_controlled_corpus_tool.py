@@ -14,11 +14,11 @@ from layer2_runtime_governance.execution.action_schemas import build_actor_runti
 from layer2_runtime_governance.execution.result_builder import (
     convert_tool_call_to_actor_result,
 )
-from layer2_runtime_governance.runtime.tool_service import canonical_action_key
 from layer3_tool_bus_external_capabilities.tool_contract import (
     ToolErrorCode,
     ToolName,
     ToolRequest,
+    canonical_tool_request_identity,
 )
 from layer3_tool_bus_external_capabilities.tools import (
     OpenAIToolGateway,
@@ -202,8 +202,14 @@ class ControlledCorpusToolTests(unittest.TestCase):
             limit=4,
         )
 
-        self.assertEqual(canonical_action_key(first), canonical_action_key(same))
-        self.assertNotEqual(canonical_action_key(first), canonical_action_key(different_limit))
+        self.assertEqual(
+            canonical_tool_request_identity(first),
+            canonical_tool_request_identity(same),
+        )
+        self.assertNotEqual(
+            canonical_tool_request_identity(first),
+            canonical_tool_request_identity(different_limit),
+        )
 
 
 if __name__ == "__main__":

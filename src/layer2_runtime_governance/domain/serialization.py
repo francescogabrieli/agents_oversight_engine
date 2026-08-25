@@ -90,6 +90,10 @@ def coerce_human_review_external_edit(
 # Return a normalized copy so trace and dashboard builders never mutate canonical state.
 def normalize_task_state_serialization(task_state: TaskState) -> TaskState:
     normalized = deepcopy(task_state)
+    # Materialize the v6 planner marker when recovering older checkpoint objects.
+    for plan_step in normalized.plan_steps:
+        if "produces_governed_external_effect_proposal" not in vars(plan_step):
+            plan_step.produces_governed_external_effect_proposal = False
     # Older checkpoints predate operational workspace and progress fields.
     if not hasattr(normalized, "workspace"):
         normalized.workspace = AgentWorkspace()
@@ -108,6 +112,16 @@ def normalize_task_state_serialization(task_state: TaskState) -> TaskState:
         normalized.no_progress_turns = 0
     if not hasattr(normalized, "evidence_request_count"):
         normalized.evidence_request_count = 0
+    # Legacy checkpoints used the whole-run counter as the active ceiling.
+    if not hasattr(normalized, "evidence_request_episode_count"):
+        normalized.evidence_request_episode_count = normalized.evidence_request_count
+    if not hasattr(normalized, "evidence_request_episode_id"):
+        current_step = normalized.current_plan_step
+        normalized.evidence_request_episode_id = (
+            current_step.step_id
+            if current_step is not None and normalized.evidence_request_episode_count
+            else None
+        )
     if not hasattr(normalized, "actor_protocol_retry_count"):
         normalized.actor_protocol_retry_count = 0
     if not hasattr(normalized, "actor_protocol_retry_progress_epoch"):

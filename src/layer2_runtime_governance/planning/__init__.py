@@ -13,6 +13,7 @@ from ..domain import (
     PlannerDecision,
     PlanStep,
     TaskState,
+    validate_external_effect_plan_contract,
     validate_plan_step_evidence_contract,
 )
 from .openai_adapter import (
@@ -77,6 +78,7 @@ class _PlanStepPayload(BaseModel):
     expected_outcome: str = Field(..., min_length=1)
     produces_factual_claims: bool = Field(default=False)
     evidence_burden: _EvidenceBurdenPayload | None = Field(default=None)
+    produces_governed_external_effect_proposal: bool
 
     # Share the domain invariant so provider output cannot omit a factual burden.
     @model_validator(mode="after")
@@ -111,8 +113,16 @@ Each item in plan_steps must contain:
 - expected_outcome
 - produces_factual_claims (boolean: true if this step produces factual claims that leave the system or will be used for downstream decision-making, false otherwise)
 - evidence_burden (required object when produces_factual_claims is true; omit it when produces_factual_claims is false. Fields: min_independent_sources [default 1], require_retrieved_content [default true], freshness_window_days [optional integer])
+- produces_governed_external_effect_proposal (boolean: true only for the terminal semantic step that prepares the exact governed external operation requested by an execute-after-governance task)
 
 Rules:
+- Classify a step as factual when its durable result selects, validates, extracts,
+  compares, or reports source identities, dates, organizations, measurements, claims,
+  or other world facts that a later step will use. Evidence acquisition is not
+  non-factual merely because the concrete capability call is operational.
+- A procedural result derived only from the user-supplied task contract can remain
+  non-factual; for example, restating a supplied reference date or calculating its
+  requested interval does not require external evidence.
 - Stay at the semantic planning level.
 - Do not emit executable tool calls.
 - Do not mention concrete tool names, URLs, function names, query strings, API inputs, shell commands, or payloads.
@@ -138,6 +148,9 @@ Rules:
   the complete execution-ready proposal. Human approval, capability invocation,
   delivery or execution receipts, and runtime completion are governed lifecycle
   transitions, not additional plan steps.
+- When execution_intent is execute_after_governance, mark exactly that terminal step
+  with produces_governed_external_effect_proposal=true and mark every earlier step
+  false. When execution_intent is proposal_only, mark every step false.
 - Do not add speculative retry, delivery-verification, or failure-recovery steps before
   such a failure has actually been observed. Runtime execution and replanning handle
   concrete failures when they occur.
@@ -152,7 +165,11 @@ Rules:
 
 
 # Build the user prompt from the canonical runtime state.
-def build_planner_user_prompt(*, task_state: TaskState) -> str:
+def build_planner_user_prompt(
+    *,
+    task_state: TaskState,
+    contract_feedback: str | None = None,
+) -> str:
     payload = {
         "task_spec": {
             "goal": task_state.task_spec.goal,
@@ -177,6 +194,7 @@ def build_planner_user_prompt(*, task_state: TaskState) -> str:
             "runtime_flags": [flag.value for flag in task_state.runtime_flags],
             "step_index": task_state.step_index,
         },
+        "prior_contract_feedback": contract_feedback,
     }
 
     return (
@@ -187,7 +205,7 @@ def build_planner_user_prompt(*, task_state: TaskState) -> str:
 
 class OpenAIPlanner(PlannerPort):
     planner_name = "openai_layer2_planner"
-    prompt_version = "planner_v4"
+    prompt_version = "planner_v6"
 
     def __init__(self, settings: OpenAIPlannerSettings | None = None) -> None:
         # Validate planner prerequisites once at construction time.
@@ -199,55 +217,92 @@ class OpenAIPlanner(PlannerPort):
         )
 
     def plan(self, *, task_state: TaskState) -> PlannerDecision:
-        # Ask OpenAI for a typed semantic planning payload and convert it into domain models.
-        try:
-            response = self._request_plan_response(task_state=task_state)
-        except Exception as exc:  # pragma: no cover - network/client errors
-            raise PlannerExecutionError(f"Planner request failed: {exc}") from exc
+        contract_feedback: str | None = None
 
-        payload = cast(
-            _PlanningPayload,
-            require_parsed_output(
-                response=response,
-                error_type=PlannerExecutionError,
-                missing_output_message="Planner returned no structured output.",
-            ),
-        )
+        # Give the semantic planner one bounded correction attempt before execution.
+        for contract_attempt in range(2):
+            try:
+                response = self._request_plan_response(
+                    task_state=task_state,
+                    contract_feedback=contract_feedback,
+                )
+            except Exception as exc:  # pragma: no cover - network/client errors
+                raise PlannerExecutionError(f"Planner request failed: {exc}") from exc
 
-        plan_steps = [
-            PlanStep(
-                step_id=f"step_{index}",
-                objective=item.objective,
-                rationale=item.rationale,
-                expected_outcome=item.expected_outcome,
-                produces_factual_claims=item.produces_factual_claims,
-                evidence_burden=(
-                    EvidenceBurden(
-                        min_independent_sources=item.evidence_burden.min_independent_sources,
-                        require_retrieved_content=item.evidence_burden.require_retrieved_content,
-                        freshness_window_days=item.evidence_burden.freshness_window_days,
-                    )
-                    if item.evidence_burden is not None
-                    else None
+            payload = cast(
+                _PlanningPayload,
+                require_parsed_output(
+                    response=response,
+                    error_type=PlannerExecutionError,
+                    missing_output_message="Planner returned no structured output.",
                 ),
             )
-            for index, item in enumerate(payload.plan_steps, start=1)
-        ]
+            plan_steps = [
+                PlanStep(
+                    step_id=f"step_{index}",
+                    objective=item.objective,
+                    rationale=item.rationale,
+                    expected_outcome=item.expected_outcome,
+                    produces_factual_claims=item.produces_factual_claims,
+                    evidence_burden=(
+                        EvidenceBurden(
+                            min_independent_sources=(
+                                item.evidence_burden.min_independent_sources
+                            ),
+                            require_retrieved_content=(
+                                item.evidence_burden.require_retrieved_content
+                            ),
+                                freshness_window_days=(
+                                    item.evidence_burden.freshness_window_days
+                                ),
+                        )
+                        if item.evidence_burden is not None
+                        else None
+                    ),
+                    produces_governed_external_effect_proposal=(
+                        item.produces_governed_external_effect_proposal
+                    ),
+                )
+                for index, item in enumerate(payload.plan_steps, start=1)
+            ]
+            try:
+                validate_external_effect_plan_contract(
+                    steps=plan_steps,
+                    execution_intent=task_state.execution_intent,
+                )
+            except ValueError as exc:
+                if contract_attempt == 0:
+                    contract_feedback = str(exc)
+                    continue
+                raise PlannerExecutionError(
+                    "Planner violated the external-effect plan contract after "
+                    f"correction: {exc}"
+                ) from exc
 
-        return PlannerDecision(
-            plan_steps=plan_steps,
-            rationale=payload.rationale_summary,
-            planner_name=self.planner_name,
-            prompt_version=self.prompt_version,
-        )
+            return PlannerDecision(
+                plan_steps=plan_steps,
+                rationale=payload.rationale_summary,
+                planner_name=self.planner_name,
+                prompt_version=self.prompt_version,
+            )
+
+        raise PlannerExecutionError("Planner exhausted its contract correction attempt.")
 
     # Delegate typed parsing and transient retries to the shared provider boundary.
-    def _request_plan_response(self, *, task_state: TaskState) -> object:
+    def _request_plan_response(
+        self,
+        *,
+        task_state: TaskState,
+        contract_feedback: str | None,
+    ) -> object:
         return request_parsed_openai_response(
             client=self._client,
             model=self._settings.model,
             system_prompt=build_planner_system_prompt(),
-            user_prompt=build_planner_user_prompt(task_state=task_state),
+            user_prompt=build_planner_user_prompt(
+                task_state=task_state,
+                contract_feedback=contract_feedback,
+            ),
             text_format=_PlanningPayload,
         )
 

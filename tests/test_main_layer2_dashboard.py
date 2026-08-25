@@ -332,6 +332,46 @@ class MainLayer2DashboardTests(unittest.TestCase):
         self.assertIsNotNone(claimed)
         self.assertEqual(claimed.decision_payload["request_id"], "thread-resume:hitl")
 
+    # Verify the local server opens the checkpoint database at submission time.
+    def test_api_resume_uses_fresh_default_checkpointer(self) -> None:
+        _persist_review_artifacts(
+            self.artifact_store,
+            thread_id="thread-fresh-checkpoint",
+            updated_at="2026-06-05T10:00:00+00:00",
+        )
+        session = _build_paused_session(thread_id="thread-fresh-checkpoint")
+        request_checkpointer = object()
+
+        with mock.patch(
+            "main_layer2_dashboard.build_default_checkpointer",
+            return_value=request_checkpointer,
+        ) as build_checkpointer, mock.patch(
+            "main_layer2_dashboard.build_dashboard_session_from_thread_id",
+            return_value=session,
+        ) as build_session, mock.patch(
+            "main_layer2_dashboard.close_checkpointer"
+        ) as close_checkpointer:
+            payload = self._request_json(
+                "/api/reviews/thread-fresh-checkpoint/resume",
+                method="POST",
+                body={
+                    "thread_id": "thread-fresh-checkpoint",
+                    "request_id": "thread-fresh-checkpoint:hitl",
+                    "decision_type": "approve_continue",
+                    "reviewer_id": "operator-1",
+                },
+                use_default_checkpointer=True,
+            )
+
+        self.assertEqual(payload["decision_submission"]["delivery_status"], "pending")
+        build_checkpointer.assert_called_once_with()
+        build_session.assert_called_once_with(
+            "thread-fresh-checkpoint",
+            checkpointer=request_checkpointer,
+            artifact_store=self.artifact_store,
+        )
+        close_checkpointer.assert_called_once_with(request_checkpointer)
+
     # Verify submission persists the typed decision without invoking the runtime graph.
     def test_submit_dashboard_decision_uses_decision_inbox(self) -> None:
         session = _build_paused_session(
@@ -371,8 +411,14 @@ class MainLayer2DashboardTests(unittest.TestCase):
         *,
         method: str = "GET",
         body: dict[str, object] | None = None,
+        use_default_checkpointer: bool = False,
     ) -> dict[str, object]:
-        status, _, raw_body = self._request_raw(path, method=method, body=body)
+        status, _, raw_body = self._request_raw(
+            path,
+            method=method,
+            body=body,
+            use_default_checkpointer=use_default_checkpointer,
+        )
         self.assertEqual(status, 200)
         return json.loads(raw_body.decode("utf-8"))
 
@@ -383,12 +429,13 @@ class MainLayer2DashboardTests(unittest.TestCase):
         *,
         method: str = "GET",
         body: dict[str, object] | None = None,
+        use_default_checkpointer: bool = False,
     ) -> tuple[int, dict[str, str], bytes]:
         httpd = build_dashboard_httpd(
             host="127.0.0.1",
             port=0,
             artifact_store=self.artifact_store,
-            checkpointer=object(),
+            checkpointer=None if use_default_checkpointer else object(),
             decision_inbox=self.decision_inbox,
             static_root=self.static_root,
         )

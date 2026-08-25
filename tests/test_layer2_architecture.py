@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import unittest
 from pathlib import Path
 
@@ -9,8 +10,29 @@ SRC_ROOT = REPO_ROOT / "src"
 LAYER2_ROOT = SRC_ROOT / "layer2_runtime_governance"
 LAYER3_ROOT = SRC_ROOT / "layer3_tool_bus_external_capabilities"
 LAYER4_ROOT = SRC_ROOT / "layer4_state_evidence_observability"
+OPA_POLICY_ROOT = REPO_ROOT / "configs" / "opa" / "layer2_governance"
+OPA_SERVICE_ROOT = REPO_ROOT / "services" / "policy_decision_point"
 
 class Layer2ArchitectureTests(unittest.TestCase):
+    # The local PDP must reload mounted policies and advertise the runtime-compatible version.
+    def test_local_opa_service_keeps_policy_version_and_reload_contract(self) -> None:
+        policy_data = json.loads(
+            (OPA_POLICY_ROOT / "data.json").read_text(encoding="utf-8")
+        )
+        expected_version = policy_data["policy_config"]["policy_bundle_version"]
+        adapter_source = (
+            LAYER2_ROOT / "governance_components" / "policy_engine.py"
+        ).read_text(encoding="utf-8")
+        compose_source = (OPA_SERVICE_ROOT / "compose.yaml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            f'policy_bundle_version = "{expected_version}"',
+            adapter_source,
+        )
+        self.assertIn("- --watch", compose_source)
+
     # Domain modules must not regain the copied cross-capability import boilerplate.
     def test_domain_leaf_contracts_keep_minimal_imports(self) -> None:
         leaf_modules = ("lifecycle.py", "plan.py", "runtime_records.py")

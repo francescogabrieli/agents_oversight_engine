@@ -29,9 +29,32 @@ export type DashboardPlanStep = {
 
 export type DashboardPanel = Record<string, unknown>;
 
+export type DashboardGovernancePanel = DashboardPanel & {
+  directive?: string;
+  summary?: string | null;
+  selected_reason?: string | null;
+  reason_codes?: string[];
+};
+
+export type DashboardOversightPanel = DashboardPanel & {
+  summary?: string | null;
+};
+
+export type DashboardPillarDiagnostic = {
+  pillar_name: "evidence" | "trajectory";
+  required: boolean;
+  mode?: string | null;
+  level?: string | null;
+  summary?: string | null;
+  reason_codes: string[];
+  facts: Record<string, unknown>;
+};
+
 export type HumanReviewPendingRequest = {
   request_id: string;
   review_summary?: string | null;
+  reason_codes?: string[];
+  resume_state?: string | null;
   allowed_decisions: string[];
   external_communication_draft?: ExternalCommunicationDraft | null;
   operation_id?: string | null;
@@ -81,8 +104,8 @@ export type DashboardSnapshot = {
   is_terminal: boolean;
   reason_codes: string[];
   current_plan_step?: DashboardPlanStep | null;
-  governance?: DashboardPanel | null;
-  oversight?: DashboardPanel | null;
+  governance?: DashboardGovernancePanel | null;
+  oversight?: DashboardOversightPanel | null;
   behavioral?: DashboardPanel | null;
   external_communication?: DashboardPanel | null;
   external_execution: ExternalExecutionPanel;
@@ -90,6 +113,9 @@ export type DashboardSnapshot = {
     pending_request?: HumanReviewPendingRequest | null;
     allowed_decisions?: string[];
     review_summary?: string | null;
+    resume_state?: string | null;
+    evidence_diagnostic?: DashboardPillarDiagnostic | null;
+    trajectory_diagnostic?: DashboardPillarDiagnostic | null;
   } | null;
 };
 

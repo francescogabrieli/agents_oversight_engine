@@ -25,7 +25,10 @@ from ..domain import (
     TerminationReason,
     set_external_communication_phase,
 )
-from ..domain.step_recovery import restore_actor_step_for_more_evidence
+from ..domain.step_recovery import (
+    resolve_evidence_episode_id,
+    restore_actor_step_for_more_evidence,
+)
 from ..governance_components import (
     GovernanceDecision,
     GovernanceDirective,
@@ -43,6 +46,148 @@ from .actor_service import (
     commit_terminal_completion_candidate,
 )
 from .lifecycle_service import _append_step_record
+
+
+_EVIDENCE_REFERENCE_FACTS = {
+    "freshness_metadata_missing": "freshness_missing_observation_ids",
+    "stale_evidence": "stale_evidence_observation_ids",
+    "future_source_timestamp": "future_source_timestamp_observation_ids",
+    "circular_evidence_reference": "circular_evidence_observation_ids",
+}
+_EVIDENCE_LITERAL_FACTS = {
+    "unanchored_literals_in_selection": "unanchored_literals_in_selection",
+    "unanchored_literals_in_universe": "unanchored_literals_in_universe",
+}
+_EVIDENCE_REMEDIATION_SUMMARIES = {
+    "freshness_metadata_missing": (
+        "Replace these observations or fetch their specific dated documents; "
+        "an undated landing or index page cannot satisfy declared freshness."
+    ),
+    "stale_evidence": (
+        "Remove or replace these observations because their source timestamps "
+        "fall outside the declared freshness window."
+    ),
+    "future_source_timestamp": (
+        "Remove or independently verify these observations because their source "
+        "timestamps are later than the evaluation reference time."
+    ),
+    "unanchored_literals_in_selection": (
+        "Remove or correct these literal claims, or select concrete observations "
+        "that contain the same supported values."
+    ),
+    "unanchored_literals_in_universe": (
+        "These literal claims are absent from every observation; retrieve direct "
+        "support or remove them before completing the step."
+    ),
+    "insufficient_independent_sources": (
+        "Retrieve and select enough observations from independent source origins."
+    ),
+    "retrieved_content_missing": (
+        "Fetch the specific source documents instead of relying on search titles or locators."
+    ),
+}
+
+
+# Advance both the whole-run audit counter and the bounded current episode.
+def _record_evidence_request(state: TaskState, *, operation_id: str) -> None:
+    state.evidence_request_count += 1
+    if state.evidence_request_episode_id != operation_id:
+        state.evidence_request_episode_id = operation_id
+        state.evidence_request_episode_count = 0
+    state.evidence_request_episode_count += 1
+
+
+# Convert Evidence raw facts into concrete, actor-visible remediation findings.
+def _build_evidence_feedback_findings(
+    *,
+    codes: tuple[str, ...],
+    facts: dict[str, object],
+    observations: tuple | list = (),
+) -> tuple[JudgeFindingSnapshot, ...]:
+    findings: list[JudgeFindingSnapshot] = []
+    for code in codes:
+        reference_field = _EVIDENCE_REFERENCE_FACTS.get(code)
+        reference_values = facts.get(reference_field, []) if reference_field else []
+        evidence_refs = (
+            tuple(str(item) for item in reference_values)
+            if isinstance(reference_values, list | tuple)
+            else ()
+        )
+        literal_field = _EVIDENCE_LITERAL_FACTS.get(code)
+        literal_values = facts.get(literal_field, []) if literal_field else []
+        literals = (
+            tuple(str(item) for item in literal_values)
+            if isinstance(literal_values, list | tuple)
+            else ()
+        )
+        summary = _EVIDENCE_REMEDIATION_SUMMARIES.get(
+            code,
+            f"Resolve the observed Evidence deficit '{code}' before resubmission.",
+        )
+        if code == "insufficient_independent_sources":
+            current_count = facts.get('distinct_independent_sources_count', 0)
+            required_count = facts.get('min_independent_sources_required', 0)
+            summary = (
+                f"{summary} Current distinct sources: "
+                f"{current_count}; required: "
+                f"{required_count}."
+            )
+            # Enrich with actionable guidance: how many search results remain unexplored.
+            unexplored = _count_unexplored_search_results(observations)
+            if unexplored > 0:
+                gap = max(0, int(required_count) - int(current_count)) if required_count else 0
+                summary += (
+                    f" You have {unexplored} unfetched search results available."
+                    f" Open at least {max(gap, 1)} more from different source origins"
+                    f" before completing the step."
+                )
+            else:
+                summary += (
+                    " No unfetched search results remain; consider issuing a"
+                    " new web_search with alternative queries to find additional sources."
+                )
+        findings.append(
+            JudgeFindingSnapshot(
+                category="evidence",
+                code=code,
+                severity="medium",
+                summary=summary,
+                evidence_refs=evidence_refs,
+                payload_excerpt="; ".join(literals[:8]) if literals else None,
+            )
+        )
+    return tuple(findings)
+
+
+def _count_unexplored_search_results(
+    observations: tuple | list,
+) -> int:
+    """Count search-result observations whose URLs have not been fetched yet.
+
+    A search-result observation is identified by its content starting with
+    ``Search result title:`` or lacking a locator with an http(s) scheme while
+    still carrying a URL-shaped locator. A fetched observation has a locator
+    that was also used as a ``fetch_url_text`` target (i.e. appears on a
+    non-search observation). This is a lightweight heuristic consistent with
+    the adapter contracts in Layer 3.
+    """
+    from urllib.parse import urlparse
+
+    search_urls: set[str] = set()
+    fetched_urls: set[str] = set()
+    for obs in observations:
+        locator = getattr(obs, "locator", None) or ""
+        is_search_stub = obs.content.startswith("Search result title:")
+        if is_search_stub:
+            if locator:
+                search_urls.add(locator)
+            continue
+        # Non-stub observations with an http(s) locator are fetched content.
+        parsed = urlparse(locator)
+        if parsed.scheme in {"http", "https"} and parsed.netloc:
+            fetched_urls.add(locator)
+
+    return len(search_urls - fetched_urls)
 
 
 # Apply a validated policy outcome to canonical runtime state.
@@ -250,7 +395,8 @@ def _apply_governance_decision(
         return
 
     if governance_decision.directive == GovernanceDirective.REQUEST_MORE_EVIDENCE:
-        state.evidence_request_count += 1
+        operation_id = resolve_evidence_episode_id(state)
+        _record_evidence_request(state, operation_id=operation_id)
         set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
@@ -264,17 +410,7 @@ def _apply_governance_decision(
         evidence_facts = evidence_payload.get("raw_facts", {}) if isinstance(evidence_payload, dict) else {}
         deficit_codes = evidence_facts.get("deficit_codes", []) if isinstance(evidence_facts, dict) else []
         reason_codes = tuple(governance_decision.reason_codes or ["invalid_or_missing_selected_evidence"])
-        all_codes = tuple(str(c) for c in (deficit_codes or reason_codes))
-
-        operation_id = (
-            state.external_operation_proposal.operation_id
-            if state.external_operation_proposal is not None
-            else (
-                state.plan_steps[state.current_plan_step_index].step_id
-                if state.current_plan_step_index is not None and state.current_plan_step_index < len(state.plan_steps)
-                else "current_step"
-            )
-        )
+        all_codes = tuple(dict.fromkeys(str(c) for c in (deficit_codes or reason_codes)))
         state.governance_action_feedback.append(
             GovernanceActionFeedback(
                 operation_id=operation_id,
@@ -285,22 +421,22 @@ def _apply_governance_decision(
                 ),
                 finding_codes=all_codes,
                 summary=governance_decision.summary,
-                revision_index=state.evidence_request_count,
+                revision_index=state.evidence_request_episode_count,
                 invalidated_evidence_selection_digest=(
                     state.pending_completion_candidate.evidence_selection_digest
                     if state.pending_completion_candidate is not None
                     else None
                 ),
-                findings=tuple(
-                    JudgeFindingSnapshot(
-                        category="evidence",
-                        code=code,
-                        severity="medium",
-                        summary=f"Evidence deficit: {code}",
-                    )
-                    for code in all_codes
+                findings=_build_evidence_feedback_findings(
+                    codes=all_codes,
+                    facts=evidence_facts,
+                    observations=tuple(state.observations),
                 ),
-                judge_summary=f"Governance required additional evidence (request {state.evidence_request_count})",
+                judge_summary=(
+                    "Governance required additional evidence "
+                    f"(episode request {state.evidence_request_episode_count}; "
+                    f"whole-run request {state.evidence_request_count})."
+                ),
                 judge_rationale=(
                     governance_decision.combiner_selected_reason
                     or governance_decision.summary

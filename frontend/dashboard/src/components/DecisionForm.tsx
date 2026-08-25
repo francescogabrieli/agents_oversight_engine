@@ -4,20 +4,11 @@ import type {
   HumanReviewDecisionPayload,
   ReviewDetailResponse,
 } from "../types";
+import { humanReviewDecisionLabel } from "./humanReviewPresentation";
 
 type DecisionFormProps = {
   detail: ReviewDetailResponse;
   onSubmit: (payload: HumanReviewDecisionPayload) => Promise<void>;
-};
-
-const DECISION_LABELS: Record<string, string> = {
-  approve_continue: "Approve",
-  approve_continue_read_only: "Approve read-only",
-  modify_and_continue: "Modify",
-  request_more_evidence: "More evidence",
-  replan: "Replan",
-  ask_clarification: "Clarify",
-  abort: "Abort",
 };
 
 function prettyMetadata(metadata: Record<string, unknown>) {
@@ -147,7 +138,7 @@ export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
                 decision === "abort" ? "abort" : "",
               ].filter(Boolean).join(" ")}
             >
-              {DECISION_LABELS[decision] ?? decision}
+              {humanReviewDecisionLabel(decision)}
             </button>
           ))}
         </div>

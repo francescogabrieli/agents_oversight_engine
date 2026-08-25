@@ -61,7 +61,7 @@ class OPAHttpPolicyEngineSettings:
 # Keep policy transport configuration and I/O behind the OPA adapter.
 class OPAHttpPolicyEngine(PolicyEnginePort):
     policy_engine_name = "opa_http_policy_engine"
-    policy_bundle_version = "layer2_governance_v4"
+    policy_bundle_version = "layer2_governance_v5"
     policy_config_version = "layer2_governance_thresholds_v2"
 
     def __init__(self, settings: OPAHttpPolicyEngineSettings | None = None) -> None:

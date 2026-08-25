@@ -13,9 +13,10 @@ policy_fact_names := [
 	"external_action_revision_count",
 	"unchanged_resubmission",
 	"repeated_rejected_payload_digest",
-	"replan_count",
+	"replan_episode_count",
 	"consecutive_tool_failures",
 	"action_churn_count",
+	"external_candidate",
 ]
 
 # Runtime counters and recovery markers remain replayable telemetry, not policy triggers.
@@ -26,10 +27,11 @@ observational_only_fact_names := [
 	"tool_call_count",
 	"successful_tool_call_count",
 	"failed_tool_call_count",
+	"synthetic_tool_result_count",
 	"observation_count",
+	"replan_count",
 	"consecutive_provider_protocol_failures",
 	"completion_signal",
-	"external_candidate",
 	"provider_recovery_active",
 	"provider_protocol_retry_exhausted",
 ]
@@ -46,13 +48,13 @@ observable_change_since_last_replan := object.get(facts, "observable_change_sinc
 action_revision_count := object.get(facts, "external_action_revision_count", 0)
 unchanged_resubmission := object.get(facts, "unchanged_resubmission", false)
 repeated_rejected_payload_digest := object.get(facts, "repeated_rejected_payload_digest", false)
-replan_count := object.get(facts, "replan_count", 0)
+replan_episode_count := object.get(facts, "replan_episode_count", 0)
 consecutive_tool_failures := object.get(facts, "consecutive_tool_failures", 0)
 action_churn_count := object.get(facts, "action_churn_count", 0)
+external_candidate := object.get(facts, "external_candidate", false)
 
 max_action_revisions_before_review := object.get(data.policy_config.thresholds, "max_action_revisions_before_review", 3)
 max_replans_before_review := object.get(data.policy_config.thresholds, "max_replans_before_review", 3)
-max_consecutive_tool_failures_before_replan := object.get(data.policy_config.thresholds, "max_consecutive_tool_failures_before_replan", 2)
 max_consecutive_tool_failures_before_review := object.get(data.policy_config.thresholds, "max_consecutive_tool_failures_before_review", 4)
 max_action_churn_before_review := object.get(data.policy_config.thresholds, "max_action_churn_before_review", 2)
 
@@ -86,14 +88,8 @@ action_revision_limit_reached if {
 default replan_ceiling_reached := false
 
 replan_ceiling_reached if {
-	replan_count >= max_replans_before_review
-}
-
-default consecutive_tool_failures_replan_threshold_reached := false
-
-consecutive_tool_failures_replan_threshold_reached if {
-	consecutive_tool_failures >= max_consecutive_tool_failures_before_replan
-	consecutive_tool_failures < max_consecutive_tool_failures_before_review
+	actor_requested_replan
+	replan_episode_count >= max_replans_before_review
 }
 
 default consecutive_tool_failures_review_threshold_reached := false
@@ -105,6 +101,7 @@ consecutive_tool_failures_review_threshold_reached if {
 default action_churn := false
 
 action_churn if {
+	external_candidate
 	action_churn_count >= max_action_churn_before_review
 }
 
@@ -126,7 +123,6 @@ result := {
 	"replan_request_stalled": replan_request_stalled,
 	"action_revision_limit_reached": action_revision_limit_reached,
 	"replan_ceiling_reached": replan_ceiling_reached,
-	"consecutive_tool_failures_replan_threshold_reached": consecutive_tool_failures_replan_threshold_reached,
 	"consecutive_tool_failures_review_threshold_reached": consecutive_tool_failures_review_threshold_reached,
 	"action_churn": action_churn,
 	"unchanged_resubmission": unchanged_resubmission,

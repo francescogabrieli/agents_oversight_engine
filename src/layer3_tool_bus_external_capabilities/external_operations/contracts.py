@@ -237,7 +237,7 @@ class JudgeFindingSnapshot:
 class GovernanceActionFeedback:
     # Findings are audit-safe revision instructions, not hidden reasoning.
     operation_id: str
-    invalidated_payload_digest: str
+    invalidated_payload_digest: str | None
     finding_codes: tuple[str, ...]
     summary: str
     revision_index: int

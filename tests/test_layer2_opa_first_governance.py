@@ -140,7 +140,7 @@ class OPAFirstGovernanceContractTests(unittest.TestCase):
 
 class _AllowPolicyEngine(PolicyEnginePort):
     policy_engine_name = "test_opa_v3_engine"
-    policy_bundle_version = "layer2_governance_v4"
+    policy_bundle_version = "layer2_governance_v5"
     policy_config_version = "layer2_governance_thresholds_v2"
 
     def __init__(self) -> None:

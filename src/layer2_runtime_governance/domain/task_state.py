@@ -121,7 +121,10 @@ class TaskState:
     external_operation_history: list[ExternalOperationProposal] = field(default_factory=list)
     approved_external_operation_digest: str | None = None
     governance_action_feedback: list[GovernanceActionFeedback] = field(default_factory=list)
+    # Preserve whole-run volume while bounding retries only inside one semantic episode.
     evidence_request_count: int = 0
+    evidence_request_episode_count: int = 0
+    evidence_request_episode_id: str | None = None
     external_operation_revision_count: int = 0
     current_external_execution_request: ExternalExecutionRequest | None = None
     last_external_execution_receipt: ExternalExecutionReceipt | None = None

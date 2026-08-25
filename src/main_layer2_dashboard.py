@@ -81,32 +81,28 @@ class DashboardSession:
 class DashboardServerContext:
     # Group the server dependencies so the request handler can stay stateless.
     artifact_store: RuntimeArtifactStore
-    checkpointer: Any
+    # A supplied checkpointer is test/deployment-owned; local SQLite is opened per POST.
+    checkpointer: Any | None
     decision_inbox: ReviewDecisionInboxPort
     static_root: Path
 
 
 class Layer2DashboardHTTPServer(ThreadingHTTPServer):
-    # Own and release infrastructure created by the dashboard server factory.
+    # Own and release the decision transport created by the dashboard server factory.
     def __init__(
         self,
         *args,
-        owned_checkpointer: Any | None = None,
         owned_decision_inbox: ReviewDecisionInboxPort | None = None,
         **kwargs,
     ) -> None:
-        self._owned_checkpointer = owned_checkpointer
         self._owned_decision_inbox = owned_decision_inbox
         super().__init__(*args, **kwargs)
 
-    # Close the saver connection or pool together with the HTTP server.
+    # Close the durable decision transport together with the HTTP server.
     def server_close(self) -> None:
         try:
             super().server_close()
         finally:
-            if self._owned_checkpointer is not None:
-                close_checkpointer(self._owned_checkpointer)
-                self._owned_checkpointer = None
             if self._owned_decision_inbox is not None:
                 self._owned_decision_inbox.close()
                 self._owned_decision_inbox = None
@@ -609,20 +605,17 @@ def build_dashboard_httpd(
     decision_inbox: ReviewDecisionInboxPort | None = None,
     static_root: Path = DEFAULT_STATIC_ROOT,
 ) -> ThreadingHTTPServer:
-    owns_checkpointer = checkpointer is None
     owns_decision_inbox = decision_inbox is None
-    resolved_checkpointer = checkpointer or build_default_checkpointer()
     resolved_decision_inbox = decision_inbox or SQLiteReviewDecisionInbox()
     context = DashboardServerContext(
         artifact_store=artifact_store or RuntimeArtifactStore(),
-        checkpointer=resolved_checkpointer,
+        checkpointer=checkpointer,
         decision_inbox=resolved_decision_inbox,
         static_root=static_root,
     )
     return Layer2DashboardHTTPServer(
         (host, port),
         _build_request_handler(context=context),
-        owned_checkpointer=resolved_checkpointer if owns_checkpointer else None,
         owned_decision_inbox=(
             resolved_decision_inbox if owns_decision_inbox else None
         ),
@@ -688,10 +681,15 @@ def _build_request_handler(*, context: DashboardServerContext):
                 self.send_error(HTTPStatus.NOT_FOUND, "Unknown dashboard route")
                 return
 
+            # A fresh local saver observes checkpoints written after dashboard startup.
+            request_checkpointer = self.server_context.checkpointer
+            owns_request_checkpointer = request_checkpointer is None
+            if request_checkpointer is None:
+                request_checkpointer = build_default_checkpointer()
             try:
                 session = build_dashboard_session_from_thread_id(
                     thread_id,
-                    checkpointer=self.server_context.checkpointer,
+                    checkpointer=request_checkpointer,
                     artifact_store=self.server_context.artifact_store,
                 )
                 payload = _read_json_request(self)
@@ -736,6 +734,9 @@ def _build_request_handler(*, context: DashboardServerContext):
                     {"error": f"Unable to submit the human review decision: {exc}"},
                     status=HTTPStatus.INTERNAL_SERVER_ERROR,
                 )
+            finally:
+                if owns_request_checkpointer:
+                    close_checkpointer(request_checkpointer)
 
         # Serve the built React application and fall back to index.html for client routes.
         def _serve_static(self, request_path: str) -> None:

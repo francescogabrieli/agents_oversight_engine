@@ -365,6 +365,8 @@ class Layer2ActorExecutionTests(unittest.TestCase):
 
         self.assertIn("only step you may complete or commit", system_prompt)
         self.assertIn("Use the full plan as context", system_prompt)
+        self.assertIn("landing/index page has no source timestamp", system_prompt)
+        self.assertIn("never resubmit an unchanged payload, completion", system_prompt)
         self.assertIn('"observations":', user_prompt)
         self.assertNotIn("content_state", user_prompt)
         self.assertIn('"observation_id": "replan_step_1:tool:1:source:1"', user_prompt)
@@ -851,6 +853,7 @@ class Layer2ActorExecutionTests(unittest.TestCase):
                 "expected_outcome",
                 "status",
                 "produces_factual_claims",
+                "produces_governed_external_effect_proposal",
                 "evidence_burden",
             },
         )

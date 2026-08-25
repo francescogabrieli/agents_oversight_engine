@@ -3,6 +3,7 @@ from ..domain import (
     PlanStepStatus,
     RuntimeState,
     TaskState,
+    validate_external_effect_plan_contract,
     validate_plan_steps_evidence_contract,
 )
 from .lifecycle_service import _append_step_record
@@ -16,6 +17,10 @@ def planner(state: TaskState, *, planner_service: PlannerPort) -> TaskState:
 
     decision = planner_service.plan(task_state=state)
     validate_plan_steps_evidence_contract(decision.plan_steps)
+    validate_external_effect_plan_contract(
+        steps=decision.plan_steps,
+        execution_intent=state.execution_intent,
+    )
     state.plan_steps = list(decision.plan_steps)
     state.current_plan_step_index = 0 if state.plan_steps else None
     state.planner_rationale = decision.rationale

@@ -4,7 +4,15 @@ from urllib.parse import urlparse
 from ..actor_contract import ActorResult, ActorResultType, CapabilityAccessMode
 from ..domain import RuntimeFlag, RuntimeState, ScratchpadEntry, ScratchpadEntryType, TaskState
 from ..domain.runtime_records import ToolAttempt, ToolDisposition, ToolInvocation
-from layer3_tool_bus_external_capabilities.tool_contract import ToolErrorCode, ToolExecutionResult, ToolGatewayPort, ToolName, ToolObservation, ToolRequest
+from layer3_tool_bus_external_capabilities.tool_contract import (
+    ToolErrorCode,
+    ToolExecutionResult,
+    ToolGatewayPort,
+    ToolName,
+    ToolObservation,
+    ToolRequest,
+    canonical_tool_request_identity,
+)
 from .lifecycle_service import _append_step_record
 
 
@@ -14,7 +22,7 @@ def tool_gateway(state: TaskState, *, tool_gateway_service: ToolGatewayPort) -> 
         _append_step_record(state, node_name="tool_gateway", summary="Tool gateway skipped because no tool request was ready.")
         return state
     request = state.current_tool_request
-    action_key = canonical_action_key(request)
+    action_key = canonical_tool_request_identity(request)
     result, disposition, invoked = _guarded_tool_result(
         state=state, request=request, action_key=action_key, tool_gateway_service=tool_gateway_service
     )
@@ -32,30 +40,6 @@ def tool_gateway(state: TaskState, *, tool_gateway_service: ToolGatewayPort) -> 
         state.current_state = RuntimeState.ACTING
     _append_step_record(state, node_name="tool_gateway", summary=f"Tool gateway recorded {disposition.value} for '{request.tool_name.value}'.")
     return state
-
-
-# Canonicalize only arguments that change execution; actor prose intentionally has no effect.
-def canonical_action_key(request: ToolRequest) -> str:
-    values: tuple[object, ...]
-    if request.tool_name == ToolName.WEB_SEARCH:
-        values = (_normalize_value(request.query), request.max_results)
-    elif request.tool_name == ToolName.FETCH_URL_TEXT:
-        values = (_normalize_url(request.url),)
-    elif request.tool_name == ToolName.CONTROLLED_DOCUMENT_READ:
-        values = (_normalize_value(request.document_id),)
-    elif request.tool_name == ToolName.CONTROLLED_DATASET_READ:
-        values = (_normalize_value(request.dataset_id), request.limit)
-    elif request.tool_name == ToolName.MCP_LOCAL_TEST_TEXT_STATS:
-        values = (_normalize_value(request.text), request.limit)
-    elif request.tool_name == ToolName.MCP_LOCAL_TEST_ECHO:
-        values = (_normalize_value(request.text),)
-    elif request.tool_name == ToolName.MCP_LOCAL_TEST_READ_FIXTURE:
-        values = (_normalize_value(request.path),)
-    elif request.tool_name == ToolName.MCP_LOCAL_TEST_CALCULATE_EXPRESSION:
-        values = (_normalize_value(request.expression),)
-    else:
-        values = ()
-    return f"{request.tool_name.value}:{values!r}"
 
 
 # Return cache/rejection results without allowing them to become backend invocations.
@@ -113,7 +97,7 @@ def _request_protocol_replan(state: TaskState, *, action_key: str) -> None:
 # A cached success is valid only for the current execution epoch.
 def _successful_result_for_action(state: TaskState, action_key: str) -> ToolExecutionResult | None:
     for result in reversed(state.tool_results_history):
-        if result.success and canonical_action_key(result.request) == action_key:
+        if result.success and canonical_tool_request_identity(result.request) == action_key:
             return result
     return None
 
@@ -147,20 +131,17 @@ def _circuit_open(state: TaskState, request: ToolRequest, action_key: str) -> bo
             continue
         if not invocation.action_key.startswith(f"{ToolName.FETCH_URL_TEXT.value}:"):
             continue
-        candidate = next((result.request for result in state.tool_results_history if canonical_action_key(result.request) == invocation.action_key), None)
+        candidate = next(
+            (
+                result.request
+                for result in state.tool_results_history
+                if canonical_tool_request_identity(result.request) == invocation.action_key
+            ),
+            None,
+        )
         if candidate and urlparse(candidate.url or "").netloc.casefold() == host:
             failures += 1
     return failures >= 2
-
-
-# Normalize a value for capability-owned equivalence, not for semantic quality scoring.
-def _normalize_value(value: str | None) -> str:
-    return " ".join((value or "").split()).casefold()
-
-
-# Normalize URL comparison enough to avoid textual variants of the same fetch.
-def _normalize_url(value: str | None) -> str:
-    return (value or "").strip().casefold().rstrip("/")
 
 
 # Turn adapter observations into evidence and advance progress only for concrete new content.
@@ -253,4 +234,4 @@ def _append_observation(*, state: TaskState, tool_result: ToolExecutionResult, e
         state.scratchpad.append(ScratchpadEntry(state.actor_turn_count, step.step_id, ScratchpadEntryType.OBSERVATION, f"Observed tool result from '{tool_result.request.tool_name.value}': {tool_result.summary}", evidence_refs))
 
 
-__all__ = ["canonical_action_key", "observe_tool_result", "tool_gateway"]
+__all__ = ["observe_tool_result", "tool_gateway"]

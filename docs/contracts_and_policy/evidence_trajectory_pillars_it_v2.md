@@ -6,7 +6,7 @@
 
 I pillar **Evidence** e **Trajectory** forniscono a OPA fatti osservabili sulla run:
 
-- **Evidence** controlla che le affermazioni fattuali in uscita siano *verificabili*: che il supporto dichiarato esista, sia integro, sia sufficiente rispetto a quanto lo step richiedeva e che i controlli di freshness, non-circolarità e ancoraggio letterale siano applicati.
+- **Evidence** controlla che le affermazioni fattuali in uscita siano *verificabili*: che il supporto dichiarato esista, sia integro e sia sufficiente rispetto a quanto lo step richiedeva. Non-circolarità e ancoraggio letterale sono applicati; la freshness è attualmente osservata ma non bloccante.
 - **Trajectory** controlla che la run *termini*: che l'agente avanzi, che non ripeta replan o proposte esterne senza una nuova base osservabile, e che non superi i limiti di convergenza configurati.
 
 Nessuno dei due valuta il significato. Evidence risponde a «il supporto c'è ed è controllabile?», Trajectory a «stiamo convergendo?». La domanda «ha senso ed è appropriato?» è del **Judge**.
@@ -45,10 +45,17 @@ PlanStep(
         require_retrieved_content=True,
         freshness_window_days=30,
     ),
+    produces_governed_external_effect_proposal=True,
 )
 ```
 
-Se `produces_factual_claims` è falso, Trajectory resta attivo per la liveness ma Evidence non ha un onere di copertura. Se è vero, `evidence_burden` è obbligatorio: il costruttore canonico di `PlanStep`, gli schema del planner/replanner e il preflight dei servizi runtime rifiutano lo step senza burden. Un checkpoint legacy già persistito che violi l'invariante non viene degradato silenziosamente: Evidence espone `missing_evidence_burden` e OPA richiede `WAIT_HUMAN_REVIEW`, perché l'Actor non può correggere retroattivamente il contratto semantico del piano.
+Se `produces_factual_claims` è falso, Trajectory resta attivo per la liveness ma Evidence non ha un onere di copertura. Se è vero, `evidence_burden` è obbligatorio al confine canonico: il costruttore di `PlanStep`, gli schema del planner/replanner e il preflight runtime rifiutano lo step malformato. Per uno stato legacy o recuperato che abbia comunque oltrepassato quel confine, Evidence espone `missing_evidence_burden` nei fatti e nei reason code diagnostici, imposta `coverage_evaluated=false` e OPA non blocca la run per questa sola condizione. Integrità, provenienza e gli altri controlli applicabili restano indipendenti.
+
+Il contratto distingue esplicitamente `completion_attempt` da `factual_completion_attempt`: il primo è vero per ogni `STEP_COMPLETED`, il secondo solo quando quello stesso step dichiara `produces_factual_claims=true`. L'integrità dei riferimenti e il binding dei digest restano controllati a ogni completamento; burden, fragilità dei soli titoli, non-circolarità e ancoraggio letterale diventano deficit attivi solo al confine fattuale. Numeri o date calcolati esclusivamente dai vincoli forniti dall'utente — per esempio la finestra di 30 giorni rispetto a una data di riferimento già data — restano osservabili nel trace, ma non generano da soli `REQUEST_MORE_EVIDENCE`.
+
+Il replan non può azzerare questo contratto. Il prompt riceve il `remaining_evidence_obligation` aggregato sulla traiettoria corrente e pendente; il runtime rifiuta una sostituzione che elimini il lavoro fattuale o indebolisca numero minimo di fonti, requisito di contenuto recuperato o finestra di freshness. Il replanner di produzione dispone di un solo tentativo correttivo tipizzato, poi fallisce chiuso; il fallback locale conserva invece gli step futuri originali.
+
+Il marker `produces_governed_external_effect_proposal` è un contratto distinto dal burden: non misura evidenza, ma garantisce che un task `execute_after_governance` possieda nel piano esattamente uno step terminale che produrrà la proposta operativa tipizzata. Se il planner restituisce soltanto uno step preparatorio, riceve un unico feedback correttivo prima dell'avvio dell'actor; se fallisce ancora, il runtime si arresta invece di trasformare l'omissione in un replan della trajectory.
 
 ### Come viene registrata un'evidenza
 
@@ -63,6 +70,8 @@ ToolObservation(
 ```
 
 L'osservazione è conservata nel `TaskState` con la sua provenienza: tool call e plan step che l'hanno generata. Quando completa uno step, l'Actor dichiara quali osservazioni ha usato:
+
+Per documenti HTML e XHTML, `source_timestamp` rappresenta una data di pubblicazione semanticamente attribuita: metadata editoriali, JSON-LD `datePublished`, elemento data marcato come pubblicazione oppure nodo metadata-like il cui contenuto completo coincide con `Published <date>`. Frasi generiche nel body e label di update/revisione non costituiscono prova della data della pagina. L'header HTTP `Last-Modified` resta metadata di trasporto e non soddisfa mai la freshness editoriale, neppure per testo o PDF; quei formati richiederanno un estrattore semantico dedicato. Nel controllo di ancoraggio, URL del candidato e locator osservati sono confrontati come token esatti, mai per sottostringa; il locator selezionato e il timestamp attribuito fanno parte del corpus. Un punto o una virgola terminale sono ignorati soltanto se la variante ripulita coincide esattamente con un locator osservato; la punteggiatura significativa per l'URL resta parte del token.
 
 ```python
 StepValidation(
@@ -96,7 +105,7 @@ burden_satisfied = true
 
 L'indipendenza è strutturale: locator distinti per schema e dominio. Non è un giudizio sull'indipendenza editoriale delle fonti, che resta del Judge.
 
-**3. Qualità strutturale dell'osservazione e freshness.** Evidence distingue la data attribuita alla fonte dal momento di retrieval. Quando il burden dichiara `freshness_window_days`, ogni osservazione selezionata deve avere una `source_timestamp` timezone-aware, non futura e compresa nella finestra calcolata rispetto al pass di governance; metadata assente, data obsoleta o futura producono un evidence gap. Il fetch HTTP corrente popola il campo solo dal header sorgente `Last-Modified`: il momento di retrieval non è mai usato come surrogato. Gli altri adapter devono emettere esplicitamente una data attribuita alla fonte per soddisfare un burden di freshness.
+**3. Qualità strutturale dell'osservazione e freshness.** Evidence distingue la data attribuita alla fonte dal momento di retrieval. Quando il burden dichiara `freshness_window_days`, il signal service verifica che le osservazioni selezionate abbiano una data valida e compresa nella finestra. Nella configurazione corrente la freshness resta visibile nel trace ma non apre da sola un evidence gap. Il fetch HTTP usa date editoriali di pubblicazione estratte dal documento; `Last-Modified`, momento di retrieval e semplici date presenti nel testo non sono usati come surrogati.
 
 ```text
 selected_evidence_all_title_only
@@ -115,7 +124,7 @@ circular_evidence_reasons = {"obs_21": "self_produced_locator"}
 
 Il controllo non pretende di riconoscere una circolarità semantica o una parafrasi di un output dell'Actor: quei casi restano responsabilità del Judge o di un futuro detector con una nuova provenienza tipizzata.
 
-**5. Ancoraggio letterale.** Sui soli token estraibili — numeri, date, importi, URL, indirizzi. Un letterale presente nel payload deve comparire verbatim in almeno un'osservazione. Per un completamento fattuale, Rego consuma ora entrambi i fatti di ancoraggio: anche uno solo non vuoto apre `evidence_gap`.
+**5. Ancoraggio letterale.** Sui soli token estraibili — numeri, date, importi, URL, indirizzi. Un letterale presente nel payload deve comparire in almeno un'osservazione o nella sua provenienza tipizzata; la sola punteggiatura di frase dopo un URL viene normalizzata. Per gli URL, schema/host, porta di default, slash terminale e parametri di tracking (`utm_*`, `gclid`, `fbclid` e analoghi) sono normalizzati, mentre path e query semanticamente significativi restano distinti. Le numerazioni strutturali dichiarate (`Articolo 1.1`, `Step 2.1`) e i frammenti numerici interni a identificatori non sono claim; il separatore decimale locale degli importi è normalizzato senza cambiare il valore. Per un completamento fattuale, Rego consuma ora entrambi i fatti di ancoraggio: anche uno solo non vuoto apre `evidence_gap`.
 
 ```text
 unanchored_literals_in_selection = ["18%"]
@@ -130,24 +139,26 @@ I fatti di Evidence non producono direttamente una revisione semantica del paylo
 
 | Situazione | Fatti / condizione | Direttiva OPA | Reason code |
 |---|---|---|---|
-| **Contratto fattuale malformato** | step fattuale senza `evidence_burden` in un checkpoint legacy | `WAIT_HUMAN_REVIEW` | `missing_evidence_burden` |
-| **Gap strutturale o di copertura** | integrità non valida, contenuto recuperato mancante, freshness/non-circolarità non soddisfatte, onere non soddisfatto o letterali non ancorati | `REQUEST_MORE_EVIDENCE` | `invalid_or_missing_selected_evidence` |
-| **Tetto delle richieste raggiunto** | `evidence_request_count` oltre il limite configurato | `WAIT_HUMAN_REVIEW` | `evidence_request_limit_reached` |
+| **Burden non dichiarato** | step fattuale senza `evidence_burden` | nessuna direttiva da solo | `missing_evidence_burden` nel risultato diagnostico di Evidence |
+| **Gap strutturale o di copertura** | integrità non valida, contenuto recuperato mancante, non-circolarità non soddisfatta, onere applicabile non soddisfatto o letterali non ancorati | `REQUEST_MORE_EVIDENCE` | `invalid_or_missing_selected_evidence` |
+| **Freshness non soddisfatta (configurazione corrente)** | data mancante, obsoleta o futura con `freshness_enforcement_enabled=false` | nessuna direttiva da sola; diagnostica preservata | reason code specifico di freshness |
+| **Tetto delle richieste raggiunto** | `evidence_request_episode_count` oltre il limite configurato | `WAIT_HUMAN_REVIEW` | `evidence_request_limit_reached` |
 | **Pillar richiesto ma non disponibile** | errore del signal service | `WAIT_HUMAN_REVIEW` | `required_pillar_unavailable` |
 
 `REVISE_ACTION` resta invece una direttiva del percorso Judge quando la valutazione semantica richiede una modifica del candidato.
 
-Nota che nella v1 una selezione vuota non era automaticamente invalida. **Nel contratto corrente lo è per ogni step fattuale**, perché quell'onere deve ora essere dichiarato obbligatoriamente. Su uno step che non produce affermazioni fattuali la selezione vuota resta legittima.
+Una selezione vuota è un gap di copertura quando esiste un burden dichiarato che la rende insufficiente. Nel solo percorso difensivo in cui uno stato privo di burden raggiunge comunque OPA, `coverage_evaluated=false`: l'assenza della dichiarazione rimane visibile, ma non autorizza da sola `REQUEST_MORE_EVIDENCE` o HITL.
 
 ### Il ciclo di `REQUEST_MORE_EVIDENCE`
 
 Nella v1 questa direttiva ripristinava lo step e non lasciava traccia: nessun feedback all'Actor, nessun contatore, nessun tetto. Nella v2 è simmetrica al ciclo di revisione del Judge:
 
-1. il runtime scrive un `GovernanceActionFeedback` che l'Actor riceve nel turno successivo, con il difetto esatto — «lo step richiede 3 fonti indipendenti con contenuto recuperato; ne hai dichiarate 0 su 23 osservazioni disponibili»;
-2. `evidence_request_count` sale ed è un fatto per OPA;
-3. raggiunto il tetto, la direttiva diventa `WAIT_HUMAN_REVIEW`.
+1. il runtime scrive un `GovernanceActionFeedback` che l'Actor riceve nel turno successivo, con il difetto esatto e gli ID interessati — per esempio «queste osservazioni sono prive di timestamp: apri i documenti specifici» oppure «questa osservazione è fuori finestra: rimuovila o sostituiscila»;
+2. `evidence_request_count` conserva il volume whole-run per audit, mentre `evidence_request_episode_count` conta i tentativi relativi allo step o candidato corrente ed è il fatto usato da OPA per il tetto;
+3. un nuovo step apre automaticamente un nuovo episodio; una decisione umana `request_more_evidence` o `replan` apre esplicitamente un nuovo episodio senza cancellare il totale whole-run;
+4. raggiunto il tetto, la direttiva diventa `WAIT_HUMAN_REVIEW`. Questo review espone soltanto `request_more_evidence`, `replan` e `abort`: un generico `approve_continue` non è un'eccezione digest-bound all'onere di evidenza e quindi non può bypassarlo.
 
-Senza queste tre cose il pillar può bloccare senza poter terminare: è l'unica configurazione che destabilizza davvero la run.
+Senza questi quattro elementi il pillar può bloccare senza poter terminare: è la configurazione che destabilizza davvero la run.
 
 ### Esempio in cui Evidence passa
 
@@ -222,27 +233,30 @@ Trajectory osserva la forma del percorso, non la qualità di un output. Non chie
 ### Cosa osserva
 
 - turni dell'Actor, step completati, osservazioni raccolte;
-- tool call riuscite e fallite, e fallimenti consecutivi;
-- numero di replan totali e presenza di una motivazione;
+- tool call realmente eseguite, risultati sintetici del guard e fallimenti consecutivi nell'episodio corrente;
+- numero di replan totali, replan nell'episodio corrente e presenza di una motivazione;
 - nuove tool call, osservazioni o step completati dall'ultimo replan;
 - revisioni della stessa operazione esterna;
 - ripresentazione dello stesso candidato o di un payload già respinto.
 
-Una differenza rispetto alla v1: **gli interventi umani non contano come nuova base osservabile.** Nella v1 `human_review_count` entrava nel delta di `observable_change_since_last_replan`, quindi una review umana azzerava gratuitamente il vincolo di liveness. Una decisione umana non è un fatto nuovo sul mondo.
+Una differenza rispetto alla v1: **gli interventi umani non contano come nuova base osservabile.** Nella v1 `human_review_count` entrava nel delta di `observable_change_since_last_replan`, quindi una review umana azzerava gratuitamente il vincolo di liveness. Una decisione umana non è un fatto nuovo sul mondo. Può però chiudere esplicitamente l'episodio di controllo sottoposto a review: questa è una transizione HITL auditabile, non un'evidenza di progresso autonomo.
+
+L'identità di una richiesta tool è costruita da capability e argomenti eseguibili normalizzati; `reason` e altra prosa dell'Actor non possono creare un candidato artificialmente nuovo. Nei batch la proposta governata viene inoltre ricalcolata dalla `current_tool_request`: quando il cursore passa dalla prima alla seconda richiesta, target e digest passano insieme e la review non può restare legata all'operazione precedente.
 
 ### Contratto di consumo dei fatti
 
-Il contratto runtime corrente esporta 22 `raw_facts`. Dieci sono consumati direttamente
+Il contratto runtime corrente esporta 24 `raw_facts`. Undici sono consumati direttamente
 da Trajectory/OPA per la convergenza: `needs_replan_signal`, `replan_reason_present`,
 `first_replan_request`, `observable_change_since_last_replan`,
 `external_action_revision_count`, `unchanged_resubmission`,
-`repeated_rejected_payload_digest`, `replan_count`, `consecutive_tool_failures` e
-`action_churn_count`. `replan_count` appartiene quindi al percorso decisionale attivo.
+`repeated_rejected_payload_digest`, `replan_episode_count`, `consecutive_tool_failures`,
+`action_churn_count` ed `external_candidate`. Il totale `replan_count` resta quindi
+auditabile senza trasformarsi in una condizione permanente di blocco.
 
-I restanti dodici — `actor_turn_count`, `progress_epoch`, `completed_step_count`,
+I restanti tredici — `actor_turn_count`, `progress_epoch`, `completed_step_count`,
 `tool_call_count`, `successful_tool_call_count`, `failed_tool_call_count`,
-`observation_count`, `consecutive_provider_protocol_failures`, `completion_signal`,
-`external_candidate`, `provider_recovery_active` e
+`synthetic_tool_result_count`, `observation_count`, `replan_count`,
+`consecutive_provider_protocol_failures`, `completion_signal`, `provider_recovery_active` e
 `provider_protocol_retry_exhausted` — sono fatti di trace/evaluation. Alcuni contatori
 sono sorgenti locali per costruire fatti derivati, come
 `observable_change_since_last_replan`; non diventano per questo soglie OPA autonome.
@@ -258,14 +272,14 @@ Nella v1 esistevano solo regole di liveness e di ripresentazione. La v2 aggiunge
 | Regola | Condizione | Direttiva |
 |---|---|---|
 | `replan_request_stalled` | replan chiesto senza nuova base osservabile | `WAIT_HUMAN_REVIEW` |
-| `replan_ceiling_reached` | replan totali oltre il limite configurato | `WAIT_HUMAN_REVIEW` |
-| `consecutive_tool_failures` | N fallimenti di fila senza osservazione utile | `REPLAN`, poi `WAIT_HUMAN_REVIEW` |
-| `action_churn` | oscillazione fra varianti già viste senza convergere | `WAIT_HUMAN_REVIEW` |
+| `replan_ceiling_reached` | l'Actor chiede un nuovo replan dopo aver raggiunto il limite nell'episodio corrente | `WAIT_HUMAN_REVIEW` |
+| `consecutive_tool_failures` | almeno 4 invocazioni backend fallite di fila nell'episodio corrente | `WAIT_HUMAN_REVIEW` |
+| `action_churn` | il candidato external corrente oscilla fra varianti già viste della stessa operazione | `WAIT_HUMAN_REVIEW` |
 | `unchanged_resubmission` | stesso payload e stessa selezione ripresentati | `WAIT_HUMAN_REVIEW` |
 | `repeated_rejected_payload_digest` | ripresentato un digest già respinto | `WAIT_HUMAN_REVIEW` |
-| `action_revision_limit_reached` | revisioni oltre `max_action_revisions_before_review` | `WAIT_HUMAN_REVIEW` |
+| `action_revision_limit_reached` | revisioni che raggiungono `max_action_revisions_before_review` | `WAIT_HUMAN_REVIEW` |
 
-`replan_ceiling_reached`, `consecutive_tool_failures` e `action_churn` sono nuove. Le altre esistono già e funzionano: `unchanged_resubmission` e `repeated_rejected_payload_digest` sono la parte più solida del sistema attuale.
+`replan_ceiling_reached`, `consecutive_tool_failures` e `action_churn` sono nuove. `consecutive_tool_failures` resta sempre osservabile, ma sotto la soglia di revisione non produce direttive e non forza un replan. Cache hit, duplicati respinti e circuit breaker sono risultati sintetici: alimentano `synthetic_tool_result_count`, non il conteggio dei fallimenti backend. `action_churn` è limitato all'operazione corrente, riparte dopo una modifica umana e non può bloccare un pass non-external. Le altre regole esistono già e funzionano: `unchanged_resubmission` e `repeated_rejected_payload_digest` sono la parte più solida del sistema attuale.
 
 Due correzioni sulle regole esistenti:
 
@@ -294,7 +308,7 @@ observable_change_since_last_replan = false
 replan_request_stalled              = true
 ```
 
-OPA restituisce `WAIT_HUMAN_REVIEW`. Se invece la base cambia ogni volta ma i replan continuano a susseguirsi, è `replan_ceiling_reached` a fermare la run — nella v1 `replan_count` è calcolato e mai letto dalle policy.
+OPA restituisce `WAIT_HUMAN_REVIEW`. Se invece la base cambia ogni volta ma i replan continuano a susseguirsi, `replan_episode_count` cresce. Il ceiling interviene soltanto davanti a una nuova richiesta `NEEDS_REPLAN` oltre la soglia: non resta vero su ogni passaggio futuro di governance. Un'approvazione legata all'esatta richiesta HITL chiude l'episodio revisionato senza autorizzare eventuali operazioni external coincidenti; `replan_count` totale rimane nel trace.
 
 ### Esempio di proposta esterna
 
@@ -345,13 +359,13 @@ In breve: **Evidence protegge la verificabilità del legame fra affermazione e o
 | Attivazione Evidence | solo `STEP_COMPLETED` e candidato esterno | anche `PROPOSE_ACTION` con contenuto fattuale |
 | Attivazione Trajectory | `NEEDS_REPLAN` e `STEP_COMPLETED` | sempre, con modalità liveness e convergenza |
 | Criterio di Evidence | integrità dei riferimenti scelti | integrità **più** onere probatorio obbligatorio per lo step fattuale |
-| Selezione vuota | mai invalida | invalida per ogni step fattuale |
+| Selezione vuota | mai invalida | invalida quando non soddisfa il burden dichiarato; ogni step fattuale canonico deve dichiararlo |
 | Esito di Evidence | un booleano, un reason code | fatti grezzi e deficit codes, con mapping OPA a direttive osservabili |
 | `REQUEST_MORE_EVIDENCE` | senza feedback, senza contatore, senza tetto | feedback all'Actor, contatore, escalation a revisione umana |
 | Ancoraggio del contenuto | assente | letterale attivo sui token estraibili, con distinzione selezione/universo |
 | Non-circolarità | assente | controllo strutturale attivo su provenienza actor-derived e locator auto-prodotti; la circolarità semantica resta fuori scope |
 | Regole di convergenza | solo liveness e ripresentazione | più tetto sui replan, fallimenti consecutivi, churn |
-| Interventi umani nella liveness | contano come nuova base | non contano |
+| Interventi umani nella liveness | contano come nuova base | non sono fatti sul mondo; chiudono solo l'episodio di controllo revisionato |
 | Regole concorrenti | una sola riportata | decisiva riportata, altre in `rejected_alternatives` |
 | Limite di revisione | scatta a limite meno uno | `action_revision_limit_reached` scatta al limite |
 

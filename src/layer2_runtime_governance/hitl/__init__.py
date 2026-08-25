@@ -207,6 +207,23 @@ def _apply_human_review_decision(
         )
 
     if human_review_decision.decision_type == HumanReviewDecisionType.APPROVE_CONTINUE:
+        if "evidence_request_limit_reached" in _review_reason_codes(
+            state=state,
+            request=pending_request,
+        ):
+            raise ValueError(
+                "An Evidence ceiling cannot be bypassed by an unbound continue approval."
+            )
+        if _is_trajectory_episode_release(
+            decision=human_review_decision,
+            pending_request=pending_request,
+        ):
+            # This approval releases only the reviewed trajectory boundary. It
+            # never authorizes a coincident or stale external-operation proposal.
+            state.current_external_execution_request = None
+            state.approved_external_operation_digest = None
+            state.current_state = pending_request.resume_state
+            return
         _validate_approval_scope(
             state=state,
             pending_request=pending_request,
@@ -280,6 +297,13 @@ def _apply_human_review_decision(
         return
 
     if human_review_decision.decision_type == HumanReviewDecisionType.APPROVE_CONTINUE_READ_ONLY:
+        if "evidence_request_limit_reached" in _review_reason_codes(
+            state=state,
+            request=pending_request,
+        ):
+            raise ValueError(
+                "An Evidence ceiling cannot be bypassed by a read-only continue approval."
+            )
         _validate_approval_scope(
             state=state,
             pending_request=pending_request,
@@ -344,6 +368,7 @@ def _apply_human_review_decision(
         return
 
     if human_review_decision.decision_type == HumanReviewDecisionType.REQUEST_MORE_EVIDENCE:
+        _start_fresh_evidence_request_episode(state)
         set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
@@ -356,6 +381,7 @@ def _apply_human_review_decision(
         return
 
     if human_review_decision.decision_type == HumanReviewDecisionType.REPLAN:
+        _start_fresh_evidence_request_episode(state)
         set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
@@ -573,6 +599,12 @@ def _resolve_allowed_human_review_decisions(
             HumanReviewDecisionType.REQUEST_MORE_EVIDENCE,
             HumanReviewDecisionType.ABORT,
         )
+    if "evidence_request_limit_reached" in reason_codes:
+        return (
+            HumanReviewDecisionType.REQUEST_MORE_EVIDENCE,
+            HumanReviewDecisionType.REPLAN,
+            HumanReviewDecisionType.ABORT,
+        )
     if {
         "judge_unsafe",
         "judge_uncertain",
@@ -594,6 +626,18 @@ def _resolve_allowed_human_review_decisions(
         )
     if "replan_request_stalled" in reason_codes:
         return (
+            HumanReviewDecisionType.REPLAN,
+            HumanReviewDecisionType.ABORT,
+        )
+    if "replan_ceiling_reached" in reason_codes:
+        return (
+            HumanReviewDecisionType.APPROVE_CONTINUE,
+            HumanReviewDecisionType.REPLAN,
+            HumanReviewDecisionType.ABORT,
+        )
+    if "consecutive_tool_failures" in reason_codes:
+        return (
+            HumanReviewDecisionType.APPROVE_CONTINUE,
             HumanReviewDecisionType.REPLAN,
             HumanReviewDecisionType.ABORT,
         )
@@ -670,7 +714,12 @@ def human_review_reasons_authorize_external_execution(
         "unchanged_candidate_resubmission",
         "rejected_candidate_resubmitted",
         "external_low_actor_self_confidence",
+        "replan_ceiling_reached",
         "replan_request_stalled",
+        "consecutive_tool_failures",
+        "action_churn",
+        "evidence_request_limit_reached",
+        "invalid_or_missing_selected_evidence",
         "policy_version_mismatch",
         "required_pillar_unavailable",
         "judge_required_unavailable",
@@ -681,6 +730,28 @@ def human_review_reasons_authorize_external_execution(
     return (
         "capability_approval_required" in reasons
         and not reasons.intersection(blocking_reasons)
+    )
+
+
+# Start a new bounded Evidence remediation episode without erasing whole-run audit volume.
+def _start_fresh_evidence_request_episode(state: TaskState) -> None:
+    state.evidence_request_episode_count = 0
+    state.evidence_request_episode_id = None
+
+
+# Recognize an exact approval that closes only its reviewed trajectory episode.
+def _is_trajectory_episode_release(
+    *,
+    decision: HumanReviewDecision,
+    pending_request: HumanReviewRequest,
+) -> bool:
+    return (
+        decision.decision_type == HumanReviewDecisionType.APPROVE_CONTINUE
+        and decision.request_id == pending_request.request_id
+        and bool(
+            {"replan_ceiling_reached", "consecutive_tool_failures"}
+            & set(pending_request.reason_codes)
+        )
     )
 
 

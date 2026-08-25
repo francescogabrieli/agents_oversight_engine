@@ -277,6 +277,55 @@ body {
 .back-link:hover { color: var(--text-primary); }
 .back-link svg { width: 13px; height: 13px; }
 
+/* ── generic review context ──────────────────────────────── */
+.review-context-body { display: grid; gap: 14px; }
+.review-context-reason {
+  padding: 12px 14px;
+  border-left: 3px solid var(--warning);
+  border-radius: 0 8px 8px 0;
+  background: var(--warning-soft);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.55;
+}
+.review-context-summary {
+  margin: -4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.review-reason-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.review-diagnostics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.review-diagnostic {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+.review-diagnostic-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.review-diagnostic-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.review-diagnostic-summary {
+  margin: 3px 0 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.review-diagnostic-level { color: var(--text-muted); font-size: 10px; text-transform: uppercase; }
+
 /* ── produced text ────────────────────────────────────────── */
 .produced-text {
   margin: 0; white-space: pre-wrap; word-break: break-word;
@@ -469,5 +518,6 @@ body {
   .review-header-main { flex-direction: column; }
   .review-header-status { justify-content: flex-start; }
   .operator-options-grid { grid-template-columns: 1fr; }
+  .review-diagnostics-grid { grid-template-columns: 1fr; }
   .kv-grid-2col { grid-template-columns: 1fr; }
 }

@@ -58,6 +58,7 @@ class TracePlanStep:
     status: str
     produces_factual_claims: bool = False
     evidence_burden: TraceEvidenceBurden | None = None
+    produces_governed_external_effect_proposal: bool = False
 
 
 # Read-only observability component extracted from the trace facade.

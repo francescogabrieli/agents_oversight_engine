@@ -4,7 +4,8 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
 import { DecisionForm } from "../components/DecisionForm";
-import type { ReviewDetailResponse } from "../types";
+import { ReviewContextPanel } from "../components/ReviewContextPanel";
+import type { DashboardSnapshot, ReviewDetailResponse } from "../types";
 
 describe("ReviewThreadPage", () => {
   beforeEach(() => {
@@ -33,6 +34,8 @@ describe("ReviewThreadPage", () => {
               },
               governance: {
                 directive: "wait_human_review",
+                summary: "The total number of replan requests reached the configured ceiling.",
+                selected_reason: "Replan ceiling reached; operator direction is required.",
               },
               oversight: {
                 summary: "Evidence and risk warrant human review.",
@@ -43,6 +46,9 @@ describe("ReviewThreadPage", () => {
               human_review: {
                 pending_request: {
                   request_id: "thread-1:hitl",
+                  review_summary: "Review the stalled trajectory before continuing.",
+                  reason_codes: ["replan_ceiling_reached"],
+                  resume_state: "ready_tool_execution",
                   allowed_decisions: [
                     "approve_continue",
                     "approve_continue_read_only",
@@ -58,6 +64,28 @@ describe("ReviewThreadPage", () => {
                     recipient: "ops@example.com",
                     subject: "Draft subject",
                     metadata: { priority: "high" },
+                  },
+                },
+                evidence_diagnostic: {
+                  pillar_name: "evidence",
+                  required: false,
+                  mode: "inactive",
+                  level: "unscored",
+                  summary: "Evidence pillar inactive (not required).",
+                  reason_codes: [],
+                  facts: {},
+                },
+                trajectory_diagnostic: {
+                  pillar_name: "trajectory",
+                  required: true,
+                  mode: "active",
+                  level: "degraded",
+                  summary: "The replan ceiling requires an operator decision.",
+                  reason_codes: ["replan_ceiling_reached"],
+                  facts: {
+                    replan_count: 3,
+                    max_replans_before_review: 3,
+                    consecutive_tool_failures: 3,
                   },
                 },
               },
@@ -114,6 +142,16 @@ describe("ReviewThreadPage", () => {
       </MemoryRouter>,
     );
 
+    expect(
+      await screen.findByRole("heading", { name: "Why human review is required" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByText("Replan ceiling reached; operator direction is required.").length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText("Replan Count")).toBeInTheDocument();
+    expect(screen.getByText("Consecutive Tool Failures")).toBeInTheDocument();
+    expect(screen.getByText("Evidence pillar inactive (not required).")).toBeInTheDocument();
+    expect(screen.getByText("Produced text")).toBeInTheDocument();
     expect((await screen.findAllByText("Collect evidence.")).length).toBeGreaterThan(0);
     for (const label of [
       "Approve",
@@ -191,5 +229,59 @@ describe("ReviewThreadPage", () => {
     );
 
     expect(screen.getByRole("button", { name: "Replan" })).toHaveClass("active");
+  });
+
+  it("renders actionable context for a non-external trajectory review", () => {
+    const snapshot: DashboardSnapshot = {
+      runtime_state: "waiting_human_review",
+      resume_state: "ready_tool_execution",
+      has_pending_review: true,
+      is_terminal: false,
+      reason_codes: ["replan_ceiling_reached"],
+      current_plan_step: {
+        step_id: "replan_step_1",
+        objective: "Recover from repeated source fetch failures.",
+        rationale: "The source path is stalled.",
+        expected_outcome: "A viable source path.",
+        status: "in_progress",
+      },
+      governance: {
+        directive: "wait_human_review",
+        summary: "The configured replan ceiling was reached.",
+        selected_reason: "Three replans require operator direction.",
+      },
+      external_execution: {
+        execution_intent: "execute_after_governance",
+        retryable: false,
+        attempt_count: 0,
+        receipt_count: 0,
+      },
+      human_review: {
+        pending_request: {
+          request_id: "thread-trajectory:hitl",
+          reason_codes: ["replan_ceiling_reached"],
+          resume_state: "ready_tool_execution",
+          allowed_decisions: ["approve_continue", "replan", "abort"],
+        },
+        trajectory_diagnostic: {
+          pillar_name: "trajectory",
+          required: true,
+          mode: "active",
+          level: "degraded",
+          summary: "Trajectory intervention threshold reached.",
+          reason_codes: ["replan_ceiling_reached"],
+          facts: { replan_count: 3, consecutive_tool_failures: 3 },
+        },
+      },
+    };
+
+    render(<ReviewContextPanel taskGoal="Research current AI releases." snapshot={snapshot} />);
+
+    expect(screen.getByText("Three replans require operator direction.")).toBeInTheDocument();
+    expect(screen.getByText("Research current AI releases.")).toBeInTheDocument();
+    expect(screen.getByText("Recover from repeated source fetch failures.")).toBeInTheDocument();
+    expect(screen.getByText("Approve, Replan, Abort")).toBeInTheDocument();
+    expect(screen.getByText("ready_tool_execution")).toBeInTheDocument();
+    expect(screen.queryByText("Produced text")).not.toBeInTheDocument();
   });
 });

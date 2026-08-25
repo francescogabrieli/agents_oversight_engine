@@ -9,6 +9,8 @@ from unittest.mock import patch
 
 from pydantic import ValidationError
 
+from layer1_intake import ExecutionIntent
+
 from tests.layer2_runtime_fixtures import (
     CollidingReplanner,
     FakeReplannerClient,
@@ -39,6 +41,7 @@ from layer2_runtime_governance.domain import (
     PlanStepStatus,
     RuntimeState,
     TaskState,
+    validate_external_effect_plan_contract,
 )
 from layer2_runtime_governance.execution import (
     BedrockNovaActor,
@@ -48,11 +51,14 @@ from layer2_runtime_governance.governance_components import GovernanceDirective
 from layer2_runtime_governance.planning import (
     OpenAIPlanner,
     OpenAIPlannerSettings,
+    PlannerExecutionError,
     build_planner_system_prompt,
 )
 from layer2_runtime_governance.planning.replanning import (
+    LocalConservativeReplanner,
     OpenAIReplanner,
     OpenAIReplannerSettings,
+    ReplanDecision,
     build_replanner_system_prompt,
     build_replanner_user_prompt,
 )
@@ -224,11 +230,13 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
                     objective="Recover with a narrower semantic step.",
                     rationale="The actor reported the previous step was not executable.",
                     expected_outcome="A narrower step the actor can complete.",
+                    produces_governed_external_effect_proposal=False,
                 ),
                 _ReplanStepPayload(
                     objective="Synthesize the recovered result.",
                     rationale="The task still requires a final grounded answer.",
                     expected_outcome="A concise final output.",
+                    produces_governed_external_effect_proposal=False,
                 ),
             ],
         )
@@ -241,7 +249,7 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         decision = replanner.replan(task_state=task_state)
 
         self.assertEqual(decision.replanner_name, "openai_layer2_replanner")
-        self.assertEqual(decision.prompt_version, "replanner_v3")
+        self.assertEqual(decision.prompt_version, "replanner_v5")
         self.assertEqual(len(decision.replacement_steps), 2)
         self.assertEqual(decision.replacement_steps[0].step_id, "replan_step_1")
         self.assertEqual(decision.replacement_steps[0].status, PlanStepStatus.PENDING)
@@ -260,6 +268,315 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         self.assertIn("The initial step is too broad", user_prompt)
         self.assertIn("current_blocked_step", user_prompt)
 
+    # Replanning receives the strongest still-pending proof dimensions explicitly.
+    def test_replanner_prompt_projects_remaining_evidence_obligation(self) -> None:
+        task_state = _build_replanning_task_state()
+        task_state.plan_steps.append(
+            PlanStep(
+                step_id="step_2",
+                objective="Produce a current, source-backed briefing.",
+                rationale="The final result depends on current external facts.",
+                expected_outcome="A briefing grounded in three recent sources.",
+                produces_factual_claims=True,
+                evidence_burden=EvidenceBurden(
+                    min_independent_sources=3,
+                    require_retrieved_content=True,
+                    freshness_window_days=30,
+                ),
+            )
+        )
+
+        prompt = build_replanner_user_prompt(task_state=task_state)
+        payload = json.loads(prompt.split("\n\n", 1)[1])
+
+        self.assertEqual(
+            payload["remaining_evidence_obligation"],
+            {
+                "factual_step_required": True,
+                "min_independent_sources": 3,
+                "require_retrieved_content": True,
+                "freshness_window_days": 30,
+            },
+        )
+        self.assertIn("must not", build_replanner_system_prompt())
+
+    # A custom replanner cannot bypass an active burden by flipping every step to false.
+    def test_runtime_rejects_replan_that_removes_factual_obligation(self) -> None:
+        class WeakeningReplanner:
+            replanner_name = "weakening_replanner"
+            prompt_version = "weakening_v1"
+
+            # Return a structurally valid replacement that semantically drops the burden.
+            def replan(self, *, task_state: TaskState) -> ReplanDecision:
+                return ReplanDecision(
+                    replacement_steps=[
+                        PlanStep(
+                            step_id="replacement_1",
+                            objective="Continue without a factual output.",
+                            rationale="Exercise the obligation floor.",
+                            expected_outcome="A procedural result.",
+                        )
+                    ],
+                    rationale="Drop the remaining factual work.",
+                    replanner_name=self.replanner_name,
+                    prompt_version=self.prompt_version,
+                )
+
+        task_state = _build_replanning_task_state()
+        task_state.plan_steps.append(
+            PlanStep(
+                step_id="step_2",
+                objective="Produce a factual result.",
+                rationale="The task requires independently sourced claims.",
+                expected_outcome="A current, grounded answer.",
+                produces_factual_claims=True,
+                evidence_burden=EvidenceBurden(
+                    min_independent_sources=3,
+                    freshness_window_days=30,
+                ),
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "removed the remaining factual"):
+            replanner(task_state, replanner_service=WeakeningReplanner())
+
+    # A custom replanner cannot erase the terminal governed-operation obligation.
+    def test_runtime_rejects_replan_that_drops_external_terminal_marker(self) -> None:
+        class DroppingExternalReplanner:
+            replanner_name = "dropping_external_replanner"
+            prompt_version = "dropping_external_v1"
+
+            # Return a recovery step that silently omits the requested final effect.
+            def replan(self, *, task_state: TaskState) -> ReplanDecision:
+                return ReplanDecision(
+                    replacement_steps=[
+                        PlanStep(
+                            step_id="replacement_1",
+                            objective="Recover some local material.",
+                            rationale="Exercise external-effect contract validation.",
+                            expected_outcome="A local intermediate result.",
+                        )
+                    ],
+                    rationale="Incorrectly drop the external proposal.",
+                    replanner_name=self.replanner_name,
+                    prompt_version=self.prompt_version,
+                )
+
+        task_state = TaskState.from_intake(_build_external_communication_intake_result())
+        task_state.current_state = RuntimeState.REPLANNING
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Prepare the governed external communication proposal.",
+                rationale="The user requested delivery after governance.",
+                expected_outcome="One exact execution-ready email proposal.",
+                status=PlanStepStatus.BLOCKED,
+                produces_governed_external_effect_proposal=True,
+            )
+        ]
+        task_state.current_plan_step_index = 0
+        task_state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.NEEDS_REPLAN,
+            summary="The proposal needs a different recovery path.",
+            blocking_reason="The current approach cannot finish the proposal.",
+        )
+
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            replanner(task_state, replanner_service=DroppingExternalReplanner())
+
+    # The offline fallback retains pending work instead of collapsing the trajectory.
+    def test_local_replanner_retains_future_factual_obligation(self) -> None:
+        task_state = _build_replanning_task_state()
+        burden = EvidenceBurden(
+            min_independent_sources=3,
+            freshness_window_days=30,
+        )
+        task_state.plan_steps.append(
+            PlanStep(
+                step_id="step_2",
+                objective="Produce a factual result.",
+                rationale="The task requires independently sourced claims.",
+                expected_outcome="A current, grounded answer.",
+                produces_factual_claims=True,
+                evidence_burden=burden,
+            )
+        )
+
+        decision = LocalConservativeReplanner().replan(task_state=task_state)
+
+        self.assertEqual(len(decision.replacement_steps), 3)
+        self.assertEqual(decision.replacement_steps[1].step_id, "step_2")
+        self.assertTrue(decision.replacement_steps[2].produces_factual_claims)
+        self.assertEqual(decision.replacement_steps[2].evidence_burden, burden)
+
+    # The offline fallback retains a future terminal external proposal marker too.
+    def test_local_replanner_retains_future_external_terminal_marker(self) -> None:
+        task_state = TaskState.from_intake(_build_external_communication_intake_result())
+        task_state.current_state = RuntimeState.REPLANNING
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Recover the material needed by the external proposal.",
+                rationale="The final proposal has a blocked prerequisite.",
+                expected_outcome="Recovered proposal material.",
+                status=PlanStepStatus.BLOCKED,
+            ),
+            PlanStep(
+                step_id="step_2",
+                objective="Prepare the governed external communication proposal.",
+                rationale="The user requested delivery after governance.",
+                expected_outcome="One exact execution-ready email proposal.",
+                produces_governed_external_effect_proposal=True,
+            ),
+        ]
+        task_state.current_plan_step_index = 0
+        task_state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.NEEDS_REPLAN,
+            summary="The prerequisite needs a conservative recovery.",
+            blocking_reason="The current prerequisite cannot be completed as planned.",
+        )
+
+        decision = LocalConservativeReplanner().replan(task_state=task_state)
+
+        self.assertFalse(
+            decision.replacement_steps[0].produces_governed_external_effect_proposal
+        )
+        self.assertTrue(
+            decision.replacement_steps[-1].produces_governed_external_effect_proposal
+        )
+        validate_external_effect_plan_contract(
+            steps=decision.replacement_steps,
+            execution_intent=task_state.execution_intent,
+        )
+
+    # The production replanner gets one bounded semantic correction before failing closed.
+    def test_openai_replanner_retries_weakened_evidence_obligation(self) -> None:
+        from layer2_runtime_governance.planning.replanning import (
+            _ReplanEvidenceBurdenPayload,
+            _ReplanningPayload,
+            _ReplanStepPayload,
+        )
+
+        task_state = _build_replanning_task_state()
+        task_state.plan_steps.append(
+            PlanStep(
+                step_id="step_2",
+                objective="Produce a factual result.",
+                rationale="The task requires independently sourced claims.",
+                expected_outcome="A current, grounded answer.",
+                produces_factual_claims=True,
+                evidence_burden=EvidenceBurden(
+                    min_independent_sources=3,
+                    freshness_window_days=30,
+                ),
+            )
+        )
+        invalid_payload = _ReplanningPayload(
+            rationale_summary="Incorrectly remove the factual obligation.",
+            replacement_steps=[
+                _ReplanStepPayload(
+                    objective="Collect candidate material.",
+                    rationale="Try another route.",
+                    expected_outcome="A procedural candidate list.",
+                    produces_governed_external_effect_proposal=False,
+                )
+            ],
+        )
+        corrected_payload = _ReplanningPayload(
+            rationale_summary="Preserve the factual obligation.",
+            replacement_steps=[
+                _ReplanStepPayload(
+                    objective="Validate and report current source-backed facts.",
+                    rationale="The remaining task has a governed proof obligation.",
+                    expected_outcome="A grounded result from three recent sources.",
+                    produces_factual_claims=True,
+                    evidence_burden=_ReplanEvidenceBurdenPayload(
+                        min_independent_sources=3,
+                        freshness_window_days=30,
+                    ),
+                    produces_governed_external_effect_proposal=False,
+                )
+            ],
+        )
+        replanner_service = OpenAIReplanner(
+            settings=OpenAIReplannerSettings(api_key="test-key", model="test-model")
+        )
+        fake_client = FakeReplannerClient([invalid_payload, corrected_payload])
+        replanner_service._client = fake_client
+
+        decision = replanner_service.replan(task_state=task_state)
+
+        self.assertEqual(fake_client.responses.call_count, 2)
+        self.assertTrue(decision.replacement_steps[0].produces_factual_claims)
+        correction_prompt = fake_client.responses.all_kwargs[1]["input"][1]["content"]
+        correction_payload = json.loads(correction_prompt.split("\n\n", 1)[1])
+        self.assertIn("removed", correction_payload["prior_contract_feedback"])
+
+    # The production replanner also corrects a dropped external terminal marker once.
+    def test_openai_replanner_corrects_missing_external_terminal_step(self) -> None:
+        from layer2_runtime_governance.planning.replanning import (
+            _ReplanningPayload,
+            _ReplanStepPayload,
+        )
+
+        task_state = TaskState.from_intake(_build_external_communication_intake_result())
+        task_state.current_state = RuntimeState.REPLANNING
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Prepare the governed external communication proposal.",
+                rationale="The user requested delivery after governance.",
+                expected_outcome="One exact execution-ready email proposal.",
+                status=PlanStepStatus.BLOCKED,
+                produces_governed_external_effect_proposal=True,
+            )
+        ]
+        task_state.current_plan_step_index = 0
+        task_state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.NEEDS_REPLAN,
+            summary="The proposal needs a different recovery path.",
+            blocking_reason="The current approach cannot finish the proposal.",
+        )
+        invalid_payload = _ReplanningPayload(
+            rationale_summary="Incorrectly drop the external proposal.",
+            replacement_steps=[
+                _ReplanStepPayload(
+                    objective="Recover a local intermediate result.",
+                    rationale="Try another route.",
+                    expected_outcome="A local result only.",
+                    produces_governed_external_effect_proposal=False,
+                )
+            ],
+        )
+        corrected_payload = _ReplanningPayload(
+            rationale_summary="Preserve the requested governed external proposal.",
+            replacement_steps=[
+                _ReplanStepPayload(
+                    objective="Prepare the governed external communication proposal.",
+                    rationale="The user still requests delivery after governance.",
+                    expected_outcome="One exact execution-ready email proposal.",
+                    produces_governed_external_effect_proposal=True,
+                )
+            ],
+        )
+        replanner_service = OpenAIReplanner(
+            settings=OpenAIReplannerSettings(api_key="test-key", model="test-model")
+        )
+        fake_client = FakeReplannerClient([invalid_payload, corrected_payload])
+        replanner_service._client = fake_client
+
+        decision = replanner_service.replan(task_state=task_state)
+
+        self.assertEqual(fake_client.responses.call_count, 2)
+        self.assertTrue(
+            decision.replacement_steps[-1].produces_governed_external_effect_proposal
+        )
+        correction_prompt = fake_client.responses.all_kwargs[1]["input"][1]["content"]
+        correction_payload = json.loads(correction_prompt.split("\n\n", 1)[1])
+        self.assertIn("exactly one", correction_payload["prior_contract_feedback"])
 
     # Planner-facing prompts must share exact, detached audit-item projections.
     def test_planning_prompt_item_projections_are_exact_and_audit_safe(self) -> None:
@@ -285,6 +602,7 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
             "expected_outcome": "A broad evidence base.",
             "status": "blocked",
             "produces_factual_claims": False,
+            "produces_governed_external_effect_proposal": False,
             "evidence_burden": None,
         }
         expected_observation = {
@@ -334,6 +652,7 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
                 rationale="The test exercises the planner contract.",
                 expected_outcome="A grounded factual output.",
                 produces_factual_claims=True,
+                produces_governed_external_effect_proposal=False,
             )
         with self.assertRaises(ValidationError):
             _ReplanStepPayload(
@@ -341,6 +660,7 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
                 rationale="The test exercises the replanner contract.",
                 expected_outcome="A grounded factual output.",
                 produces_factual_claims=True,
+                produces_governed_external_effect_proposal=False,
             )
 
     # Revalidate mutable output from a custom planner before execution begins.
@@ -368,6 +688,167 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         task_state = TaskState.from_intake(_build_research_intake_result())
         with self.assertRaises(ValueError):
             planner(task_state, planner_service=InvalidPlanner())
+
+    # Bind execution intent to one explicit terminal proposal instead of prompt wording.
+    def test_external_effect_plan_contract_requires_one_terminal_marker(self) -> None:
+        setup_step = PlanStep(
+            step_id="step_1",
+            objective="Prepare the source material.",
+            rationale="The requested effect depends on prior material.",
+            expected_outcome="Validated material for the final proposal.",
+        )
+        terminal_step = PlanStep(
+            step_id="step_2",
+            objective="Prepare the governed external operation.",
+            rationale="The user requested execution after governance.",
+            expected_outcome="One exact execution-ready proposal.",
+            produces_governed_external_effect_proposal=True,
+        )
+
+        validate_external_effect_plan_contract(
+            steps=[setup_step, terminal_step],
+            execution_intent=ExecutionIntent.EXECUTE_AFTER_GOVERNANCE,
+        )
+        validate_external_effect_plan_contract(
+            steps=[setup_step],
+            execution_intent=ExecutionIntent.PROPOSAL_ONLY,
+        )
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            validate_external_effect_plan_contract(
+                steps=[setup_step],
+                execution_intent=ExecutionIntent.EXECUTE_AFTER_GOVERNANCE,
+            )
+        with self.assertRaisesRegex(ValueError, "terminal semantic step"):
+            validate_external_effect_plan_contract(
+                steps=[terminal_step, setup_step],
+                execution_intent=ExecutionIntent.EXECUTE_AFTER_GOVERNANCE,
+            )
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            validate_external_effect_plan_contract(
+                steps=[terminal_step, terminal_step],
+                execution_intent=ExecutionIntent.EXECUTE_AFTER_GOVERNANCE,
+            )
+        with self.assertRaisesRegex(ValueError, "proposal-only"):
+            validate_external_effect_plan_contract(
+                steps=[terminal_step],
+                execution_intent=ExecutionIntent.PROPOSAL_ONLY,
+            )
+
+    # Reject the exact benchmark failure shape before the actor can enter replanning.
+    def test_runtime_rejects_incomplete_external_plan_before_actor(self) -> None:
+        class IncompleteExternalPlanner:
+            planner_name = "incomplete_external_planner"
+            prompt_version = "incomplete_v1"
+
+            # Return only a setup step, omitting the requested external-effect proposal.
+            def plan(self, *, task_state: TaskState) -> PlannerDecision:
+                return PlannerDecision(
+                    plan_steps=[
+                        PlanStep(
+                            step_id="step_1",
+                            objective="Define the requested recency window.",
+                            rationale="The research has a supplied reference date.",
+                            expected_outcome="A bounded date interval.",
+                        )
+                    ],
+                    rationale="Start from the requested date window.",
+                    planner_name=self.planner_name,
+                    prompt_version=self.prompt_version,
+                )
+
+        task_state = TaskState.from_intake(_build_external_communication_intake_result())
+
+        with self.assertRaisesRegex(ValueError, "exactly one"):
+            planner(task_state, planner_service=IncompleteExternalPlanner())
+
+    # The production planner receives one bounded correction for an incomplete plan.
+    def test_openai_planner_corrects_missing_external_terminal_step(self) -> None:
+        from layer2_runtime_governance.planning import (
+            _PlanningPayload,
+            _PlanStepPayload,
+        )
+
+        incomplete_payload = _PlanningPayload(
+            rationale_summary="Define only the recency window.",
+            plan_steps=[
+                _PlanStepPayload(
+                    objective="Define the requested recency window.",
+                    rationale="The task supplies a reference date.",
+                    expected_outcome="A bounded date interval.",
+                    produces_governed_external_effect_proposal=False,
+                )
+            ],
+        )
+        corrected_payload = _PlanningPayload(
+            rationale_summary="Cover the task through its requested external effect.",
+            plan_steps=[
+                _PlanStepPayload(
+                    objective="Research and synthesize the requested briefing.",
+                    rationale="The external communication depends on grounded content.",
+                    expected_outcome="A source-backed briefing.",
+                    produces_governed_external_effect_proposal=False,
+                ),
+                _PlanStepPayload(
+                    objective="Prepare the governed external communication proposal.",
+                    rationale="The user requested delivery after governance.",
+                    expected_outcome="One exact execution-ready email proposal.",
+                    produces_governed_external_effect_proposal=True,
+                ),
+            ],
+        )
+        planner_service = OpenAIPlanner(
+            settings=OpenAIPlannerSettings(api_key="test-key", model="test-model")
+        )
+        fake_client = FakeReplannerClient([incomplete_payload, corrected_payload])
+        planner_service._client = fake_client
+
+        decision = planner_service.plan(
+            task_state=TaskState.from_intake(
+                _build_external_communication_intake_result()
+            )
+        )
+
+        self.assertEqual(fake_client.responses.call_count, 2)
+        self.assertEqual(decision.prompt_version, "planner_v6")
+        self.assertTrue(
+            decision.plan_steps[-1].produces_governed_external_effect_proposal
+        )
+        correction_prompt = fake_client.responses.all_kwargs[1]["input"][1]["content"]
+        correction_payload = json.loads(correction_prompt.split("\n\n", 1)[1])
+        self.assertIn("exactly one", correction_payload["prior_contract_feedback"])
+
+    # Fail closed when the bounded correction still omits the requested effect.
+    def test_openai_planner_rejects_two_incomplete_external_plans(self) -> None:
+        from layer2_runtime_governance.planning import (
+            _PlanningPayload,
+            _PlanStepPayload,
+        )
+
+        incomplete_payload = _PlanningPayload(
+            rationale_summary="Return only a setup step.",
+            plan_steps=[
+                _PlanStepPayload(
+                    objective="Define the requested recency window.",
+                    rationale="The task supplies a reference date.",
+                    expected_outcome="A bounded date interval.",
+                    produces_governed_external_effect_proposal=False,
+                )
+            ],
+        )
+        planner_service = OpenAIPlanner(
+            settings=OpenAIPlannerSettings(api_key="test-key", model="test-model")
+        )
+        fake_client = FakeReplannerClient([incomplete_payload, incomplete_payload])
+        planner_service._client = fake_client
+
+        with self.assertRaisesRegex(PlannerExecutionError, "after correction"):
+            planner_service.plan(
+                task_state=TaskState.from_intake(
+                    _build_external_communication_intake_result()
+                )
+            )
+
+        self.assertEqual(fake_client.responses.call_count, 2)
 
     # Make the declared proof obligation visible to the bounded executor.
     def test_actor_prompt_projects_declared_evidence_burden(self) -> None:
@@ -459,6 +940,7 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
                         objective="Collect authoritative DMA sources.",
                         rationale="The task is research-oriented.",
                         expected_outcome="A compact source set.",
+                        produces_governed_external_effect_proposal=False,
                     )
                 ],
             ),
@@ -500,6 +982,9 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         self.assertIn("Identify prerequisites and dependencies", prompt)
         self.assertIn("There is no preferred fixed step count", prompt)
         self.assertIn("complete execution-ready proposal", prompt)
+        self.assertIn("produces_governed_external_effect_proposal=true", prompt)
+        self.assertIn("source identities, dates, organizations", prompt)
+        self.assertIn("user-supplied task contract", prompt)
         self.assertIn("not additional plan steps", prompt)
         self.assertNotIn("email", prompt.lower())
         self.assertNotIn("research", prompt.lower())
@@ -568,6 +1053,7 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
                             objective="Prepare the draft for human review.",
                             rationale="External communication remains review-gated.",
                             expected_outcome="The same draft in review-ready form.",
+                            produces_governed_external_effect_proposal=True,
                         ),
                     ],
                     rationale="Prepare the requested product update without adding facts.",
@@ -616,6 +1102,7 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
                             objective="Draft the email.",
                             rationale="Use the extracted evidence.",
                             expected_outcome="A complete email.",
+                            produces_governed_external_effect_proposal=True,
                         ),
                     ],
                     rationale="Collect evidence and draft the requested email.",
@@ -638,6 +1125,7 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
                 "expected_outcome",
                 "status",
                 "produces_factual_claims",
+                "produces_governed_external_effect_proposal",
                 "evidence_burden",
             },
         )

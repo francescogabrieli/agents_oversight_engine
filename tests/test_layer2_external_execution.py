@@ -149,6 +149,10 @@ class OneStepExternalPlanner:
                     objective="Prepare the requested email operation.",
                     rationale="The actor must produce one exact governed proposal.",
                     expected_outcome="A typed email proposal.",
+                    produces_governed_external_effect_proposal=(
+                        task_state.execution_intent
+                        == ExecutionIntent.EXECUTE_AFTER_GOVERNANCE
+                    ),
                 )
             ],
             rationale="One bounded external-operation step is sufficient.",

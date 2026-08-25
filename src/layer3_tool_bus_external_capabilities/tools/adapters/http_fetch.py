@@ -9,7 +9,11 @@ from urllib.error import HTTPError, URLError
 
 from ..contracts import ToolErrorCode, ToolExecutionResult, ToolObservation, ToolRequest
 from ..eu_legal import try_fetch_specialized_legal_document
-from ..extractors import extract_pdf_text, extract_visible_text
+from ..extractors import (
+    extract_html_publication_timestamp,
+    extract_pdf_text,
+    extract_visible_text,
+)
 from ..models import ToolDefinition
 from ..text import is_meaningful_extracted_text, truncate_text
 
@@ -57,14 +61,22 @@ class HttpFetchAdapter:
         )
         if isinstance(fetch_result, tuple) and len(fetch_result) == 2 and isinstance(fetch_result[1], ToolErrorCode):
             return ToolExecutionResult(request=tool_request, success=False, summary="URL fetch failed.", error_message=str(fetch_result[0]), error_code=fetch_result[1], extractability_limited=True)
-        raw_body, charset, content_type, truncated, source_timestamp = fetch_result
+        raw_body, charset, content_type, truncated, transport_timestamp = fetch_result
         if truncated and content_type == "application/pdf":
             return ToolExecutionResult(request=tool_request, success=False, summary="PDF extraction exceeded the byte limit.", error_message="PDF byte limit prevents treating the document as complete.", error_code=ToolErrorCode.BYTE_LIMIT, extractability_limited=True)
         decoded_body = raw_body.decode(charset, errors="replace")
-        if content_type == "text/html":
+        if content_type in {"text/html", "application/xhtml+xml"}:
             extracted_text = extract_visible_text(decoded_body)
+            publication_timestamp = extract_html_publication_timestamp(decoded_body)
+            source_timestamp = (
+                publication_timestamp.value
+                if publication_timestamp is not None
+                else None
+            )
         else:
             extracted_text = decoded_body
+            publication_timestamp = None
+            source_timestamp = None
         content = truncate_text(extracted_text, definition.max_content_chars)
         content_truncated = truncated or len(content or "") < len(extracted_text)
         specialized_result = try_fetch_specialized_legal_document(
@@ -81,7 +93,14 @@ class HttpFetchAdapter:
         return ToolExecutionResult(
             request=tool_request,
             success=True,
-            summary="URL text fetched successfully.",
+            summary=_source_timestamp_summary(
+                publication_basis=(
+                    publication_timestamp.basis
+                    if publication_timestamp is not None
+                    else None
+                ),
+                transport_timestamp=transport_timestamp,
+            ),
             content=content,
             truncated=content_truncated,
             extractability_limited=content_truncated,
@@ -144,6 +163,25 @@ def _parse_last_modified(headers: Message) -> datetime | None:
     if parsed_value.tzinfo is None or parsed_value.utcoffset() is None:
         return None
     return parsed_value.astimezone(timezone.utc)
+
+
+# Explain which source timestamp was accepted without treating transport metadata as publication.
+def _source_timestamp_summary(
+    *,
+    publication_basis: str | None,
+    transport_timestamp: datetime | None,
+) -> str:
+    if publication_basis is not None:
+        return (
+            "URL text fetched successfully. Publication timestamp extracted from "
+            f"{publication_basis}."
+        )
+    if transport_timestamp is not None:
+        return (
+            "URL text fetched successfully. HTTP Last-Modified was observed but "
+            "excluded from semantic publication freshness."
+        )
+    return "URL text fetched successfully."
 
 
 # Resolve urllib at call time so tests and deployments can inject transport cleanly.
