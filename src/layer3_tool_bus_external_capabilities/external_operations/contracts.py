@@ -137,6 +137,18 @@ class CommunicationOperationPayload:
     bcc: tuple[str, ...] = ()
     body_format: CommunicationBodyFormat = CommunicationBodyFormat.PLAIN
 
+    # Checkpoint restore rebuilds this dataclass from stored primitives, so the declared
+    # format can arrive as a bare string. Normalize once here rather than at every call
+    # site, and never trust an unknown value with a rendering decision.
+    def __post_init__(self) -> None:
+        if isinstance(self.body_format, CommunicationBodyFormat):
+            return
+        try:
+            resolved = CommunicationBodyFormat(str(self.body_format).strip().lower())
+        except ValueError:
+            resolved = CommunicationBodyFormat.PLAIN
+        object.__setattr__(self, "body_format", resolved)
+
 
 DatabaseParameterValue: TypeAlias = str | int | float | bool | None
 

@@ -71,6 +71,7 @@ def coerce_external_communication_draft(
         body=_coerce_optional_string(payload.get("body")),
         cc=tuple(str(item) for item in payload.get("cc", [])),
         bcc=tuple(str(item) for item in payload.get("bcc", [])),
+        body_format=str(payload.get("body_format") or "plain"),
         metadata=_coerce_metadata_dict(payload.get("metadata")),
     )
 
@@ -500,6 +501,7 @@ def _coerce_external_operation_payload(
             ),
             cc=tuple(str(item) for item in payload.get("cc", [])),
             bcc=tuple(str(item) for item in payload.get("bcc", [])),
+            body_format=payload.get("body_format", "plain"),
         )
     if resolved_family == ExternalOperationFamily.DATABASE:
         return DatabaseOperationPayload(

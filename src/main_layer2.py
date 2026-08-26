@@ -474,13 +474,13 @@ def build_compact_trace(trace: dict[str, Any]) -> dict[str, Any]:
 # Print compact progress updates while preserving stdout for final traces.
 def _print_progress(node_name: str, update: dict[str, Any]) -> None:
     task_state = update.get("task_state")
-    details = _format_task_state_progress(task_state)
+    details = _format_task_state_progress(task_state, node_name=node_name)
     suffix = f" | {details}" if details else ""
     print(f"[Layer 2] {node_name}{suffix}", file=sys.stderr, flush=True)
 
 
 # Summarize only audit-safe state fields during streaming progress.
-def _format_task_state_progress(task_state: Any) -> str:
+def _format_task_state_progress(task_state: Any, node_name: str = "") -> str:
     if task_state is None:
         return ""
 
@@ -499,6 +499,10 @@ def _format_task_state_progress(task_state: Any) -> str:
         parts.append(f"actor_turns={actor_turn_count}")
     if tool_call_count is not None:
         parts.append(f"tool_calls={tool_call_count}")
+    if node_name == "planner":
+        plan_steps = getattr(task_state, "plan_steps", None)
+        if plan_steps is not None:
+            parts.append(f"steps={len(plan_steps)}")
     return ", ".join(parts)
 
 

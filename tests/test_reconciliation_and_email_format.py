@@ -14,8 +14,20 @@ from layer2_runtime_governance.hitl import (
 from layer3_tool_bus_external_capabilities.external_capability_mcp.markdown_email import (
     render_markdown_email_html,
 )
+from json_serialization import to_jsonable
+from layer1_intake import ExecutionIntent
+from layer2_runtime_governance.domain.serialization import (
+    coerce_external_communication_draft,
+)
+from layer3_tool_bus_external_capabilities.external_operations.mcp.executor import (
+    _communication_arguments,
+)
 from layer3_tool_bus_external_capabilities.external_operations import (
     CommunicationBodyFormat,
+    CommunicationOperationPayload,
+    DestinationClass,
+    ExternalExecutionAuthorizationSource,
+    build_external_execution_request,
     ExternalExecutionReceipt,
     ExternalExecutionStatus,
     normalize_communication_operation,
@@ -151,6 +163,79 @@ class MarkdownEmailRenderingTests(unittest.TestCase):
         self.assertNotIn("href=\"javascript:", html.lower())
         self.assertNotIn("<a ", html.lower())
         self.assertIn("[x](javascript:alert(1))", html)
+
+
+class BodyFormatSurvivesTheRuntimeBoundariesTests(unittest.TestCase):
+    # Regression for benchmark-web-email-11: checkpoint restore rebuilt the payload from
+    # stored primitives, so the enum arrived as a bare string and the connector raised
+    # AttributeError on `.value`. Coercion belongs to the canonical payload, once.
+    def test_payload_coerces_a_restored_string_format(self) -> None:
+        for raw, expected in (
+            ("markdown", CommunicationBodyFormat.MARKDOWN),
+            ("MARKDOWN", CommunicationBodyFormat.MARKDOWN),
+            ("plain", CommunicationBodyFormat.PLAIN),
+            ("unknown-format", CommunicationBodyFormat.PLAIN),
+            (None, CommunicationBodyFormat.PLAIN),
+        ):
+            with self.subTest(raw=raw):
+                payload = CommunicationOperationPayload(
+                    channel="email",
+                    recipient="a@b.test",
+                    subject="S",
+                    body="B",
+                    destination_class=DestinationClass.EXTERNAL,
+                    body_format=raw,
+                )
+                self.assertIs(payload.body_format, expected)
+                self.assertEqual(payload.body_format.value, expected.value)
+
+    # Regression for benchmark-web-email-11: the actor declared markdown on the draft but
+    # the runtime rebuild dropped it, so the canonical payload silently said plain.
+    def test_declared_format_survives_checkpoint_and_normalization(self) -> None:
+        draft = ExternalCommunicationDraft(
+            channel="email",
+            recipient="a@b.test",
+            subject="S",
+            body="# Title",
+            body_format="markdown",
+        )
+
+        restored = coerce_external_communication_draft(to_jsonable(draft))
+        self.assertEqual(restored.body_format, "markdown")
+
+        proposal = normalize_communication_operation(
+            operation_id="op-1",
+            plan_step_id="step_1",
+            capability_id="communication.email.send",
+            draft=restored,
+            execution_candidate=True,
+        )
+        self.assertIs(proposal.payload.body_format, CommunicationBodyFormat.MARKDOWN)
+
+    # The connector must receive the declared contract, not a default.
+    def test_connector_arguments_carry_the_declared_format(self) -> None:
+        proposal = normalize_communication_operation(
+            operation_id="op-1",
+            plan_step_id="step_1",
+            capability_id="communication.email.send",
+            draft=ExternalCommunicationDraft(
+                channel="email",
+                recipient="a@b.test",
+                subject="S",
+                body="# Title",
+                body_format="markdown",
+            ),
+            execution_candidate=True,
+        )
+        request = build_external_execution_request(
+            proposal=proposal,
+            authorized_payload_digest=proposal.payload_digest,
+            execution_intent=ExecutionIntent.EXECUTE_AFTER_GOVERNANCE,
+            authorization_source=ExternalExecutionAuthorizationSource.HUMAN_REVIEW,
+            reviewer_id="operator-local",
+        )
+
+        self.assertEqual(_communication_arguments(request)["body_format"], "markdown")
 
 
 if __name__ == "__main__":

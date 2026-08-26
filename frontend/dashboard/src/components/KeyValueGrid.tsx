@@ -8,6 +8,7 @@ const STATUS_BADGE: Record<string, BadgeVariant> = {
   ...RUNTIME_STATE_BADGE_VARIANTS,
   yes:                  "badge-completed",
   no:                   "badge-neutral",
+  sì:                   "badge-completed",
   escalate:             "badge-waiting",
   uncertain:            "badge-info",
   pending:              "badge-waiting",
@@ -43,7 +44,7 @@ export function KeyValueGrid({ title, values }: KeyValueGridProps) {
       <p className="kv-section-title">{title}</p>
       {entries.length === 0 ? (
         <div className="kv-grid">
-          <div className="kv-empty">No data available.</div>
+          <div className="kv-empty">Nessun dato disponibile.</div>
         </div>
       ) : (
         <div className="kv-grid kv-grid-2col">

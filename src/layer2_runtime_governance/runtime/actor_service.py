@@ -632,7 +632,16 @@ def _merge_external_communication_draft(
         metadata.update(typed_draft.metadata)
     if "source" not in metadata:
         metadata["source"] = "actor_output"
-    metadata.setdefault("content_format", "markdown")
+    # The author-declared rendering contract survives the rebuild; losing it here
+    # silently downgraded every governed draft to plain text.
+    resolved_body_format = (
+        typed_draft.body_format
+        if typed_draft is not None
+        else current_draft.body_format
+        if current_draft is not None
+        else "plain"
+    )
+    metadata.setdefault("content_format", resolved_body_format)
     metadata["review_ready"] = review_ready
 
     state.external_communication.draft = ExternalCommunicationDraft(
@@ -675,6 +684,7 @@ def _merge_external_communication_draft(
             if current_draft is not None
             else ()
         ),
+        body_format=resolved_body_format,
         metadata=metadata,
     )
 

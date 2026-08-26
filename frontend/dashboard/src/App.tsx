@@ -15,7 +15,7 @@ export function App() {
         <div className="topbar-spacer" />
         <span className="topbar-pill">
           <span className="topbar-pill-dot" />
-          live
+          attivo
         </span>
       </header>
       <main className="page-content">

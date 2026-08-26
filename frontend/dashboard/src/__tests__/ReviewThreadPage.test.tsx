@@ -152,34 +152,34 @@ describe("ReviewThreadPage", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: "Why human review is required" }),
+      await screen.findByRole("heading", { name: "Perché serve una decisione dell'operatore" }),
     ).toBeInTheDocument();
     expect(
       screen.getAllByText("Replan ceiling reached; operator direction is required.").length,
     ).toBeGreaterThan(0);
+    expect(screen.getByText("Cosa ha notato la verifica automatica")).toBeInTheDocument();
+    expect(screen.getByText("The recipient scope is not supported by the draft evidence.")).toBeInTheDocument();
+    expect(screen.getByText("Fonti alla base della proposta")).toBeInTheDocument();
+    expect(screen.getByText("The source supports the reviewed claim.")).toBeInTheDocument();
+    expect(screen.getByText("Testo prodotto")).toBeInTheDocument();
+    expect((await screen.findAllByText("Collect evidence.")).length).toBeGreaterThan(0);
+
+    await user.click(screen.getByText("Mostra i dati osservati"));
     expect(screen.getByText("Replan Count")).toBeInTheDocument();
     expect(screen.getByText("Consecutive Tool Failures")).toBeInTheDocument();
-    expect(screen.getByText("Evidence pillar inactive (not required).")).toBeInTheDocument();
-    expect(screen.getByText("Judge findings")).toBeInTheDocument();
-    expect(
-      screen.getByText("The recipient scope is not supported by the draft evidence."),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Selected evidence")).toBeInTheDocument();
-    expect(screen.getByText("The source supports the reviewed claim.")).toBeInTheDocument();
-    expect(screen.getByText("Produced text")).toBeInTheDocument();
-    expect((await screen.findAllByText("Collect evidence.")).length).toBeGreaterThan(0);
+
     for (const label of [
-      "Approve",
-      "Approve read-only",
-      "Modify",
-      "More evidence",
-      "Replan",
-      "Clarify",
-      "Abort",
+      "Approva",
+      "Approva in sola lettura",
+      "Modifica",
+      "Richiedi più evidenze",
+      "Ripianifica",
+      "Chiedi un chiarimento",
+      "Interrompi",
     ]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
-    await user.click(screen.getByRole("button", { name: "Submit decision" }));
+    await user.click(screen.getByRole("button", { name: "Invia decisione" }));
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/reviews/thread-1/resume",
@@ -190,7 +190,7 @@ describe("ReviewThreadPage", () => {
     expect(
       await screen.findByRole("dialog", { name: "Decisione inviata correttamente" }),
     ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Submit decision" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Invia decisione" })).not.toBeInTheDocument();
   });
 
   it("keeps the selected decision when polling returns an equivalent review payload", async () => {
@@ -220,9 +220,9 @@ describe("ReviewThreadPage", () => {
       <DecisionForm detail={detail} onSubmit={vi.fn().mockResolvedValue(undefined)} />,
     );
 
-    await screen.findByRole("button", { name: "Replan" });
-    await user.click(screen.getByRole("button", { name: "Replan" }));
-    expect(screen.getByRole("button", { name: "Replan" })).toHaveClass("active");
+    await screen.findByRole("button", { name: "Ripianifica" });
+    await user.click(screen.getByRole("button", { name: "Ripianifica" }));
+    expect(screen.getByRole("button", { name: "Ripianifica" })).toHaveClass("active");
 
     const pendingRequest = detail.dashboard_snapshot?.human_review?.pending_request;
     rerender(
@@ -243,7 +243,7 @@ describe("ReviewThreadPage", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Replan" })).toHaveClass("active");
+    expect(screen.getByRole("button", { name: "Ripianifica" })).toHaveClass("active");
   });
 
   it("renders actionable context for a non-external trajectory review", () => {
@@ -293,10 +293,11 @@ describe("ReviewThreadPage", () => {
     render(<ReviewContextPanel taskGoal="Research current AI releases." snapshot={snapshot} />);
 
     expect(screen.getByText("Three replans require operator direction.")).toBeInTheDocument();
-    expect(screen.getByText("Research current AI releases.")).toBeInTheDocument();
-    expect(screen.getByText("Recover from repeated source fetch failures.")).toBeInTheDocument();
-    expect(screen.getByText("Approve, Replan, Abort")).toBeInTheDocument();
-    expect(screen.getByText("ready_tool_execution")).toBeInTheDocument();
-    expect(screen.queryByText("Produced text")).not.toBeInTheDocument();
+    expect(screen.getByText(/Research current AI releases\./)).toBeInTheDocument();
+    expect(
+      screen.getAllByText(/Recover from repeated source fetch failures\./).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText("Puoi scegliere tra: Approva, Ripianifica, Interrompi.")).toBeInTheDocument();
+    expect(screen.queryByText("Testo prodotto")).not.toBeInTheDocument();
   });
 });

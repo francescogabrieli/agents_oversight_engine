@@ -13,6 +13,27 @@ export const RUNTIME_STATE_BADGE_VARIANTS: Record<string, BadgeVariant> = {
   aborted: "badge-aborted",
 };
 
+// Italian operator-facing labels for the raw runtime/resume state codes.
+const RUNTIME_STATE_LABELS: Record<string, string> = {
+  planning: "In pianificazione",
+  acting: "In esecuzione",
+  ready_next_step: "Pronto per il passo successivo",
+  ready_tool_execution: "Pronto per l'esecuzione dello strumento",
+  ready_governance: "In attesa di governance",
+  ready_external_execution: "Pronto per l'esecuzione esterna",
+  replanning: "Ripianificazione in corso",
+  waiting_human_review: "In attesa di revisione",
+  completed: "Completato",
+  review_completed: "Revisione completata",
+  aborted: "Interrotto",
+};
+
+// Convert a raw runtime/resume state code into a readable Italian label.
+export function runtimeStateLabel(runtimeState: string | null | undefined) {
+  if (!runtimeState) return null;
+  return RUNTIME_STATE_LABELS[runtimeState] ?? runtimeState;
+}
+
 // Resolve one runtime state into the shared badge presentation.
 export function runtimeStateBadgeClass(runtimeState: string | null) {
   return `badge ${RUNTIME_STATE_BADGE_VARIANTS[runtimeState ?? ""] ?? "badge-default"}`;

@@ -1,9 +1,12 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { fetchReviewInbox } from "../api";
+import { communicationPhaseLabel, executionIntentLabel, executionStatusLabel } from "../components/executionPresentation";
+import { humanReviewDecisionLabel } from "../components/humanReviewPresentation";
 import {
   RuntimeStateIcon,
   runtimeStateBadgeClass,
+  runtimeStateLabel,
   runtimeStateRowClass,
 } from "../components/runtimeStatePresentation";
 import { usePolledResource } from "../hooks";
@@ -31,24 +34,23 @@ function InboxRow({ item, interactive = true }: { item: ReviewInboxEntry; intera
         <div className="inbox-row-top">
           <div className="inbox-row-left">
             <span className={runtimeStateBadgeClass(item.runtime_state)}>
-              {item.runtime_state ?? "unknown"}
+              {runtimeStateLabel(item.runtime_state) ?? "sconosciuto"}
             </span>
             {item.external_communication_phase ? (
-              <span className="badge badge-neutral">{item.external_communication_phase}</span>
+              <span className="badge badge-neutral">
+                {communicationPhaseLabel(item.external_communication_phase)}
+              </span>
             ) : null}
             {item.execution_intent ? (
-              <span className="badge badge-neutral">{item.execution_intent}</span>
+              <span className="badge badge-neutral">{executionIntentLabel(item.execution_intent)}</span>
             ) : null}
             {item.external_execution_status ? (
-              <span className="badge badge-info">{item.external_execution_status}</span>
+              <span className="badge badge-info">{executionStatusLabel(item.external_execution_status)}</span>
             ) : null}
             {item.decision_type ? (
-              <span className="badge badge-completed">{item.decision_type}</span>
+              <span className="badge badge-completed">{humanReviewDecisionLabel(item.decision_type)}</span>
             ) : null}
-            {item.delivery_status ? (
-              <span className="badge badge-neutral">{item.delivery_status}</span>
-            ) : null}
-            <p className="inbox-row-title">{item.task_goal ?? "Untitled task"}</p>
+            <p className="inbox-row-title">{item.task_goal ?? "Attività senza titolo"}</p>
           </div>
           <div className="inbox-row-meta">
             <span className="inbox-row-timestamp">{formatTimestamp(item.updated_at)}</span>
@@ -61,7 +63,7 @@ function InboxRow({ item, interactive = true }: { item: ReviewInboxEntry; intera
         {item.allowed_decisions.length > 0 ? (
           <div className="inbox-row-actions">
             {item.allowed_decisions.map((d) => (
-              <span key={d} className="action-chip">{d}</span>
+              <span key={d} className="action-chip">{humanReviewDecisionLabel(d)}</span>
             ))}
           </div>
         ) : null}
@@ -99,25 +101,17 @@ export function ReviewInboxPage() {
   return (
     <div style={{ display: "grid", gap: 20 }}>
       <div className="page-header">
-        <p className="page-header-eyebrow">Human-in-the-loop</p>
-        <h1 className="page-header-title">Review inbox</h1>
+        <p className="page-header-eyebrow">Supervisione umana</p>
+        <h1 className="page-header-title">Attività da revisionare</h1>
         <p className="page-header-sub">
-          Active threads waiting for operator review. Polling every 2&nbsp;seconds.
+          Attività in attesa di una tua decisione. Aggiornamento automatico ogni 2&nbsp;secondi.
         </p>
       </div>
 
       <div className="stat-row">
         <div className="stat-item">
-          <div className="stat-label">Active pending</div>
+          <div className="stat-label">In attesa</div>
           <div className="stat-value">{loading ? "—" : items.length}</div>
-        </div>
-        <div className="stat-item">
-          <div className="stat-label">Inbox cutoff</div>
-          <div className="stat-value">2 min</div>
-        </div>
-        <div className="stat-item">
-          <div className="stat-label">Polling</div>
-          <div className="stat-value">2 sec</div>
         </div>
       </div>
 
@@ -125,8 +119,8 @@ export function ReviewInboxPage() {
 
       <div className="card">
         <div className="card-header">
-          <h2 className="card-title">Active queue</h2>
-          <span className="badge badge-waiting">{items.length} pending</span>
+          <h2 className="card-title">Coda attiva</h2>
+          <span className="badge badge-waiting">{items.length} in attesa</span>
         </div>
         <div className="card-body">
           {loading && items.length === 0 ? (
@@ -136,7 +130,7 @@ export function ReviewInboxPage() {
           {!loading && items.length === 0 ? (
             <div className="empty-state">
               <span className="empty-state-icon">✓</span>
-              No pending reviews in the active queue.
+              Nessuna attività in attesa di revisione.
             </div>
           ) : null}
 

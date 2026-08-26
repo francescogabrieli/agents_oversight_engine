@@ -63,6 +63,7 @@ def _validate_external_operation_payload(payload: Any) -> ExternalOperationPaylo
             ),
             cc=_coerce_recipient_tuple(payload.cc, field_name="cc"),
             bcc=_coerce_recipient_tuple(payload.bcc, field_name="bcc"),
+            body_format=payload.body_format,
         )
     if isinstance(payload, DatabaseOperationPayload):
         return _build_database_operation_payload(
@@ -122,6 +123,7 @@ def _coerce_external_operation_payload(
             ),
             cc=_coerce_recipient_tuple(payload.get("cc"), field_name="cc"),
             bcc=_coerce_recipient_tuple(payload.get("bcc"), field_name="bcc"),
+            body_format=payload.get("body_format", "plain"),
         )
     if payload_type == "database":
         return _build_database_operation_payload(payload)

@@ -279,6 +279,23 @@ body {
 
 /* ── generic review context ──────────────────────────────── */
 .review-context-body { display: grid; gap: 14px; }
+.review-context-narrative {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.review-narrative-list {
+  margin: 0; padding-left: 18px;
+  display: grid; gap: 4px;
+  color: var(--text-secondary);
+  font-size: 12px; line-height: 1.5;
+}
+.review-evidence-locator {
+  margin-top: 2px;
+  font-size: 11px; color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
 .review-context-reason {
   padding: 12px 14px;
   border-left: 3px solid var(--warning);

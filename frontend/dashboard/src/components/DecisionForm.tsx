@@ -4,7 +4,7 @@ import type {
   HumanReviewDecisionPayload,
   ReviewDetailResponse,
 } from "../types";
-import { humanReviewDecisionLabel } from "./humanReviewPresentation";
+import { humanReviewDecisionExplanation, humanReviewDecisionLabel } from "./humanReviewPresentation";
 
 type DecisionFormProps = {
   detail: ReviewDetailResponse;
@@ -73,7 +73,7 @@ export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
       };
 
       if (isModify && !modificationAllowed) {
-        throw new Error("The current review payload is not modifiable.");
+        throw new Error("Il contenuto di questa revisione non è modificabile.");
       }
 
       if (isModify && draft) {
@@ -108,21 +108,26 @@ export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
           },
         };
       } else if (isModify) {
-        throw new Error("This review has no modifiable external proposal.");
+        throw new Error("Questa revisione non ha una proposta esterna modificabile.");
       }
 
       await onSubmit(payload);
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Unknown error.");
+      setError(submitError instanceof Error ? submitError.message : "Errore sconosciuto.");
     } finally {
       setSubmitting(false);
     }
   };
 
+  const activeExplanation = humanReviewDecisionExplanation(decisionType);
+
   return (
     <section className="card card-accent">
       <div className="card-header">
-        <h2 className="card-title">Actions</h2>
+        <div>
+          <h2 className="card-title">La tua decisione</h2>
+          <p className="card-caption">Scegli cosa succede a questa attività.</p>
+        </div>
       </div>
       <div className="card-body review-actions-body">
         <div className="decision-button-grid">
@@ -143,29 +148,31 @@ export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
           ))}
         </div>
 
+        {activeExplanation ? <p className="review-context-summary">{activeExplanation}</p> : null}
+
         {isClarification ? (
           <div className="form-field">
-            <label className="form-label">Clarification text</label>
+            <label className="form-label">Testo del chiarimento</label>
             <textarea
               className="form-textarea"
               style={{ minHeight: 96 }}
               value={clarificationText}
               onChange={(event) => setClarificationText(event.target.value)}
-              placeholder="Describe what clarification is needed..."
+              placeholder="Descrivi il chiarimento necessario..."
             />
           </div>
         ) : null}
 
         {isModify && !modificationAllowed ? (
           <div className="alert alert-warning">
-            Modify is always available as an HITL control, but this review has no
-            editable typed payload.
+            La modifica è sempre disponibile come controllo dell'operatore, ma questa
+            revisione non ha un contenuto tipizzato modificabile.
           </div>
         ) : null}
 
         {isModify && modificationAllowed && draft ? (
           <div className="edit-draft-panel">
-            <p className="section-label" style={{ margin: 0 }}>Edit produced text</p>
+            <p className="section-label" style={{ margin: 0 }}>Modifica il testo prodotto</p>
             <div className="form-field">
               <textarea
                 className="form-textarea form-textarea-mono"
@@ -179,7 +186,7 @@ export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
 
         {isModify && modificationAllowed && !draft && operationProposal ? (
           <div className="edit-draft-panel">
-            <p className="section-label" style={{ margin: 0 }}>Edit typed operation payload</p>
+            <p className="section-label" style={{ margin: 0 }}>Modifica i dati dell'operazione</p>
             <div className="form-field">
               <textarea
                 className="form-textarea form-textarea-mono"
@@ -200,17 +207,17 @@ export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
             onClick={submit}
             style={isAbort ? { background: "var(--danger)", borderColor: "var(--danger)" } : undefined}
           >
-            {submitting ? "Submitting..." : "Submit decision"}
+            {submitting ? "Invio in corso..." : "Invia decisione"}
           </button>
 
           <details className="technical-details" style={{ flex: 1 }}>
             <summary className="technical-details-summary" style={{ borderTop: "none", paddingLeft: 8 }}>
-              Advanced options
+              Opzioni avanzate
             </summary>
             <div className="technical-details-body">
               <div className="operator-options-grid">
                 <div className="form-field">
-                  <label className="form-label">Reviewer ID</label>
+                  <label className="form-label">ID revisore</label>
                   <input
                     className="form-input"
                     value={reviewerId}
@@ -219,20 +226,20 @@ export function DecisionForm({ detail, onSubmit }: DecisionFormProps) {
                 </div>
                 <div className="form-field">
                   <label className="form-label">
-                    Note <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(optional)</span>
+                    Nota <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(facoltativa)</span>
                   </label>
                   <input
                     className="form-input"
                     value={note}
                     onChange={(event) => setNote(event.target.value)}
-                    placeholder="Internal note..."
+                    placeholder="Nota interna..."
                   />
                 </div>
               </div>
               {isModify && draft ? (
                 <div className="form-field">
                   <label className="form-label">
-                    Metadata <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(JSON)</span>
+                    Metadati <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(JSON)</span>
                   </label>
                   <textarea
                     className="form-textarea form-textarea-mono"
