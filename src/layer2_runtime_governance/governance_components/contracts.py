@@ -80,6 +80,8 @@ class GovernanceReasonCode(str, Enum):
     MISSING_EVIDENCE_BURDEN = "missing_evidence_burden"
     INSUFFICIENT_INDEPENDENT_SOURCES = "insufficient_independent_sources"
     RETRIEVED_CONTENT_MISSING = "retrieved_content_missing"
+    # Retired with the freshness evidence family: nothing emits these any more, and they
+    # remain only so archived thesis traces stay parseable against this vocabulary.
     FRESHNESS_METADATA_MISSING = "freshness_metadata_missing"
     STALE_EVIDENCE = "stale_evidence"
     FUTURE_SOURCE_TIMESTAMP = "future_source_timestamp"
@@ -92,6 +94,7 @@ class GovernanceReasonCode(str, Enum):
     REPLAN_CEILING_REACHED = "replan_ceiling_reached"
     CONSECUTIVE_TOOL_FAILURES = "consecutive_tool_failures"
     ACTION_CHURN = "action_churn"
+    STEP_EXPLORATION_BUDGET_EXHAUSTED = "step_exploration_budget_exhausted"
     UNCHANGED_CANDIDATE_RESUBMISSION = "unchanged_candidate_resubmission"
     REJECTED_CANDIDATE_RESUBMITTED = "rejected_candidate_resubmitted"
     UNRESOLVABLE_REVISION = "unresolvable_revision"

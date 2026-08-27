@@ -16,15 +16,15 @@ base_facts := {
 	"uncertainty": {"actor_self_confidence": 0.9, "configured_confidence_threshold": 0.65},
 }
 
-facts_evidence := {"raw_facts": {"completion_attempt": true, "factual_completion_attempt": true, "evidence_count": 2, "selected_evidence_ref_count": 1, "selected_evidence_refs_valid": true, "selected_evidence_refs_unique": true, "observation_ids_unique": true, "selected_observations_have_content": true, "selected_observations_provenance_resolvable": true, "selected_observations_belong_to_known_steps": true, "selected_evidence_all_title_only": false, "evidence_snapshot_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "evidence_selection_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "candidate_evidence_binding_present": true, "candidate_evidence_snapshot_matches": true, "candidate_evidence_selection_matches": true, "candidate_external_operation_digest_matches": true}, "score_components": {}, "score_formula_version": "evidence_integrity_provenance_v1", "thresholds_version": "layer2_governance_thresholds_v2"}
-facts_trajectory := {"raw_facts": {"actor_turn_count": 4, "completed_step_count": 1, "tool_call_count": 2, "successful_tool_call_count": 2, "failed_tool_call_count": 0, "synthetic_tool_result_count": 0, "observation_count": 2, "replan_count": 0, "replan_episode_count": 0, "consecutive_provider_protocol_failures": 0, "needs_replan_signal": false, "replan_reason_present": false, "first_replan_request": true, "observable_change_since_last_replan": true, "completion_signal": true, "external_candidate": false, "external_action_revision_count": 0, "unchanged_resubmission": false, "repeated_rejected_payload_digest": false}, "score_components": {}, "score_formula_version": "trajectory_health_v1", "thresholds_version": "layer2_governance_thresholds_v2"}
-shadow := {"raw_facts": {"mode": "shadow", "decision_influence": false, "pillar_unavailable": false}, "score_components": {}, "score_formula_version": "shadow", "thresholds_version": "layer2_governance_thresholds_v2"}
-no_judge := {"raw_facts": {"invoked": false, "required": false, "status": "not_applicable", "pillar_unavailable": false, "verdict": "uncertain", "severity": "low", "digest_matches": false}, "score_components": {}, "score_formula_version": "judge_v4", "thresholds_version": "layer2_governance_thresholds_v2"}
+facts_evidence := {"raw_facts": {"completion_attempt": true, "factual_completion_attempt": true, "evidence_count": 2, "selected_evidence_ref_count": 1, "selected_evidence_refs_valid": true, "selected_evidence_refs_unique": true, "observation_ids_unique": true, "selected_observations_have_content": true, "selected_observations_provenance_resolvable": true, "selected_observations_belong_to_known_steps": true, "selected_evidence_all_title_only": false, "evidence_snapshot_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "evidence_selection_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "candidate_evidence_binding_present": true, "candidate_evidence_snapshot_matches": true, "candidate_evidence_selection_matches": true, "candidate_external_operation_digest_matches": true}, "score_components": {}, "score_formula_version": "evidence_integrity_provenance_v1", "thresholds_version": "layer2_governance_thresholds_v3"}
+facts_trajectory := {"raw_facts": {"actor_turn_count": 4, "completed_step_count": 1, "tool_call_count": 2, "successful_tool_call_count": 2, "failed_tool_call_count": 0, "synthetic_tool_result_count": 0, "observation_count": 2, "replan_count": 0, "replan_episode_count": 0, "consecutive_provider_protocol_failures": 0, "needs_replan_signal": false, "replan_reason_present": false, "first_replan_request": true, "observable_change_since_last_replan": true, "completion_signal": true, "external_candidate": false, "external_action_revision_count": 0, "unchanged_resubmission": false, "repeated_rejected_payload_digest": false}, "score_components": {}, "score_formula_version": "trajectory_health_v1", "thresholds_version": "layer2_governance_thresholds_v3"}
+shadow := {"raw_facts": {"mode": "shadow", "decision_influence": false, "pillar_unavailable": false}, "score_components": {}, "score_formula_version": "shadow", "thresholds_version": "layer2_governance_thresholds_v3"}
+no_judge := {"raw_facts": {"invoked": false, "required": false, "status": "not_applicable", "pillar_unavailable": false, "verdict": "uncertain", "severity": "low", "digest_matches": false}, "score_components": {}, "score_formula_version": "judge_v4", "thresholds_version": "layer2_governance_thresholds_v3"}
 
-base_input := {"schema_version": "governance_decision_input.v1", "policy_bundle_version": "layer2_governance_v5", "policy_config_version": "layer2_governance_thresholds_v2", "base_facts": base_facts, "pillar_requirements": {"require_evidence": true, "require_risk": false, "require_trajectory": true, "require_behavioral": false, "require_judge": false}, "pillars": {"evidence": facts_evidence, "trajectory": facts_trajectory, "risk": shadow, "behavioral": shadow, "judge": no_judge}, "pillar_unavailable": {"evidence": false, "trajectory": false, "risk": false, "behavioral": false, "judge": false}, "pillar_errors": {}}
+base_input := {"schema_version": "governance_decision_input.v1", "policy_bundle_version": "layer2_governance_v6", "policy_config_version": "layer2_governance_thresholds_v3", "base_facts": base_facts, "pillar_requirements": {"require_evidence": true, "require_risk": false, "require_trajectory": true, "require_behavioral": false, "require_judge": false}, "pillars": {"evidence": facts_evidence, "trajectory": facts_trajectory, "risk": shadow, "behavioral": shadow, "judge": no_judge}, "pillar_unavailable": {"evidence": false, "trajectory": false, "risk": false, "behavioral": false, "judge": false}, "pillar_errors": {}}
 
 governed_operation := {"operation_id": "op-1", "boundary": "governed_external", "operation_family": "communication", "normalized_effect": "send", "execution_candidate": true, "target": {"kind": "recipient", "value": "ops@example.com", "destination_class": "external"}, "payload_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "capability_profile_id": "communication.default", "payload": {"payload_type": "communication", "recipient": "ops@example.com"}}
-safe_judge := {"raw_facts": {"invoked": true, "required": true, "status": "active", "pillar_unavailable": false, "verdict": "safe", "severity": "low", "evaluated_operation_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "expected_operation_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "operation_digest_matches": true, "evaluated_evidence_snapshot_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "expected_evidence_snapshot_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "evidence_snapshot_matches": true, "evaluated_evidence_selection_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "expected_evidence_selection_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "evidence_selection_matches": true, "digest_matches": true}, "score_components": {}, "score_formula_version": "external_operation_semantic_judge_v2", "thresholds_version": "layer2_governance_thresholds_v2"}
+safe_judge := {"raw_facts": {"invoked": true, "required": true, "status": "active", "pillar_unavailable": false, "verdict": "safe", "severity": "low", "evaluated_operation_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "expected_operation_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "operation_digest_matches": true, "evaluated_evidence_snapshot_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "expected_evidence_snapshot_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "evidence_snapshot_matches": true, "evaluated_evidence_selection_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "expected_evidence_selection_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "evidence_selection_matches": true, "digest_matches": true}, "score_components": {}, "score_formula_version": "external_operation_semantic_judge_v2", "thresholds_version": "layer2_governance_thresholds_v3"}
 
 test_intermediate_output_requires_no_active_semantic_pillars if {
 	facts := object.union(base_facts, {"actor": object.union(base_facts.actor, {"result_type": "intermediate_output"})})
@@ -91,6 +91,8 @@ test_trajectory_fact_usage_manifest_is_explicit if {
 		"consecutive_tool_failures",
 		"action_churn_count",
 		"external_candidate",
+		"current_step_tool_attempt_count",
+		"completion_signal",
 	]
 	result.fact_usage.observational_only_facts == [
 		"actor_turn_count",
@@ -103,7 +105,6 @@ test_trajectory_fact_usage_manifest_is_explicit if {
 		"observation_count",
 		"replan_count",
 		"consecutive_provider_protocol_failures",
-		"completion_signal",
 		"provider_recovery_active",
 		"provider_protocol_retry_exhausted",
 	]
@@ -190,28 +191,49 @@ test_nonfactual_completion_still_enforces_selected_reference_integrity if {
 	result.directive == "request_more_evidence"
 }
 
-test_freshness_deficit_remains_diagnostic_while_enforcement_disabled if {
-	evidence := object.union(facts_evidence, {"raw_facts": object.union(facts_evidence.raw_facts, {"coverage_evaluated": true, "burden_satisfied": false, "independent_sources_satisfied": true, "retrieved_content_satisfied": true, "freshness_evaluated": true, "freshness_satisfied": false, "deficit_codes": ["freshness_metadata_missing"]})})
+# The specific structural deficit has to travel on the decision itself: it was only
+# ever reachable inside the pillar payload, so the evaluation store recorded one
+# undifferentiated code for every Evidence family.
+test_evidence_gap_decision_carries_the_active_deficit_codes if {
+	raw_facts := object.union(facts_evidence.raw_facts, {"evidence_completion_attempt": true, "has_unanchored_literals_in_selection": true, "deficit_codes": ["unanchored_literals_in_selection"]})
+	evidence := object.union(facts_evidence, {"raw_facts": raw_facts})
 	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"evidence": evidence})})
 	result := decision with input as candidate
-        result.directive == "continue"
-        result.pillar_results.evidence.evidence_gap == false
-        result.pillar_results.evidence.freshness_enforcement_enabled == false
-        not "freshness_metadata_missing" in result.pillar_results.evidence.reason_codes
-}
-
-test_stale_evidence_requests_more_evidence_when_enforcement_enabled if {
-	evidence := object.union(facts_evidence, {"raw_facts": object.union(facts_evidence.raw_facts, {"coverage_evaluated": true, "burden_satisfied": false, "independent_sources_satisfied": true, "retrieved_content_satisfied": true, "freshness_evaluated": true, "freshness_satisfied": false})})
-	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"evidence": evidence})})
-	result := decision with input as candidate with data.policy_config.evidence.freshness_enforcement_enabled as true
 	result.directive == "request_more_evidence"
+	result.reason_codes == ["invalid_or_missing_selected_evidence", "unanchored_literals_in_selection"]
 }
 
-test_explicit_insufficiency_remains_valid_when_freshness_enforcement_enabled if {
-    raw_facts := object.union(facts_evidence.raw_facts, {"coverage_evaluated": true, "independent_sources_satisfied": false, "retrieved_content_satisfied": false, "freshness_evaluated": false, "insufficiency_declaration_permitted": true, "insufficiency_declared_in_payload": true})
+test_evidence_ceiling_escalation_carries_the_active_deficit_codes if {
+	raw_facts := object.union(facts_evidence.raw_facts, {"evidence_completion_attempt": true, "has_unanchored_literals_in_selection": true, "evidence_request_episode_count": 3, "deficit_codes": ["unanchored_literals_in_selection"]})
+	evidence := object.union(facts_evidence, {"raw_facts": raw_facts})
+	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"evidence": evidence})})
+	result := decision with input as candidate
+	result.directive == "wait_human_review"
+	result.reason_codes == ["evidence_request_limit_reached", "unanchored_literals_in_selection"]
+}
+
+# Read-only exploration used to have no terminating condition at all.
+test_step_exploration_budget_escalates_to_human_review if {
+	trajectory := object.union(facts_trajectory, {"raw_facts": object.union(facts_trajectory.raw_facts, {"current_step_tool_attempt_count": 30, "completion_signal": false})})
+	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"trajectory": trajectory})})
+	result := decision with input as candidate
+	result.directive == "wait_human_review"
+	result.reason_codes == ["step_exploration_budget_exhausted"]
+}
+
+# A completing turn is exempt: Evidence is the substantive check on that boundary.
+test_step_exploration_budget_does_not_block_a_completion if {
+	trajectory := object.union(facts_trajectory, {"raw_facts": object.union(facts_trajectory.raw_facts, {"current_step_tool_attempt_count": 40, "completion_signal": true})})
+	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"trajectory": trajectory})})
+	result := decision with input as candidate
+	result.directive == "continue"
+}
+
+test_explicit_insufficiency_satisfies_the_declared_burden if {
+    raw_facts := object.union(facts_evidence.raw_facts, {"coverage_evaluated": true, "independent_sources_satisfied": false, "retrieved_content_satisfied": false, "insufficiency_declaration_permitted": true, "insufficiency_declared_in_payload": true})
     evidence := object.union(facts_evidence, {"raw_facts": raw_facts})
     candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"evidence": evidence})})
-    result := decision with input as candidate with data.policy_config.evidence.freshness_enforcement_enabled as true
+    result := decision with input as candidate
     result.directive == "continue"
     result.pillar_results.evidence.evidence_gap == false
 }

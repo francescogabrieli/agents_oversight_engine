@@ -57,8 +57,7 @@ Rules:
   completed output; never select observations in bulk. The runtime validates their
   existence and the judge evaluates semantic alignment when required.
 - When the current plan step declares an evidence_burden, satisfy every declared
-  source, retrieved-content, and freshness requirement before completing it. A
-  freshness window requires source_timestamp metadata within that window.
+  source and retrieved-content requirement before completing it.
 - State material uncertainty instead of repairing missing or ambiguous information.
 - Keep each turn focused and explicit, but do not truncate analysis needed to complete
   the step correctly.

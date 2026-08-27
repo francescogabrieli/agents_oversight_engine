@@ -209,7 +209,6 @@ class Layer2TraceTests(unittest.TestCase):
         state.plan_steps[0].evidence_burden = EvidenceBurden(
             min_independent_sources=2,
             require_retrieved_content=True,
-            freshness_window_days=7,
         )
         state.observations[0] = ToolObservation(
             observation_id=state.observations[0].observation_id,

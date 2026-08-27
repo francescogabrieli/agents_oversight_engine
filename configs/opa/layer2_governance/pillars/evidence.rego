@@ -25,9 +25,6 @@ max_evidence_requests_before_review := object.get(data.policy_config.thresholds,
 coverage_evaluated := object.get(facts, "coverage_evaluated", false)
 independent_sources_satisfied := object.get(facts, "independent_sources_satisfied", true)
 retrieved_content_satisfied := object.get(facts, "retrieved_content_satisfied", true)
-freshness_evaluated := object.get(facts, "freshness_evaluated", false)
-freshness_satisfied := object.get(facts, "freshness_satisfied", true)
-freshness_enforcement_enabled := object.get(object.get(data.policy_config, "evidence", {}), "freshness_enforcement_enabled", true)
 insufficiency_declaration_permitted := object.get(facts, "insufficiency_declaration_permitted", false)
 insufficiency_declared_in_payload := object.get(facts, "insufficiency_declared_in_payload", false)
 circular_reference_detected := object.get(facts, "circular_reference_detected", false)
@@ -41,35 +38,17 @@ evidence_request_ceiling_reached if {
 }
 
 default evidence_gap := false
-default base_coverage_satisfied := false
 default enforced_burden_satisfied := false
 
-base_coverage_satisfied if {
+enforced_burden_satisfied if {
 	independent_sources_satisfied == true
 	retrieved_content_satisfied == true
 }
 
-base_coverage_satisfied if {
+# A task may authorize declaring the shortfall instead of meeting the source count.
+enforced_burden_satisfied if {
 	insufficiency_declaration_permitted == true
 	insufficiency_declared_in_payload == true
-}
-
-enforced_burden_satisfied if {
-	base_coverage_satisfied
-	freshness_enforcement_enabled != true
-}
-
-enforced_burden_satisfied if {
-	base_coverage_satisfied
-	freshness_enforcement_enabled == true
-	insufficiency_declared_in_payload == true
-}
-
-enforced_burden_satisfied if {
-	base_coverage_satisfied
-	freshness_enforcement_enabled == true
-	freshness_evaluated == true
-	freshness_satisfied == true
 }
 
 evidence_gap if {
@@ -105,12 +84,6 @@ evidence_gap if {
 evidence_gap if {
 	coverage_evaluated == true
 	enforced_burden_satisfied != true
-}
-
-evidence_gap if {
-	freshness_enforcement_enabled == true
-	freshness_evaluated == true
-	freshness_satisfied != true
 }
 
 evidence_gap if {
@@ -153,15 +126,10 @@ evidence_gap if {
 	has_unanchored_literals_in_universe == true
 }
 
-excluded_freshness_reason(code) if {
-        freshness_enforcement_enabled != true
-        code in {"freshness_metadata_missing", "stale_evidence", "future_source_timestamp"}
-}
-
-active_reason_codes := [code |
-        some code in object.get(facts, "deficit_codes", [])
-        not excluded_freshness_reason(code)
-]
+# Every deficit the runtime observes is enforced; the pillar no longer reports a
+# structural finding it cannot act on. These codes reach the decision itself, so
+# remediation and the evaluation store read the same vocabulary the rules used.
+active_reason_codes := object.get(facts, "deficit_codes", [])
 
 require_evidence := object.get(object.get(input, "pillar_requirements", {}), "require_evidence", false) == true
 
@@ -178,7 +146,6 @@ result := {
 	"decision_influence": decision_influence,
 	"evidence_gap": evidence_gap,
 	"evidence_request_ceiling_reached": evidence_request_ceiling_reached,
-	"freshness_enforcement_enabled": freshness_enforcement_enabled,
 	"enforced_burden_satisfied": enforced_burden_satisfied,
 	"diagnostic_score": object.get(object.get(input.pillars, "evidence", {}), "diagnostic_score", null),
 	"diagnostic_level": object.get(object.get(input.pillars, "evidence", {}), "diagnostic_level", "unscored"),

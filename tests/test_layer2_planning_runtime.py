@@ -281,7 +281,6 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
                 evidence_burden=EvidenceBurden(
                     min_independent_sources=3,
                     require_retrieved_content=True,
-                    freshness_window_days=30,
                 ),
             )
         )
@@ -295,7 +294,6 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
                 "factual_step_required": True,
                 "min_independent_sources": 3,
                 "require_retrieved_content": True,
-                "freshness_window_days": 30,
             },
         )
         self.assertIn("must not", build_replanner_system_prompt())
@@ -332,7 +330,6 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
                 produces_factual_claims=True,
                 evidence_burden=EvidenceBurden(
                     min_independent_sources=3,
-                    freshness_window_days=30,
                 ),
             )
         )
@@ -390,7 +387,6 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         task_state = _build_replanning_task_state()
         burden = EvidenceBurden(
             min_independent_sources=3,
-            freshness_window_days=30,
         )
         task_state.plan_steps.append(
             PlanStep(
@@ -469,7 +465,6 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
                 produces_factual_claims=True,
                 evidence_burden=EvidenceBurden(
                     min_independent_sources=3,
-                    freshness_window_days=30,
                 ),
             )
         )
@@ -494,7 +489,6 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
                     produces_factual_claims=True,
                     evidence_burden=_ReplanEvidenceBurdenPayload(
                         min_independent_sources=3,
-                        freshness_window_days=30,
                     ),
                     produces_governed_external_effect_proposal=False,
                 )
@@ -864,7 +858,6 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
                 evidence_burden=EvidenceBurden(
                     min_independent_sources=2,
                     require_retrieved_content=True,
-                    freshness_window_days=7,
                 ),
             )
         ]
@@ -879,7 +872,6 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
             {
                 "min_independent_sources": 2,
                 "require_retrieved_content": True,
-                "freshness_window_days": 7,
             },
         )
 

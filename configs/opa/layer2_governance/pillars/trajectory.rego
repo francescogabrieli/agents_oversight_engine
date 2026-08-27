@@ -18,6 +18,8 @@ policy_fact_names := [
 	"consecutive_tool_failures",
 	"action_churn_count",
 	"external_candidate",
+	"current_step_tool_attempt_count",
+	"completion_signal",
 ]
 
 # Runtime counters and recovery markers remain replayable telemetry, not policy triggers.
@@ -32,7 +34,6 @@ observational_only_fact_names := [
 	"observation_count",
 	"replan_count",
 	"consecutive_provider_protocol_failures",
-	"completion_signal",
 	"provider_recovery_active",
 	"provider_protocol_retry_exhausted",
 ]
@@ -54,11 +55,14 @@ replan_episode_count := object.get(facts, "replan_episode_count", 0)
 consecutive_tool_failures := object.get(facts, "consecutive_tool_failures", 0)
 action_churn_count := object.get(facts, "action_churn_count", 0)
 external_candidate := object.get(facts, "external_candidate", false)
+current_step_tool_attempt_count := object.get(facts, "current_step_tool_attempt_count", 0)
+completion_signal := object.get(facts, "completion_signal", false)
 
 max_action_revisions_before_review := object.get(data.policy_config.thresholds, "max_action_revisions_before_review", 3)
 max_replans_before_review := object.get(data.policy_config.thresholds, "max_replans_before_review", 3)
 max_consecutive_tool_failures_before_review := object.get(data.policy_config.thresholds, "max_consecutive_tool_failures_before_review", 4)
 max_action_churn_before_review := object.get(data.policy_config.thresholds, "max_action_churn_before_review", 2)
+max_tool_attempts_per_step_before_review := object.get(data.policy_config.thresholds, "max_tool_attempts_per_step_before_review", 30)
 
 default replan_request_admissible := false
 
@@ -107,6 +111,16 @@ action_churn if {
 	action_churn_count >= max_action_churn_before_review
 }
 
+default step_exploration_budget_exhausted := false
+
+# Bound read-only exploration: a step worked past its attempt ceiling without reaching a
+# completion is escalated for supervision rather than left to run without a terminating
+# condition. A completing turn is exempt, because Evidence is the substantive check there.
+step_exploration_budget_exhausted if {
+	current_step_tool_attempt_count >= max_tool_attempts_per_step_before_review
+	not completion_signal
+}
+
 require_trajectory := object.get(object.get(input, "pillar_requirements", {}), "require_trajectory", false) == true
 
 mode := "active" if {
@@ -127,6 +141,7 @@ result := {
 	"replan_ceiling_reached": replan_ceiling_reached,
 	"consecutive_tool_failures_review_threshold_reached": consecutive_tool_failures_review_threshold_reached,
 	"action_churn": action_churn,
+	"step_exploration_budget_exhausted": step_exploration_budget_exhausted,
 	"unchanged_resubmission": unchanged_resubmission,
 	"repeated_rejected_payload_digest": repeated_rejected_payload_digest,
 	"unresolvable_revision": unresolvable_revision,

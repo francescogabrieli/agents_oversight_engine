@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
+from datetime import datetime
 from typing import Any
 from urllib.parse import urlparse, urlsplit
 
@@ -53,9 +54,14 @@ _STRUCTURAL_NUMBER_PREFIX = re.compile(
 _STRUCTURAL_NUMBER_LINE_START = re.compile(
     r"^\s*\d+(?:\.\d+)*[.)]\s"
 )
-_LOCALIZED_CURRENCY = re.compile(
-    r"^(?P<symbol>[\$€£¥])\s*(?P<whole>\d+)(?P<separator>[\.,])(?P<fraction>\d{1,2})$"
+# prefix: currency symbol; suffix: percent sign or ISO currency code.
+_NUMERIC_LITERAL = re.compile(
+    r"^(?P<prefix>[\$€£¥])?\s*(?P<number>\d[\d.,\s ]*\d|\d)"
+    r"\s*(?P<suffix>%|USD|EUR|GBP|JPY|CHF)?$",
+    re.IGNORECASE,
 )
+# "141.006" and "1,234,567": a separator followed by exactly three digits, repeated.
+_GROUPED_INTEGER = re.compile(r"^\d{1,3}(?P<sep>[.,])\d{3}(?:(?P=sep)\d{3})*$")
 
 # A task states a date in prose ("24 agosto 2026"); an agent renders it numerically.
 # Both denote the same authoritative value, so the corpus index must carry every
@@ -134,19 +140,6 @@ def _declares_insufficiency(target_text: str) -> bool:
     return False
 
 
-@dataclass(frozen=True)
-class _FreshnessAssessment:
-    # Retain every deterministic freshness outcome needed by OPA and the audit trace.
-    evaluated: bool
-    satisfied: bool
-    window_days: int | None
-    reference_time: str | None
-    source_timestamps: dict[str, str | None]
-    missing_observation_ids: tuple[str, ...]
-    stale_observation_ids: tuple[str, ...]
-    future_observation_ids: tuple[str, ...]
-
-
 def extract_source_origin(locator: str | None) -> str:
     if not locator:
         return "unknown_origin"
@@ -188,15 +181,61 @@ def _extract_literal_tokens(text: str) -> list[str]:
     return sorted(tokens)
 
 
-# Treat decimal comma and decimal point as equivalent for localized currency rendering.
-def _literal_comparison_key(token: str) -> str:
-    currency = _LOCALIZED_CURRENCY.fullmatch(token)
-    if currency is None:
-        return token
-    return (
-        f"{currency.group('symbol')}"
-        f"{currency.group('whole')}.{currency.group('fraction')}"
-    )
+# A number denotes the same quantity whichever locale renders it. An Italian agent
+# writes "141.006" and "30,4%" for the "141,006" and "30.4%" of an English source, and
+# "97%" for its "97.0%". Comparing surface forms reported those as unsupported claims,
+# so anchoring compares quantities: a literal yields every canonical key its notation
+# can plausibly denote, and it is anchored when the corpus offers any of the same keys.
+def _literal_comparison_keys(token: str) -> frozenset[str]:
+    numeric = _NUMERIC_LITERAL.fullmatch(token.strip())
+    if numeric is None:
+        return frozenset({token})
+    prefix = numeric.group("prefix") or ""
+    suffix = (numeric.group("suffix") or "").strip().upper()
+    keys = {
+        f"{prefix}{value}{suffix}"
+        for value in _numeric_readings(numeric.group("number"))
+    }
+    return frozenset(keys) if keys else frozenset({token})
+
+
+# Yield every quantity a separator layout can denote, canonically formatted.
+def _numeric_readings(text: str) -> set[str]:
+    digits = re.sub(r"[\s ]", "", text)
+    if digits.isdigit():
+        return _decimal_key(digits)
+    commas = digits.count(",")
+    dots = digits.count(".")
+    readings: set[str] = set()
+    if commas and dots:
+        # The rightmost separator is the decimal point; the other one groups thousands.
+        if digits.rfind(",") > digits.rfind("."):
+            readings |= _decimal_key(digits.replace(".", "").replace(",", "."))
+        else:
+            readings |= _decimal_key(digits.replace(",", ""))
+        return readings
+    separator = "," if commas else "."
+    if commas + dots > 1:
+        # Repeated separators can only group thousands.
+        return _decimal_key(digits.replace(separator, ""))
+    if _GROUPED_INTEGER.fullmatch(digits):
+        # A lone separator before exactly three digits is genuinely ambiguous: it groups
+        # thousands in one locale and opens decimals in the other. Both readings are
+        # admitted, because this family exists to catch invented values, not to punish
+        # an agent for the notation of its own language.
+        readings |= _decimal_key(digits.replace(separator, ""))
+    readings |= _decimal_key(digits.replace(separator, "."))
+    return readings
+
+
+# Render one canonical decimal string, dropping trailing zeros so 97 == 97.0.
+def _decimal_key(text: str) -> set[str]:
+    try:
+        value = Decimal(text)
+    except InvalidOperation:
+        return set()
+    # Decimal.normalize renders integers in exponent form ("1E+3"); expand them back.
+    return {format(value.normalize(), "f")}
 
 
 # Include immutable observation provenance when checking literal claim anchoring.
@@ -288,9 +327,10 @@ def _build_literal_corpus_index(
     )
     literal_keys = frozenset(
         {
-            _literal_comparison_key(item)
+            key
             for item in _extract_literal_tokens(corpus)
             if not item.casefold().startswith(("http://", "https://"))
+            for key in _literal_comparison_keys(item)
         }
         | _prose_date_renderings(corpus)
     )
@@ -331,7 +371,9 @@ def _literal_is_anchored(token: str, index: _LiteralCorpusIndex) -> bool:
             return True
         stripped = token.rstrip(".,")
         return stripped != token and canonical_web_locator(stripped) in index.locators
-    return token in index.corpus_text or _literal_comparison_key(token) in index.literal_keys
+    return token in index.corpus_text or bool(
+        _literal_comparison_keys(token) & index.literal_keys
+    )
 
 
 # Return task-anchored and truly unanchored literals in stable target-token order.
@@ -376,78 +418,9 @@ def _get_target_text(task_state: TaskState) -> str:
     return " ".join(parts)
 
 
-# Normalize only source-attributed, timezone-aware timestamps for a freshness decision.
-def _normalize_source_timestamp(value: object) -> datetime | None:
-    if not isinstance(value, datetime):
-        return None
-    if value.tzinfo is None or value.utcoffset() is None:
-        return None
-    return value.astimezone(timezone.utc)
-
-
-# Preserve an observed timestamp in audit facts even when it is unusable for freshness.
+# Carry an observed publication timestamp into the literal corpus as source provenance.
 def _source_timestamp_text(value: object) -> str | None:
     return value.isoformat() if isinstance(value, datetime) else None
-
-
-# Evaluate a declared freshness window against source metadata, never retrieval time.
-def _evaluate_freshness(
-    *,
-    selected: list[ToolObservation],
-    freshness_window_days: int | None,
-    evaluated_at: datetime | None,
-) -> _FreshnessAssessment:
-    source_timestamps = {
-        item.observation_id: _source_timestamp_text(
-            getattr(item, "source_timestamp", None)
-        )
-        for item in selected
-    }
-    if freshness_window_days is None:
-        return _FreshnessAssessment(
-            evaluated=False,
-            satisfied=True,
-            window_days=None,
-            reference_time=None,
-            source_timestamps=source_timestamps,
-            missing_observation_ids=(),
-            stale_observation_ids=(),
-            future_observation_ids=(),
-        )
-
-    reference_time = evaluated_at or datetime.now(timezone.utc)
-    normalized_reference_time = _normalize_source_timestamp(reference_time)
-    if normalized_reference_time is None:
-        raise ValueError("Evidence freshness evaluation requires an aware UTC reference time.")
-
-    cutoff = normalized_reference_time - timedelta(days=freshness_window_days)
-    missing_observation_ids: list[str] = []
-    stale_observation_ids: list[str] = []
-    future_observation_ids: list[str] = []
-    for item in selected:
-        source_timestamp = _normalize_source_timestamp(
-            getattr(item, "source_timestamp", None)
-        )
-        if source_timestamp is None:
-            missing_observation_ids.append(item.observation_id)
-        elif source_timestamp > normalized_reference_time:
-            future_observation_ids.append(item.observation_id)
-        elif source_timestamp < cutoff:
-            stale_observation_ids.append(item.observation_id)
-
-    return _FreshnessAssessment(
-        evaluated=True,
-        satisfied=bool(selected)
-        and not missing_observation_ids
-        and not stale_observation_ids
-        and not future_observation_ids,
-        window_days=freshness_window_days,
-        reference_time=normalized_reference_time.isoformat(),
-        source_timestamps=source_timestamps,
-        missing_observation_ids=tuple(missing_observation_ids),
-        stale_observation_ids=tuple(stale_observation_ids),
-        future_observation_ids=tuple(future_observation_ids),
-    )
 
 
 # Reject typed actor-produced artifacts and echo-style transformations as evidence sources.
@@ -476,7 +449,6 @@ def build_evidence_signal(
     *,
     task_state: TaskState,
     thresholds_version: str,
-    evaluated_at: datetime | None = None,
 ) -> dict[str, Any]:
     result = task_state.actor_result
     validation = result.step_validation if result is not None else None
@@ -503,12 +475,6 @@ def build_evidence_signal(
     evidence_completion_attempt = completion_attempt and evidence_families_active
     unique_selected = tuple(dict.fromkeys(selected_refs))
     available_obs_ids = {item.observation_id for item in task_state.observations}
-    selected_evidence_ref_ratio = (
-        len(unique_selected) / len(available_obs_ids)
-        if available_obs_ids
-        else 0.0
-    )
-
     observation_lineage = build_observation_lineage(task_state=task_state)
 
     # Famiglia 1: Integrità referenziale e digest binding
@@ -634,16 +600,8 @@ def build_evidence_signal(
             retrieved_content_satisfied = bool(selected_retrieved)
         else:
             retrieved_content_satisfied = True
-        freshness = _evaluate_freshness(
-            selected=selected,
-            freshness_window_days=evidence_burden.freshness_window_days,
-            evaluated_at=evaluated_at,
-        )
-        freshness_satisfied = freshness.satisfied
         burden_satisfied = (
-            independent_sources_satisfied
-            and retrieved_content_satisfied
-            and freshness_satisfied
+            independent_sources_satisfied and retrieved_content_satisfied
         )
     elif produces_factual_claims:
         # Legacy or malformed state must not silently downgrade the factual obligation.
@@ -651,17 +609,6 @@ def build_evidence_signal(
         min_sources = 0
         independent_sources_satisfied = False
         retrieved_content_satisfied = False
-        freshness = _FreshnessAssessment(
-            evaluated=False,
-            satisfied=False,
-            window_days=None,
-            reference_time=None,
-            source_timestamps={},
-            missing_observation_ids=(),
-            stale_observation_ids=(),
-            future_observation_ids=(),
-        )
-        freshness_satisfied = freshness.satisfied
         burden_satisfied = False
     else:
         # An external proposal may activate the families without declaring a burden.
@@ -669,17 +616,6 @@ def build_evidence_signal(
         min_sources = 0
         independent_sources_satisfied = True
         retrieved_content_satisfied = True
-        freshness = _FreshnessAssessment(
-            evaluated=False,
-            satisfied=True,
-            window_days=None,
-            reference_time=None,
-            source_timestamps={},
-            missing_observation_ids=(),
-            stale_observation_ids=(),
-            future_observation_ids=(),
-        )
-        freshness_satisfied = freshness.satisfied
         burden_satisfied = True
 
     # Famiglia 3: Qualità strutturale delle osservazioni
@@ -728,12 +664,6 @@ def build_evidence_signal(
         deficit_codes.append("insufficient_independent_sources")
     if coverage_evaluated and not retrieved_content_satisfied:
         deficit_codes.append("retrieved_content_missing")
-    if freshness.evaluated and freshness.missing_observation_ids:
-        deficit_codes.append("freshness_metadata_missing")
-    if freshness.evaluated and freshness.stale_observation_ids:
-        deficit_codes.append("stale_evidence")
-    if freshness.evaluated and freshness.future_observation_ids:
-        deficit_codes.append("future_source_timestamp")
     if evidence_completion_attempt and selected_evidence_all_title_only:
         deficit_codes.append("title_only_evidence_fragility")
     if evidence_completion_attempt and circular_reference_detected:
@@ -762,18 +692,14 @@ def build_evidence_signal(
         "observation_count": len(task_state.observations),
         "observation_ids_unique": observation_ids_unique,
         "selected_evidence_ref_count": len(selected_refs),
-        "selected_evidence_ref_ratio": selected_evidence_ref_ratio,
         "selected_evidence_refs_valid": selected_evidence_refs_valid,
         "selected_evidence_refs_unique": selected_evidence_refs_unique,
         "selected_observations_have_content": selected_observations_have_content,
         "selected_observations_provenance_resolvable": provenance_resolvable,
         "selected_observations_belong_to_known_steps": known_steps,
-        "selected_search_title_only_count": search_title_only_ref_count,
         "selected_evidence_all_title_only": selected_evidence_all_title_only,
         "evidence_selection_digest": selection_digest,
         "evidence_snapshot_digest": snapshot_digest,
-        "evidence_snapshot_observation_count": len(snapshot_manifest),
-        "evidence_snapshot_omitted_observation_ids": [],
         "candidate_evidence_binding_required": candidate_binding_required,
         "candidate_evidence_binding_present": candidate_binding_present,
         "candidate_evidence_snapshot_matches": candidate_snapshot_matches,
@@ -782,7 +708,6 @@ def build_evidence_signal(
         "completion_attempt": completion_attempt,
         "factual_completion_attempt": factual_completion_attempt,
         "evidence_completion_attempt": evidence_completion_attempt,
-        "external_operation_candidate": bool(task_state.external_operation_proposal and task_state.external_operation_proposal.execution_candidate),
         "evidence_request_count": getattr(task_state, "evidence_request_count", 0),
         "evidence_request_episode_count": evidence_request_episode_count,
         "evidence_request_episode_id": current_evidence_episode_id,
@@ -790,7 +715,6 @@ def build_evidence_signal(
         "produces_factual_claims": produces_factual_claims,
         "produces_governed_external_effect_proposal": produces_external_effect_proposal,
         "evidence_families_active": evidence_families_active,
-        "evidence_burden_declared": declared_evidence_burden is not None,
         "evidence_burden_derived_from_task": (
             declared_evidence_burden is None and evidence_burden is not None
         ),
@@ -801,16 +725,6 @@ def build_evidence_signal(
         "min_independent_sources_required": min_sources,
         "independent_sources_satisfied": independent_sources_satisfied,
         "retrieved_content_satisfied": retrieved_content_satisfied,
-        "freshness_evaluated": freshness.evaluated,
-        "freshness_window_days": freshness.window_days,
-        "freshness_reference_time": freshness.reference_time,
-        "selected_source_timestamps": freshness.source_timestamps,
-        "freshness_missing_observation_ids": list(freshness.missing_observation_ids),
-        "stale_evidence_observation_ids": list(freshness.stale_observation_ids),
-        "future_source_timestamp_observation_ids": list(
-            freshness.future_observation_ids
-        ),
-        "freshness_satisfied": freshness_satisfied,
         "burden_satisfied": burden_satisfied,
         "insufficiency_declaration_permitted": bool(
             evidence_burden and evidence_burden.insufficiency_declaration_permitted
@@ -819,9 +733,7 @@ def build_evidence_signal(
         # Famiglia 4 facts
         "circular_reference_detected": circular_reference_detected,
         "circular_evidence_observation_ids": sorted(circular_evidence_reasons),
-        "circular_evidence_reasons": circular_evidence_reasons,
         # Famiglia 5 facts
-        "target_literal_token_count": len(target_tokens),
         "literals_anchored_to_task": literals_anchored_to_task,
         "unanchored_literals_in_selection": unanchored_literals_in_selection,
         "unanchored_literals_in_universe": unanchored_literals_in_universe,
@@ -829,7 +741,6 @@ def build_evidence_signal(
         "has_unanchored_literals_in_universe": len(unanchored_literals_in_universe) > 0,
         # Aggregated deficit codes
         "deficit_codes": deficit_codes,
-        "has_evidence_deficit": len(deficit_codes) > 0,
     }
     return {
         "raw_facts": raw_facts,

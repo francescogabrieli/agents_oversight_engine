@@ -340,15 +340,6 @@ def build_judge_signal(
         "operation_digest_matches": operation_digest_matches,
         "digest_matches": digest_matches,
         "prompt_version": assessment.prompt_version if assessment else None,
-        "model_metadata": (
-            {
-                "provider": assessment.model_metadata.provider,
-                "model": assessment.model_metadata.model,
-                "judge_name": assessment.model_metadata.judge_name,
-            }
-            if assessment and assessment.model_metadata
-            else None
-        ),
     }
     return {
         "raw_facts": raw_facts,

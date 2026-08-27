@@ -27,6 +27,22 @@ class ToolDisposition(str, Enum):
     REJECTED_CIRCUIT = "rejected_circuit"
     REJECTED_UNANCHORED_TARGET = "rejected_unanchored_target"
 
+    # A disposition either reached the capability backend or was settled locally.
+    # Convergence rules must classify by this split rather than by an allowlist,
+    # so a new local rejection can never fall outside every progress guard.
+    @property
+    def reached_backend(self) -> bool:
+        return self in _BACKEND_DISPOSITIONS
+
+
+_BACKEND_DISPOSITIONS = frozenset(
+    {
+        ToolDisposition.EXECUTED_SUCCESS,
+        ToolDisposition.EXECUTED_RETRYABLE_FAILURE,
+        ToolDisposition.EXECUTED_TERMINAL_FAILURE,
+    }
+)
+
 
 @dataclass(frozen=True)
 class StepArtifact:

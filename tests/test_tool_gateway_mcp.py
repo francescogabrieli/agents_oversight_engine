@@ -309,7 +309,7 @@ class GatewayMCPTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertIsNone(result.observations[0].source_timestamp)
         self.assertIn(
-            "excluded from semantic publication freshness",
+            "excluded from the source publication timestamp",
             result.summary,
         )
 
@@ -346,7 +346,7 @@ class GatewayMCPTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertIsNone(result.observations[0].source_timestamp)
         self.assertIn(
-            "excluded from semantic publication freshness",
+            "excluded from the source publication timestamp",
             result.summary,
         )
 

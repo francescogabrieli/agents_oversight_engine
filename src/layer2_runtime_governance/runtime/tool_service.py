@@ -36,7 +36,13 @@ def tool_gateway(state: TaskState, *, tool_gateway_service: ToolGatewayPort) -> 
     state.last_tool_result = result
     state.tool_results_history.append(result)
     state.current_tool_request = None
-    if disposition in {ToolDisposition.REJECTED_DUPLICATE, ToolDisposition.CACHE_HIT} and _same_epoch_repeat_count(state, action_key) >= 2:
+    # Any locally settled request made no progress on the world. Escalating only a
+    # named subset let a new rejection kind loop without bound: an unanchored target
+    # is refused before the backend, so it is neither a failure nor a duplicate and
+    # no convergence rule could ever see it.
+    if not disposition.reached_backend and _step_repeat_count(
+        state, action_key, request.plan_step_id
+    ) >= 2:
         _request_protocol_replan(state, action_key=action_key)
     else:
         state.current_state = RuntimeState.ACTING
@@ -91,9 +97,18 @@ def _is_retryable_backend_failure(result: ToolExecutionResult) -> bool:
     }
 
 
-# Count same-epoch attempts after adding the current rejected duplicate.
-def _same_epoch_repeat_count(state: TaskState, action_key: str) -> int:
-    return sum(1 for item in state.tool_attempts if item.action_key == action_key and item.progress_epoch == state.progress_epoch)
+# Count repeats of one request within the plan step that issued it.
+#
+# This was once scoped to the progress epoch, which the actor advances itself: any
+# observation bumps the epoch, so interleaving one productive search with repeated ones
+# reset the window before it could ever reach the ceiling. The counter has to live on a
+# boundary the actor cannot move, and the step is that boundary.
+def _step_repeat_count(state: TaskState, action_key: str, plan_step_id: str) -> int:
+    return sum(
+        1
+        for item in state.tool_attempts
+        if item.action_key == action_key and item.plan_step_id == plan_step_id
+    )
 
 
 # Escalate local protocol churn to replanning without asking OPA to supervise technical loops.

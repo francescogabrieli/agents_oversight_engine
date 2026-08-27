@@ -83,7 +83,6 @@ class _ReplanEvidenceBurdenPayload(BaseModel):
 
     min_independent_sources: int = Field(default=1, ge=1)
     require_retrieved_content: bool = Field(default=True)
-    freshness_window_days: int | None = Field(default=None, ge=1)
     insufficiency_declaration_permitted: bool = Field(default=False)
 
 
@@ -130,7 +129,7 @@ Each replacement step must contain:
 - rationale
 - expected_outcome
 - produces_factual_claims (boolean: true if this step produces factual claims that leave the system or will be used for downstream decision-making, false otherwise)
-- evidence_burden (required object when produces_factual_claims is true; omit it when produces_factual_claims is false. Fields: min_independent_sources [default 1], require_retrieved_content [default true], freshness_window_days [optional integer], insufficiency_declaration_permitted [default false])
+- evidence_burden (required object when produces_factual_claims is true; omit it when produces_factual_claims is false. Fields: min_independent_sources [default 1], require_retrieved_content [default true], insufficiency_declaration_permitted [default false])
 - produces_governed_external_effect_proposal (boolean: true only for the terminal remaining step that prepares the exact governed external operation requested by an execute-after-governance task)
 
 Rules:
@@ -143,7 +142,7 @@ Rules:
   requested interval does not require external evidence.
 - Preserve the `remaining_evidence_obligation` supplied in the runtime context. The
   replacement trajectory must contain factual work when it is required and must not
-  reduce its source-count, retrieved-content, or freshness dimensions.
+  reduce its source-count or retrieved-content dimensions.
 - Do not modify or repeat completed steps.
 - Do not emit concrete tool calls, URLs, query strings, API inputs, shell commands, or executable payloads.
 - Stay at the semantic planning level.
@@ -233,9 +232,6 @@ def build_replanner_user_prompt(
             ),
             "require_retrieved_content": (
                 evidence_floor.require_retrieved_content if evidence_floor else None
-            ),
-            "freshness_window_days": (
-                evidence_floor.freshness_window_days if evidence_floor else None
             ),
         },
         "prior_contract_feedback": contract_feedback,
@@ -334,9 +330,6 @@ class OpenAIReplanner(ReplannerPort):
                                 ),
                                 require_retrieved_content=(
                                     step.evidence_burden.require_retrieved_content
-                                ),
-                                freshness_window_days=(
-                                    step.evidence_burden.freshness_window_days
                                 ),
                                 insufficiency_declaration_permitted=(
                                     step.evidence_burden.insufficiency_declaration_permitted

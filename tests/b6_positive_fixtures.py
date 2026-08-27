@@ -380,12 +380,16 @@ def _has_feedback_code(actor_task: ActorTask, *, code: str) -> bool:
     return any(code in feedback.finding_codes for feedback in actor_task.governance_feedback)
 
 
-# Preserve the exact Evidence deficit code in the OPA-shaped pillar result.
+# Preserve the exact Evidence deficit codes on both the pillar result and the decision
+# itself, mirroring main.rego: the gate code names the directive, the deficit codes name
+# which structural family failed, and remediation reads the decision, not the raw facts.
 def _annotate_evidence_gap(*, output: dict[str, Any], evidence_facts: dict[str, Any]) -> None:
+    deficit_codes = list(evidence_facts.get("deficit_codes", []))
     evidence = dict(output["pillar_results"]["evidence"])
     evidence["evidence_gap"] = True
-    evidence["reason_codes"] = list(evidence_facts.get("deficit_codes", []))
+    evidence["reason_codes"] = deficit_codes
     output["pillar_results"]["evidence"] = evidence
+    output["reason_codes"] = ["invalid_or_missing_selected_evidence", *deficit_codes]
 
 
 # Preserve the Trajectory threshold fact in the OPA-shaped pillar result.

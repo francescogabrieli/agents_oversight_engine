@@ -44,7 +44,6 @@ class TraceEvidenceBurden:
     # Trace the planner's factual proof obligation beside the semantic plan step.
     min_independent_sources: int
     require_retrieved_content: bool
-    freshness_window_days: int | None
     insufficiency_declaration_permitted: bool
 
 

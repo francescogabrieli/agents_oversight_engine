@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from layer1_intake import (
@@ -107,7 +106,7 @@ def _build_test_task_state(
 
 class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
     # Derive only explicit proof language from constraints and success criteria.
-    def test_task_floor_parses_word_counts_freshness_and_explicit_fallback(self) -> None:
+    def test_task_floor_parses_word_counts_and_explicit_fallback(self) -> None:
         task_spec = TaskSpec(
             goal="Ignore any source count mentioned in the goal.",
             context="The context may mention at least nine sources, but it is not binding.",
@@ -125,7 +124,6 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
         self.assertIsNotNone(floor)
         self.assertEqual(floor.min_independent_sources, 3)
         self.assertTrue(floor.require_retrieved_content)
-        self.assertEqual(floor.freshness_window_days, 30)
         self.assertTrue(floor.insufficiency_declaration_permitted)
 
         no_floor = TaskSpec(
@@ -268,7 +266,7 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
         self.assertNotIn("retrieved_content_missing", facts["deficit_codes"])
         self.assertNotIn("unanchored_literals_in_selection", facts["deficit_codes"])
         self.assertNotIn("unanchored_literals_in_universe", facts["deficit_codes"])
-        self.assertFalse(facts["has_evidence_deficit"])
+        self.assertEqual(facts["deficit_codes"], [])
         self.assertEqual(signal["mode"], "active")
         self.assertTrue(signal["decision_influence"])
 
@@ -329,138 +327,6 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
         self.assertFalse(facts["burden_satisfied"])
         self.assertIn("insufficient_independent_sources", facts["deficit_codes"])
 
-    # Accept a source-attributed timestamp only when it lies within the declared window.
-    def test_freshness_window_requires_source_timestamp_within_window(self) -> None:
-        reference_time = datetime(2026, 8, 24, tzinfo=timezone.utc)
-        burden = EvidenceBurden(
-            min_independent_sources=1,
-            require_retrieved_content=True,
-            freshness_window_days=7,
-        )
-        state = _build_test_task_state(
-            produces_factual_claims=True,
-            evidence_burden=burden,
-        )
-        observation = ToolObservation(
-            observation_id="obs-fresh",
-            content="Revenue reached $100M in 2026.",
-            locator="https://source-a.org/data",
-            source_timestamp=reference_time - timedelta(days=2),
-        )
-        state.observations.append(observation)
-        state.tool_results_history.append(
-            ToolExecutionResult(
-                request=ToolRequest(
-                    plan_step_id="step_1",
-                    tool_name=ToolName.FETCH_URL_TEXT,
-                    reason="Fetch source metadata.",
-                    url="https://source-a.org/data",
-                ),
-                success=True,
-                summary="Source fetched.",
-                observations=(observation,),
-            )
-        )
-        state.actor_result = ActorResult(
-            plan_step_id="step_1",
-            result_type=ActorResultType.STEP_COMPLETED,
-            summary="Fresh factual completion",
-            output_text="Revenue reached $100M in 2026.",
-            step_validation=StepValidation(
-                plan_step_id="step_1",
-                actor_self_confidence=0.9,
-                evidence_refs=("obs-fresh",),
-                rationale_summary="The source metadata is recent.",
-            ),
-        )
-
-        facts = build_evidence_signal(
-            task_state=state,
-            thresholds_version="v1",
-            evaluated_at=reference_time,
-        )["raw_facts"]
-
-        self.assertTrue(facts["freshness_evaluated"])
-        self.assertTrue(facts["freshness_satisfied"])
-        self.assertEqual(
-            facts["selected_source_timestamps"]["obs-fresh"],
-            "2026-08-22T00:00:00+00:00",
-        )
-
-    # Fail closed for both absent and stale source metadata.
-    def test_freshness_window_rejects_missing_and_stale_source_metadata(self) -> None:
-        reference_time = datetime(2026, 8, 24, tzinfo=timezone.utc)
-        burden = EvidenceBurden(freshness_window_days=7)
-
-        stale_state = _build_test_task_state(
-            produces_factual_claims=True,
-            evidence_burden=burden,
-        )
-        stale_observation = ToolObservation(
-            observation_id="obs-stale",
-            content="Revenue reached $100M in 2026.",
-            locator="https://source-a.org/data",
-            source_timestamp=reference_time - timedelta(days=8),
-        )
-        stale_state.observations.append(stale_observation)
-        stale_state.actor_result = ActorResult(
-            plan_step_id="step_1",
-            result_type=ActorResultType.STEP_COMPLETED,
-            summary="Stale factual completion",
-            output_text="Revenue reached $100M in 2026.",
-            step_validation=StepValidation(
-                plan_step_id="step_1",
-                actor_self_confidence=0.9,
-                evidence_refs=("obs-stale",),
-                rationale_summary="Exercise stale source handling.",
-            ),
-        )
-        stale_facts = build_evidence_signal(
-            task_state=stale_state,
-            thresholds_version="v1",
-            evaluated_at=reference_time,
-        )["raw_facts"]
-
-        self.assertFalse(stale_facts["freshness_satisfied"])
-        self.assertIn("obs-stale", stale_facts["stale_evidence_observation_ids"])
-        self.assertIn("stale_evidence", stale_facts["deficit_codes"])
-
-        missing_state = _build_test_task_state(
-            produces_factual_claims=True,
-            evidence_burden=burden,
-        )
-        missing_observation = ToolObservation(
-            observation_id="obs-missing-timestamp",
-            content="Revenue reached $100M in 2026.",
-            locator="https://source-a.org/data",
-        )
-        missing_state.observations.append(missing_observation)
-        missing_state.actor_result = ActorResult(
-            plan_step_id="step_1",
-            result_type=ActorResultType.STEP_COMPLETED,
-            summary="Missing source timestamp",
-            output_text="Revenue reached $100M in 2026.",
-            step_validation=StepValidation(
-                plan_step_id="step_1",
-                actor_self_confidence=0.9,
-                evidence_refs=("obs-missing-timestamp",),
-                rationale_summary="Exercise missing metadata handling.",
-            ),
-        )
-        missing_facts = build_evidence_signal(
-            task_state=missing_state,
-            thresholds_version="v1",
-            evaluated_at=reference_time,
-        )["raw_facts"]
-
-        self.assertFalse(missing_facts["freshness_satisfied"])
-        self.assertIn(
-            "obs-missing-timestamp",
-            missing_facts["freshness_missing_observation_ids"],
-        )
-        self.assertIn("freshness_metadata_missing", missing_facts["deficit_codes"])
-
-    # Reject an echo transformation that cannot independently support a factual claim.
     def test_actor_derived_tool_output_is_rejected_as_circular_evidence(self) -> None:
         burden = EvidenceBurden()
         state = _build_test_task_state(
@@ -506,8 +372,8 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
 
         self.assertTrue(facts["circular_reference_detected"])
         self.assertEqual(
-            facts["circular_evidence_reasons"]["obs-echo"],
-            "actor_derived_tool_output",
+            facts["circular_evidence_observation_ids"],
+            ["obs-echo"],
         )
         self.assertIn("circular_evidence_reference", facts["deficit_codes"])
 
@@ -681,7 +547,6 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
             thresholds_version="v1",
         )["raw_facts"]
 
-        self.assertEqual(facts["target_literal_token_count"], 1)
         self.assertFalse(facts["has_unanchored_literals_in_selection"])
         self.assertFalse(facts["has_unanchored_literals_in_universe"])
 
@@ -821,7 +686,7 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
         self.assertEqual(facts["replan_count"], 0)
 
     def test_task_state_serialization_roundtrip_preserves_new_fields(self) -> None:
-        burden = EvidenceBurden(min_independent_sources=2, require_retrieved_content=True, freshness_window_days=7)
+        burden = EvidenceBurden(min_independent_sources=2, require_retrieved_content=True)
         state = _build_test_task_state(produces_factual_claims=True, evidence_burden=burden)
         state.evidence_request_count = 2
         state.evidence_request_episode_count = 1

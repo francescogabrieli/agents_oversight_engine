@@ -10,15 +10,12 @@ from layer3_tool_bus_external_capabilities.external_operations import OperationB
 # Export whole-run observable facts only at a semantic or operational boundary.
 def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvaluationInput, thresholds_version: str) -> dict[str, Any]:
     result = task_state.actor_result
-    executed_dispositions = {
-        ToolDisposition.EXECUTED_SUCCESS,
-        ToolDisposition.EXECUTED_RETRYABLE_FAILURE,
-        ToolDisposition.EXECUTED_TERMINAL_FAILURE,
-    }
+    # Reuse the canonical backend/local split so this pillar and the tool guards can
+    # never disagree about what counted as a real capability call.
     executed_attempts = [
         attempt
         for attempt in task_state.tool_attempts
-        if attempt.disposition in executed_dispositions
+        if attempt.disposition.reached_backend
     ]
     if task_state.tool_attempts:
         successful_tool_calls = sum(
@@ -80,6 +77,20 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
                 break
 
     action_churn_count = _current_operation_churn_count(task_state=task_state)
+    # Read-only exploration had no ceiling at all: searches that succeed feed no failure
+    # counter, and turn counters are observational by design, so a step could be worked
+    # indefinitely without any rule seeing it. Every attempt on the current step counts,
+    # including locally rejected ones, because they consume the same budget.
+    current_step = task_state.current_plan_step
+    current_step_tool_attempts = (
+        sum(
+            1
+            for attempt in task_state.tool_attempts
+            if attempt.plan_step_id == current_step.step_id
+        )
+        if current_step is not None
+        else 0
+    )
     unresolvable_revision = _judge_revision_has_no_new_observational_basis(
         task_state=task_state,
     )
@@ -94,6 +105,7 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
         "synthetic_tool_result_count": synthetic_tool_results,
         "consecutive_tool_failures": consecutive_tool_failures,
         "action_churn_count": action_churn_count,
+        "current_step_tool_attempt_count": current_step_tool_attempts,
         "observation_count": len(task_state.observations),
         "replan_count": replan_count,
         "replan_episode_count": replan_episode_count,

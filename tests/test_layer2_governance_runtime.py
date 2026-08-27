@@ -128,7 +128,7 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
         self.assertEqual(result.reason_codes, (GovernanceReasonCode.READ_ONLY_ALLOWED,))
         self.assertEqual(result.summary, "Read-only capability use is allowed.")
         self.assertEqual(result.policy_engine_name, "opa_http_policy_engine")
-        self.assertEqual(result.policy_bundle_version, "layer2_governance_v5")
+        self.assertEqual(result.policy_bundle_version, "layer2_governance_v6")
 
 
     def test_read_only_tool_request_routes_through_governance(self) -> None:
@@ -189,8 +189,12 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
         decision = GovernanceDecision(
             directive=GovernanceDirective.REQUEST_MORE_EVIDENCE,
             policy_decision=PolicyDecision.ALLOW,
+            # Remediation is built from the codes OPA left active on the decision, not
+            # from the runtime's own raw facts, so the fixture must carry them here too.
             reason_codes=(
                 GovernanceReasonCode.INVALID_OR_MISSING_SELECTED_EVIDENCE,
+                GovernanceReasonCode.CIRCULAR_EVIDENCE_REFERENCE,
+                GovernanceReasonCode.UNANCHORED_LITERALS_IN_SELECTION,
             ),
             summary="Evidence support is below the current step requirement.",
             constrains_capability_use=True,
@@ -204,11 +208,11 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
                 "evidence": {
                     "raw_facts": {
                         "deficit_codes": [
-                            "freshness_metadata_missing",
-                            "stale_evidence",
+                            "circular_evidence_reference",
+                            "unanchored_literals_in_selection",
                         ],
-                        "freshness_missing_observation_ids": ["obs-undated"],
-                        "stale_evidence_observation_ids": ["obs-stale"],
+                        "circular_evidence_observation_ids": ["obs-circular"],
+                        "unanchored_literals_in_selection": ["invented-figure"],
                     }
                 }
             },
@@ -230,12 +234,19 @@ class Layer2GovernanceRuntimeTests(unittest.TestCase):
         self.assertEqual(feedback.invalidated_payload_digest, None)
         self.assertEqual(
             feedback.findings[0].evidence_refs,
-            ("obs-undated",),
+            (),
         )
-        self.assertIn("specific dated documents", feedback.findings[0].summary)
         self.assertEqual(
             feedback.findings[1].evidence_refs,
-            ("obs-stale",),
+            ("obs-circular",),
+        )
+        self.assertEqual(
+            feedback.findings[2].payload_excerpt,
+            "invented-figure",
+        )
+        self.assertIn(
+            "select concrete observations",
+            feedback.findings[2].summary,
         )
 
         _apply_governance_decision(

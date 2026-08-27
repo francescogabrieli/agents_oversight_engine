@@ -159,9 +159,19 @@ Non è necessario un comando manuale per ogni run. Il runner
 il manifest, esegue gli scenari in sequenza, assegna thread ID deterministici,
 esporta ogni `full-trace-2.json` e registra anche skip, failure e pause HITL.
 
-Prima di avviare un batch, verificare l'overlay evaluation locale e generare il
-fixture SQLite se `rp16` deve essere eseguito. Il comando è sicuro da ripetere come
-preflight e non invoca provider né scrive artifact:
+Prima di avviare un batch, verificare che il PDP OPA stia servendo esattamente il
+bundle su disco (non solo la stringa di versione, che un `--watch` fallito su bind
+mount Windows può lasciare invariata mentre il contenuto delle regole è già
+cambiato):
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\verify_opa_bundle.py
+```
+
+Un esito diverso da `OK` richiede il riavvio del PDP prima di procedere. Poi,
+verificare l'overlay evaluation locale e generare il fixture SQLite se `rp16` deve
+essere eseguito. Il comando seguente è sicuro da ripetere come preflight e non
+invoca provider né scrive artifact:
 
 ```powershell
 .\.venv\Scripts\python.exe .\scripts\run_evaluation_campaign.py `

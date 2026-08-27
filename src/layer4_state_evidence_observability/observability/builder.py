@@ -141,7 +141,6 @@ def _build_plan_step(*, step: Any, task_state: TaskState) -> TracePlanStep:
             TraceEvidenceBurden(
                 min_independent_sources=evidence_burden.min_independent_sources,
                 require_retrieved_content=evidence_burden.require_retrieved_content,
-                freshness_window_days=evidence_burden.freshness_window_days,
                 insufficiency_declaration_permitted=(
                     evidence_burden.insufficiency_declaration_permitted
                 ),

@@ -23,7 +23,6 @@ class PlanStepStatus(str, Enum):
 class EvidenceBurden:
     min_independent_sources: int = 1
     require_retrieved_content: bool = True
-    freshness_window_days: int | None = None
     insufficiency_declaration_permitted: bool = False
 
     # Keep the planner-owned burden usable as a deterministic governance contract.
@@ -34,8 +33,6 @@ class EvidenceBurden:
             raise ValueError("EvidenceBurden.min_independent_sources must be at least 1.")
         if not isinstance(self.require_retrieved_content, bool):
             raise ValueError("EvidenceBurden.require_retrieved_content must be boolean.")
-        if self.freshness_window_days is not None and self.freshness_window_days < 1:
-            raise ValueError("EvidenceBurden.freshness_window_days must be at least 1 when set.")
         if not isinstance(self.insufficiency_declaration_permitted, bool):
             raise ValueError(
                 "EvidenceBurden.insufficiency_declaration_permitted must be boolean."
@@ -136,11 +133,6 @@ def derive_evidence_obligation_floor(
     if not burdens:
         return None
 
-    freshness_windows = [
-        burden.freshness_window_days
-        for burden in burdens
-        if burden.freshness_window_days is not None
-    ]
     return EvidenceBurden(
         min_independent_sources=max(
             burden.min_independent_sources for burden in burdens
@@ -148,7 +140,6 @@ def derive_evidence_obligation_floor(
         require_retrieved_content=any(
             burden.require_retrieved_content for burden in burdens
         ),
-        freshness_window_days=(min(freshness_windows) if freshness_windows else None),
         insufficiency_declaration_permitted=any(
             burden.insufficiency_declaration_permitted for burden in burdens
         ),
@@ -168,22 +159,6 @@ _MIN_SOURCE_PATTERNS = (
         r"(?P<count>\d+|uno|due|tre|quattro|cinque|sei|sette|otto|nove|dieci)\s+"
         r"(?:(?:indipendenti|valide|affidabili|rilevanti|ufficiali|autorevoli)\s+)*"
         r"(?:fonti|fontes?)\b",
-        re.IGNORECASE,
-    ),
-)
-_FRESHNESS_PATTERNS = (
-    re.compile(
-        r"\b(?:within|no\s+older\s+than|in\s+the\s+last|last)\s+"
-        r"(?P<days>\d+)\s+days?\b",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"\b(?:entro|non\s+pi[uù]\s+vecchi[ae]\s+di|ultim[oi])\s+"
-        r"(?P<days>\d+)\s+giorni\b",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"\bfreshness\s+window\s*[:=]?\s*(?P<days>\d+)\s+days?\b",
         re.IGNORECASE,
     ),
 )
@@ -243,12 +218,7 @@ def derive_task_evidence_floor(task_spec: TaskSpec) -> EvidenceBurden | None:
         for pattern in _MIN_SOURCE_PATTERNS
         for match in pattern.finditer(task_text)
     ]
-    freshness_windows = [
-        int(match.group("days"))
-        for pattern in _FRESHNESS_PATTERNS
-        for match in pattern.finditer(task_text)
-    ]
-    if not source_counts and not freshness_windows:
+    if not source_counts:
         return None
     insufficiency_permitted = any(
         pattern.search(task_text) is not None
@@ -257,7 +227,6 @@ def derive_task_evidence_floor(task_spec: TaskSpec) -> EvidenceBurden | None:
     return EvidenceBurden(
         min_independent_sources=max(source_counts, default=1),
         require_retrieved_content=True,
-        freshness_window_days=min(freshness_windows) if freshness_windows else None,
         insufficiency_declaration_permitted=insufficiency_permitted,
     )
 
@@ -271,11 +240,6 @@ def lift_evidence_burden_to_floor(
         return floor
     if floor is None:
         return burden
-    freshness_values = [
-        value
-        for value in (burden.freshness_window_days, floor.freshness_window_days)
-        if value is not None
-    ]
     return EvidenceBurden(
         min_independent_sources=max(
             burden.min_independent_sources, floor.min_independent_sources
@@ -283,7 +247,6 @@ def lift_evidence_burden_to_floor(
         require_retrieved_content=(
             burden.require_retrieved_content or floor.require_retrieved_content
         ),
-        freshness_window_days=min(freshness_values) if freshness_values else None,
         insufficiency_declaration_permitted=(
             burden.insufficiency_declaration_permitted
             or floor.insufficiency_declaration_permitted
@@ -342,11 +305,6 @@ def validate_replacement_evidence_obligation(
         and not proposed.insufficiency_declaration_permitted
     ):
         weakened_dimensions.append("insufficiency_declaration_permitted")
-    if required.freshness_window_days is not None and (
-        proposed.freshness_window_days is None
-        or proposed.freshness_window_days > required.freshness_window_days
-    ):
-        weakened_dimensions.append("freshness_window_days")
     if weakened_dimensions:
         raise ValueError(
             "Replacement trajectory weakened the remaining evidence obligation: "
@@ -372,7 +330,6 @@ def project_evidence_burden(burden: EvidenceBurden | None) -> dict[str, object] 
     projected: dict[str, object] = {
         "min_independent_sources": burden.min_independent_sources,
         "require_retrieved_content": burden.require_retrieved_content,
-        "freshness_window_days": burden.freshness_window_days,
     }
     if burden.insufficiency_declaration_permitted:
         projected["insufficiency_declaration_permitted"] = True

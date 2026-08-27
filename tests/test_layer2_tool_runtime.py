@@ -13,6 +13,7 @@ from tests.layer2_runtime_fixtures import (
 
 from layer2_runtime_governance.domain import (
     PlanStep,
+    ToolDisposition,
     PlanStepStatus,
     RuntimeFlag,
     RuntimeState,
@@ -23,7 +24,7 @@ from layer2_runtime_governance.governance_components import (
     build_policy_evaluation_input,
 )
 from layer2_runtime_governance.signal_services import build_trajectory_signal
-from layer2_runtime_governance.runtime.tool_service import observe_tool_result
+from layer2_runtime_governance.runtime.tool_service import observe_tool_result, tool_gateway
 from layer3_tool_bus_external_capabilities.external_operations.runtime_projection import (
     prepare_external_operation_proposal,
 )
@@ -210,6 +211,60 @@ class Layer2ToolRuntimeTests(unittest.TestCase):
             canonical_tool_request_identity(distinct_query),
         )
 
+
+    # Regression for benchmark-web-email-12: an actor asked 58 times for a URL it had
+    # never observed. The unanchored guard refused it before the backend, so it was
+    # neither an executed failure nor a duplicate, and no convergence rule could see it.
+    # Every locally settled disposition must escalate, not only a named subset.
+    def test_every_locally_settled_disposition_escalates_repeated_requests(self) -> None:
+        settled = [item for item in ToolDisposition if not item.reached_backend]
+        self.assertIn(ToolDisposition.REJECTED_UNANCHORED_TARGET, settled)
+        self.assertIn(ToolDisposition.REJECTED_CIRCUIT, settled)
+        self.assertIn(ToolDisposition.REJECTED_DUPLICATE, settled)
+        self.assertIn(ToolDisposition.CACHE_HIT, settled)
+        self.assertEqual(
+            [item for item in ToolDisposition if item.reached_backend],
+            [
+                ToolDisposition.EXECUTED_SUCCESS,
+                ToolDisposition.EXECUTED_RETRYABLE_FAILURE,
+                ToolDisposition.EXECUTED_TERMINAL_FAILURE,
+            ],
+        )
+
+    def test_unanchored_target_repeats_escalate_to_replanning(self) -> None:
+        state = TaskState.from_intake(_build_research_intake_result())
+        state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Collect sources",
+                rationale="r",
+                expected_outcome="o",
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        state.current_plan_step_index = 0
+
+        invented = "https://example.org/never-observed"
+        gateway = SimpleNamespace(execute=lambda **_: self.fail("backend must not be reached"))
+        for _ in range(3):
+            state.current_state = RuntimeState.READY_TOOL_EXECUTION
+            state.current_tool_request = ToolRequest(
+                plan_step_id="step_1",
+                tool_name=ToolName.FETCH_URL_TEXT,
+                reason="fetch an unobserved url",
+                url=invented,
+            )
+            tool_gateway(state, tool_gateway_service=gateway)
+
+        dispositions = [item.disposition for item in state.tool_attempts]
+        self.assertTrue(
+            all(item is ToolDisposition.REJECTED_UNANCHORED_TARGET for item in dispositions)
+        )
+        # The loop is bounded: the third identical request routes to replanning.
+        self.assertEqual(state.current_state, RuntimeState.REPLANNING)
+        self.assertEqual(state.actor_result.result_type, ActorResultType.NEEDS_REPLAN)
+        # A refused request never becomes a backend call in the trajectory facts.
+        self.assertEqual(state.tool_call_count, 0)
 
     def test_duplicate_fetch_request_is_blocked_before_reexecution(self) -> None:
         graph = _build_test_graph(

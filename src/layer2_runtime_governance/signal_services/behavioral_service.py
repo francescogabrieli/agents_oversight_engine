@@ -23,9 +23,7 @@ def build_behavioral_signal(
         "similarity_score": assessment.historical_similarity_score if assessment else None,
         "deviation_score": assessment.behavior_deviation_score if assessment else None,
         "novelty_score": assessment.novelty_score if assessment else None,
-        "historical_failure_rate": _note_rate(assessment, "failure_rate"),
         "historical_review_rate": _note_rate(assessment, "review_rate"),
-        "deviation_driver": _deviation_driver(assessment),
         "flags": list(assessment.behavioral_flags if assessment else ()),
     }
     return {
@@ -47,16 +45,6 @@ def build_behavioral_signal(
         "score_formula_version": "behavioral_features_v2",
         "thresholds_version": thresholds_version,
     }
-
-
-# Extract the persisted deviation driver from behavioural notes when present.
-def _deviation_driver(assessment: BehavioralAssessment | None) -> str | None:
-    if assessment is None:
-        return None
-    for note in assessment.notes:
-        if note.startswith("deviation_driver="):
-            return note.split("=", 1)[1]
-    return None
 
 
 # Extract non-normative historical rates persisted by the behavioural read model.

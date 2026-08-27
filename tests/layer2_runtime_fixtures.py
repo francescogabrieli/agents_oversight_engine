@@ -340,8 +340,8 @@ class OverDecomposedSourceSummaryPlanner:
 
 class StubPolicyEngine(PolicyEnginePort):
     policy_engine_name = "stub_policy_engine"
-    policy_bundle_version = "layer2_governance_v5"
-    policy_config_version = "layer2_governance_thresholds_v2"
+    policy_bundle_version = "layer2_governance_v6"
+    policy_config_version = "layer2_governance_thresholds_v3"
 
     # Model OPA's inexpensive first pass so graph tests never contact a live policy engine.
     def evaluate_required_pillars(self, *, base_facts: dict[str, Any]) -> dict[str, bool]:
@@ -457,8 +457,8 @@ class JudgeRequiredPolicyEngine(StubPolicyEngine):
 
 class ReviewPolicyEngine(PolicyEnginePort):
     policy_engine_name = "review_policy_engine"
-    policy_bundle_version = "layer2_governance_v5"
-    policy_config_version = "layer2_governance_thresholds_v2"
+    policy_bundle_version = "layer2_governance_v6"
+    policy_config_version = "layer2_governance_thresholds_v3"
 
     # Keep required-pillar selection deterministic for HITL graph tests.
     def evaluate_required_pillars(self, *, base_facts: dict[str, Any]) -> dict[str, bool]:

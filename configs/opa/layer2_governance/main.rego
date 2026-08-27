@@ -87,6 +87,8 @@ else := hitl_decision("replan_ceiling_reached", "The current replanning episode 
 
 else := hitl_decision("consecutive_tool_failures", "Consecutive tool failures exceeded the human review threshold.") if trajectory.result.consecutive_tool_failures_review_threshold_reached
 
+else := hitl_decision("step_exploration_budget_exhausted", "The plan step exhausted its read-only exploration budget without reaching a completion.") if trajectory.result.step_exploration_budget_exhausted
+
 else := hitl_decision("action_churn", "The actor oscillated between variants of the current external operation without converging.") if trajectory.result.action_churn
 
 else := hitl_decision("replan_request_stalled", "The actor repeated a replan request without a new observable execution basis.") if trajectory.result.replan_request_stalled
@@ -120,13 +122,13 @@ else := revise_decision if {
 	judge.result.verdict == "needs_revision"
 }
 
-else := hitl_decision("evidence_request_limit_reached", "The actor repeated completion without resolving required evidence and reached the request ceiling.") if {
+else := base_decision("wait_human_review", "require_human_review", array.concat(["evidence_request_limit_reached"], evidence.result.reason_codes), "The actor repeated completion without resolving required evidence and reached the request ceiling.", true) if {
 	input.pillar_requirements.require_evidence == true
 	evidence.result.evidence_gap
 	evidence.result.evidence_request_ceiling_reached
 }
 
-else := evidence_decision("invalid_or_missing_selected_evidence", "The completion references invalid or missing concrete evidence.") if {
+else := evidence_decision(evidence_gap_reason_codes, "The completion references invalid or missing concrete evidence.") if {
 	input.pillar_requirements.require_evidence == true
 	evidence.result.evidence_gap
 }
@@ -210,6 +212,12 @@ candidate_alternatives[code] := reason if {
 	code := "consecutive_tool_failures"
 	reason := "Consecutive tool failures exceeded the human review threshold."
 	trajectory.result.consecutive_tool_failures_review_threshold_reached
+}
+
+candidate_alternatives[code] := reason if {
+	code := "step_exploration_budget_exhausted"
+	reason := "The plan step exhausted its read-only exploration budget without reaching a completion."
+	trajectory.result.step_exploration_budget_exhausted
 }
 
 candidate_alternatives[code] := reason if {
@@ -332,7 +340,14 @@ continue_decision := base_decision("continue", "allow", ["allowed_by_policy"], "
 revise_decision := base_decision("revise_action", "allow", ["judge_needs_revision"], "The external payload requires semantic revision.", false)
 hitl_decision(code, reason) := base_decision("wait_human_review", "require_human_review", [code], reason, true)
 replan_decision(code, reason) := base_decision("replan", "allow", [code], reason, false)
-evidence_decision(code, reason) := base_decision("request_more_evidence", "allow", [code], reason, false)
+evidence_decision(codes, reason) := base_decision("request_more_evidence", "allow", codes, reason, false)
+
+# The gate code names the directive; the pillar codes name which structural family failed.
+# Both travel on the decision so remediation and the evaluation store read one vocabulary.
+evidence_gap_reason_codes := array.concat(
+	["invalid_or_missing_selected_evidence"],
+	[code | some code in evidence.result.reason_codes; code != "invalid_or_missing_selected_evidence"],
+)
 static_deny_reason_codes := static_policy.result.reason_codes if count(static_policy.result.reason_codes) > 0
 
 else := ["static_policy_hard_deny"]

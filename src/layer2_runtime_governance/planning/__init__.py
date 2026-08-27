@@ -67,7 +67,6 @@ class _EvidenceBurdenPayload(BaseModel):
 
     min_independent_sources: int = Field(default=1, ge=1)
     require_retrieved_content: bool = Field(default=True)
-    freshness_window_days: int | None = Field(default=None, ge=1)
     insufficiency_declaration_permitted: bool = Field(default=False)
 
 
@@ -113,7 +112,7 @@ Each item in plan_steps must contain:
 - rationale
 - expected_outcome
 - produces_factual_claims (boolean: true if this step produces factual claims that leave the system or will be used for downstream decision-making, false otherwise)
-- evidence_burden (required object when produces_factual_claims is true; omit it when produces_factual_claims is false. Fields: min_independent_sources [default 1], require_retrieved_content [default true], freshness_window_days [optional integer], insufficiency_declaration_permitted [default false])
+- evidence_burden (required object when produces_factual_claims is true; omit it when produces_factual_claims is false. Fields: min_independent_sources [default 1], require_retrieved_content [default true], insufficiency_declaration_permitted [default false])
 - produces_governed_external_effect_proposal (boolean: true only for the terminal semantic step that prepares the exact governed external operation requested by an execute-after-governance task)
 
 Rules:
@@ -252,9 +251,6 @@ class OpenAIPlanner(PlannerPort):
                             ),
                             require_retrieved_content=(
                                 item.evidence_burden.require_retrieved_content
-                            ),
-                            freshness_window_days=(
-                                item.evidence_burden.freshness_window_days
                             ),
                             insufficiency_declaration_permitted=(
                                 item.evidence_burden.insufficiency_declaration_permitted

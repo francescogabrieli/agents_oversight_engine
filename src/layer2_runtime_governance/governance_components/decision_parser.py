@@ -336,10 +336,8 @@ def _static_policy_directive_from_pillar(
 ) -> GovernanceDirective:
     if not isinstance(pillar, dict):
         return fallback_directive
-    if pillar.get("hard_deny") is True or pillar.get("write_blocked") is True:
+    if pillar.get("hard_deny") is True:
         return GovernanceDirective.STOP
-    if pillar.get("hitl_mandatory") is True:
-        return GovernanceDirective.WAIT_HUMAN_REVIEW
     if pillar.get("clarification_signaled") is True:
         return GovernanceDirective.ASK_USER_CLARIFICATION
     if pillar.get("read_only_required") is True:
@@ -352,8 +350,8 @@ def _static_policy_summary_from_pillar(pillar: Any) -> str:
         return "Static policy pillar result was unavailable."
     if pillar.get("summary"):
         return str(pillar["summary"])
-    if pillar.get("hard_deny") is True or pillar.get("write_blocked") is True:
-        return str(pillar.get("deny_reason") or "Static policy hard-denied the operation.")
+    if pillar.get("hard_deny") is True:
+        return "Static policy hard-denied the operation."
     if pillar.get("clarification_signaled") is True:
         return "Static policy preserved the actor clarification request."
     if pillar.get("read_only_required") is True:

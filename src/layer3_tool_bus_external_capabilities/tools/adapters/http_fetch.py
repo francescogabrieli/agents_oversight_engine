@@ -249,7 +249,7 @@ def _source_timestamp_summary(
     if transport_timestamp is not None:
         return (
             "URL text fetched successfully. HTTP Last-Modified was observed but "
-            "excluded from semantic publication freshness."
+            "excluded from the source publication timestamp."
         )
     return "URL text fetched successfully."
 

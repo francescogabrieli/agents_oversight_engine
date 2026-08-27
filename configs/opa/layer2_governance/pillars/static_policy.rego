@@ -20,8 +20,10 @@ hard_deny if {
 	object.get(operation, "execution_candidate", false) == true
 }
 
+# The read-only profile list is configuration, not a literal: a new read-only database
+# profile must be declared to be recognized rather than silently bypass this gate.
 is_read_only_profile if {
-	profile_id == "enterprise_db.read_only"
+	profile_id in object.get(static_config, "read_only_profile_ids", [])
 }
 
 is_read_only_profile if {
@@ -178,8 +180,4 @@ result := {
 	"summary": summary,
 	"read_only_required": read_only_required,
 	"clarification_signaled": clarification_signaled,
-	# Legacy fields remain observable but no longer encode generic external/write bans.
-	"write_blocked": hard_deny,
-	"hitl_mandatory": false,
-	"deny_reason": summary,
 }

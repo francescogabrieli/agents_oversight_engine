@@ -1,20 +1,25 @@
 {
   "policy_config": {
-    "policy_bundle_version": "layer2_governance_v5",
-    "thresholds_version": "layer2_governance_thresholds_v2",
+    "policy_bundle_version": "layer2_governance_v6",
+    "thresholds_version": "layer2_governance_thresholds_v3",
     "thresholds": {
       "max_action_revisions_before_review": 3,
       "max_replans_before_review": 3,
       "max_consecutive_tool_failures_before_review": 4,
       "max_action_churn_before_review": 2,
-      "max_evidence_requests_before_review": 3
-    },
-    "evidence": {
-      "freshness_enforcement_enabled": false
+      "max_evidence_requests_before_review": 3,
+      "max_tool_attempts_per_step_before_review": 30
     },
     "static_policy": {
-      "prohibited_destinations": ["blocked@example.com"],
-      "prohibited_destination_domains": ["blocked.example"]
+      "prohibited_destinations": [
+        "blocked@example.com"
+      ],
+      "prohibited_destination_domains": [
+        "blocked.example"
+      ],
+      "read_only_profile_ids": [
+        "enterprise_db.read_only"
+      ]
     }
   }
 }

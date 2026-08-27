@@ -89,7 +89,6 @@ def build_risk_signal(
         "operation_id": external_operation.operation_id,
         "operation_digest": external_operation.payload_digest,
         "recoverability": recoverability,
-        "recovery_mechanism": recovery_mechanism,
         "blast_radius": profile.scope if profile else "unknown",
         "sensitivity": policy_input.task_sensitivity.value,
         "exposure": external_operation.target.destination_class.value,

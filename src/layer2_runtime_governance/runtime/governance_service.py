@@ -37,6 +37,7 @@ from ..domain.step_recovery import (
 from ..governance_components import (
     GovernanceDecision,
     GovernanceDirective,
+    GovernanceReasonCode,
     PolicyEnginePort,
     PolicyEvaluationInput,
     evaluate_opa_first_governance,
@@ -54,9 +55,6 @@ from .lifecycle_service import _append_step_record
 
 
 _EVIDENCE_REFERENCE_FACTS = {
-    "freshness_metadata_missing": "freshness_missing_observation_ids",
-    "stale_evidence": "stale_evidence_observation_ids",
-    "future_source_timestamp": "future_source_timestamp_observation_ids",
     "circular_evidence_reference": "circular_evidence_observation_ids",
 }
 _EVIDENCE_LITERAL_FACTS = {
@@ -64,18 +62,6 @@ _EVIDENCE_LITERAL_FACTS = {
     "unanchored_literals_in_universe": "unanchored_literals_in_universe",
 }
 _EVIDENCE_REMEDIATION_SUMMARIES = {
-    "freshness_metadata_missing": (
-        "Replace these observations or fetch their specific dated documents; "
-        "an undated landing or index page cannot satisfy declared freshness."
-    ),
-    "stale_evidence": (
-        "Remove or replace these observations because their source timestamps "
-        "fall outside the declared freshness window."
-    ),
-    "future_source_timestamp": (
-        "Remove or independently verify these observations because their source "
-        "timestamps are later than the evaluation reference time."
-    ),
     "unanchored_literals_in_selection": (
         "Remove or correct these literal claims, or select concrete observations "
         "that contain the same supported values."
@@ -425,9 +411,20 @@ def _apply_governance_decision(
 
         evidence_payload = (governance_decision.pillar_results or {}).get("evidence", {})
         evidence_facts = evidence_payload.get("raw_facts", {}) if isinstance(evidence_payload, dict) else {}
-        deficit_codes = evidence_facts.get("deficit_codes", []) if isinstance(evidence_facts, dict) else []
-        reason_codes = tuple(governance_decision.reason_codes or ["invalid_or_missing_selected_evidence"])
-        all_codes = tuple(dict.fromkeys(str(c) for c in (deficit_codes or reason_codes)))
+        # Remediation is built from the codes OPA left active, never from the runtime's
+        # own deficit list. Reading the raw facts let the actor be sent after a finding
+        # the policy had deliberately excluded, which is Python overruling the engine.
+        reason_codes = governance_decision.reason_codes or (
+            GovernanceReasonCode.INVALID_OR_MISSING_SELECTED_EVIDENCE,
+        )
+        # These are typed GovernanceReasonCode members; str(member) renders the qualified
+        # name, not the wire value, so the value has to be read explicitly.
+        all_codes = tuple(
+            dict.fromkeys(
+                c.value if isinstance(c, GovernanceReasonCode) else str(c)
+                for c in reason_codes
+            )
+        )
         state.governance_action_feedback.append(
             GovernanceActionFeedback(
                 operation_id=operation_id,
