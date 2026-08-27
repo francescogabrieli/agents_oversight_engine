@@ -1,7 +1,7 @@
 # I tre pillar: come funzionano ora e come funzioneranno
 
 Documento di orientamento rapido su **Evidence**, **Trajectory** e **Judge**.
-Non è la specifica: quella resta in `evidence_trajectory_pillars_it_v2.md` e in `AGENTS.md`.
+Non è la specifica: quella resta in [`pillars_riferimento_completo.md`](pillars_riferimento_completo.md) e in `AGENTS.md`.
 
 Versione della policy descritta qui: `layer2_governance_v6` /
 `layer2_governance_thresholds_v3` (`configs/opa/layer2_governance/data.json`). È la

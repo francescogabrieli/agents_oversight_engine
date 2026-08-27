@@ -11,19 +11,17 @@ docs/
 ├── README.md                          <- Index and sitemap of repository documentation
 ├── architecture/                      <- System Architecture & Concrete E2E Walkthroughs
 │   ├── architecturev3.md              <- [Canonical] Primary architecture specification (v3)
-│   ├── e2e_real_task.md               <- Concrete E2E execution walkthrough (DMA task)
 │   ├── e2e_real_task_walkthrough_it.md<- Detailed Italian step-by-step E2E execution trace (Email task)
 │   ├── architecture_analysis.md       <- Architectural breakdown and module alignment
-│   ├── architettura_fino_a_qui.md     <- Historical executive progress summary
 │   ├── governance_components.md       <- Governance node internal components & OPA coupling
 │   ├── governance_components.excalidraw<- Excalidraw architecture diagram
 │   ├── layer2_modularization.md       <- Layer 2 modular monolith & scaling roadmap
 │   ├── opa_first_governance.md        <- OPA-first PDP / PEP runtime ownership split
 │   └── policy_service_architecture.md <- Deployable Policy Decision Point architecture
 ├── contracts_and_policy/              <- Governance Contracts, Research & Policy Rationale
+│   ├── pillars_riferimento_completo.md<- [Canonical] Full four-pillar field/threshold reference, with diagrams
+│   ├── pillars_prima_e_dopo.md        <- Pillar before/after narrative across this session's fixes
 │   ├── governance_hitl_contract.md    <- Reason-scoped Human-in-the-Loop decision contract
-│   ├── evidence_trajectory_pillars_it_v2.md <- Current Evidence/Trajectory pillar contract
-│   ├── evidence_trajectory_pillars_it.md <- Historical v1 pillar contract
 │   ├── governance_pillars_research_basis.md <- Academic research foundations for oversight pillars
 │   ├── tool_gateway_strategy.md       <- Read-only Tool Gateway registry and security strategy
 │   └── framework_selection_rationale.md <- Technical evaluation and framework selection rationale
