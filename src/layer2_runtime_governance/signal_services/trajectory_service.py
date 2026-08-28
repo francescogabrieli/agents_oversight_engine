@@ -51,9 +51,13 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
     # progress_epoch and plan_signature are bumped by the replanner itself, so
     # comparing them would let every replan self-admit the next one.
     # Human interventions do not count as a new observable basis on the world.
+    # tool_results_history records every attempt, including the locally settled ones
+    # that never reached a backend, so reading its length let a cache hit or a refused
+    # target satisfy this guard and admit the replan it exists to refuse. tool_call_count
+    # advances only on invocation, and is what the sibling revision check already reads.
     observable_change_since_last_replan = bool(
         last_replan is None
-        or len(task_state.tool_results_history) > getattr(last_replan, "tool_result_count", 0)
+        or task_state.tool_call_count > _replan_basis_tool_calls(last_replan)
         or len(task_state.observations) > getattr(last_replan, "observation_count", 0)
         or len(task_state.executed_steps) > getattr(last_replan, "completed_step_count", 0)
     )
@@ -186,6 +190,19 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
 
 
 # Detect a repeated needs_revision verdict without turning the fact into a Python directive.
+# Read the replan boundary from checkpoints written before the counter was corrected.
+# Falling back to the superseded total keeps an archived thread at the boundary it was
+# paused on; defaulting to zero would admit its next replan unconditionally.
+def _replan_basis_tool_calls(checkpoint: object) -> int:
+    return int(
+        getattr(
+            checkpoint,
+            "tool_call_count",
+            getattr(checkpoint, "tool_result_count", 0),
+        )
+    )
+
+
 def _judge_revision_has_no_new_observational_basis(*, task_state: TaskState) -> bool:
     proposal = task_state.external_operation_proposal
     latest_judge = task_state.last_judge_assessment

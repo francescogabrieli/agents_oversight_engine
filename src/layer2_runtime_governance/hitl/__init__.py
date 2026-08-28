@@ -226,6 +226,7 @@ def _apply_human_review_decision(
             raise ValueError(
                 "An Evidence ceiling cannot be bypassed by an unbound continue approval."
             )
+        _record_anchoring_adjudication(state=state, pending_request=pending_request)
         if _is_trajectory_episode_release(
             decision=human_review_decision,
             pending_request=pending_request,
@@ -316,6 +317,7 @@ def _apply_human_review_decision(
             raise ValueError(
                 "An Evidence ceiling cannot be bypassed by a read-only continue approval."
             )
+        _record_anchoring_adjudication(state=state, pending_request=pending_request)
         _validate_approval_scope(
             state=state,
             pending_request=pending_request,
@@ -394,6 +396,7 @@ def _apply_human_review_decision(
 
     if human_review_decision.decision_type == HumanReviewDecisionType.REPLAN:
         _start_fresh_evidence_request_episode(state)
+        state.adjudicated_evidence_anchoring_digest = None
         set_external_communication_phase(
             state,
             phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
@@ -789,6 +792,25 @@ def human_review_reasons_authorize_external_execution(
 def _start_fresh_evidence_request_episode(state: TaskState) -> None:
     state.evidence_request_episode_count = 0
     state.evidence_request_episode_id = None
+
+
+# A continue approval on an anchoring review settles exactly the selection reviewed.
+# Binding the ruling to the selection digest stops it from carrying over to a later,
+# unreviewed completion, while letting the approved one proceed instead of escalating
+# again on the very facts a human already saw.
+def _record_anchoring_adjudication(
+    *,
+    state: TaskState,
+    pending_request: HumanReviewRequest,
+) -> None:
+    if "evidence_anchoring_requires_review" not in _review_reason_codes(
+        state=state,
+        request=pending_request,
+    ):
+        return
+    candidate = state.pending_completion_candidate
+    if candidate is not None and candidate.evidence_selection_digest:
+        state.adjudicated_evidence_anchoring_digest = candidate.evidence_selection_digest
 
 
 # Recognize an exact approval that closes only its reviewed trajectory episode.

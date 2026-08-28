@@ -75,7 +75,7 @@ def replanner(state: TaskState, *, replanner_service: ReplannerPort) -> TaskStat
     state.replan_checkpoints.append(
         ReplanCheckpoint(
             actor_turn_count=state.actor_turn_count,
-            tool_result_count=len(state.tool_results_history),
+            tool_call_count=state.tool_call_count,
             observation_count=len(state.observations),
             completed_step_count=len(state.executed_steps),
             human_review_count=len(state.human_review_history),

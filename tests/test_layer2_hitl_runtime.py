@@ -122,7 +122,7 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
             task_state.replan_checkpoints.append(
                 ReplanCheckpoint(
                     actor_turn_count=index + 1,
-                    tool_result_count=index,
+                    tool_call_count=index,
                     observation_count=index,
                     completed_step_count=0,
                     human_review_count=0,

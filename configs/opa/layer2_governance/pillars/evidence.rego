@@ -30,6 +30,9 @@ insufficiency_declared_in_payload := object.get(facts, "insufficiency_declared_i
 circular_reference_detected := object.get(facts, "circular_reference_detected", false)
 has_unanchored_literals_in_selection := object.get(facts, "has_unanchored_literals_in_selection", false)
 has_unanchored_literals_in_universe := object.get(facts, "has_unanchored_literals_in_universe", false)
+has_unanchored_locators_in_selection := object.get(facts, "has_unanchored_locators_in_selection", false)
+has_unanchored_locators_in_universe := object.get(facts, "has_unanchored_locators_in_universe", false)
+anchoring_concern_adjudicated := object.get(facts, "anchoring_concern_adjudicated", false)
 
 default evidence_request_ceiling_reached := false
 
@@ -37,7 +40,13 @@ evidence_request_ceiling_reached if {
 	evidence_request_episode_count >= max_evidence_requests_before_review
 }
 
-default evidence_gap := false
+# Two structural classes with different remediation semantics. A violation is
+# resolvable by retrieving or selecting differently, so it goes back to the actor.
+# A concern is not: no further retrieval can turn a computed value into a quoted
+# one, and the actor's only available fix is deleting the claim. Only a human can
+# tell an invented literal from a derived one, so a concern escalates instead.
+default evidence_violation := false
+default evidence_concern := false
 default enforced_burden_satisfied := false
 
 enforced_burden_satisfied if {
@@ -51,85 +60,129 @@ enforced_burden_satisfied if {
 	insufficiency_declared_in_payload == true
 }
 
-evidence_gap if {
+evidence_violation if {
 	completion_attempt == true
 	refs_valid != true
 }
 
-evidence_gap if {
+evidence_violation if {
 	completion_attempt == true
 	refs_unique != true
 }
 
-evidence_gap if {
+evidence_violation if {
 	completion_attempt == true
 	observation_ids_unique != true
 }
 
-evidence_gap if {
+evidence_violation if {
 	completion_attempt == true
 	content_present != true
 }
 
-evidence_gap if {
+evidence_violation if {
 	completion_attempt == true
 	provenance_resolvable != true
 }
 
-evidence_gap if {
+evidence_violation if {
 	completion_attempt == true
 	known_steps != true
 }
 
-evidence_gap if {
+evidence_violation if {
 	coverage_evaluated == true
 	enforced_burden_satisfied != true
 }
 
-evidence_gap if {
+evidence_violation if {
 	evidence_completion == true
 	all_title_only == true
 }
 
-evidence_gap if {
+evidence_violation if {
 	candidate_binding_required
 	candidate_binding_present != true
 }
 
-evidence_gap if {
+evidence_violation if {
 	candidate_binding_required
 	candidate_snapshot_matches != true
 }
 
-evidence_gap if {
+evidence_violation if {
 	candidate_binding_required
 	candidate_selection_matches != true
 }
 
-evidence_gap if {
+evidence_violation if {
 	candidate_binding_required
 	candidate_operation_matches != true
 }
 
-evidence_gap if {
+evidence_violation if {
 	evidence_completion == true
 	circular_reference_detected == true
 }
 
-evidence_gap if {
+# A locator the completion names but never retrieved is resolvable by retrieval:
+# the actor fetches what it cited, or removes a source that does not exist.
+evidence_violation if {
 	evidence_completion == true
-	has_unanchored_literals_in_selection == true
+	has_unanchored_locators_in_selection == true
 }
 
-evidence_gap if {
+evidence_violation if {
+	evidence_completion == true
+	has_unanchored_locators_in_universe == true
+}
+
+# Without the adjudication guard the gate never terminates: a review resumes the
+# actor, the actor recompletes with the same values, and the same concern escalates
+# again. The remediation loop is bounded by its request ceiling; this one is bounded
+# by the human ruling on exactly this selection.
+evidence_concern if {
+	evidence_completion == true
+	has_unanchored_literals_in_selection == true
+	not anchoring_concern_adjudicated
+}
+
+evidence_concern if {
 	evidence_completion == true
 	has_unanchored_literals_in_universe == true
+	not anchoring_concern_adjudicated
 }
+
+# The union keeps the historical gate name meaningful: any structural deficit still
+# blocks judge admission and completion, whichever class produced it.
+default evidence_gap := false
+
+evidence_gap if evidence_violation
+
+evidence_gap if evidence_concern
 
 # Every deficit the runtime observes is enforced; the pillar no longer reports a
 # structural finding it cannot act on. These codes reach the decision itself, so
 # remediation and the evaluation store read the same vocabulary the rules used.
 active_reason_codes := object.get(facts, "deficit_codes", [])
+
+# Remediation is built from the codes a decision carries, so the classes must be
+# separable: telling the actor to "remove these literals" alongside a fixable
+# deficit is how a correct derived value gets silently deleted.
+anchoring_reason_codes := {
+	"unanchored_literals_in_selection",
+	"unanchored_literals_in_universe",
+}
+
+violation_reason_codes := [code |
+	some code in active_reason_codes
+	not anchoring_reason_codes[code]
+]
+
+concern_reason_codes := [code |
+	some code in active_reason_codes
+	anchoring_reason_codes[code]
+]
 
 require_evidence := object.get(object.get(input, "pillar_requirements", {}), "require_evidence", false) == true
 
@@ -145,6 +198,10 @@ result := {
 	"mode": mode,
 	"decision_influence": decision_influence,
 	"evidence_gap": evidence_gap,
+	"evidence_violation": evidence_violation,
+	"evidence_concern": evidence_concern,
+	"violation_reason_codes": violation_reason_codes,
+	"concern_reason_codes": concern_reason_codes,
 	"evidence_request_ceiling_reached": evidence_request_ceiling_reached,
 	"enforced_burden_satisfied": enforced_burden_satisfied,
 	"diagnostic_score": object.get(object.get(input.pillars, "evidence", {}), "diagnostic_score", null),

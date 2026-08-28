@@ -18,6 +18,18 @@ from layer3_tool_bus_external_capabilities.tool_contract import (
 from .lifecycle_service import _append_step_record
 
 
+# A locally settled request never reached the world, so repeating it cannot change its
+# outcome. Counting repeats per plan step could not bound that: the protocol replan the
+# per-step ceiling triggers opens a new step and resets the very counter meant to stop
+# it, so an actor that keeps deriving the same unreachable URL loops across replans
+# while no convergence rule can observe it - a settled attempt is neither a backend
+# failure nor a duplicate invocation. This ceiling lives on run scope, which nothing in
+# the loop can reset, and it governs whether an execution is admitted at all. How many
+# replaced trajectories are too many stays a policy question, answered by Trajectory's
+# replan ceiling, so no directive threshold is duplicated here.
+_MAX_SETTLED_ATTEMPTS_PER_TARGET = 3
+
+
 # Execute a capability through a progress-aware local guard before any backend or OPA boundary.
 def tool_gateway(state: TaskState, *, tool_gateway_service: ToolGatewayPort) -> TaskState:
     if state.current_state != RuntimeState.READY_TOOL_EXECUTION or state.current_tool_request is None:
@@ -40,9 +52,17 @@ def tool_gateway(state: TaskState, *, tool_gateway_service: ToolGatewayPort) -> 
     # named subset let a new rejection kind loop without bound: an unanchored target
     # is refused before the backend, so it is neither a failure nor a duplicate and
     # no convergence rule could ever see it.
-    if not disposition.reached_backend and _step_repeat_count(
-        state, action_key, request.plan_step_id
-    ) >= 2:
+    #
+    # Replanning is the escalation only while it can still help. Once this target is
+    # exhausted the step is deliberately kept: its exploration budget then keeps climbing
+    # until Trajectory escalates to supervision, which is the terminating condition a
+    # reset step never reaches. Each target concedes at most one replan this way, and the
+    # policy ceiling bounds how many a run may accumulate in total.
+    if (
+        not disposition.reached_backend
+        and not _target_exhausted(state, action_key)
+        and _step_repeat_count(state, action_key, request.plan_step_id) >= 2
+    ):
         _request_protocol_replan(state, action_key=action_key)
     else:
         state.current_state = RuntimeState.ACTING
@@ -52,6 +72,20 @@ def tool_gateway(state: TaskState, *, tool_gateway_service: ToolGatewayPort) -> 
 
 # Return cache/rejection results without allowing them to become backend invocations.
 def _guarded_tool_result(*, state: TaskState, request: ToolRequest, action_key: str, tool_gateway_service: ToolGatewayPort) -> tuple[ToolExecutionResult, ToolDisposition, bool]:
+    if _target_exhausted(state, action_key):
+        # Name the outcome as final. The actor kept reissuing a derived URL because every
+        # refusal read as a transient one; only an explicit dead end moves it on.
+        return (
+            _synthetic_result(
+                request,
+                "This exact request was refused locally too many times in this run and "
+                "will not be attempted again. Choose a different target or complete the "
+                "step without it.",
+                ToolErrorCode.DUPLICATE_REQUEST,
+            ),
+            ToolDisposition.REJECTED_DUPLICATE,
+            False,
+        )
     cached = _successful_result_for_action(state, action_key)
     if cached is not None:
         return ToolExecutionResult(
@@ -109,6 +143,20 @@ def _step_repeat_count(state: TaskState, action_key: str, plan_step_id: str) -> 
         for item in state.tool_attempts
         if item.action_key == action_key and item.plan_step_id == plan_step_id
     )
+
+
+# Count settled attempts on one target across the whole run, on a boundary no replan
+# and no epoch advance can reset.
+def _run_settled_attempt_count(state: TaskState, action_key: str) -> int:
+    return sum(
+        1
+        for item in state.tool_attempts
+        if item.action_key == action_key and not item.disposition.reached_backend
+    )
+
+
+def _target_exhausted(state: TaskState, action_key: str) -> bool:
+    return _run_settled_attempt_count(state, action_key) >= _MAX_SETTLED_ATTEMPTS_PER_TARGET
 
 
 # Escalate local protocol churn to replanning without asking OPA to supervise technical loops.

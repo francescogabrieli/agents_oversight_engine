@@ -133,8 +133,11 @@ class StepCompletionCandidate:
 @dataclass(frozen=True)
 class ReplanCheckpoint:
     # Record the observable boundary after one replacement trajectory is installed.
+    # The tool figure counts backend-reaching calls, never locally settled outcomes:
+    # a cache hit or a rejected target changed nothing in the world, so it must not
+    # read as a new observable basis admitting the next replan.
     actor_turn_count: int
-    tool_result_count: int
+    tool_call_count: int
     observation_count: int
     completed_step_count: int
     human_review_count: int

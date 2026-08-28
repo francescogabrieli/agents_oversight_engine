@@ -93,8 +93,13 @@ action_revision_limit_reached if {
 
 default replan_ceiling_reached := false
 
+# The ceiling measures how many trajectories this episode already replaced, not who is
+# asking for the next one. Requiring an actor request here made the rule blind to every
+# replan the runtime raised on its own: a protocol replan installs a replacement plan
+# and the actor has produced a fresh result by the next pass, so needs_replan_signal is
+# never true when governance looks. The checkpoints were counted and the rule ignored
+# them, which is how a run could replace its trajectory without bound.
 replan_ceiling_reached if {
-	actor_requested_replan
 	replan_episode_count >= max_replans_before_review
 }
 

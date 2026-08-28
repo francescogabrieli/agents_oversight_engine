@@ -126,6 +126,8 @@ class TaskState:
     evidence_request_episode_count: int = 0
     evidence_request_episode_id: str | None = None
     evidence_request_ceiling_reached: bool = False
+    # Digest of the evidence selection a human already ruled on for literal anchoring.
+    adjudicated_evidence_anchoring_digest: str | None = None
     external_operation_revision_count: int = 0
     current_external_execution_request: ExternalExecutionRequest | None = None
     last_external_execution_receipt: ExternalExecutionReceipt | None = None

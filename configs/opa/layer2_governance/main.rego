@@ -83,7 +83,7 @@ else := unavailable_required_pillar_decision if active_required_pillar_unavailab
 
 else := clarification_decision if static_policy.result.clarification_signaled
 
-else := hitl_decision("replan_ceiling_reached", "The current replanning episode reached the configured ceiling while the actor requested another replan.") if trajectory.result.replan_ceiling_reached
+else := hitl_decision("replan_ceiling_reached", "The current replanning episode reached the configured ceiling for replaced trajectories.") if trajectory.result.replan_ceiling_reached
 
 else := hitl_decision("consecutive_tool_failures", "Consecutive tool failures exceeded the human review threshold.") if trajectory.result.consecutive_tool_failures_review_threshold_reached
 
@@ -124,13 +124,23 @@ else := revise_decision if {
 
 else := base_decision("wait_human_review", "require_human_review", array.concat(["evidence_request_limit_reached"], evidence.result.reason_codes), "The actor repeated completion without resolving required evidence and reached the request ceiling.", true) if {
 	input.pillar_requirements.require_evidence == true
-	evidence.result.evidence_gap
+	evidence.result.evidence_violation
 	evidence.result.evidence_request_ceiling_reached
+}
+
+# An anchoring concern survives every retrieval the actor could still perform, so
+# returning it as a remediation would leave deleting the claim as the only move the
+# actor can make. Fixable deficits are cleared first; a surviving concern is a
+# question about the output itself, and a human answers it.
+else := base_decision("wait_human_review", "require_human_review", evidence_anchoring_reason_codes, "Literal claims in the completion are absent from every observation and cannot be settled by further retrieval.", true) if {
+	input.pillar_requirements.require_evidence == true
+	evidence.result.evidence_concern
+	not evidence.result.evidence_violation
 }
 
 else := evidence_decision(evidence_gap_reason_codes, "The completion references invalid or missing concrete evidence.") if {
 	input.pillar_requirements.require_evidence == true
-	evidence.result.evidence_gap
+	evidence.result.evidence_violation
 }
 
 else := external_low_confidence_review if {
@@ -204,7 +214,7 @@ judge_binding_valid if {
 
 candidate_alternatives[code] := reason if {
 	code := "replan_ceiling_reached"
-	reason := "The current replanning episode reached the configured ceiling while the actor requested another replan."
+	reason := "The current replanning episode reached the configured ceiling for replaced trajectories."
 	trajectory.result.replan_ceiling_reached
 }
 
@@ -289,7 +299,7 @@ candidate_alternatives[code] := reason if {
 	code := "evidence_request_limit_reached"
 	reason := "The actor repeated completion without resolving required evidence and reached the request ceiling."
 	input.pillar_requirements.require_evidence == true
-	evidence.result.evidence_gap
+	evidence.result.evidence_violation
 	evidence.result.evidence_request_ceiling_reached
 }
 
@@ -297,7 +307,15 @@ candidate_alternatives[code] := reason if {
 	code := "invalid_or_missing_selected_evidence"
 	reason := "The completion references invalid or missing concrete evidence."
 	input.pillar_requirements.require_evidence == true
-	evidence.result.evidence_gap
+	evidence.result.evidence_violation
+}
+
+candidate_alternatives[code] := reason if {
+	code := "evidence_anchoring_requires_review"
+	reason := "Literal claims in the completion are absent from every observation and cannot be settled by further retrieval."
+	input.pillar_requirements.require_evidence == true
+	evidence.result.evidence_concern
+	not evidence.result.evidence_violation
 }
 
 candidate_alternatives[code] := reason if {
@@ -346,7 +364,12 @@ evidence_decision(codes, reason) := base_decision("request_more_evidence", "allo
 # Both travel on the decision so remediation and the evaluation store read one vocabulary.
 evidence_gap_reason_codes := array.concat(
 	["invalid_or_missing_selected_evidence"],
-	[code | some code in evidence.result.reason_codes; code != "invalid_or_missing_selected_evidence"],
+	[code | some code in evidence.result.violation_reason_codes; code != "invalid_or_missing_selected_evidence"],
+)
+
+evidence_anchoring_reason_codes := array.concat(
+	["evidence_anchoring_requires_review"],
+	[code | some code in evidence.result.concern_reason_codes; code != "evidence_anchoring_requires_review"],
 )
 static_deny_reason_codes := static_policy.result.reason_codes if count(static_policy.result.reason_codes) > 0
 

@@ -246,7 +246,7 @@ class Layer2ToolRuntimeTests(unittest.TestCase):
 
         invented = "https://example.org/never-observed"
         gateway = SimpleNamespace(execute=lambda **_: self.fail("backend must not be reached"))
-        for _ in range(3):
+        for _ in range(2):
             state.current_state = RuntimeState.READY_TOOL_EXECUTION
             state.current_tool_request = ToolRequest(
                 plan_step_id="step_1",
@@ -260,11 +260,82 @@ class Layer2ToolRuntimeTests(unittest.TestCase):
         self.assertTrue(
             all(item is ToolDisposition.REJECTED_UNANCHORED_TARGET for item in dispositions)
         )
-        # The loop is bounded: the third identical request routes to replanning.
+        # The loop is bounded: the second identical request on this step routes to
+        # replanning, before the target's run-scoped exhaustion ceiling is reached.
         self.assertEqual(state.current_state, RuntimeState.REPLANNING)
         self.assertEqual(state.actor_result.result_type, ActorResultType.NEEDS_REPLAN)
         # A refused request never becomes a backend call in the trajectory facts.
         self.assertEqual(state.tool_call_count, 0)
+
+    # A replan concedes one retry per target, not one per plan step it survives across.
+    # Once the run-scoped attempt ceiling is reached, the same fixation must not open a
+    # second replan - the step is held instead so its exploration budget can terminate it.
+    def test_exhausted_target_does_not_replan_again_on_a_new_step(self) -> None:
+        state = TaskState.from_intake(_build_research_intake_result())
+        state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Collect sources",
+                rationale="r",
+                expected_outcome="o",
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        state.current_plan_step_index = 0
+        invented = "https://example.org/never-observed"
+        gateway = SimpleNamespace(execute=lambda **_: self.fail("backend must not be reached"))
+
+        for _ in range(2):
+            state.current_state = RuntimeState.READY_TOOL_EXECUTION
+            state.current_tool_request = ToolRequest(
+                plan_step_id="step_1",
+                tool_name=ToolName.FETCH_URL_TEXT,
+                reason="fetch an unobserved url",
+                url=invented,
+            )
+            tool_gateway(state, tool_gateway_service=gateway)
+        self.assertEqual(state.current_state, RuntimeState.REPLANNING)
+
+        # The replanner would install a new step id; simulate that boundary directly.
+        state.plan_steps.append(
+            PlanStep(
+                step_id="replan_step_1",
+                objective="Collect sources",
+                rationale="r",
+                expected_outcome="o",
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        )
+        state.current_plan_step_index = 1
+        # The third attempt still checks anchoring directly: exhaustion is measured
+        # before this attempt is recorded, and only two are settled so far.
+        state.current_state = RuntimeState.READY_TOOL_EXECUTION
+        state.current_tool_request = ToolRequest(
+            plan_step_id="replan_step_1",
+            tool_name=ToolName.FETCH_URL_TEXT,
+            reason="fetch the same unobserved url again",
+            url=invented,
+        )
+        tool_gateway(state, tool_gateway_service=gateway)
+        self.assertEqual(state.current_state, RuntimeState.ACTING)
+        self.assertEqual(
+            state.last_tool_result.error_code, ToolErrorCode.UNANCHORED_TARGET
+        )
+
+        # The fourth attempt is refused before the anchoring check even runs: the
+        # target is now exhausted at the run scope, and the step is held rather than
+        # replanned again, so its exploration budget is free to keep climbing.
+        state.current_state = RuntimeState.READY_TOOL_EXECUTION
+        state.current_tool_request = ToolRequest(
+            plan_step_id="replan_step_1",
+            tool_name=ToolName.FETCH_URL_TEXT,
+            reason="fetch the same unobserved url once more",
+            url=invented,
+        )
+        tool_gateway(state, tool_gateway_service=gateway)
+        self.assertEqual(state.current_state, RuntimeState.ACTING)
+        self.assertEqual(state.last_tool_result.error_code, ToolErrorCode.DUPLICATE_REQUEST)
+        self.assertIn("will not be attempted again", state.last_tool_result.summary)
 
     def test_duplicate_fetch_request_is_blocked_before_reexecution(self) -> None:
         graph = _build_test_graph(

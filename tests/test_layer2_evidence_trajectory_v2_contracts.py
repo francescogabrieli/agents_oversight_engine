@@ -44,6 +44,7 @@ from layer2_runtime_governance.governance_components import build_policy_evaluat
 from layer2_runtime_governance.signal_services.evidence_service import build_evidence_signal
 from layer2_runtime_governance.signal_services.trajectory_service import build_trajectory_signal
 from layer3_tool_bus_external_capabilities.external_operations import (
+    normalize_sql_operation,
     normalize_communication_operation,
 )
 from layer3_tool_bus_external_capabilities.tool_contract import (
@@ -377,6 +378,52 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
         )
         self.assertIn("circular_evidence_reference", facts["deficit_codes"])
 
+    # A SQL statement asks the world a question; its literals are selection criteria
+    # the actor authored, not values a source has to support. Anchoring them made a
+    # governed read fail for containing an ordinary WHERE clause.
+    def test_sql_literals_are_not_anchored_as_claims(self) -> None:
+        state = _build_test_task_state(
+            produces_factual_claims=True,
+            evidence_burden=EvidenceBurden(),
+        )
+        state.observations.append(
+            ToolObservation(
+                observation_id="obs-1",
+                content="Incident register schema.",
+                locator="controlled-dataset://evaluation_incidents_v1",
+                retrieval_kind=RetrievalKind.CONTROLLED_RESOURCE,
+            )
+        )
+        state.external_operation_proposal = normalize_sql_operation(
+            operation_id="op-1",
+            plan_step_id="step_1",
+            capability_id="database.statement.execute",
+            sql=(
+                "SELECT severity, COUNT(*) FROM incidents "
+                "WHERE created_at >= '2025-01-01' AND severity_id = 4271 LIMIT 500"
+            ),
+            database_target="evaluation_reporting",
+            database_profile_id="evaluation_reporting_read_only",
+        )
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.STEP_COMPLETED,
+            summary="Query prepared",
+            output_text="Prepared the governed read.",
+            step_validation=StepValidation(
+                plan_step_id="step_1",
+                actor_self_confidence=0.8,
+                evidence_refs=("obs-1",),
+                rationale_summary="Query targets obs-1.",
+            ),
+        )
+
+        facts = build_evidence_signal(task_state=state, thresholds_version="v1")["raw_facts"]
+
+        self.assertEqual(facts["unanchored_literals_in_selection"], [])
+        self.assertEqual(facts["unanchored_literals_in_universe"], [])
+        self.assertNotIn("unanchored_literals_in_selection", facts["deficit_codes"])
+
     def test_literal_anchoring_identifies_unanchored_tokens(self) -> None:
         state = _build_test_task_state(
             produces_factual_claims=True,
@@ -491,7 +538,7 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
             thresholds_version="v1",
         )["raw_facts"]
 
-        self.assertNotIn(clean_url, facts["unanchored_literals_in_selection"])
+        self.assertNotIn(clean_url, facts["unanchored_locators_in_selection"])
         state.actor_result = ActorResult(
             plan_step_id="step_1",
             result_type=ActorResultType.STEP_COMPLETED,
@@ -510,7 +557,7 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
         )["raw_facts"]
         self.assertIn(
             f"{clean_url}?version=2",
-            changed_facts["unanchored_literals_in_selection"],
+            changed_facts["unanchored_locators_in_selection"],
         )
 
     # Layout numbers and UUID fragments are not claims; localized currency remains checkable.
@@ -583,8 +630,8 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
             thresholds_version="v1",
         )["raw_facts"]
 
-        self.assertIn(claimed_url, facts["unanchored_literals_in_selection"])
-        self.assertIn(claimed_url, facts["unanchored_literals_in_universe"])
+        self.assertIn(claimed_url, facts["unanchored_locators_in_selection"])
+        self.assertIn(claimed_url, facts["unanchored_locators_in_universe"])
 
     # URL prefixes are not evidence for a different, longer observed locator.
     def test_literal_url_prefix_is_not_anchored_by_longer_locator(self) -> None:
@@ -619,8 +666,8 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
             thresholds_version="v1",
         )["raw_facts"]
 
-        self.assertIn(claimed_url, facts["unanchored_literals_in_selection"])
-        self.assertIn(claimed_url, facts["unanchored_literals_in_universe"])
+        self.assertIn(claimed_url, facts["unanchored_locators_in_selection"])
+        self.assertIn(claimed_url, facts["unanchored_locators_in_universe"])
 
     # An observed article grounds its exact channel path at a segment boundary.
     def test_literal_url_channel_path_is_anchored_by_observed_descendant(self) -> None:
@@ -868,11 +915,50 @@ class SelectionScopedCoverageTests(unittest.TestCase):
                 "min_independent_sources_required": 3,
             },
             observations=(),
+            retrieval_tools=frozenset({ToolName.WEB_SEARCH, ToolName.FETCH_URL_TEXT}),
         )
 
         summary = findings[0].summary
         self.assertNotIn("already retrieved", summary)
         self.assertIn("new web_search", summary)
+
+    # A run whose retrieval surface is a controlled corpus cannot widen a web search.
+    # Naming an action the gateway would refuse spends remediation rounds on a move the
+    # actor cannot make, and hides the real surface from the reviewer reading the trace.
+    def test_remediation_names_the_surface_the_run_actually_has(self) -> None:
+        findings = _build_evidence_feedback_findings(
+            codes=("insufficient_independent_sources",),
+            facts={
+                "distinct_independent_sources_count": 1,
+                "retrieved_independent_sources_count": 1,
+                "min_independent_sources_required": 2,
+            },
+            observations=(),
+            retrieval_tools=frozenset(
+                {ToolName.CONTROLLED_DATASET_READ, ToolName.CONTROLLED_DOCUMENT_READ}
+            ),
+        )
+
+        summary = findings[0].summary
+        self.assertNotIn("web_search", summary)
+        self.assertIn("controlled_dataset.read", summary)
+        self.assertIn("controlled_document.read", summary)
+
+    def test_remediation_states_the_burden_is_unreachable_without_retrieval(self) -> None:
+        findings = _build_evidence_feedback_findings(
+            codes=("insufficient_independent_sources",),
+            facts={
+                "distinct_independent_sources_count": 0,
+                "retrieved_independent_sources_count": 0,
+                "min_independent_sources_required": 2,
+            },
+            observations=(),
+            retrieval_tools=frozenset(),
+        )
+
+        summary = findings[0].summary
+        self.assertNotIn("web_search", summary)
+        self.assertIn("No retrieval tool is enabled", summary)
 
 
 if __name__ == "__main__":

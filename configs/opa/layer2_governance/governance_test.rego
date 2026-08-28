@@ -167,11 +167,41 @@ test_invalid_selected_evidence_requests_more_evidence if {
 	result.directive == "request_more_evidence"
 }
 
-test_unanchored_literal_requests_more_evidence if {
-	evidence := object.union(facts_evidence, {"raw_facts": object.union(facts_evidence.raw_facts, {"has_unanchored_literals_in_selection": true})})
+# No further retrieval turns a computed value into a quoted one, so returning this to
+# the actor would leave deleting the claim as its only move. A human adjudicates instead.
+test_unanchored_literal_escalates_to_human_review if {
+	raw_facts := object.union(facts_evidence.raw_facts, {"has_unanchored_literals_in_selection": true, "deficit_codes": ["unanchored_literals_in_selection"]})
+	evidence := object.union(facts_evidence, {"raw_facts": raw_facts})
+	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"evidence": evidence})})
+	result := decision with input as candidate
+	result.directive == "wait_human_review"
+	result.reason_codes == ["evidence_anchoring_requires_review", "unanchored_literals_in_selection"]
+	result.pillar_results.evidence.evidence_concern == true
+	result.pillar_results.evidence.evidence_violation == false
+}
+
+# The union keeps the historical gate meaningful: a concern still bars the judge.
+test_unanchored_literal_blocks_judge_admission if {
+	raw_facts := object.union(facts_evidence.raw_facts, {"has_unanchored_literals_in_universe": true, "deficit_codes": ["unanchored_literals_in_universe"]})
+	evidence := object.union(facts_evidence, {"raw_facts": raw_facts})
+	candidate := object.union(base_input, {"base_facts": object.union(base_facts, {"external_operation": governed_operation}), "pillar_requirements": {"require_evidence": true, "require_risk": false, "require_trajectory": true, "require_behavioral": false, "require_judge": true}, "pillars": object.union(base_input.pillars, {"evidence": evidence, "judge": safe_judge})})
+	result := decision with input as candidate
+	result.pillar_results.evidence.evidence_gap == true
+	result.judge_admission.required == false
+}
+
+# A fixable deficit is cleared first, and the remediation must not carry the anchoring
+# code with it: instructing the actor to remove a literal it cannot support is how a
+# correct derived value gets silently deleted before any human sees it.
+test_violation_precedes_concern_and_excludes_anchoring_codes if {
+	raw_facts := object.union(facts_evidence.raw_facts, {"circular_reference_detected": true, "has_unanchored_literals_in_selection": true, "deficit_codes": ["circular_evidence_reference", "unanchored_literals_in_selection"]})
+	evidence := object.union(facts_evidence, {"raw_facts": raw_facts})
 	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"evidence": evidence})})
 	result := decision with input as candidate
 	result.directive == "request_more_evidence"
+	result.reason_codes == ["invalid_or_missing_selected_evidence", "circular_evidence_reference"]
+	result.pillar_results.evidence.evidence_violation == true
+	result.pillar_results.evidence.evidence_concern == true
 }
 
 test_nonfactual_completion_keeps_literal_gaps_observational if {
@@ -195,21 +225,21 @@ test_nonfactual_completion_still_enforces_selected_reference_integrity if {
 # ever reachable inside the pillar payload, so the evaluation store recorded one
 # undifferentiated code for every Evidence family.
 test_evidence_gap_decision_carries_the_active_deficit_codes if {
-	raw_facts := object.union(facts_evidence.raw_facts, {"evidence_completion_attempt": true, "has_unanchored_literals_in_selection": true, "deficit_codes": ["unanchored_literals_in_selection"]})
+	raw_facts := object.union(facts_evidence.raw_facts, {"evidence_completion_attempt": true, "circular_reference_detected": true, "deficit_codes": ["circular_evidence_reference"]})
 	evidence := object.union(facts_evidence, {"raw_facts": raw_facts})
 	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"evidence": evidence})})
 	result := decision with input as candidate
 	result.directive == "request_more_evidence"
-	result.reason_codes == ["invalid_or_missing_selected_evidence", "unanchored_literals_in_selection"]
+	result.reason_codes == ["invalid_or_missing_selected_evidence", "circular_evidence_reference"]
 }
 
 test_evidence_ceiling_escalation_carries_the_active_deficit_codes if {
-	raw_facts := object.union(facts_evidence.raw_facts, {"evidence_completion_attempt": true, "has_unanchored_literals_in_selection": true, "evidence_request_episode_count": 3, "deficit_codes": ["unanchored_literals_in_selection"]})
+	raw_facts := object.union(facts_evidence.raw_facts, {"evidence_completion_attempt": true, "circular_reference_detected": true, "evidence_request_episode_count": 3, "deficit_codes": ["circular_evidence_reference"]})
 	evidence := object.union(facts_evidence, {"raw_facts": raw_facts})
 	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"evidence": evidence})})
 	result := decision with input as candidate
 	result.directive == "wait_human_review"
-	result.reason_codes == ["evidence_request_limit_reached", "unanchored_literals_in_selection"]
+	result.reason_codes == ["evidence_request_limit_reached", "circular_evidence_reference"]
 }
 
 # Read-only exploration used to have no terminating condition at all.

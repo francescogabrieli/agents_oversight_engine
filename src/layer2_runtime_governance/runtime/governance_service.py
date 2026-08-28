@@ -11,9 +11,10 @@ from layer3_tool_bus_external_capabilities.external_operations import (
     OperationBoundary,
     build_external_execution_request,
 )
-from layer3_tool_bus_external_capabilities.tools import ToolGatewayConfig
+from layer3_tool_bus_external_capabilities.tools import ToolCapability, ToolGatewayConfig
 from layer3_tool_bus_external_capabilities.tool_contract import (
     RetrievalKind,
+    ToolName,
     canonical_web_locator,
 )
 from layer4_state_evidence_observability.behavioral import (
@@ -60,6 +61,8 @@ _EVIDENCE_REFERENCE_FACTS = {
 _EVIDENCE_LITERAL_FACTS = {
     "unanchored_literals_in_selection": "unanchored_literals_in_selection",
     "unanchored_literals_in_universe": "unanchored_literals_in_universe",
+    "unanchored_locators_in_selection": "unanchored_locators_in_selection",
+    "unanchored_locators_in_universe": "unanchored_locators_in_universe",
 }
 _EVIDENCE_REMEDIATION_SUMMARIES = {
     "unanchored_literals_in_selection": (
@@ -76,7 +79,30 @@ _EVIDENCE_REMEDIATION_SUMMARIES = {
     "retrieved_content_missing": (
         "Fetch the specific source documents instead of relying on search titles or locators."
     ),
+    "unanchored_locators_in_selection": (
+        "These sources are cited but were never retrieved. Fetch each one so the "
+        "citation rests on an observation, or remove it from the output."
+    ),
+    "unanchored_locators_in_universe": (
+        "These sources appear in the output but in no observation of this run. Fetch "
+        "each one before citing it, or remove it from the output."
+    ),
 }
+
+
+# Remediation may only name retrieval the run can actually perform. Telling an actor
+# whose surface is a controlled corpus to widen a web search is an instruction the
+# runtime already knows will fail, and it hides the real state from the operator.
+def _enabled_retrieval_tools(
+    tool_gateway_config: ToolGatewayConfig | None,
+) -> frozenset[ToolName]:
+    if tool_gateway_config is None:
+        return frozenset()
+    return frozenset(
+        tool_name
+        for tool_name, definition in tool_gateway_config.tools.items()
+        if definition.enabled and definition.capability == ToolCapability.READ
+    )
 
 
 # Advance both the whole-run audit counter and the bounded current episode.
@@ -94,6 +120,7 @@ def _build_evidence_feedback_findings(
     codes: tuple[str, ...],
     facts: dict[str, object],
     observations: tuple | list = (),
+    retrieval_tools: frozenset[ToolName] = frozenset(),
 ) -> tuple[JudgeFindingSnapshot, ...]:
     findings: list[JudgeFindingSnapshot] = []
     for code in codes:
@@ -137,17 +164,35 @@ def _build_evidence_feedback_findings(
                     " retrieving new sources."
                 )
             else:
-                unexplored = _count_unexplored_search_results(observations)
+                web_search_enabled = ToolName.WEB_SEARCH in retrieval_tools
+                unexplored = (
+                    _count_unexplored_search_results(observations)
+                    if web_search_enabled
+                    else 0
+                )
                 if unexplored > 0:
                     summary += (
                         f" You have {unexplored} unfetched search results available."
                         f" Open at least {max(gap, 1)} more from different source origins"
                         f" before completing the step."
                     )
-                else:
+                elif web_search_enabled:
                     summary += (
                         " No unfetched search results remain; consider issuing a"
                         " new web_search with alternative queries to find additional sources."
+                    )
+                elif retrieval_tools:
+                    available = ", ".join(
+                        sorted(tool_name.value for tool_name in retrieval_tools)
+                    )
+                    summary += (
+                        f" Web search is not available to this run; the retrieval tools"
+                        f" you can still use are: {available}."
+                    )
+                else:
+                    summary += (
+                        " No retrieval tool is enabled for this run, so the burden"
+                        " cannot be met by further acquisition."
                     )
         findings.append(
             JudgeFindingSnapshot(
@@ -238,6 +283,7 @@ def governance(
         state,
         governance_decision=governance_decision,
         policy_input=policy_input,
+        retrieval_tools=_enabled_retrieval_tools(tool_gateway_config),
     )
 
     if state.current_state == RuntimeState.WAITING_HUMAN_REVIEW:
@@ -307,6 +353,7 @@ def _apply_governance_decision(
     *,
     governance_decision: GovernanceDecision,
     policy_input: PolicyEvaluationInput,
+    retrieval_tools: frozenset[ToolName] = frozenset(),
 ) -> None:
     evidence_result = (governance_decision.pillar_results or {}).get("evidence", {})
     evidence_result = evidence_result if isinstance(evidence_result, dict) else {}
@@ -445,6 +492,7 @@ def _apply_governance_decision(
                     codes=all_codes,
                     facts=evidence_facts,
                     observations=tuple(state.observations),
+                    retrieval_tools=retrieval_tools,
                 ),
                 judge_summary=(
                     "Governance required additional evidence "

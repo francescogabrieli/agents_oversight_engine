@@ -246,7 +246,7 @@ class Layer2OversightRawFactsTests(unittest.TestCase):
             state.replan_checkpoints.append(
                 ReplanCheckpoint(
                     actor_turn_count=index + 1,
-                    tool_result_count=0,
+                    tool_call_count=0,
                     observation_count=0,
                     completed_step_count=0,
                     human_review_count=0,
@@ -285,7 +285,7 @@ class Layer2OversightRawFactsTests(unittest.TestCase):
         state.replan_checkpoints.append(
             ReplanCheckpoint(
                 actor_turn_count=3,
-                tool_result_count=0,
+                tool_call_count=0,
                 observation_count=0,
                 completed_step_count=0,
                 human_review_count=1,

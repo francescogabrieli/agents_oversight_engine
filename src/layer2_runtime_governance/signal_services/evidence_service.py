@@ -21,7 +21,6 @@ from layer2_runtime_governance.domain import (
 from layer2_runtime_governance.domain.step_recovery import resolve_evidence_episode_id
 from layer3_tool_bus_external_capabilities.external_operations import (
     CommunicationOperationPayload,
-    DatabaseOperationPayload,
 )
 from layer3_tool_bus_external_capabilities.tool_contract import (
     RetrievalKind,
@@ -399,14 +398,32 @@ def _unanchored_literal_tokens(
     return task_anchored, unanchored
 
 
+# A token that names a source is not the same kind of claim as one that states a
+# quantity. An unanchored URL is resolvable by retrieval - the actor fetches what it
+# cited, or drops a link that does not exist. An unanchored number, date or percentage
+# is not: no fetch turns a computed value into a quoted one, and the two must therefore
+# reach different remediation paths.
+def _partition_locator_tokens(tokens: list[str]) -> tuple[list[str], list[str]]:
+    locators = [
+        token for token in tokens
+        if token.casefold().startswith(("http://", "https://"))
+    ]
+    values = [
+        token for token in tokens
+        if not token.casefold().startswith(("http://", "https://"))
+    ]
+    return locators, values
+
+
 def _get_target_text(task_state: TaskState) -> str:
     parts: list[str] = []
     if task_state.external_operation_proposal is not None:
         payload = task_state.external_operation_proposal.payload
+        # Only assertions are anchored. A communication body claims things about the
+        # world; a SQL statement asks the world a question, and its literals are
+        # selection criteria the actor authored, not values a source has to support.
         if isinstance(payload, CommunicationOperationPayload) and payload.body:
             parts.append(payload.body)
-        elif isinstance(payload, DatabaseOperationPayload) and payload.sql:
-            parts.append(payload.sql)
     if (
         task_state.external_communication is not None
         and task_state.external_communication.draft is not None
@@ -632,15 +649,35 @@ def build_evidence_signal(
     target_text = _get_target_text(task_state)
     task_corpus = _task_literal_corpus(task_state.task_spec)
     target_tokens = _extract_literal_tokens(target_text)
-    literals_anchored_to_task, unanchored_literals_in_selection = _unanchored_literal_tokens(
+    literals_anchored_to_task, unanchored_in_selection = _unanchored_literal_tokens(
         target_tokens=target_tokens,
         observations=selected,
         task_corpus=task_corpus,
     )
-    _, unanchored_literals_in_universe = _unanchored_literal_tokens(
+    _, unanchored_in_universe = _unanchored_literal_tokens(
         target_tokens=target_tokens,
         observations=task_state.observations,
         task_corpus=task_corpus,
+    )
+    (
+        unanchored_locators_in_selection,
+        unanchored_literals_in_selection,
+    ) = _partition_locator_tokens(unanchored_in_selection)
+    (
+        unanchored_locators_in_universe,
+        unanchored_literals_in_universe,
+    ) = _partition_locator_tokens(unanchored_in_universe)
+    # A human who has already ruled on exactly this selection settles the question. The
+    # binding is the selection digest, so the ruling cannot carry over to a different
+    # completion, and an unreviewed concern still reaches a person.
+    adjudicated_anchoring_digest = getattr(
+        task_state,
+        "adjudicated_evidence_anchoring_digest",
+        None,
+    )
+    anchoring_concern_adjudicated = bool(
+        adjudicated_anchoring_digest is not None
+        and adjudicated_anchoring_digest == selection_digest
     )
     insufficiency_declared_in_payload = _declares_insufficiency(target_text)
 
@@ -668,6 +705,10 @@ def build_evidence_signal(
         deficit_codes.append("title_only_evidence_fragility")
     if evidence_completion_attempt and circular_reference_detected:
         deficit_codes.append("circular_evidence_reference")
+    if evidence_completion_attempt and unanchored_locators_in_selection:
+        deficit_codes.append("unanchored_locators_in_selection")
+    if evidence_completion_attempt and unanchored_locators_in_universe:
+        deficit_codes.append("unanchored_locators_in_universe")
     if evidence_completion_attempt and unanchored_literals_in_selection:
         deficit_codes.append("unanchored_literals_in_selection")
     if evidence_completion_attempt and unanchored_literals_in_universe:
@@ -735,10 +776,15 @@ def build_evidence_signal(
         "circular_evidence_observation_ids": sorted(circular_evidence_reasons),
         # Famiglia 5 facts
         "literals_anchored_to_task": literals_anchored_to_task,
+        "unanchored_locators_in_selection": unanchored_locators_in_selection,
+        "unanchored_locators_in_universe": unanchored_locators_in_universe,
+        "has_unanchored_locators_in_selection": len(unanchored_locators_in_selection) > 0,
+        "has_unanchored_locators_in_universe": len(unanchored_locators_in_universe) > 0,
         "unanchored_literals_in_selection": unanchored_literals_in_selection,
         "unanchored_literals_in_universe": unanchored_literals_in_universe,
         "has_unanchored_literals_in_selection": len(unanchored_literals_in_selection) > 0,
         "has_unanchored_literals_in_universe": len(unanchored_literals_in_universe) > 0,
+        "anchoring_concern_adjudicated": anchoring_concern_adjudicated,
         # Aggregated deficit codes
         "deficit_codes": deficit_codes,
     }

@@ -68,6 +68,7 @@ from layer2_runtime_governance.signal_services.trajectory_service import (
 )
 from layer3_tool_bus_external_capabilities.tool_contract import (
     RetrievalKind,
+    ToolErrorCode,
     ToolExecutionResult,
     ToolName,
     ToolObservation,
@@ -416,7 +417,7 @@ class TraceFixesIntegrationTests(unittest.TestCase):
         state.replan_checkpoints.append(
             ReplanCheckpoint(
                 actor_turn_count=state.actor_turn_count,
-                tool_result_count=0,
+                tool_call_count=0,
                 observation_count=0,
                 completed_step_count=0,
                 human_review_count=0,
@@ -436,7 +437,34 @@ class TraceFixesIntegrationTests(unittest.TestCase):
         # the checkpoint — even though progress_epoch and plan signature changed.
         self.assertFalse(signal["raw_facts"]["observable_change_since_last_replan"])
 
-        # A new tool result is an observable execution event.
+        # A locally settled result - a cache hit, a rejected target - still lands in
+        # tool_results_history without reaching a backend, so it must not read as a new
+        # observable basis on its own; only tool_call_count, which advances solely on
+        # invocation, may satisfy this guard.
+        state.tool_results_history.append(
+            ToolExecutionResult(
+                request=ToolRequest(
+                    plan_step_id="step_1",
+                    tool_name=ToolName.WEB_SEARCH,
+                    reason="Collect fresh evidence.",
+                    query="settled without reaching a backend",
+                ),
+                success=False,
+                summary="Equivalent capability result was reused locally.",
+                error_code=ToolErrorCode.DUPLICATE_REQUEST,
+            )
+        )
+        settled_signal = build_trajectory_signal(
+            task_state=state,
+            policy_input=policy_input,
+            thresholds_version="test",
+        )
+        self.assertFalse(
+            settled_signal["raw_facts"]["observable_change_since_last_replan"]
+        )
+
+        # A backend invocation is a genuine observable execution event.
+        state.tool_call_count += 1
         state.tool_results_history.append(
             ToolExecutionResult(
                 request=ToolRequest(
