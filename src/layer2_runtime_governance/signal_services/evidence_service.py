@@ -93,6 +93,15 @@ _PROSE_DATE_PATTERNS = (
     ),
 )
 
+# A source states a share in prose ("28 percent", "3,5 per cento"); an agent renders
+# it with the symbol ("28%"). Both denote the same quantity, so the prose form has to
+# expand into the same canonical keys a "%"-suffixed token would produce.
+_PROSE_PERCENT_PATTERN = re.compile(
+    r"\b(?P<number>\d+(?:[.,]\d+)?)\s*(?:percent|per\s*cento|percento)\b",
+    re.IGNORECASE,
+)
+
+
 _ACTOR_DERIVED_TOOL_NAMES = frozenset(
     {
         ToolName.MCP_LOCAL_TEST_ECHO.value,
@@ -299,6 +308,17 @@ def _prose_date_renderings(corpus: str) -> set[str]:
     return renderings
 
 
+# Mirror _prose_date_renderings for the word-form of a percentage, so "28 percent" and
+# "28%" anchor to each other exactly as "141.006" and "141,006" already do by quantity.
+def _prose_percent_renderings(corpus: str) -> set[str]:
+    renderings: set[str] = set()
+    for match in _PROSE_PERCENT_PATTERN.finditer(corpus):
+        renderings.update(
+            f"{value}%" for value in _numeric_readings(match.group("number"))
+        )
+    return renderings
+
+
 # Normalize URL identity and non-URL literal keys once for both anchoring domains.
 def _build_literal_corpus_index(
     *,
@@ -332,6 +352,7 @@ def _build_literal_corpus_index(
             for key in _literal_comparison_keys(item)
         }
         | _prose_date_renderings(corpus)
+        | _prose_percent_renderings(corpus)
     )
     return _LiteralCorpusIndex(
         locators=frozenset(locator_values),

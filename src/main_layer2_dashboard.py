@@ -446,6 +446,13 @@ def _build_review_inbox_entry(
         "external_communication_phase": external_communication_phase,
         "execution_intent": execution_intent,
         "external_execution_status": external_execution_status,
+        # The operator-facing frontend maps this to a plain-language Italian reason;
+        # review_summary alone is OPA's raw English audit sentence.
+        "reason_codes": (
+            list(pending_request.get("reason_codes") or [])
+            if isinstance(pending_request, dict)
+            else []
+        ),
     }
 
 

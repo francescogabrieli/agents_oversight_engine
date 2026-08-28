@@ -55,7 +55,11 @@ tool. Non valuta se un'affermazione è *vera*: valuta se è *sostenuta*.
 3. **Qualità strutturale** — non basta una selezione fatta di soli titoli di ricerca.
 4. **Non-circolarità** — l'agente non può citare il proprio output come prova.
 5. **Ancoraggio letterale** — URL, date, importi e numeri presenti nel testo devono
-   comparire nelle osservazioni, o venire dal compito stesso.
+   comparire nelle osservazioni, o venire dal compito stesso. Si divide per classe: un
+   URL citato ma mai recuperato è un `evidence_violation` (l'attore lo fetcha o lo
+   toglie); un numero, una data o una valuta non ancorati sono un `evidence_concern`
+   (nessun recupero li risolve, decide un umano). L'SQL di un'operazione database non
+   è più testo da ancorare: una query è una richiesta, non un'affermazione.
 
 > Una quinta famiglia — **freschezza della fonte** (finestra di giorni, data di
 > pubblicazione, source-timestamp) — è stata **ritirata**. Si attivava solo se il
@@ -99,7 +103,10 @@ nella dashboard:
 | `independent_sources_satisfied` | Il minimo è raggiunto | invariato |
 | `retrieved_content_satisfied` | C'è almeno un documento davvero aperto | invariato come nome, **ora vero davvero** |
 | `burden_satisfied` | L'onere è coperto nel complesso | invariato |
-| `has_unanchored_literals_in_selection` / `..._in_universe` | Ci sono valori nel testo che nessuna fonte sostiene | invariato come nome, **molti meno falsi allarmi** |
+| `has_unanchored_locators_in_selection` / `..._in_universe` | Ci sono URL citati mai recuperati | **nuovo campo** — prima erano mescolati con i valori |
+| `has_unanchored_literals_in_selection` / `..._in_universe` | Ci sono valori (non URL) che nessuna fonte sostiene | invariato come nome, ora **solo valori**, molti meno falsi allarmi |
+| `evidence_violation` / `evidence_concern` | Le due classi separate del deficit | **nuovo** — `evidence_gap` ne resta l'unione storica |
+| `anchoring_concern_adjudicated` | Un umano ha già approvato questa identica selezione | **nuovo** — evita che lo stesso concern riapra la review dopo l'approvazione |
 | `circular_reference_detected` | L'agente cita se stesso come prova | invariato |
 | `selected_evidence_all_title_only` | La selezione è fatta di soli titoli di ricerca | invariato |
 | `evidence_request_episode_count` | Quante volte è già stata chiesta più evidenza | invariato |
@@ -127,18 +134,26 @@ e sbagliava. *Dopo* è un campo tipizzato scritto da chi esegue la chiamata.
 
 ### Cosa produce
 
-Un booleano `evidence_gap` più una lista di codici di deficit. OPA lo traduce in
-`request_more_evidence` (torna all'attore) e, dopo 3 richieste nello stesso episodio, in
-escalation a revisione umana. **I codici di deficit specifici viaggiano ora insieme al
-codice generico sulla decisione stessa** (`invalid_or_missing_selected_evidence` più, ad
-esempio, `unanchored_literals_in_selection`): prima restavano intrappolati dentro il
-pilastro e la valutazione finale della tesi li avrebbe visti tutti come un'unica voce
-indistinta, senza poter dire quale delle cinque famiglie interviene e quanto spesso.
+Un booleano `evidence_gap`, unione di due classi separate. Un `evidence_violation`
+(famiglie 1–4, o un locator di famiglia 5) segue il ciclo storico: OPA lo traduce in
+`request_more_evidence` (torna all'attore con i `violation_reason_codes`) e, dopo 3
+richieste nello stesso episodio, in escalation a revisione umana
+(`evidence_request_limit_reached`). Un `evidence_concern` puro (solo valori di famiglia 5,
+nessuna violazione) **salta il ciclo**: va diretto a `wait_human_review` con
+`evidence_anchoring_requires_review`, perché nessun ulteriore tentativo dell'attore può
+risolverlo — rimandarlo indietro rischierebbe di fargli cancellare un'affermazione
+corretta solo per soddisfare il controllo. Un'approvazione umana su quella selezione
+esatta la ricorda (`anchoring_concern_adjudicated`); un replan la dimentica.
+
+I codici specifici viaggiano sulla decisione stessa, ciascuno nella lista della propria
+classe: prima restavano intrappolati dentro il pilastro e la valutazione finale della
+tesi li avrebbe visti tutti come un'unica voce indistinta, senza poter dire quale
+famiglia interviene, quanto spesso, e se l'attore poteva davvero risolverla da solo.
 
 I codici di deficit più frequenti: `insufficient_independent_sources`,
-`retrieved_content_missing`, `unanchored_literals_in_selection`,
+`retrieved_content_missing`, `unanchored_locators_in_selection`,
 `title_only_evidence_fragility`, `circular_evidence_reference`,
-`candidate_digest_mismatch`.
+`candidate_digest_mismatch` (rimediabili); `unanchored_literals_in_selection` (concern).
 
 ### Come funziona ORA — i problemi (stato originario)
 
@@ -172,6 +187,14 @@ I codici di deficit più frequenti: `insufficient_independent_sources`,
   fonte.
 - **Il vocabolario di deficit arriva fino alla decisione e alla valutazione finale**, non
   resta chiuso dentro al pilastro.
+- **L'ancoraggio letterale si divide per classe**: un URL non recuperato torna
+  all'attore (`evidence_violation`), un valore non ancorato va diretto a un umano
+  (`evidence_concern`) senza consumare il ciclo di remediation. Un'approvazione umana
+  sulla selezione esatta è ricordata, così la stessa run non ripropone la stessa
+  domanda due volte.
+- **La remediation nomina solo i tool di retrieval effettivamente abilitati**: prima
+  suggeriva sempre "prova una nuova web_search" anche su run dove il web non è tra le
+  capability disponibili.
 
 > **Limite dichiarato**: le euristiche linguistiche del pilastro (riconoscimento di date
 > in prosa, dichiarazioni di insufficienza, prefissi che escludono un numero strutturale
@@ -302,9 +325,32 @@ passo è esaurito).
   automaticamente sotto la stessa guardia, per costruzione.
 - **Tetto esplicito ai tentativi per passo** (vedi sopra): l'esplorazione read-only non è
   più senza fine.
+- **Il tetto di replan conta ogni traiettoria sostituita, non solo quelle che l'attore
+  ha richiesto esplicitamente**: `replan_ceiling_reached` scattava solo se, nello stesso
+  turno, l'attore stava chiedendo un altro replan. Il *protocol replan* che il Tool
+  Gateway avvia da sé (quando una richiesta si risolve localmente due volte sullo stesso
+  passo) non arriva mai a governance in quello stato — installa la traiettoria
+  sostitutiva e l'attore produce già un risultato nuovo al turno dopo. Il contatore
+  contava questi replan, la regola li ignorava: una run poteva sostituire la propria
+  traiettoria senza limite. È la causa diretta di un loop osservato su una run di
+  benchmark (26 richieste dello stesso URL mai osservato). Il tetto ora conta ogni
+  episodio di replan installato, indipendentemente da chi l'ha chiesto.
+- **Il Tool Gateway ha una propria guardia di run scope**: un bersaglio che accumula 3
+  tentativi risolti localmente nell'intera run diventa esaurito e riceve un rifiuto
+  esplicitamente terminale invece di uno che sembra transitorio; il passo del piano
+  resta aperto invece di essere sostituito, così il suo budget di esplorazione può
+  arrivare al tetto. Resta enforcement (il gateway decide se *questa* esecuzione parte),
+  non governance: quante traiettorie sostituite sono troppe lo decide sempre e solo il
+  tetto di replan di OPA sopra.
+- **`observable_change_since_last_replan` misurava anche gli esiti risolti localmente**:
+  un *cache hit* bastava a soddisfare la guardia e ad ammettere il replan che la guardia
+  esiste per rifiutare. Ora conta solo le chiamate che hanno davvero raggiunto il
+  backend (`tool_call_count`), la stessa definizione già usata dal controllo gemello
+  sulla revisione del Judge.
 
 Le soglie esistenti non cambiano. Cambia il fatto che i contatori si riempiano per motivi
-veri, e che ora esista un limite dove prima non ce n'era nessuno.
+veri, e che ora esista un limite dove prima non ce n'era nessuno — su entrambi i lati,
+gateway e OPA.
 
 ---
 

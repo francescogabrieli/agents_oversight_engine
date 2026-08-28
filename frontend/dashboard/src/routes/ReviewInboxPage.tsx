@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { fetchReviewInbox } from "../api";
 import { communicationPhaseLabel, executionIntentLabel, executionStatusLabel } from "../components/executionPresentation";
 import { humanReviewDecisionLabel } from "../components/humanReviewPresentation";
+import { reasonCodeExplanation } from "../components/reasonCodePresentation";
 import {
   RuntimeStateIcon,
   runtimeStateBadgeClass,
@@ -57,9 +58,14 @@ function InboxRow({ item, interactive = true }: { item: ReviewInboxEntry; intera
             <span className="inbox-row-id">{item.thread_id}</span>
           </div>
         </div>
-        {item.review_summary ? (
-          <p className="inbox-row-summary">{item.review_summary}</p>
-        ) : null}
+        {(() => {
+          // Prefer a plain-language Italian explanation of the primary reason code;
+          // OPA's raw English audit sentence is a fallback for an unmapped code only.
+          const primaryReasonCode = item.reason_codes?.[0] ?? null;
+          const clearSummary = primaryReasonCode ? reasonCodeExplanation(primaryReasonCode) : null;
+          const summary = clearSummary ?? item.review_summary;
+          return summary ? <p className="inbox-row-summary">{summary}</p> : null;
+        })()}
         {item.allowed_decisions.length > 0 ? (
           <div className="inbox-row-actions">
             {item.allowed_decisions.map((d) => (

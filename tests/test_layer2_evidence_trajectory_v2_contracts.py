@@ -424,6 +424,39 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
         self.assertEqual(facts["unanchored_literals_in_universe"], [])
         self.assertNotIn("unanchored_literals_in_selection", facts["deficit_codes"])
 
+    # A source states a share in prose ("28 percent"); an agent renders the same
+    # quantity with the symbol ("28%"). Both denote the same value and must anchor to
+    # each other, exactly as differently-punctuated numbers already do.
+    def test_prose_percent_anchors_to_symbol_form(self) -> None:
+        state = _build_test_task_state(
+            produces_factual_claims=True,
+            evidence_burden=EvidenceBurden(),
+        )
+        obs1 = ToolObservation(
+            observation_id="obs-1",
+            content="This update reduced token usage by up to 28 percent and improved accuracy by up to 3.5 percent.",
+            locator="https://source-a.org/update",
+        )
+        state.observations.append(obs1)
+
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.STEP_COMPLETED,
+            summary="Report prepared",
+            output_text="L'aggiornamento riduce l'uso di token del 28% e migliora l'accuratezza del 3,5%.",
+            step_validation=StepValidation(
+                plan_step_id="step_1",
+                actor_self_confidence=0.8,
+                evidence_refs=("obs-1",),
+                rationale_summary="Report references obs-1.",
+            ),
+        )
+
+        facts = build_evidence_signal(task_state=state, thresholds_version="v1")["raw_facts"]
+
+        self.assertFalse(facts["has_unanchored_literals_in_selection"])
+        self.assertFalse(facts["has_unanchored_literals_in_universe"])
+
     def test_literal_anchoring_identifies_unanchored_tokens(self) -> None:
         state = _build_test_task_state(
             produces_factual_claims=True,

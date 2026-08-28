@@ -292,6 +292,14 @@ describe("ReviewThreadPage", () => {
 
     render(<ReviewContextPanel taskGoal="Research current AI releases." snapshot={snapshot} />);
 
+    // The primary, always-visible reason is a plain-language Italian explanation of the
+    // reason code, not OPA's raw English audit sentence. The short label also appears
+    // as a chip on the trajectory diagnostic breakdown below, so it is not unique.
+    expect(screen.getAllByText("Troppi tentativi di ripianificazione").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(/L'attività ha cambiato strategia troppe volte/),
+    ).toBeInTheDocument();
+    // The raw OPA sentence is preserved for audit, inside the technical details.
     expect(screen.getByText("Three replans require operator direction.")).toBeInTheDocument();
     expect(screen.getByText(/Research current AI releases\./)).toBeInTheDocument();
     expect(

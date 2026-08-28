@@ -12,6 +12,7 @@ export type ReviewInboxEntry = {
   decision_type?: string | null;
   delivery_status?: string | null;
   owner_available?: boolean;
+  reason_codes?: string[];
 };
 
 export type ReviewInboxResponse = {

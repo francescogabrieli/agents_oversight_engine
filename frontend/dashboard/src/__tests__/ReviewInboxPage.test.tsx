@@ -86,4 +86,48 @@ describe("ReviewInboxPage", () => {
     expect(screen.getByText("Resume the governed task.")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Resume the governed task/i })).not.toBeInTheDocument();
   });
+
+  // The inbox row is the first thing an operator sees; it must not lead with OPA's
+  // raw English audit sentence when the primary reason code has an Italian mapping.
+  it("shows a plain-language Italian summary instead of the raw governance sentence", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          items: [
+            {
+              thread_id: "thread-anchoring",
+              runtime_state: "waiting_human_review",
+              updated_at: "2026-08-28T10:00:00+00:00",
+              task_goal: "Prepare a sourced briefing.",
+              review_summary:
+                "Literal claims in the completion are absent from every observation and cannot be settled by further retrieval.",
+              reason_codes: ["evidence_anchoring_requires_review"],
+              allowed_decisions: ["approve_continue", "modify_and_continue"],
+              request_id: "thread-anchoring:hitl",
+              external_communication_phase: null,
+            },
+          ],
+          completed_items: [],
+        }),
+      }),
+    );
+
+    render(
+      <MemoryRouter
+        initialEntries={["/"]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByText(/non corrispondono esattamente a quanto trovato nelle fonti/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Literal claims in the completion are absent/),
+    ).not.toBeInTheDocument();
+  });
 });

@@ -227,12 +227,14 @@ def _apply_human_review_decision(
                 "An Evidence ceiling cannot be bypassed by an unbound continue approval."
             )
         _record_anchoring_adjudication(state=state, pending_request=pending_request)
-        if _is_trajectory_episode_release(
+        if _is_non_authorizing_boundary_release(
             decision=human_review_decision,
             pending_request=pending_request,
         ):
-            # This approval releases only the reviewed trajectory boundary. It
-            # never authorizes a coincident or stale external-operation proposal.
+            # This approval releases only the reviewed boundary (a trajectory ceiling,
+            # or a settled anchoring concern). It never authorizes a coincident or
+            # stale external-operation proposal - that still needs its own
+            # capability_approval_required gate, unaffected by this decision.
             state.current_external_execution_request = None
             state.approved_external_operation_digest = None
             state.current_state = pending_request.resume_state
@@ -655,6 +657,16 @@ def _resolve_allowed_human_review_decisions(
             HumanReviewDecisionType.REPLAN,
             HumanReviewDecisionType.ABORT,
         )
+    if "evidence_anchoring_requires_review" in reason_codes:
+        # Approving here settles the flagged values as fine, releasing only the
+        # anchoring boundary; it is not an authorization to execute the pending
+        # external operation, which keeps its own separate approval gate.
+        return (
+            HumanReviewDecisionType.APPROVE_CONTINUE,
+            HumanReviewDecisionType.MODIFY_AND_CONTINUE,
+            HumanReviewDecisionType.REPLAN,
+            HumanReviewDecisionType.ABORT,
+        )
     if {
         "judge_unsafe",
         "judge_uncertain",
@@ -814,7 +826,7 @@ def _record_anchoring_adjudication(
 
 
 # Recognize an exact approval that closes only its reviewed trajectory episode.
-def _is_trajectory_episode_release(
+def _is_non_authorizing_boundary_release(
     *,
     decision: HumanReviewDecision,
     pending_request: HumanReviewRequest,
@@ -823,7 +835,11 @@ def _is_trajectory_episode_release(
         decision.decision_type == HumanReviewDecisionType.APPROVE_CONTINUE
         and decision.request_id == pending_request.request_id
         and bool(
-            {"replan_ceiling_reached", "consecutive_tool_failures"}
+            {
+                "replan_ceiling_reached",
+                "consecutive_tool_failures",
+                "evidence_anchoring_requires_review",
+            }
             & set(pending_request.reason_codes)
         )
     )

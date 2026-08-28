@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { DashboardPillarDiagnostic, DashboardSnapshot } from "../types";
 import { humanReviewDecisionLabel } from "./humanReviewPresentation";
 import { KeyValueGrid } from "./KeyValueGrid";
+import { reasonCodeChipLabel, reasonCodeExplanation, reasonCodeLabel } from "./reasonCodePresentation";
 import { runtimeStateLabel } from "./runtimeStatePresentation";
 
 type ReviewContextPanelProps = {
@@ -86,8 +87,8 @@ function PillarDiagnostic({ diagnostic }: { diagnostic: DashboardPillarDiagnosti
             {diagnostic.reason_codes.length > 0 ? (
               <div className="review-reason-chips">
                 {diagnostic.reason_codes.map((code) => (
-                  <span className="action-chip" key={code}>
-                    {code}
+                  <span className="action-chip" key={code} title={code}>
+                    {reasonCodeChipLabel(code)}
                   </span>
                 ))}
               </div>
@@ -105,14 +106,23 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
   const humanReview = snapshot.human_review;
   const pendingRequest = humanReview?.pending_request;
   const governance = snapshot.governance;
-  const selectedReason =
+  const rawReason =
     governance?.selected_reason ??
     governance?.summary ??
     pendingRequest?.review_summary ??
     humanReview?.review_summary ??
-    "Il sistema richiede una decisione dell'operatore prima di proseguire.";
+    null;
   const governanceSummary = governance?.summary;
   const reasonCodes = pendingRequest?.reason_codes ?? snapshot.reason_codes;
+  // The primary code is what OPA actually selected as the deciding reason; everything
+  // else riding on the same decision is supporting detail, shown in the technical view.
+  const primaryReasonCode = reasonCodes[0] ?? null;
+  const clearExplanation = primaryReasonCode ? reasonCodeExplanation(primaryReasonCode) : null;
+  const reasonHeading = primaryReasonCode ? reasonCodeLabel(primaryReasonCode) : null;
+  // Fall back to the raw governance text only for a reason code with no Italian
+  // mapping yet, so nothing silently disappears from the primary view.
+  const selectedReason =
+    clearExplanation ?? rawReason ?? "Il sistema richiede una decisione dell'operatore prima di proseguire.";
   const judgeFindings = pendingRequest?.judge_findings ?? humanReview?.judge_findings ?? [];
   const selectedEvidenceReferences = humanReview?.selected_evidence_references ?? [];
   const allowedDecisions =
@@ -149,10 +159,8 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
           Il sistema si è fermato perché serve la tua decisione prima di continuare.
         </p>
 
+        {reasonHeading ? <p className="review-context-reason-label">{reasonHeading}</p> : null}
         <div className="review-context-reason">{selectedReason}</div>
-        {governanceSummary && governanceSummary !== selectedReason ? (
-          <p className="review-context-summary">{governanceSummary}</p>
-        ) : null}
 
         {judgeFindings.length > 0 ? (
           <article className="review-diagnostic" aria-label="Osservazioni del giudice automatico">
@@ -213,6 +221,11 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
                   value: allowedDecisions.map(humanReviewDecisionLabel).join(", ") || null,
                 },
                 { label: "Codici motivo (governance)", value: reasonCodes.join(", ") || null },
+                { label: "Motivo selezionato (audit, originale)", value: rawReason },
+                {
+                  label: "Sintesi tecnica (audit)",
+                  value: governanceSummary && governanceSummary !== rawReason ? governanceSummary : null,
+                },
               ]}
             />
           </div>

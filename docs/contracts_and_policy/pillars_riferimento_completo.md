@@ -52,7 +52,7 @@ direttiva unica.
 | Pilastro | Domanda a cui risponde | Natura | Può bloccare da solo? |
 |---|---|---|---|
 | **Static Policy** | Questa operazione viola un vincolo assoluto e non negoziabile? | deterministico | Sì — `hard_deny` è assorbente |
-| **Evidence** | Le affermazioni dell'agente sono agganciate a prove concrete? | deterministico | Sì — via `evidence_gap` |
+| **Evidence** | Le affermazioni dell'agente sono agganciate a prove concrete? | deterministico | Sì — due classi: `evidence_violation` blocca, `evidence_concern` chiama un umano |
 | **Trajectory** | L'esecuzione sta convergendo o gira a vuoto? | deterministico | Sì — via i tetti di convergenza |
 | **Judge** | Questo esatto messaggio ha senso ed è appropriato da eseguire? | probabilistico (LLM) | Sì — ma solo dopo che gli altri tre sono puliti |
 
@@ -165,50 +165,91 @@ flowchart TD
     end
     F2 --> F3["Famiglia 3 · Qualità strutturale<br/>non tutta la selezione è fatta di soli titoli di ricerca"]
     F3 --> F4["Famiglia 4 · Non-circolarità<br/>l'agente non cita il proprio output come prova"]
-    F4 --> F5["Famiglia 5 · Ancoraggio letterale<br/>URL, date, numeri nel testo devono comparire<br/>nelle osservazioni o venire dal task"]
-    F5 --> GAP{{"Una qualsiasi famiglia<br/>ha fallito?"}}
-    GAP -->|sì| CODES["evidence_gap = true<br/>+ lista di deficit_codes specifici"]
-    GAP -->|no| PASS(["evidence_gap = false<br/>il turno prosegue"])
+    F4 --> F5["Famiglia 5 · Ancoraggio letterale<br/>ogni URL, data, numero o valuta nel testo<br/>deve comparire nelle osservazioni o venire dal task"]
+    F5 --> SPLIT{{"letterale non ancorato:<br/>è un locator (URL) o un valore?"}}
+    SPLIT -->|locator| VIOL["evidence_violation<br/>l'attore può recuperarlo o toglierlo"]
+    SPLIT -->|valore| CONC["evidence_concern<br/>nessun recupero lo risolve"]
+    F1 -.fallita.-> VIOL
+    F2 -.fallita.-> VIOL
+    F3 -.fallita.-> VIOL
+    F4 -.fallita.-> VIOL
+    VIOL & CONC --> GAP["evidence_gap = true<br/>(unione delle due classi)"]
 ```
 
 Le famiglie sono valutate insieme, non in sequenza bloccante: `deficit_codes` può
-contenerne più di una alla volta.
+contenerne più di una alla volta. Le famiglie 1–4 producono sempre `evidence_violation`
+quando falliscono: sono verificabili, non c'è interpretazione. La famiglia 5 si divide
+per tipo di token — un URL citato ma mai recuperato è un `evidence_violation` (l'attore
+lo fetcha o lo toglie); un numero, una data o una valuta non ancorati sono un
+`evidence_concern`, perché nessun recupero ulteriore trasforma un valore calcolato in
+uno citato, e l'unica mossa dell'attore sarebbe cancellare un'affermazione che potrebbe
+essere corretta. `evidence_gap` resta il nome storico dell'unione delle due classi: un
+qualunque deficit continua a bloccare il completamento e l'ammissione al Judge,
+qualunque sia la sua classe. F5 non considera più l'SQL di un'operazione database come
+testo da ancorare: una query è una richiesta, non un'affermazione sul mondo.
 
 ### 3.3 Cosa succede dopo un deficit
 
 ```mermaid
-flowchart LR
-    A["evidence_gap = true"] --> B{{"evidence_request_episode_count<br/>≥ 3?"}}
-    B -->|no| C["OPA: request_more_evidence<br/>torna all'attore con i deficit_codes esatti"]
-    B -->|sì| D["OPA: wait_human_review<br/>reason: evidence_request_limit_reached"]
-    C --> E["L'attore corregge, ripropone il completamento"]
-    E --> A
+flowchart TD
+    A["evidence_gap = true"] --> B{{"evidence_violation = true?"}}
+    B -->|sì| C{{"evidence_request_episode_count<br/>≥ 3?"}}
+    C -->|no| D["OPA: request_more_evidence<br/>torna all'attore con i deficit_codes rimediabili"]
+    C -->|sì| E["OPA: wait_human_review<br/>reason: evidence_request_limit_reached"]
+    D --> F["L'attore corregge, ripropone il completamento"]
+    F --> A
+    B -->|no, solo concern| G["OPA: wait_human_review<br/>reason: evidence_anchoring_requires_review<br/>(nessun ciclo, va diretto a un umano)"]
+    G --> H{{"un umano approva<br/>questa identica selezione?"}}
+    H -->|sì| I["adjudicated_evidence_anchoring_digest<br/>registra il digest approvato"]
+    H -->|no, replan| J["il digest si azzera:<br/>una nuova traiettoria produce claim diversi"]
 ```
 
-Il tetto è per episodio (si azzera a ogni nuova operazione), non per l'intera run.
+Un `evidence_violation` (famiglie 1–4, o un locator di famiglia 5) segue il ciclo
+limitato all'attore: tetto per episodio, si azzera a ogni nuova operazione. Un
+`evidence_concern` puro (solo valori di famiglia 5, nessuna violazione) **salta il
+ciclo**: non ha senso rimandarlo all'attore, perché nessun tentativo aggiuntivo può
+risolverlo. Va diretto a revisione umana con `evidence_anchoring_requires_review`.
+
+La memoria di aggiudicazione evita che lo stesso concern torni a bloccare la run dopo
+un'approvazione: quando un umano approva un completamento fermato per ancoraggio,
+`adjudicated_evidence_anchoring_digest` registra il digest esatto della selezione di
+evidenze approvata. Un concern sulla stessa identica selezione non si ripresenta. Un
+`replan`, che produce claim diversi, azzera la memoria.
 
 ### 3.4 I `deficit_codes` — il vocabolario che arriva alla decisione
 
-Da questa sessione, i codici specifici viaggiano **sulla decisione stessa** (non restano
-chiusi dentro il pilastro): `request_more_evidence` porta sia il codice generico sia i
-deficit attivi, così la valutazione finale della tesi può distinguere quale famiglia
-interviene, non solo che "qualcosa" è mancato.
+I codici specifici viaggiano **sulla decisione stessa** (non restano chiusi dentro il
+pilastro), separati per classe: `request_more_evidence` porta solo i codici
+**rimediabili** (`violation_reason_codes`); `wait_human_review` per un ancoraggio porta
+solo i codici di **concern** (`concern_reason_codes`), sotto
+`evidence_anchoring_requires_review`. Un deficit di famiglia 5 non viaggia mai insieme a
+un deficit rimediabile sulla stessa decisione: dire all'attore "correggi X" e "rimuovi
+questi valori" nello stesso turno rischia di fargli cancellare un'affermazione corretta
+solo per soddisfare il controllo automatico. La valutazione finale della tesi può
+distinguere quale famiglia interviene *e* quale classe ha deciso — non solo che
+"qualcosa" è mancato.
 
-| Codice | Famiglia | Cosa significa |
-|---|---|---|
-| `invalid_evidence_ref` | 1 | Il riferimento citato non esiste tra le osservazioni |
-| `duplicate_evidence_ref` | 1 | La stessa referenza citata più volte |
-| `empty_observation_content` | 1 | L'osservazione citata non ha contenuto |
-| `unresolvable_provenance` | 1 | Non si risale a chi/cosa ha prodotto l'osservazione |
-| `unknown_step_lineage` | 1 | L'osservazione non appartiene a un passo noto del piano |
-| `candidate_digest_mismatch` | 1 | Il candidato non è sigillato sui digest correnti |
-| `missing_evidence_burden` | 2 | Il passo produce claim fattuali ma non dichiara un onere probatorio |
-| `insufficient_independent_sources` | 2 | Meno fonti indipendenti del minimo richiesto |
-| `retrieved_content_missing` | 2 | Serve contenuto davvero recuperato, non solo uno snippet |
-| `title_only_evidence_fragility` | 3 | La selezione è fatta di soli titoli di ricerca |
-| `circular_evidence_reference` | 4 | L'agente cita un proprio output precedente come prova |
-| `unanchored_literals_in_selection` | 5 | Un valore nel testo selezionato non è sostenuto da nessuna fonte né dal task |
-| `unanchored_literals_in_universe` | 5 | Lo stesso, ma il valore non compare in *nessuna* osservazione raccolta |
+| Codice | Famiglia | Classe | Cosa significa |
+|---|---|---|---|
+| `invalid_evidence_ref` | 1 | violation | Il riferimento citato non esiste tra le osservazioni |
+| `duplicate_evidence_ref` | 1 | violation | La stessa referenza citata più volte |
+| `empty_observation_content` | 1 | violation | L'osservazione citata non ha contenuto |
+| `unresolvable_provenance` | 1 | violation | Non si risale a chi/cosa ha prodotto l'osservazione |
+| `unknown_step_lineage` | 1 | violation | L'osservazione non appartiene a un passo noto del piano |
+| `candidate_digest_mismatch` | 1 | violation | Il candidato non è sigillato sui digest correnti |
+| `missing_evidence_burden` | 2 | violation | Il passo produce claim fattuali ma non dichiara un onere probatorio |
+| `insufficient_independent_sources` | 2 | violation | Meno fonti indipendenti del minimo richiesto |
+| `retrieved_content_missing` | 2 | violation | Serve contenuto davvero recuperato, non solo uno snippet |
+| `title_only_evidence_fragility` | 3 | violation | La selezione è fatta di soli titoli di ricerca |
+| `circular_evidence_reference` | 4 | violation | L'agente cita un proprio output precedente come prova |
+| `unanchored_locators_in_selection` | 5 | violation | Un URL citato nel testo selezionato non è mai stato recuperato |
+| `unanchored_locators_in_universe` | 5 | violation | Lo stesso, e il locator non compare in *nessuna* osservazione raccolta |
+| `unanchored_literals_in_selection` | 5 | **concern** | Un valore (numero, data, valuta) nel testo selezionato non è sostenuto da nessuna fonte né dal task |
+| `unanchored_literals_in_universe` | 5 | **concern** | Lo stesso, e il valore non compare in *nessuna* osservazione raccolta |
+
+I codici di famiglia 5 sono l'unica coppia che si divide per classe: un URL non
+recuperato è un `violation` (l'attore lo fetcha o lo toglie), un valore non ancorato è
+un `concern` (va a un umano, mai all'attore).
 
 > **Limite dichiarato.** Una sesta famiglia — **freschezza della fonte** (finestra di
 > giorni, data di pubblicazione) — è stata **ritirata** in questa sessione. I codici
@@ -243,7 +284,12 @@ Numeri scritti in italiano, la fonte in inglese diceva `141,006` e `30.4%`: prim
 venivano confrontati come stringhe e risultavano "inventati" anche se corretti.
 L'ancoraggio letterale ora confronta la **quantità**, non la forma: separatori di
 migliaia/decimali diversi per lingua e zeri finali (`97%` = `97.0%`) non generano più
-falsi allarmi.
+falsi allarmi. Un valore genuinamente non ancorato come questo — se il matching di
+quantità non lo salva — è oggi un `evidence_concern`: va a revisione umana invece di
+tornare all'attore, perché non è detto sia inventato. Nella run `benchmark-web-email-14`
+il caso reale era una data (`28/07/2026`) calcolata dall'attore come inizio della
+finestra "ultimi 30 giorni dal 27 agosto 2026" richiesta dal task — corretta
+aritmeticamente, ma non citabile da nessuna fonte per costruzione.
 
 ### 3.7 Campi completi esportati
 
@@ -275,9 +321,14 @@ falsi allarmi.
 | `insufficiency_declaration_permitted` / `..._declared_in_payload` | famiglia 2 | Il task permette la valvola "dichiara l'insufficienza", e se è stata usata |
 | `circular_reference_detected` / `circular_evidence_observation_ids` | famiglia 4 | Autocitazione rilevata, e su quali id |
 | `literals_anchored_to_task` | audit | Valori del testo che vengono dal task, quindi non da provare |
-| `unanchored_literals_in_selection` / `..._in_universe` | famiglia 5 | Valori letterali non sostenuti, sulla selezione e sull'intero universo |
-| `has_unanchored_literals_in_selection` / `..._in_universe` | famiglia 5 | Le stesse liste, come booleani |
-| `deficit_codes` | **verso la decisione** | L'aggregato di tutti i deficit trovati — ora propagato oltre il pilastro |
+| `unanchored_locators_in_selection` / `..._in_universe` | famiglia 5 · violation | URL citati mai recuperati, sulla selezione e sull'intero universo |
+| `has_unanchored_locators_in_selection` / `..._in_universe` | famiglia 5 · violation | Le stesse liste, come booleani |
+| `unanchored_literals_in_selection` / `..._in_universe` | famiglia 5 · concern | Valori non sostenuti (non URL), sulla selezione e sull'intero universo |
+| `has_unanchored_literals_in_selection` / `..._in_universe` | famiglia 5 · concern | Le stesse liste, come booleani |
+| `anchoring_concern_adjudicated` | audit | Un umano ha già approvato questa identica selezione per ancoraggio |
+| `deficit_codes` | **verso la decisione** | L'aggregato di tutti i deficit trovati — propagato oltre il pilastro |
+| `evidence_violation` / `evidence_concern` | **result, verso la decisione** | Le due classi separate; `evidence_gap` ne resta l'unione |
+| `violation_reason_codes` / `concern_reason_codes` | **result, verso la decisione** | I `deficit_codes` già partizionati per classe |
 
 ---
 
@@ -305,7 +356,7 @@ degrado, per costruzione.
 
 ```mermaid
 flowchart TD
-    T(["Trajectory attivo"]) --> G1{{"replan_episode_count ≥ 3<br/>E l'attore chiede un altro replan?"}}
+    T(["Trajectory attivo"]) --> G1{{"replan_episode_count ≥ 3?"}}
     G1 -->|sì| R1["wait_human_review<br/>replan_ceiling_reached"]
     G1 -->|no| G2{{"consecutive_tool_failures ≥ 4?"}}
     G2 -->|sì| R2["wait_human_review<br/>consecutive_tool_failures"]
@@ -333,6 +384,18 @@ primo guardiano che scatta vince.
 > corrente — e ogni osservazione nuova fa avanzare quell'epoch, disarmando la guardia.
 > È stata spostata sul passo del piano, e il nuovo tetto copre il caso che la guardia da
 > sola non può vedere: un attore che *varia* le richieste invece di ripeterle.
+
+> **Il guardiano 01 aveva un buco.** `replan_episode_count ≥ max_replans_before_review`
+> scattava solo quando, nello stesso turno, `needs_replan_signal` era vero — cioè solo
+> quando l'attore stava esplicitamente chiedendo un altro replan. Ma il *protocol
+> replan* che il Tool Gateway avvia da sé (§4.5) non arriva mai a governance in quello
+> stato: installa una traiettoria sostitutiva e, al turno successivo, l'attore ha già
+> prodotto un risultato nuovo. Il contatore contava questi replan, la regola li
+> ignorava: una run poteva sostituire la propria traiettoria senza limite finché nessun
+> replan veniva mai *richiesto* dall'attore nello stesso turno in cui il tetto era già
+> raggiunto. La condizione `E l'attore chiede un altro replan` è stata rimossa: il
+> guardiano ora conta *quante traiettorie l'episodio ha già sostituito*, non chi sta
+> chiedendo la prossima.
 
 ### 4.3 Soglie — da `data.json`
 
@@ -378,6 +441,44 @@ distinzione che conta per Trajectory è una sola: **ha raggiunto il backend o no
 
 Ogni nuovo tipo di rifiuto locale ricade automaticamente sotto la stessa guardia di
 progresso, per costruzione — non serve più elencare a mano quali disposizioni contano.
+
+### 4.6 Il Tool Gateway rifiuta, OPA decide quanto è troppo
+
+Il Tool Gateway ha una propria guardia locale, indipendente da Trajectory: se un
+bersaglio (`action_key`) accumula **3 tentativi risolti localmente nell'intera run**
+(`_MAX_SETTLED_ATTEMPTS_PER_TARGET`), diventa *esaurito*. Da quel momento ogni ulteriore
+richiesta identica riceve un rifiuto sintetico esplicitamente terminale — "non verrà
+più tentata, scegli un altro bersaglio" — invece del messaggio di rifiuto ordinario, e
+il passo del piano viene **deliberatamente mantenuto** invece di essere sostituito: il
+suo budget di esplorazione (guardiano 03) continua a salire fino al tetto.
+
+Questo rifiuto è enforcement, non governance: il gateway decide se *questa* esecuzione
+può partire, non quante traiettorie sostituite sono troppe. Quella soglia resta di OPA,
+sul guardiano 01 (§4.2–§4.3). La separazione regge perché un bersaglio esaurito
+concede **al massimo un replan** prima di bloccarsi da solo: il *protocol replan* del
+gateway scatta dopo 2 ripetizioni sullo stesso passo, e a quel punto il bersaglio non è
+ancora esaurito (2 < 3); ma sul passo successivo la ripetizione riparte da un contatore
+di passo azzerato mentre il contatore di run continua a salire, quindi il secondo
+tentativo di replan sullo stesso bersaglio trova il gateway già esaurito e non genera
+un secondo replan. Un attore fissato su bersagli *diversi* può comunque accumulare più
+protocol replan — ed è esattamente lì che il guardiano 01 di OPA, ora corretto (§4.2),
+interviene: la soglia direttiva su "quanti replan sono troppi" vive in un solo posto.
+
+> **Bug chiuso in questa sessione.** Prima, il gateway non aveva alcun tetto di run
+> scope: un attore che deduceva un URL da un titolo (mai osservato come locator) veniva
+> rifiutato, ripeteva la richiesta, il *protocol replan* azzerava lo step — e con lo
+> step si azzerava l'unico contatore (`current_step_tool_attempt_count`) che avrebbe
+> potuto far scattare il guardiano 03. La cura ricreava il loop un piano più sopra: una
+> run ha ripetuto lo stesso URL inventato 26 volte senza che nessun guardiano potesse
+> mai vederla. Il tetto di run scope sul gateway, insieme al fix del guardiano 01
+> sopra, chiude entrambe le metà del buco.
+
+`observable_change_since_last_replan` (tabella §4.1) aveva un difetto collegato: leggeva
+la lunghezza di `tool_results_history`, che include anche gli esiti risolti localmente
+— un *cache hit* bastava a soddisfare la guardia e ad ammettere il replan che la guardia
+esiste per rifiutare. Ora legge `tool_call_count`, che avanza solo su un'invocazione
+reale del backend — la stessa definizione già usata dal controllo gemello sulla
+revisione del Judge (`unresolvable_revision`).
 
 ---
 
@@ -517,10 +618,13 @@ flowchart TD
     JV -->|no| JR{{"Judge: needs_revision?"}}
     JR -->|sì e tetto revisioni raggiunto| JRX["wait_human_review<br/>action_revision_limit_reached"]
     JR -->|sì sotto il tetto| JRR["revise_action"]
-    JR -->|no| EV{{"Evidence: evidence_gap?"}}
-    EV -->|sì e tetto richieste raggiunto| EVX["wait_human_review<br/>evidence_request_limit_reached"]
-    EV -->|sì sotto il tetto| EVR["request_more_evidence"]
-    EV -->|no| LC{{"candidato esterno:<br/>confidenza attore troppo bassa?"}}
+    JR -->|no| EVV{{"Evidence: evidence_violation<br/>E tetto richieste raggiunto?"}}
+    EVV -->|sì| EVX["wait_human_review<br/>evidence_request_limit_reached"]
+    EVV -->|no| EVC{{"Evidence: evidence_concern<br/>senza evidence_violation?"}}
+    EVC -->|sì| EVA["wait_human_review<br/>evidence_anchoring_requires_review"]
+    EVC -->|no| EVR2{{"Evidence: evidence_violation?"}}
+    EVR2 -->|sì| EVR["request_more_evidence"]
+    EVR2 -->|no| LC{{"candidato esterno:<br/>confidenza attore troppo bassa?"}}
     LC -->|sì| LCX["wait_human_review<br/>external_low_actor_self_confidence"]
     LC -->|no| AP{{"candidato esterno:<br/>approvazione richiesta dalla capability?"}}
     AP -->|sì| APX["wait_human_review<br/>capability_approval_required"]
@@ -543,7 +647,7 @@ la applica, non la reinterpreta mai.
 |---|---|---|
 | `continue` | ✅ via libera | Tutti i pilastri attivi hanno dato l'assenso. Il turno prosegue normalmente. |
 | `continue_read_only` | ✅ via libera | Prosegue, ma dentro l'inviluppo read-only (`static_policy`). |
-| `request_more_evidence` | ↩️ torna all'attore | Evidence ha trovato un `evidence_gap`: l'attore riceve i `deficit_codes` esatti e corregge. |
+| `request_more_evidence` | ↩️ torna all'attore | Evidence ha trovato un `evidence_violation`: l'attore riceve i `deficit_codes` rimediabili e corregge. Un `evidence_concern` puro non arriva mai qui — va diretto a `wait_human_review` (§3.3). |
 | `revise_action` | ↩️ torna all'attore | Il Judge ha chiesto `needs_revision` sotto il tetto delle revisioni consentite. |
 | `replan` | ↩️ torna all'attore | Trajectory ha ammesso una richiesta di replan legittima (base osservativa nuova). |
 | `ask_user_clarification` | ⏸️ richiede input | L'attore stesso ha segnalato di aver bisogno di un chiarimento. |

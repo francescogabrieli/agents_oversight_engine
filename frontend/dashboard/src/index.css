@@ -296,6 +296,14 @@ body {
   font-size: 11px; color: var(--text-muted);
   overflow-wrap: anywhere;
 }
+.review-context-reason-label {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
 .review-context-reason {
   padding: 12px 14px;
   border-left: 3px solid var(--warning);
