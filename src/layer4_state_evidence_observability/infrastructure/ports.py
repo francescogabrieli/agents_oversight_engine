@@ -16,6 +16,7 @@ class RuntimeArtifactPaths:
     runtime_summary_path: Path
     full_trace_path: Path
     trace_summary_path: Path
+    governance_narrative_path: Path
     dashboard_snapshot_path: Path
     pending_human_review_path: Path
 

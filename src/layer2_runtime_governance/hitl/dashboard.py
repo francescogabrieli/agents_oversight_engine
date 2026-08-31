@@ -239,7 +239,9 @@ _EVIDENCE_REVIEW_FACTS = (
     "has_unanchored_literals_in_selection",
     "has_unanchored_literals_in_universe",
     # An anchoring concern reaches a human directly, so the panel has to name the exact
-    # literals under question; the booleans alone are not adjudicable.
+    # literals under question, each with the sentence it was written in; the booleans
+    # alone are not adjudicable, and neither is a bare value out of context.
+    "unanchored_literal_excerpts",
     "unanchored_literals_in_selection",
     "unanchored_literals_in_universe",
     "has_unanchored_locators_in_selection",

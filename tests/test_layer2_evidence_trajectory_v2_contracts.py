@@ -457,6 +457,40 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
         self.assertFalse(facts["has_unanchored_literals_in_selection"])
         self.assertFalse(facts["has_unanchored_literals_in_universe"])
 
+    # A reviewer approves or rejects on the claim in context, not on a bare token, so
+    # the pillar reports the sentence each flagged value was written in.
+    def test_flagged_literals_carry_their_surrounding_sentence(self) -> None:
+        state = _build_test_task_state(
+            produces_factual_claims=True,
+            evidence_burden=EvidenceBurden(),
+        )
+        state.observations.append(
+            ToolObservation(
+                observation_id="obs-1",
+                content="The release notes describe the rollout.",
+                locator="https://source-a.org/notes",
+            )
+        )
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.STEP_COMPLETED,
+            summary="Report prepared",
+            output_text="Il rollout ha ridotto i costi del 82,5% nel trimestre.",
+            step_validation=StepValidation(
+                plan_step_id="step_1",
+                actor_self_confidence=0.8,
+                evidence_refs=("obs-1",),
+                rationale_summary="Report references obs-1.",
+            ),
+        )
+
+        facts = build_evidence_signal(task_state=state, thresholds_version="v1")["raw_facts"]
+
+        self.assertIn("82,5%", facts["unanchored_literals_in_selection"])
+        excerpts = facts["unanchored_literal_excerpts"]
+        entry = next(item for item in excerpts if item["value"] == "82,5%")
+        self.assertIn("ridotto i costi", entry["excerpt"])
+
     def test_literal_anchoring_identifies_unanchored_tokens(self) -> None:
         state = _build_test_task_state(
             produces_factual_claims=True,

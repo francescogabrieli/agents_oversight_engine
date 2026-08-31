@@ -70,6 +70,9 @@ from layer2_runtime_governance import (
     layer2_trace_to_json,
 )
 from layer2_runtime_governance.signal_services.evidence_service import build_evidence_signal
+from layer4_state_evidence_observability.observability import (
+    build_governance_narrative_markdown,
+)
 
 
 class Layer2TraceTests(unittest.TestCase):
@@ -174,6 +177,27 @@ class Layer2TraceTests(unittest.TestCase):
             _trace_schema_validator().validate(missing)
         with self.assertRaises(ValidationError):
             _trace_schema_validator().validate(wrong_type)
+
+    # governance_exchange.md is the complete audit stream and is unreadable by design;
+    # this artifact exists so a person can follow the same run turn by turn. It must keep
+    # the moments that required a decision and collapse the routine ones.
+    def test_governance_narrative_keeps_decisions_and_collapses_routine(self) -> None:
+        state = _complete_task_state()
+        trace = build_layer2_runtime_trace(
+            thread_id="trace-test",
+            intake_result=state.intake_payload,
+            task_state=state,
+        )
+
+        markdown = build_governance_narrative_markdown(trace)
+
+        self.assertIn("Cosa si sono detti agente e governance", markdown)
+        self.assertIn("trace-test", markdown)
+        self.assertIn("Trace the governed runtime.", markdown)
+        # Routine passes are summarized, never rendered one block each.
+        self.assertIn("valutazioni di routine", markdown)
+        # The artifact has to stay small enough to actually read.
+        self.assertLess(len(markdown), 20000)
 
     def test_runtime_trace_includes_core_sections_and_histories(self) -> None:
         state = _complete_task_state()

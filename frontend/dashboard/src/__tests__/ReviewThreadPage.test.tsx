@@ -246,6 +246,72 @@ describe("ReviewThreadPage", () => {
     expect(screen.getByRole("button", { name: "Ripianifica" })).toHaveClass("active");
   });
 
+  // A bare flagged token is not adjudicable; the reviewer needs the sentence it was
+  // written in to decide whether the value is wrong or merely phrased differently.
+  it("shows each flagged value with the sentence it appears in", () => {
+    const snapshot: DashboardSnapshot = {
+      runtime_state: "waiting_human_review",
+      resume_state: "acting",
+      has_pending_review: true,
+      is_terminal: false,
+      reason_codes: ["evidence_anchoring_requires_review"],
+      external_execution: {
+        execution_intent: "execute_after_governance",
+        retryable: false,
+        attempt_count: 0,
+        receipt_count: 0,
+      },
+      human_review: {
+        pending_request: {
+          request_id: "thread-anchor:hitl",
+          reason_codes: ["evidence_anchoring_requires_review"],
+          resume_state: "acting",
+          allowed_decisions: ["approve_continue", "modify_and_continue", "abort"],
+        },
+        evidence_diagnostic: {
+          pillar_name: "evidence",
+          required: true,
+          mode: "active",
+          level: "unscored",
+          summary: "Evidence structural controls evaluated.",
+          reason_codes: ["unanchored_literals_in_selection"],
+          facts: {
+            unanchored_literal_excerpts: [
+              {
+                value: "82,5%",
+                excerpt: "Il rollout ha ridotto i costi del 82,5% nel trimestre.",
+                source_matches: [
+                  {
+                    locator: "https://source-a.org/notes",
+                    excerpt: "it improved average accuracy by up to 82.5 percent while reducing cost.",
+                  },
+                ],
+              },
+              { value: "99%", excerpt: "Copertura del 99% dei casi.", source_matches: [] },
+            ],
+          },
+        },
+      },
+    };
+
+    render(<ReviewContextPanel taskGoal="Prepare a sourced briefing." snapshot={snapshot} />);
+
+    expect(screen.getByText("82,5%")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Il rollout ha ridotto i costi del 82,5% nel trimestre\./),
+    ).toBeInTheDocument();
+    // The source passage is what makes the value adjudicable: the agent wrote "82,5%",
+    // the source wrote "82.5 percent" - the same quantity the matcher did not recognize.
+    expect(
+      screen.getByText(/it improved average accuracy by up to 82\.5 percent/),
+    ).toBeInTheDocument();
+    // A value found in no source is the decisive opposite signal, stated explicitly.
+    expect(
+      screen.getByText(/Nessun riscontro di questo valore in nessuna fonte/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Valori segnalati/)).toBeInTheDocument();
+  });
+
   it("renders actionable context for a non-external trajectory review", () => {
     const snapshot: DashboardSnapshot = {
       runtime_state: "waiting_human_review",

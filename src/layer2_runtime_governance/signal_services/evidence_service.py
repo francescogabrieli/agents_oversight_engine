@@ -436,6 +436,97 @@ def _partition_locator_tokens(tokens: list[str]) -> tuple[list[str], list[str]]:
     return locators, values
 
 
+# A reviewer cannot judge a flagged value from the value alone: "9/07/2026" says
+# nothing, the sentence containing it says everything. The pillar already holds both the
+# examined text and the exact tokens it rejected, so it is the only component that can
+# state what was flagged and where without guessing.
+#
+# Knowing what the agent wrote is still not enough to decide: the reviewer has to know
+# whether the same quantity exists in the sources in some form the matcher missed, or
+# is absent entirely. So each flagged value is also looked up in the selected sources by
+# its canonical quantity - a deterministic search, not a nearest-match guess. A hit is
+# reported as a passage to check, never as "the source said X", and an explicit absence
+# is itself the decisive signal.
+_EXCERPT_RADIUS = 110
+_MAX_SOURCE_MATCHES = 3
+
+
+def _literal_excerpts(
+    *,
+    target_text: str,
+    tokens: list[str],
+    observations: list[ToolObservation],
+) -> list[dict[str, Any]]:
+    excerpts: list[dict[str, Any]] = []
+    for token in tokens:
+        index = target_text.find(token)
+        if index < 0:
+            excerpt = ""
+        else:
+            start = max(0, index - _EXCERPT_RADIUS)
+            end = min(len(target_text), index + len(token) + _EXCERPT_RADIUS)
+            fragment = " ".join(target_text[start:end].split())
+            excerpt = (
+                f"{'...' if start > 0 else ''}{fragment}{'...' if end < len(target_text) else ''}"
+            )
+        excerpts.append(
+            {
+                "value": token,
+                "excerpt": excerpt,
+                "source_matches": _source_matches_for_literal(
+                    token=token,
+                    observations=observations,
+                ),
+            }
+        )
+    return excerpts
+
+
+# Render the surface forms one canonical quantity can take, so a source writing "82.5"
+# is found for an agent that wrote "82,5%". Non-numeric tokens are searched verbatim.
+def _literal_search_variants(token: str) -> list[str]:
+    numeric = _NUMERIC_LITERAL.fullmatch(token.strip())
+    if numeric is None:
+        return [token]
+    variants: set[str] = {token}
+    for reading in _numeric_readings(numeric.group("number")):
+        variants.add(reading)
+        variants.add(reading.replace(".", ","))
+    return sorted(variants, key=len, reverse=True)
+
+
+# Locate one flagged value inside the sources the actor actually selected.
+def _source_matches_for_literal(
+    *,
+    token: str,
+    observations: list[ToolObservation],
+) -> list[dict[str, str]]:
+    matches: list[dict[str, str]] = []
+    for observation in observations:
+        content = observation.content or ""
+        if not content:
+            continue
+        for variant in _literal_search_variants(token):
+            index = content.find(variant)
+            if index < 0:
+                continue
+            start = max(0, index - _EXCERPT_RADIUS)
+            end = min(len(content), index + len(variant) + _EXCERPT_RADIUS)
+            fragment = " ".join(content[start:end].split())
+            matches.append(
+                {
+                    "locator": observation.locator or "",
+                    "excerpt": (
+                        f"{'...' if start > 0 else ''}{fragment}{'...' if end < len(content) else ''}"
+                    ),
+                }
+            )
+            break
+        if len(matches) >= _MAX_SOURCE_MATCHES:
+            break
+    return matches
+
+
 def _get_target_text(task_state: TaskState) -> str:
     parts: list[str] = []
     if task_state.external_operation_proposal is not None:
@@ -700,6 +791,13 @@ def build_evidence_signal(
         adjudicated_anchoring_digest is not None
         and adjudicated_anchoring_digest == selection_digest
     )
+    # Only the concern class reaches a person, so only it needs the reviewer-facing
+    # context; locator violations are remediated by the actor, which already has the text.
+    unanchored_literal_excerpts = _literal_excerpts(
+        target_text=target_text,
+        tokens=unanchored_literals_in_selection or unanchored_literals_in_universe,
+        observations=selected or task_state.observations,
+    )
     insufficiency_declared_in_payload = _declares_insufficiency(target_text)
 
     # Deterministic deficit codes collection
@@ -801,6 +899,7 @@ def build_evidence_signal(
         "unanchored_locators_in_universe": unanchored_locators_in_universe,
         "has_unanchored_locators_in_selection": len(unanchored_locators_in_selection) > 0,
         "has_unanchored_locators_in_universe": len(unanchored_locators_in_universe) > 0,
+        "unanchored_literal_excerpts": unanchored_literal_excerpts,
         "unanchored_literals_in_selection": unanchored_literals_in_selection,
         "unanchored_literals_in_universe": unanchored_literals_in_universe,
         "has_unanchored_literals_in_selection": len(unanchored_literals_in_selection) > 0,

@@ -319,6 +319,48 @@ body {
   color: var(--text-secondary);
   font-size: 12px;
 }
+.flagged-values {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+.flagged-values-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.flagged-value-item {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--warning);
+  border-radius: 0 6px 6px 0;
+  background: var(--surface);
+}
+.flagged-value-token {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.flagged-value-excerpt {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.flagged-value-role {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.flagged-value-role-source { color: var(--success, var(--text-primary)); }
+.flagged-value-nomatch { color: var(--danger); font-weight: 500; }
 .review-reason-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .review-diagnostics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .review-diagnostic {

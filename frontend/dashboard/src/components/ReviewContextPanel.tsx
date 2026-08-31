@@ -51,6 +51,37 @@ function factValue(value: unknown) {
   return value === null || value === undefined ? null : String(value);
 }
 
+type SourceMatch = { locator: string; excerpt: string };
+type FlaggedLiteral = { value: string; excerpt: string; sourceMatches: SourceMatch[] };
+
+// The excerpt list crosses the wire as untyped JSON facts; accept only well-formed
+// entries so a malformed payload degrades to "no context" rather than breaking the page.
+function parseSourceMatches(value: unknown): SourceMatch[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const { locator, excerpt } = entry as Record<string, unknown>;
+    if (typeof excerpt !== "string" || excerpt.length === 0) return [];
+    return [{ locator: typeof locator === "string" ? locator : "", excerpt }];
+  });
+}
+
+function parseFlaggedLiterals(value: unknown): FlaggedLiteral[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const { value: token, excerpt, source_matches } = entry as Record<string, unknown>;
+    if (typeof token !== "string" || token.length === 0) return [];
+    return [
+      {
+        value: token,
+        excerpt: typeof excerpt === "string" ? excerpt : "",
+        sourceMatches: parseSourceMatches(source_matches),
+      },
+    ];
+  });
+}
+
 // One plain-language sentence describing whether/why this pillar matters here.
 function pillarNarrative(diagnostic: DashboardPillarDiagnostic): string {
   const label = pillarLabel(diagnostic.pillar_name);
@@ -128,6 +159,12 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
   const allowedDecisions =
     pendingRequest?.allowed_decisions ?? humanReview?.allowed_decisions ?? [];
   const currentStepObjective = snapshot.current_plan_step?.objective ?? null;
+  // The pillar reports each flagged value with the sentence it was written in, so the
+  // reviewer judges the claim in context instead of a bare token. Rendered above the
+  // technical details because it is the substance of this decision, not a diagnostic.
+  const flaggedLiterals = parseFlaggedLiterals(
+    humanReview?.evidence_diagnostic?.facts?.unanchored_literal_excerpts,
+  );
   const diagnostics = [
     humanReview?.evidence_diagnostic,
     humanReview?.trajectory_diagnostic,
@@ -161,6 +198,47 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
 
         {reasonHeading ? <p className="review-context-reason-label">{reasonHeading}</p> : null}
         <div className="review-context-reason">{selectedReason}</div>
+
+        {flaggedLiterals.length > 0 ? (
+          <article className="flagged-values" aria-label="Valori segnalati">
+            <p className="review-diagnostic-title">
+              Valori segnalati — {flaggedLiterals.length}
+            </p>
+            <p className="review-context-summary" style={{ margin: 0 }}>
+              Il controllo automatico non ha riconosciuto questi valori nelle fonti. Per
+              ciascuno vedi cosa ha scritto l'agente e cosa dicono davvero le fonti.
+            </p>
+            <ul className="flagged-values-list">
+              {flaggedLiterals.map((item) => (
+                <li className="flagged-value-item" key={item.value}>
+                  <code className="flagged-value-token">{item.value}</code>
+                  {item.excerpt ? (
+                    <p className="flagged-value-excerpt">
+                      <span className="flagged-value-role">Scritto dall'agente:</span> {item.excerpt}
+                    </p>
+                  ) : null}
+                  {item.sourceMatches.length > 0 ? (
+                    item.sourceMatches.map((match, index) => (
+                      <p className="flagged-value-excerpt" key={`${item.value}-${index}`}>
+                        <span className="flagged-value-role flagged-value-role-source">
+                          Nella fonte:
+                        </span>{" "}
+                        {match.excerpt}
+                        {match.locator ? (
+                          <span className="review-evidence-locator">{match.locator}</span>
+                        ) : null}
+                      </p>
+                    ))
+                  ) : (
+                    <p className="flagged-value-excerpt flagged-value-nomatch">
+                      Nessun riscontro di questo valore in nessuna fonte selezionata.
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </article>
+        ) : null}
 
         {judgeFindings.length > 0 ? (
           <article className="review-diagnostic" aria-label="Osservazioni del giudice automatico">
