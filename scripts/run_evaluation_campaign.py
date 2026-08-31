@@ -67,6 +67,9 @@ class PlannedRun:
     thread_id: str
     output_directory: Path
     action: PlannedRunAction
+    # Carried explicitly so the per-run record states its campaign instead of leaving
+    # Layer 5 to parse it back out of the thread id.
+    campaign_id: str
 
 
 @dataclass(frozen=True)
@@ -317,6 +320,7 @@ def plan_campaign_runs(
                     thread_id=thread_id,
                     output_directory=campaign_root / thread_id,
                     action=action,
+                    campaign_id=campaign_id,
                 )
             )
     return tuple(planned_runs)
@@ -570,6 +574,7 @@ def _run_record_payload(
 ) -> dict[str, Any]:
     return {
         "record_version": "evaluation_campaign_run.v1",
+        "campaign_id": planned_run.campaign_id,
         "scenario_id": planned_run.scenario.scenario_id,
         "family": planned_run.scenario.family,
         "replica_index": planned_run.replica_index,

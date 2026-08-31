@@ -58,14 +58,114 @@ class Layer5EvaluationTests(unittest.TestCase):
                     summary.reason_codes,
                     {"judge_uncertain": 1, "local_output_allowed": 1},
                 )
+                # `local_output_allowed` is a routine allow decision, not a pillar
+                # intervention, and is counted separately so the breakdown chart is not
+                # dominated by the turns where nothing happened.
                 self.assertEqual(
                     summary.pillar_breakdown,
-                    {"General Policy": 1, "Semantic Judge": 1},
+                    {"Routine Progress": 1, "Semantic Judge": 1},
                 )
+                # Precision and recall are only meaningful against the labeled subset.
+                self.assertEqual(summary.labeled_governance_events, 2)
+                self.assertEqual(summary.total_governance_events, 2)
                 self.assertEqual(summary.avg_actor_turns, 3.0)
                 self.assertEqual(summary.avg_tool_calls, 2.0)
                 self.assertEqual(summary.avg_replanning_count, 1.0)
                 self.assertEqual(summary.avg_governance_passes, 2.0)
+
+    # Every typed reason code must resolve to a declared pillar. Substring heuristics
+    # silently routed four codes to a catch-all bucket; an exhaustive mapping is only
+    # trustworthy if adding a code without classifying it breaks the build.
+    def test_every_governance_reason_code_has_a_declared_pillar(self) -> None:
+        from layer2_runtime_governance.governance_components.contracts import (
+            GovernanceReasonCode,
+        )
+        from layer5_evaluation_continuous_improvement.reason_code_pillars import (
+            REASON_CODE_PILLARS,
+            UNCLASSIFIED_PILLAR,
+            classify_reason_code_pillar,
+        )
+
+        declared = set(REASON_CODE_PILLARS)
+        emitted = {code.value for code in GovernanceReasonCode}
+
+        self.assertEqual(emitted - declared, set(), "reason codes without a pillar")
+        self.assertEqual(declared - emitted, set(), "pillars for codes that cannot occur")
+        for code in emitted:
+            self.assertNotEqual(classify_reason_code_pillar(code), UNCLASSIFIED_PILLAR)
+
+    # These four were misattributed by the previous name-matching classifier.
+    def test_previously_misclassified_codes_reach_their_real_pillar(self) -> None:
+        from layer5_evaluation_continuous_improvement.reason_code_pillars import (
+            classify_reason_code_pillar,
+        )
+
+        self.assertEqual(
+            classify_reason_code_pillar("step_exploration_budget_exhausted"),
+            "Trajectory Pillar",
+        )
+        self.assertEqual(
+            classify_reason_code_pillar("unresolvable_revision"), "Trajectory Pillar"
+        )
+        self.assertEqual(
+            classify_reason_code_pillar("candidate_digest_mismatch"), "Evidence Pillar"
+        )
+        # No judge verdict is involved; the word "confidence" alone had captured it.
+        self.assertEqual(
+            classify_reason_code_pillar("external_low_actor_self_confidence"),
+            "External Execution Boundary",
+        )
+
+    # The trace carries no wall-clock boundary and no readable scenario identity; the
+    # campaign runner records both beside it. Without reading that sibling file the
+    # evaluation can only group by an opaque task hash and can never report duration.
+    def test_campaign_record_supplies_scenario_identity_and_duration(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            trace_path = _write_trace(root)
+            (trace_path.parent / "run_record.json").write_text(
+                json.dumps(
+                    {
+                        "record_version": "evaluation_campaign_run.v1",
+                        "campaign_id": "realistic_pilot_v1",
+                        "scenario_id": "rp07_incident_snapshot_report",
+                        "family": "structured_data",
+                        "replica_index": 2,
+                        "elapsed_seconds": 41.5,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with EvaluationStore(root / "evaluation.sqlite3") as store:
+                TraceImporter(store).import_paths([trace_path], experiment_id="experiment-1")
+
+                run = store.query("SELECT * FROM runs")[0]
+                self.assertEqual(run["scenario_id"], "rp07_incident_snapshot_report")
+                self.assertEqual(run["scenario_family"], "structured_data")
+                self.assertEqual(run["replica_index"], 2)
+                self.assertEqual(run["campaign_id"], "realistic_pilot_v1")
+                self.assertEqual(run["duration_seconds"], 41.5)
+
+                summary = build_evaluation_summary(store, experiment_id="experiment-1")
+                self.assertEqual(summary.avg_run_duration_seconds, 41.5)
+                self.assertIn("structured_data", summary.family_breakdown)
+                self.assertEqual(summary.family_breakdown["structured_data"]["runs"], 1)
+
+    # A run produced outside a campaign has no sibling record and must still import.
+    def test_trace_without_campaign_record_still_imports(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            trace_path = _write_trace(root)
+            with EvaluationStore(root / "evaluation.sqlite3") as store:
+                TraceImporter(store).import_paths([trace_path], experiment_id="experiment-1")
+
+                run = store.query("SELECT * FROM runs")[0]
+                self.assertIsNone(run["scenario_id"])
+                self.assertIsNone(run["duration_seconds"])
+
+                summary = build_evaluation_summary(store, experiment_id="experiment-1")
+                self.assertIsNone(summary.avg_run_duration_seconds)
+                self.assertIn("non dichiarata", summary.family_breakdown)
 
     # Produce a self-contained thesis bundle without optional plotting dependencies.
     def test_report_exports_json_csv_and_svg(self) -> None:

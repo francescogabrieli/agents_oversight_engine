@@ -11,6 +11,16 @@ from .store import EvaluationStore
 
 
 TRACE_VERSION = "layer2_trace.v6"
+RUN_RECORD_FILENAME = "run_record.json"
+
+# The canonical trace deliberately carries no wall-clock run boundary: it is a record of
+# what was decided, not of how long it took. The campaign runner does record that, plus
+# the readable scenario identity, in a `run_record.json` written beside the trace. Without
+# reading it the evaluation can only group runs by an opaque task-text hash and can never
+# report duration - so per-family analysis and the cost of oversight both stay unavailable
+# even though the data is already on disk. A run produced outside a campaign simply has no
+# sibling record, and every field it would have supplied stays null.
+_RUN_RECORD_VERSION = "evaluation_campaign_run.v1"
 
 
 @dataclass(frozen=True)
@@ -70,12 +80,41 @@ class TraceImporter:
                     trace_digest=digest,
                     experiment_id=experiment_id,
                     imported_at=now,
+                    run_record=_load_run_record(path),
                 )
                 self.store.replace_run_projection(**projection)
                 imported.append(path)
             except (OSError, UnicodeError, json.JSONDecodeError, ValueError, KeyError) as exc:
                 failures.append((path, str(exc)))
         return ImportResult(tuple(imported), tuple(skipped), tuple(failures))
+
+
+# Load the campaign record written beside one trace, when the run came from a campaign.
+def _load_run_record(trace_path: Path) -> dict[str, Any]:
+    record_path = trace_path.parent / RUN_RECORD_FILENAME
+    try:
+        payload = json.loads(record_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    if payload.get("record_version") != _RUN_RECORD_VERSION:
+        return {}
+    return payload
+
+
+# Read one optional non-negative float from an untrusted campaign record.
+def _optional_seconds(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if value >= 0 else None
+
+
+# Read one optional non-negative integer from an untrusted campaign record.
+def _optional_index(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if value >= 0 else None
 
 
 # Validate the small stable boundary required by the importer.
@@ -109,7 +148,9 @@ def _project_trace(
     trace_digest: str,
     experiment_id: str,
     imported_at: str,
+    run_record: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    record = run_record or {}
     runtime = payload["runtime"]
     intake = payload["intake"]
     run_id = str(runtime["thread_id"])
@@ -122,6 +163,10 @@ def _project_trace(
         "run_id": run_id,
         "experiment_id": experiment_id,
         "task_case_id": _task_case_id(intake),
+        "scenario_id": _optional_text(record.get("scenario_id")),
+        "scenario_family": _optional_text(record.get("family")),
+        "replica_index": _optional_index(record.get("replica_index")),
+        "campaign_id": _optional_text(record.get("campaign_id")),
         "trace_path": str(source_path),
         "trace_digest": trace_digest,
         "trace_version": TRACE_VERSION,
@@ -131,7 +176,7 @@ def _project_trace(
         "goal": str(intake.get("goal") or ""),
         "sensitivity": str(intake.get("sensitivity") or "unknown"),
         "execution_intent": str(intake.get("execution_intent") or "unknown"),
-        "duration_seconds": None,
+        "duration_seconds": _optional_seconds(record.get("elapsed_seconds")),
         "actor_turn_count": _non_negative_int(runtime.get("actor_turn_count")),
         "tool_call_count": len(tool_calls),
         "failed_tool_count": sum(item.get("success") is False for item in tool_calls),

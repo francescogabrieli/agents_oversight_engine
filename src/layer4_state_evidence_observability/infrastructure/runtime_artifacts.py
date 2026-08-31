@@ -261,7 +261,15 @@ class RuntimeArtifactStore:
     def list_thread_ids(self) -> list[str]:
         if not self.root_path.exists():
             return []
-        return sorted(path.name for path in self.root_path.iterdir() if path.is_dir())
+        # The artifacts root also holds infrastructure directories - the checkpoint
+        # database, the MCP ledger, archived runs - which are not threads. A thread is
+        # identified by the runtime summary it persists, so callers that iterate this
+        # list (the review inbox, checkpoint retention) never have to special-case names.
+        return sorted(
+            path.name
+            for path in self.root_path.iterdir()
+            if path.is_dir() and (path / "runtime_summary.json").is_file()
+        )
 
     # Read the persisted runtime summary for one thread when available.
     def read_runtime_summary(self, thread_id: str) -> dict[str, Any] | None:

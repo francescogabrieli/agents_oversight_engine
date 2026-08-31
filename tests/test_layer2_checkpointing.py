@@ -22,7 +22,9 @@ from layer4_state_evidence_observability.infrastructure.checkpointing import (
     build_default_checkpointer,
     build_runtime_serializer,
 )
-from layer3_tool_bus_external_capabilities.tool_contract import ToolErrorCode
+from layer3_tool_bus_external_capabilities.tool_contract import RetrievalKind, ToolErrorCode
+from layer3_tool_bus_external_capabilities.external_operations import CommunicationBodyFormat
+from layer2_runtime_governance.domain import ObservationLineage, TerminationReason
 from layer2_runtime_governance.governance_components import JudgeAdmission
 from layer2_runtime_governance.judge import (
     JudgeClaimAssessment,
@@ -75,6 +77,23 @@ class Layer2CheckpointingTests(unittest.TestCase):
         restored = serializer.loads_typed((type_tag, payload))
 
         self.assertIs(restored, ToolErrorCode.DUPLICATE_REQUEST)
+
+    # Retrieval kind, communication format, and termination reason must survive checkpoint roundtrip.
+    def test_runtime_enums_are_allowlisted_for_checkpoint_roundtrip(self) -> None:
+        serializer = build_runtime_serializer()
+        enums = (
+            RetrievalKind.SEARCH_SNIPPET,
+            RetrievalKind.FETCHED_DOCUMENT,
+            CommunicationBodyFormat.PLAIN,
+            CommunicationBodyFormat.MARKDOWN,
+            TerminationReason.GOVERNANCE_DENIED,
+            TerminationReason.HUMAN_ABORT,
+        )
+
+        for enum_val in enums:
+            type_tag, payload = serializer.dumps_typed(enum_val)
+            restored = serializer.loads_typed((type_tag, payload))
+            self.assertIs(restored, enum_val)
 
     # Staged admission and claim grounding must survive interrupt/resume checkpoints.
     def test_new_judge_contracts_are_allowlisted_for_checkpoint_roundtrip(self) -> None:

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = "layer5_evaluation_db.v2"
+SCHEMA_VERSION = "layer5_evaluation_db.v3"
 
 
 class EvaluationStore:
@@ -52,6 +52,10 @@ class EvaluationStore:
                 run_id TEXT PRIMARY KEY,
                 experiment_id TEXT NOT NULL REFERENCES experiments(experiment_id),
                 task_case_id TEXT NOT NULL,
+                scenario_id TEXT,
+                scenario_family TEXT,
+                replica_index INTEGER,
+                campaign_id TEXT,
                 trace_path TEXT NOT NULL,
                 trace_digest TEXT NOT NULL UNIQUE,
                 trace_version TEXT NOT NULL,
@@ -113,6 +117,7 @@ class EvaluationStore:
             );
 
             CREATE INDEX IF NOT EXISTS idx_runs_experiment ON runs(experiment_id);
+            CREATE INDEX IF NOT EXISTS idx_runs_scenario ON runs(scenario_id);
             CREATE INDEX IF NOT EXISTS idx_governance_run ON governance_events(run_id);
             CREATE INDEX IF NOT EXISTS idx_reviews_run ON human_reviews(run_id);
             CREATE INDEX IF NOT EXISTS idx_operations_run ON external_operations(run_id);
@@ -122,8 +127,18 @@ class EvaluationStore:
             str(row[1])
             for row in self.connection.execute("PRAGMA table_info(runs)").fetchall()
         }
-        if "termination_reason" not in run_columns:
-            self.connection.execute("ALTER TABLE runs ADD COLUMN termination_reason TEXT")
+        # Databases created before a column existed are migrated in place: an evaluation
+        # database is accumulated across a campaign and must not be rebuilt to gain a
+        # field, which would discard the manual assessments already recorded in it.
+        for column, definition in (
+            ("termination_reason", "TEXT"),
+            ("scenario_id", "TEXT"),
+            ("scenario_family", "TEXT"),
+            ("replica_index", "INTEGER"),
+            ("campaign_id", "TEXT"),
+        ):
+            if column not in run_columns:
+                self.connection.execute(f"ALTER TABLE runs ADD COLUMN {column} {definition}")
         self.connection.execute(
             "INSERT OR REPLACE INTO metadata(key, value) VALUES ('schema_version', ?)",
             (SCHEMA_VERSION,),

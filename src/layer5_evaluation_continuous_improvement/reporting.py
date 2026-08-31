@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .metrics import build_evaluation_summary, classify_reason_code_pillar
+from .metrics import build_evaluation_summary
+from .reason_code_pillars import classify_reason_code_pillar
 from .store import EvaluationStore
 
 
@@ -39,6 +40,13 @@ def generate_evaluation_report(
         csv_path = output_dir / f"{name}.csv"
         _write_csv(csv_path, rows)
         files.append(csv_path)
+
+    family_rows = [
+        {"family": family, **values} for family, values in summary.family_breakdown.items()
+    ]
+    family_csv = output_dir / "family_breakdown.csv"
+    _write_csv(family_csv, family_rows)
+    files.append(family_csv)
 
     # Export reason codes tabular dataset
     reason_code_rows = [
@@ -86,6 +94,20 @@ def generate_evaluation_report(
             "Metriche medie di efficienza e overhead per run",
             efficiency_data,
         ),
+        "family_completion.svg": (
+            "Completamento tecnico per famiglia di task",
+            {
+                family: values["technical_completion_rate"] or 0.0
+                for family, values in summary.family_breakdown.items()
+            },
+        ),
+        "family_intervention.svg": (
+            "Tasso di intervento umano per famiglia di task",
+            {
+                family: values["human_intervention_rate"] or 0.0
+                for family, values in summary.family_breakdown.items()
+            },
+        ),
     }
     for filename, (title, values) in plot_specs.items():
         plot_path = output_dir / filename
@@ -93,7 +115,12 @@ def generate_evaluation_report(
         files.append(plot_path)
     confusion_path = output_dir / "escalation_confusion_matrix.svg"
     confusion_path.write_text(
-        _confusion_matrix_svg(summary.escalation_confusion), encoding="utf-8"
+        _confusion_matrix_svg(
+            summary.escalation_confusion,
+            labeled=summary.labeled_governance_events,
+            total=summary.total_governance_events,
+        ),
+        encoding="utf-8",
     )
     files.append(confusion_path)
     manifest_path = output_dir / "manifest.json"
@@ -153,16 +180,31 @@ def _bar_chart_svg(title: str, values: dict[str, int] | dict[str, float | int]) 
 
 
 # Render the annotated escalation confusion matrix without plotting dependencies.
-def _confusion_matrix_svg(values: dict[str, int]) -> str:
+#
+# The labeled/total caption is not decoration: only manually labeled events enter this
+# matrix, so labeling escalations alone forces false_negative to zero and makes recall
+# read as a perfect 1.0. Printing the covered fraction next to the cells keeps that
+# limitation attached to the figure wherever it is reproduced.
+def _confusion_matrix_svg(values: dict[str, int], *, labeled: int, total: int) -> str:
     cells = [
-        ("Review richiesta / necessaria", values["true_positive"], 260, 135, "#86efac"),
-        ("Review richiesta / evitabile", values["false_positive"], 520, 135, "#fde68a"),
-        ("Review mancata", values["false_negative"], 260, 285, "#fca5a5"),
-        ("Continuazione corretta", values["true_negative"], 520, 285, "#bfdbfe"),
+        ("Review richiesta / necessaria", values["true_positive"], 260, 155, "#86efac"),
+        ("Review richiesta / evitabile", values["false_positive"], 520, 155, "#fde68a"),
+        ("Review mancata", values["false_negative"], 260, 305, "#fca5a5"),
+        ("Continuazione corretta", values["true_negative"], 520, 305, "#bfdbfe"),
     ]
+    coverage = (
+        f"Eventi etichettati: {labeled} su {total}"
+        + (f" ({labeled / total:.0%})" if total else "")
+        + (
+            "  —  precision e recall valgono solo su questo sottoinsieme"
+            if labeled
+            else "  —  nessun evento etichettato: precision e recall non calcolabili"
+        )
+    )
     elements = [
         '<text x="40" y="45" font-size="26" font-family="sans-serif">Confusion matrix delle escalation</text>',
-        '<text x="520" y="90" text-anchor="middle" font-size="18" font-family="sans-serif">Decisione del sistema</text>',
+        f'<text x="40" y="72" font-size="15" fill="#475569" font-family="sans-serif">{html.escape(coverage)}</text>',
+        '<text x="520" y="112" text-anchor="middle" font-size="18" font-family="sans-serif">Decisione del sistema</text>',
     ]
     for label, value, x, y, color in cells:
         elements.extend(
@@ -172,7 +214,7 @@ def _confusion_matrix_svg(values: dict[str, int]) -> str:
                 f'<text x="{x + 120}" y="{y + 92}" text-anchor="middle" font-size="30" font-family="sans-serif">{value}</text>',
             ]
         )
-    return _svg_document(820, 455, elements)
+    return _svg_document(820, 480, elements)
 
 
 # Wrap chart elements in one portable SVG document.
