@@ -34,12 +34,17 @@ class EvaluationSummary:
     avg_governance_passes: float | None
     avg_review_time_seconds: float | None
     avg_run_duration_seconds: float | None
-    # The realistic pool spans eight task families on purpose, so the per-family view is
+    # The realistic pool spans ten task families on purpose, so the per-family view is
     # the comparison the corpus was designed to support; without it every run collapses
     # into one undifferentiated average.
     family_breakdown: dict[str, dict[str, Any]]
     labeled_governance_events: int
     total_governance_events: int
+    # No archived run ever reached `completed` after replanning at least once - every
+    # one ended in `waiting_human_review` or `aborted` instead. This measures how often
+    # a replan is a genuine recovery rather than asserting it as a guaranteed capability.
+    runs_with_replan: int
+    replan_recovery_rate: float | None
 
     # Expose a JSON-ready report contract.
     def to_dict(self) -> dict[str, Any]:
@@ -106,8 +111,15 @@ def build_evaluation_summary(
         if run.get("duration_seconds") is not None
     ]
 
+    runs_with_replan = [run for run in runs if int(run["replanning_count"]) > 0]
+    recovered_after_replan = [
+        run for run in runs_with_replan if run["runtime_status"] == "completed"
+    ]
+
     return EvaluationSummary(
         family_breakdown=_family_breakdown(runs, reviews),
+        runs_with_replan=len(runs_with_replan),
+        replan_recovery_rate=_ratio(len(recovered_after_replan), len(runs_with_replan)),
         labeled_governance_events=sum(
             1 for event in governance if event["human_review_was_needed"] is not None
         ),

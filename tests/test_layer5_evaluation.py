@@ -167,6 +167,42 @@ class Layer5EvaluationTests(unittest.TestCase):
                 self.assertIsNone(summary.avg_run_duration_seconds)
                 self.assertIn("non dichiarata", summary.family_breakdown)
 
+    # A replan is a recovery attempt, not a guaranteed one - measure how often it
+    # actually reaches completion instead of asserting recovery as the default outcome.
+    def test_replan_recovery_rate_measures_completion_after_replan(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            recovered_path = root / "recovered" / "full-trace-2.json"
+            recovered_path.parent.mkdir(parents=True)
+            recovered_payload = _trace_payload()
+            recovered_payload["runtime"]["thread_id"] = "recovered"
+            recovered_path.write_text(json.dumps(recovered_payload), encoding="utf-8")
+
+            stalled_path = root / "stalled" / "full-trace-2.json"
+            stalled_path.parent.mkdir(parents=True)
+            stalled_payload = _trace_payload()
+            stalled_payload["runtime"]["thread_id"] = "stalled"
+            stalled_payload["runtime"]["current_state"] = "waiting_human_review"
+            stalled_path.write_text(json.dumps(stalled_payload), encoding="utf-8")
+
+            never_replanned_path = root / "clean" / "full-trace-2.json"
+            never_replanned_path.parent.mkdir(parents=True)
+            clean_payload = _trace_payload()
+            clean_payload["runtime"]["thread_id"] = "clean"
+            clean_payload["runtime"]["step_history"] = []
+            never_replanned_path.write_text(json.dumps(clean_payload), encoding="utf-8")
+
+            with EvaluationStore(root / "evaluation.sqlite3") as store:
+                TraceImporter(store).import_paths(
+                    [recovered_path, stalled_path, never_replanned_path],
+                    experiment_id="experiment-1",
+                )
+                summary = build_evaluation_summary(store, experiment_id="experiment-1")
+
+                # Only the two runs that actually replanned enter the denominator.
+                self.assertEqual(summary.runs_with_replan, 2)
+                self.assertEqual(summary.replan_recovery_rate, 0.5)
+
     # Produce a self-contained thesis bundle without optional plotting dependencies.
     def test_report_exports_json_csv_and_svg(self) -> None:
         with TemporaryDirectory() as directory:

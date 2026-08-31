@@ -108,6 +108,10 @@ def generate_evaluation_report(
                 for family, values in summary.family_breakdown.items()
             },
         ),
+        "replan_recovery.svg": (
+            "Esito delle run che hanno ripianificato almeno una volta",
+            _replan_recovery_breakdown(summary),
+        ),
     }
     for filename, (title, values) in plot_specs.items():
         plot_path = output_dir / filename
@@ -149,6 +153,16 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
+
+
+# A replan is a recovery attempt, not a guaranteed one; this counts how often it
+# actually reaches a technical completion versus stalling into review or aborting.
+def _replan_recovery_breakdown(summary) -> dict[str, int]:
+    recovered = round(summary.replan_recovery_rate * summary.runs_with_replan) if summary.replan_recovery_rate is not None else 0
+    return {
+        "Completate dopo replan": recovered,
+        "Non completate dopo replan": summary.runs_with_replan - recovered,
+    }
 
 
 # Render a dependency-free SVG bar chart suitable for thesis export.

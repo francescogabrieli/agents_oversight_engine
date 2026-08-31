@@ -217,6 +217,7 @@ Modular capability packages introduced for the active Layer 2–4 baseline:
 - `governance_components/` owns policy contracts, inputs, adapters, OPA-first evaluation, response parsing, and fail-closed handling
 - `src/layer4_state_evidence_observability/observability/` owns immutable trace models, read-only builders, compact views, and JSON serialization
 - `src/layer5_evaluation_continuous_improvement/` owns offline v6 trace ingestion, the dedicated SQLite evaluation projection, annotations, metrics, and dependency-free SVG/CSV/JSON reporting
+- `notebooks/thesis_plotting.py` is a companion matplotlib/seaborn renderer for LaTeX-includable PDF/PNG (300dpi) figures; it is presentation-only and must read every rate/count from `layer5_evaluation_continuous_improvement.metrics.build_evaluation_summary` rather than recomputing metrics from raw tables, and must never fabricate sample data - its dependencies live in the separate `requirements-evaluation.txt`
 - `src/layer4_state_evidence_observability/infrastructure/` owns checkpoint composition and persistence ports
 - `composition.py` is the explicit dependency-injection entry point for runtime construction
 

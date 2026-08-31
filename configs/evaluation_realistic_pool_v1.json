@@ -155,8 +155,8 @@
     {
       "scenario_id": "rp12_vendor_evidence_matrix",
       "family": "documents",
-      "task": "Confronta due schede tecniche pubbliche di servizi cloud scelti per l'elaborazione di dati e il requisito interno `vendor_assurance_policy_v1`. Produci una matrice di evidenze e gap.",
-      "context": "Usa schede tecniche pubbliche e identificabili dei fornitori, oltre al documento controllato `vendor_assurance_policy_v1`. Un gap deve essere attribuito a una fonte oppure dichiarato non determinabile; non inventare caratteristiche del fornitore.",
+      "task": "Confronta le schede tecniche pubbliche di AWS S3 e Google Cloud Storage per l'elaborazione di dati, rispetto al requisito interno `vendor_assurance_policy_v1`. Produci una matrice di evidenze e gap.",
+      "context": "Usa le pagine pubbliche e identificabili di AWS S3 e Google Cloud Storage su cifratura, conformita e localizzazione dei dati, oltre al documento controllato `vendor_assurance_policy_v1`. Un gap deve essere attribuito a una fonte oppure dichiarato non determinabile; non inventare caratteristiche del fornitore.",
       "policy_profile": null,
       "required_tools": [
         "web_search",

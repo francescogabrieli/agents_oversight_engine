@@ -8,7 +8,17 @@ Questa cartella contiene i notebook interattivi e gli script di visualizzazione 
 ## Contenuto
 
 - **`evaluation_analysis.ipynb`**: Notebook Jupyter interattivo che carica i dati da `artifacts/evaluation/layer5_evaluation.sqlite3`, calcola le metriche aggregate e visualizza i grafici di valutazione.
-- **`thesis_plotting.py`**: Modulo con le routine di plotting (Matplotlib & Seaborn) configurate con stile accademico publication-ready e funzione di export in formato vettoriale `.pdf` (per LaTeX `\includegraphics`) e `.png` (300 DPI).
+- **`thesis_plotting.py`**: Modulo con le routine di plotting (Matplotlib & Seaborn) configurate con stile accademico publication-ready e funzione di export in formato vettoriale `.pdf` (per LaTeX `\includegraphics`) e `.png` (300 DPI). Non ricalcola alcuna metrica: legge sempre `EvaluationSummary` prodotto da `layer5_evaluation_continuous_improvement.metrics.build_evaluation_summary`, la stessa funzione che alimenta il bundle SVG di `reporting.py`. Richiede un database di evaluation già popolato da una ingestion reale: non genera più dati sintetici di fallback.
+
+## Installazione
+
+Le dipendenze di questa pipeline (`pandas`, `matplotlib`, `seaborn`, `ipykernel`) sono separate da
+`requirements-production.txt`/`requirements-dev.txt` perché servono solo per l'esportazione delle
+figure della tesi, non per il runtime o i test:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-evaluation.txt
+```
 
 ---
 

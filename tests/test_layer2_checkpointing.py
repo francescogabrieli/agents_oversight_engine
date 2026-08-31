@@ -4,8 +4,10 @@ import shutil
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from uuid import uuid4
+import sqlite3
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 
@@ -30,6 +32,25 @@ from layer2_runtime_governance.judge import (
     JudgeClaimAssessment,
     JudgeClaimStatus,
 )
+
+
+# Write one minimal checkpoint with a caller-controlled `ts`, the only "last touched"
+# signal a thread with no artifact directory can offer.
+def _put_checkpoint(saver: SqliteSaver, *, thread_id: str, ts: str) -> None:
+    saver.put(
+        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+        {
+            "v": 1,
+            "id": str(uuid4()),
+            "ts": ts,
+            "channel_values": {},
+            "channel_versions": {},
+            "versions_seen": {},
+            "updated_channels": None,
+        },
+        {"source": "update", "step": 0, "parents": {}},
+        {},
+    )
 
 
 class _RecordingCheckpointer:
@@ -139,7 +160,7 @@ class Layer2CheckpointingTests(unittest.TestCase):
             "pending-review": {
                 "runtime_state": "waiting_human_review",
                 "has_pending_human_review": True,
-                "updated_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-07-16T23:30:00+00:00",
             },
             "active": {
                 "runtime_state": "acting",
@@ -164,6 +185,64 @@ class Layer2CheckpointingTests(unittest.TestCase):
         self.assertEqual(checkpointer.deleted_thread_ids, ["expired-complete"])
         self.assertEqual(report.deleted_thread_ids, ("expired-complete",))
         self.assertEqual(report.retained_thread_count, 3)
+
+    # A HITL pause nobody resumes is abandoned, not active - only the checkpoint (never
+    # the artifact directory) is reclaimed once it outlives the review window.
+    def test_retention_reclaims_stale_pending_review_threads(self) -> None:
+        summaries = {
+            "abandoned-review": {
+                "runtime_state": "waiting_human_review",
+                "has_pending_human_review": True,
+                "updated_at": "2026-07-17T08:00:00+00:00",
+            },
+            "fresh-review": {
+                "runtime_state": "waiting_human_review",
+                "has_pending_human_review": True,
+                "updated_at": "2026-07-17T09:50:00+00:00",
+            },
+        }
+        checkpointer = _RecordingCheckpointer()
+
+        report = prune_expired_checkpoint_threads(
+            checkpointer=checkpointer,
+            artifact_store=_SummaryArtifactStore(summaries),
+            settings=CheckpointRetentionSettings(stale_pending_review_hours=1),
+            now=datetime(2026, 7, 17, 10, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(report.deleted_thread_ids, ("abandoned-review",))
+        self.assertEqual(report.retained_thread_count, 1)
+
+    # A checkpoint with no matching artifact directory - a crash before the run ever
+    # persisted, or a dev/test thread reusing the production database - has no audit
+    # trail to protect, so it is discovered from the checkpoint storage itself and
+    # reclaimed on the same clock as everything else abandoned.
+    def test_retention_reclaims_orphan_checkpoint_threads(self) -> None:
+        with TemporaryDirectory() as directory:
+            db_path = Path(directory) / "orphans.sqlite3"
+            connection = sqlite3.connect(str(db_path), check_same_thread=False)
+            serde = build_runtime_serializer()
+            saver = SqliteSaver(connection, serde=serde)
+            saver.setup()
+
+            _put_checkpoint(saver, thread_id="crashed-old", ts="2026-07-17T08:00:00+00:00")
+            _put_checkpoint(saver, thread_id="crashed-recent", ts="2026-07-17T09:50:00+00:00")
+
+            report = prune_expired_checkpoint_threads(
+                checkpointer=saver,
+                artifact_store=_SummaryArtifactStore({}),
+                settings=CheckpointRetentionSettings(orphan_thread_hours=1),
+                now=datetime(2026, 7, 17, 10, 0, tzinfo=timezone.utc),
+            )
+
+            self.assertEqual(report.deleted_thread_ids, ("crashed-old",))
+            self.assertEqual(report.retained_thread_count, 1)
+            remaining = {
+                row[0]
+                for row in connection.execute("SELECT DISTINCT thread_id FROM checkpoints")
+            }
+            self.assertEqual(remaining, {"crashed-recent"})
+            connection.close()
 
     # Terminal checkpoints default to immediate cleanup after their audit artifacts exist.
     def test_default_retention_keeps_only_resumable_threads(self) -> None:

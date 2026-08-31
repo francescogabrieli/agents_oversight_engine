@@ -62,9 +62,11 @@ Contiene una riga per ogni esecuzione.
 - risultato del task: `correct`, `partial`, `incorrect` oppure `NULL` se non valutato;
 - metodo di valutazione: automatico, umano oppure assente;
 - durata, actor turn, tool call, tool failure e replanning;
+- identità dello scenario (`scenario_id`, `scenario_family`, `replica_index`,
+  `campaign_id`), quando la run proviene da una campagna;
 - timestamp della run.
 
-Lo stato tecnico e il risultato del task restano distinti: una run può essere completata dal runtime ma produrre un risultato errato. Il trace v6 corrente non espone ancora timestamp completi della run, quindi `duration_seconds` resta `NULL` fino all'estensione di Layer 4.
+Lo stato tecnico e il risultato del task restano distinti: una run può essere completata dal runtime ma produrre un risultato errato. Il trace v6 non espone timestamp di run: `scenario_id`, `scenario_family`, `replica_index`, `campaign_id` e `duration_seconds` vengono letti dal `run_record.json` che il runner di campagna scrive accanto al trace, non dal trace stesso. Una run importata da una directory priva di quel file (ad esempio ingerita direttamente da `artifacts/runtime/` invece che da `artifacts/evaluation/input/...`) ha questi campi a `NULL` e finisce nella famiglia "non dichiarata" del breakdown.
 
 ### `governance_events`
 
@@ -77,12 +79,14 @@ Contiene una riga per ogni governance pass.
 
 Confrontando review richiesta e review necessaria si ricavano escalation corrette, evitabili e mancate, oltre a precision e recall dell'oversight. Non viene quindi salvato un generico outcome complessivo dell'oversight.
 
+**Limite del protocollo di etichettatura.** `human_review_was_needed` viene annotato a mano, ed è naturale etichettare solo i turni che sono davvero finiti in escalation — sono quelli che si notano. Ma se si etichettano solo quelli, `false_negative` resta 0 per costruzione e la recall risulta un perfetto 1.0 anche senza avere mai verificato se un turno proseguito senza review avrebbe dovuto fermarsi. Precision e recall sono significative solo se il campione etichettato include anche una parte di eventi che *non* hanno richiesto review; il report riporta sempre quanti eventi sono etichettati sul totale, proprio perché il numero da solo non lo dice.
+
 ### `human_reviews`
 
 Contiene una riga per ogni decisione umana.
 
 - run e governance event associati;
-- decisione: `approve`, `edit`, `reject` o `abort`;
+- tipo di decisione tipizzata restituita dall'operatore (`approve_continue`, `approve_continue_read_only`, `modify_and_continue`, `request_more_evidence`, `replan`, `ask_clarification`, `abort`);
 - tempo di review;
 - feedback e identificativo del reviewer.
 
@@ -115,12 +119,7 @@ qualità della policy.
 
 ### Confine del corpus
 
-L'importer accetta esclusivamente `full-trace-2.json` con versione
-`layer2_trace.v6`. Le directory legacy che contengono soltanto
-`governance_conversation.*` o `governance_exchanges/` — inclusa la run 031 —
-sono intenzionalmente escluse dal corpus corrente: quei debug exchange non sono
-un trace canonico e non vengono ricostruiti retroattivamente. Per includere una
-run legacy è necessario rieseguirla o produrre un artefatto v6 completo.
+L'importer accetta esclusivamente directory che contengono `full-trace-2.json` con versione `layer2_trace.v6`; qualunque altra directory (log di debug, `governance_exchange.md` senza trace, run interrotte prima dell'export) viene scoperta e ignorata in silenzio, non ricostruita retroattivamente. Le run di sviluppo che non appartengono a nessuna campagna versionata vivono in `artifacts/runtime/legacy/` e restano fuori dal corpus per costruzione. Per includere una run legacy nel corpus è necessario rieseguirla o produrre un artefatto v6 completo.
 
 ## Metriche e risultati
 
@@ -132,6 +131,7 @@ Il Layer 5 calcola nel primo slice:
 - durata media e mediana;
 - actor turn, tool call e replanning per run;
 - human intervention rate;
+- completamento tecnico e intervento umano per famiglia di task (il pool realistico copre dieci famiglie apposta perché questo confronto sia possibile, anche se alcune restano a una sola scenario e quindi a tre sole repliche);
 - escalation corrette, evitabili e mancate;
 - precision e recall delle escalation;
 - distribuzione di approve, edit, reject e abort;
@@ -144,7 +144,7 @@ Le metriche vengono calcolate dai dati elementari tramite query e funzioni dedic
 
 ## Plotting e reporting
 
-Il primo slice genera barre per stato tecnico, task result, decisioni umane e stato delle external operation, oltre alla confusion matrix delle escalation. I grafici successivi previsti sono:
+Il primo slice genera barre per stato tecnico, task result, decisioni umane, stato delle external operation, distribuzione per pilastro di governance, medie di efficienza e completamento/intervento per famiglia di task, oltre alla confusion matrix delle escalation con la copertura dell'etichettatura in didascalia. I grafici successivi previsti sono:
 
 - barre impilate degli outcome delle run;
 - confronto tra completion tecnica e correttezza reale;
