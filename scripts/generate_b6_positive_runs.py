@@ -17,12 +17,14 @@ from layer4_state_evidence_observability.infrastructure.runtime_artifacts import
 )
 from tests.b6_positive_fixtures import (  # noqa: E402
     run_b6_evidence_run,
+    run_b6_protocol_replan_run,
     run_b6_trajectory_run,
 )
 
 
 B6_EVIDENCE_OFFICIAL_THREAD_ID = "b6-evidence-burden-insufficient-v2"
 B6_TRAJECTORY_OFFICIAL_THREAD_ID = "b6-trajectory-replan-ceiling-v2"
+B6_PROTOCOL_REPLAN_OFFICIAL_THREAD_ID = "b6-trajectory-protocol-replan-ceiling-v2"
 
 
 # Generate the deterministic official artifacts through the deployed OPA adapter.
@@ -37,6 +39,11 @@ def generate_official_b6_runs(*, artifact_root: Path) -> dict[str, dict[str, Any
         B6_TRAJECTORY_OFFICIAL_THREAD_ID: run_b6_trajectory_run(
             artifact_root=artifact_root,
             thread_id=B6_TRAJECTORY_OFFICIAL_THREAD_ID,
+            policy_engine_service=policy_engine,
+        ),
+        B6_PROTOCOL_REPLAN_OFFICIAL_THREAD_ID: run_b6_protocol_replan_run(
+            artifact_root=artifact_root,
+            thread_id=B6_PROTOCOL_REPLAN_OFFICIAL_THREAD_ID,
             policy_engine_service=policy_engine,
         ),
     }

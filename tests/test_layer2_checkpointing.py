@@ -26,7 +26,7 @@ from layer4_state_evidence_observability.infrastructure.checkpointing import (
 )
 from layer3_tool_bus_external_capabilities.tool_contract import RetrievalKind, ToolErrorCode
 from layer3_tool_bus_external_capabilities.external_operations import CommunicationBodyFormat
-from layer2_runtime_governance.domain import ObservationLineage, TerminationReason
+from layer2_runtime_governance.domain import TerminationReason
 from layer2_runtime_governance.governance_components import JudgeAdmission
 from layer2_runtime_governance.judge import (
     JudgeClaimAssessment,

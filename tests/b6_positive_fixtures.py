@@ -5,7 +5,7 @@ from typing import Any
 
 from langgraph.checkpoint.memory import InMemorySaver
 
-from main_layer2 import run_layer2_flow
+from main_layer2 import resume_layer2_flow, run_layer2_flow
 from layer2_runtime_governance import (
     ActorPort,
     ActorResult,
@@ -14,6 +14,7 @@ from layer2_runtime_governance import (
     BehavioralRecommendedDirective,
     CapabilityAccessMode,
     EvidenceBurden,
+    HumanReviewDecisionType,
     PlanStep,
     PlannerDecision,
     PolicyEnginePort,
@@ -28,6 +29,7 @@ from layer2_runtime_governance import (
 )
 from layer2_runtime_governance.domain import TaskState
 from layer2_runtime_governance.planning.replanning import ReplanDecision, ReplannerPort
+from layer3_tool_bus_external_capabilities.tool_contract import ToolErrorCode
 from layer4_state_evidence_observability.behavioral import (
     BehavioralAssessment,
     BehavioralStorePort,
@@ -44,6 +46,8 @@ from tests.layer2_runtime_fixtures import StubPolicyEngine, _build_stub_opa_deci
 
 B6_EVIDENCE_THREAD_ID = "b6-evidence-burden-insufficient"
 B6_TRAJECTORY_THREAD_ID = "b6-trajectory-replan-ceiling"
+B6_PROTOCOL_REPLAN_THREAD_ID = "b6-trajectory-protocol-replan-ceiling"
+B6_ANCHORING_CONCERN_THREAD_ID = "b6-evidence-anchoring-concern-adjudicated"
 
 
 class B6EvidencePlanner:
@@ -158,6 +162,104 @@ class B6EvidenceToolGateway(ToolGatewayPort):
         )
 
 
+class B6AnchoringConcernPlanner:
+    planner_name = "b6_anchoring_concern_fixture_planner"
+    prompt_version = "b6_anchoring_concern_fixture_v1"
+
+    # A one-source burden the actor satisfies; only the literal anchoring family is under test.
+    def plan(self, *, task_state: TaskState) -> PlannerDecision:
+        return PlannerDecision(
+            plan_steps=[
+                PlanStep(
+                    step_id="b6-anchoring-step",
+                    objective="Produce a factual claim grounded in one retrieved source.",
+                    rationale="The B6 fixture isolates the literal-anchoring family from the burden family.",
+                    expected_outcome="A factual claim citing a retrieved source.",
+                    produces_factual_claims=True,
+                    evidence_burden=EvidenceBurden(
+                        min_independent_sources=1,
+                        require_retrieved_content=True,
+                    ),
+                )
+            ],
+            rationale="The fixture planner declares a burden the actor can always satisfy.",
+            planner_name=self.planner_name,
+            prompt_version=self.prompt_version,
+        )
+
+
+class B6AnchoringConcernActor(ActorPort):
+    actor_name = "b6_anchoring_concern_fixture_actor"
+    prompt_version = "b6_anchoring_concern_fixture_v1"
+
+    # Complete with a numeric claim the retrieved source never states - a value no
+    # further retrieval could ever settle, unlike a missing citation.
+    def act(self, *, actor_task: ActorTask) -> ActorResult:
+        if not actor_task.observations:
+            return ActorResult(
+                plan_step_id=actor_task.current_plan_step.step_id,
+                result_type=ActorResultType.PROPOSE_ACTION,
+                summary="Request the one source the declared burden requires.",
+                capability_mode=CapabilityAccessMode.READ_ONLY,
+                tool_request=ToolRequest(
+                    plan_step_id=actor_task.current_plan_step.step_id,
+                    tool_name=ToolName.WEB_SEARCH,
+                    request_id="b6-anchoring-request-1",
+                    reason="The factual step needs documentary evidence.",
+                    query="B6 anchoring concern source",
+                    max_results=1,
+                    extractive_goal="Retrieve concrete source content for the claim.",
+                ),
+                scratchpad_entry=ScratchpadEntry(
+                    turn_index=actor_task.actor_turn_count,
+                    plan_step_id=actor_task.current_plan_step.step_id,
+                    entry_type=ScratchpadEntryType.TOOL_DECISION,
+                    summary="The fixture requests its one source.",
+                ),
+            )
+
+        return ActorResult(
+            plan_step_id=actor_task.current_plan_step.step_id,
+            result_type=ActorResultType.STEP_COMPLETED,
+            summary="Submit the factual claim including a computed figure the source never states.",
+            output_text="The retrieved source shows the measured adoption rate reached 82%.",
+            capability_mode=CapabilityAccessMode.NONE,
+            step_validation=StepValidation(
+                plan_step_id=actor_task.current_plan_step.step_id,
+                actor_self_confidence=0.9,
+                evidence_refs=tuple(item.observation_id for item in actor_task.observations),
+                rationale_summary="The actor cites the only retrieved source for a figure it never states.",
+            ),
+            scratchpad_entry=ScratchpadEntry(
+                turn_index=actor_task.actor_turn_count,
+                plan_step_id=actor_task.current_plan_step.step_id,
+                entry_type=ScratchpadEntryType.COMPLETION_RATIONALE,
+                summary="The completion asserts a figure absent from the cited source.",
+                evidence_refs=[item.observation_id for item in actor_task.observations],
+            ),
+        )
+
+
+class B6AnchoringConcernToolGateway(ToolGatewayPort):
+    gateway_name = "b6_anchoring_concern_fixture_gateway"
+
+    # Return one full-content observation that never states the actor's later figure.
+    def execute(self, *, tool_request: ToolRequest) -> ToolExecutionResult:
+        return ToolExecutionResult(
+            request=tool_request,
+            success=True,
+            summary="The fixture returned one concrete source without a percentage figure.",
+            content="The documentary source describes adoption trends without stating a specific rate.",
+            observations=(
+                ToolObservation(
+                    observation_id="b6-anchoring-observation-1",
+                    locator="https://b6.example/anchoring-source",
+                    content="The documentary source describes adoption trends without stating a specific rate.",
+                ),
+            ),
+        )
+
+
 class B6TrajectoryPlanner:
     planner_name = "b6_trajectory_fixture_planner"
     prompt_version = "b6_trajectory_fixture_v1"
@@ -249,6 +351,73 @@ class B6TrajectoryToolGateway(ToolGatewayPort):
         )
 
 
+class B6ProtocolReplanPlanner:
+    planner_name = "b6_protocol_replan_fixture_planner"
+    prompt_version = "b6_protocol_replan_fixture_v1"
+
+    # A single step whose only exit is the tool gateway's own protocol replan.
+    def plan(self, *, task_state: TaskState) -> PlannerDecision:
+        return PlannerDecision(
+            plan_steps=[
+                PlanStep(
+                    step_id="b6-protocol-replan-step-0",
+                    objective="Reach a stable result through a capability target that never settles.",
+                    rationale="The fixture exercises the tool gateway's own protocol replan, not an actor-requested one.",
+                    expected_outcome="A converged result after bounded recovery.",
+                )
+            ],
+            rationale="The fixture planner leaves protocol churn entirely to the tool gateway.",
+            planner_name=self.planner_name,
+            prompt_version=self.prompt_version,
+        )
+
+
+class B6ProtocolReplanActor(ActorPort):
+    actor_name = "b6_protocol_replan_fixture_actor"
+    prompt_version = "b6_protocol_replan_fixture_v1"
+
+    # Always retry the same target for the current step; the actor never notices it is
+    # cursed and never emits NEEDS_REPLAN itself - only tool_service's own protocol
+    # replan (two same-step local rejections) can ever move this fixture forward.
+    def act(self, *, actor_task: ActorTask) -> ActorResult:
+        step_id = actor_task.current_plan_step.step_id
+        return ActorResult(
+            plan_step_id=step_id,
+            result_type=ActorResultType.PROPOSE_ACTION,
+            summary=f"Retry the capability target bound to {step_id}.",
+            capability_mode=CapabilityAccessMode.READ_ONLY,
+            tool_request=ToolRequest(
+                plan_step_id=step_id,
+                tool_name=ToolName.WEB_SEARCH,
+                request_id=f"b6-protocol-replan-request-{step_id}",
+                reason="The step's only known target keeps failing at the backend.",
+                query=f"B6 protocol replan target for {step_id}",
+                max_results=1,
+                extractive_goal="Return a distinct concrete observation for convergence testing.",
+            ),
+            scratchpad_entry=ScratchpadEntry(
+                turn_index=actor_task.actor_turn_count,
+                plan_step_id=step_id,
+                entry_type=ScratchpadEntryType.TOOL_DECISION,
+                summary=f"The fixture retries the target bound to {step_id}.",
+            ),
+        )
+
+
+class B6ProtocolReplanToolGateway(ToolGatewayPort):
+    gateway_name = "b6_protocol_replan_fixture_gateway"
+
+    # Every backend attempt fails retryably; the fixture never returns a real observation.
+    def execute(self, *, tool_request: ToolRequest) -> ToolExecutionResult:
+        return ToolExecutionResult(
+            request=tool_request,
+            success=False,
+            summary="The fixture backend never settles this target.",
+            error_message="Simulated transient backend failure.",
+            error_code=ToolErrorCode.TIMEOUT,
+        )
+
+
 class B6Replanner(ReplannerPort):
     replanner_name = "b6_fixture_replanner"
     prompt_version = "b6_fixture_replanner_v1"
@@ -311,9 +480,33 @@ class B6PolicyEngine(StubPolicyEngine):
             return output
 
         if (
-            actor["result_type"] == ActorResultType.NEEDS_REPLAN.value
-            and trajectory_facts.get("replan_count", 0) >= 3
+            actor["result_type"] == ActorResultType.STEP_COMPLETED.value
+            and evidence_facts.get("burden_satisfied") is True
+            and (
+                evidence_facts.get("has_unanchored_literals_in_selection")
+                or evidence_facts.get("has_unanchored_literals_in_universe")
+            )
+            and not evidence_facts.get("anchoring_concern_adjudicated")
         ):
+            output = _build_stub_opa_decision(
+                decision_input=decision_input,
+                policy_engine=self,
+                directive="wait_human_review",
+                policy_decision="require_human_review",
+                reason_code="evidence_anchoring_requires_review",
+                summary=(
+                    "Literal claims in the completion are absent from every observation "
+                    "and cannot be settled by further retrieval."
+                ),
+            )
+            _annotate_anchoring_concern(output=output, evidence_facts=evidence_facts)
+            return output
+
+        # Mirror trajectory.rego exactly: the ceiling measures installed episodes, not
+        # who is asking for the next one, so it applies regardless of the actor's
+        # current proposal - the only way a protocol replan (never actor-requested) can
+        # ever be caught.
+        if trajectory_facts.get("replan_episode_count", 0) >= 3:
             output = _build_stub_opa_decision(
                 decision_input=decision_input,
                 policy_engine=self,
@@ -392,6 +585,15 @@ def _annotate_evidence_gap(*, output: dict[str, Any], evidence_facts: dict[str, 
     output["reason_codes"] = ["invalid_or_missing_selected_evidence", *deficit_codes]
 
 
+# Preserve the Evidence anchoring-concern facts in the OPA-shaped pillar result.
+def _annotate_anchoring_concern(*, output: dict[str, Any], evidence_facts: dict[str, Any]) -> None:
+    evidence = dict(output["pillar_results"]["evidence"])
+    evidence["evidence_concern"] = True
+    evidence["reason_codes"] = ["evidence_anchoring_requires_review"]
+    output["pillar_results"]["evidence"] = evidence
+    output["reason_codes"] = ["evidence_anchoring_requires_review"]
+
+
 # Preserve the Trajectory threshold fact in the OPA-shaped pillar result.
 def _annotate_replan_ceiling(*, output: dict[str, Any]) -> None:
     output["directive"] = "wait_human_review"
@@ -455,9 +657,95 @@ def run_b6_trajectory_run(
     )
 
 
+# Run the deterministic protocol-replan scenario: the tool gateway itself forces every
+# replan after two same-step local rejections, and the actor never once emits NEEDS_REPLAN.
+def run_b6_protocol_replan_run(
+    *,
+    artifact_root: Path,
+    thread_id: str = B6_PROTOCOL_REPLAN_THREAD_ID,
+    policy_engine_service: PolicyEnginePort | None = None,
+) -> dict[str, Any]:
+    resolved_policy_engine = policy_engine_service or B6PolicyEngine()
+    return run_layer2_flow(
+        raw_task_text="Reach a stable result despite a capability target that never settles.",
+        context_hint="The deterministic B6 actor keeps retrying the same failing target; only the tool gateway replans.",
+        thread_id=thread_id,
+        demo_intake_profile="research",
+        planner_service=B6ProtocolReplanPlanner(),
+        actor_service=B6ProtocolReplanActor(),
+        tool_gateway_service=B6ProtocolReplanToolGateway(),
+        replanner_service=B6Replanner(),
+        policy_engine_service=resolved_policy_engine,
+        behavioral_store_service=B6BehavioralStore(),
+        checkpointer=InMemorySaver(serde=build_runtime_serializer()),
+        artifact_store=RuntimeArtifactStore(root_path=artifact_root),
+    )
+
+
+# Run the deterministic anchoring-concern scenario: an unanchored literal value pauses
+# for human review, distinct from the family 1-4 violations that go through actor recovery.
+def run_b6_anchoring_concern_run(
+    *,
+    artifact_root: Path,
+    thread_id: str = B6_ANCHORING_CONCERN_THREAD_ID,
+    policy_engine_service: PolicyEnginePort | None = None,
+    checkpointer: Any | None = None,
+    artifact_store: RuntimeArtifactStore | None = None,
+) -> dict[str, Any]:
+    resolved_policy_engine = policy_engine_service or B6PolicyEngine()
+    return run_layer2_flow(
+        raw_task_text="Produce a factual result citing one retrieved documentary source.",
+        context_hint="The deterministic B6 actor asserts a figure its one source never states.",
+        thread_id=thread_id,
+        demo_intake_profile="research",
+        planner_service=B6AnchoringConcernPlanner(),
+        actor_service=B6AnchoringConcernActor(),
+        tool_gateway_service=B6AnchoringConcernToolGateway(),
+        replanner_service=B6Replanner(),
+        policy_engine_service=resolved_policy_engine,
+        behavioral_store_service=B6BehavioralStore(),
+        checkpointer=checkpointer or InMemorySaver(serde=build_runtime_serializer()),
+        artifact_store=artifact_store or RuntimeArtifactStore(root_path=artifact_root),
+    )
+
+
+# Resume a paused anchoring-concern thread with a human approve_continue, reusing the
+# exact checkpointer/artifact_store/services the pausing run was composed with so the
+# graph can pick the thread back up and demonstrate adjudication memory in one flow.
+def approve_b6_anchoring_concern_review(
+    *,
+    thread_id: str,
+    request_id: str,
+    checkpointer: Any,
+    artifact_store: RuntimeArtifactStore,
+    policy_engine_service: PolicyEnginePort | None = None,
+) -> dict[str, Any]:
+    resolved_policy_engine = policy_engine_service or B6PolicyEngine()
+    return resume_layer2_flow(
+        thread_id=thread_id,
+        human_review_decision={
+            "request_id": request_id,
+            "decision_type": HumanReviewDecisionType.APPROVE_CONTINUE.value,
+        },
+        planner_service=B6AnchoringConcernPlanner(),
+        actor_service=B6AnchoringConcernActor(),
+        tool_gateway_service=B6AnchoringConcernToolGateway(),
+        replanner_service=B6Replanner(),
+        policy_engine_service=resolved_policy_engine,
+        behavioral_store_service=B6BehavioralStore(),
+        checkpointer=checkpointer,
+        artifact_store=artifact_store,
+    )
+
+
 __all__ = [
     "B6_EVIDENCE_THREAD_ID",
     "B6_TRAJECTORY_THREAD_ID",
+    "B6_PROTOCOL_REPLAN_THREAD_ID",
+    "B6_ANCHORING_CONCERN_THREAD_ID",
     "run_b6_evidence_run",
     "run_b6_trajectory_run",
+    "run_b6_protocol_replan_run",
+    "run_b6_anchoring_concern_run",
+    "approve_b6_anchoring_concern_review",
 ]
