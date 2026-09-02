@@ -167,6 +167,65 @@ class Layer5EvaluationTests(unittest.TestCase):
                 self.assertIsNone(summary.avg_run_duration_seconds)
                 self.assertIn("non dichiarata", summary.family_breakdown)
 
+    # Failed and intentionally skipped campaign runs remain in the experimental corpus
+    # even when no canonical trace could be produced.
+    def test_trace_less_campaign_runs_are_imported_without_biasing_attempt_denominator(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            failed_dir = root / "failed-run"
+            skipped_dir = root / "skipped-run"
+            failed_dir.mkdir()
+            skipped_dir.mkdir()
+            common = {
+                "record_version": "evaluation_campaign_run.v1",
+                "campaign_id": "campaign-1",
+                "family": "research",
+                "replica_index": 1,
+                "elapsed_seconds": 4.5,
+                "required_tools": ["web_search"],
+                "external_execution": "none",
+                "task": "A campaign task",
+            }
+            (failed_dir / "run_record.json").write_text(
+                json.dumps(
+                    {
+                        **common,
+                        "thread_id": "failed-run",
+                        "scenario_id": "rp01",
+                        "status": "failed",
+                        "error_type": "RuntimeError",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (skipped_dir / "run_record.json").write_text(
+                json.dumps(
+                    {
+                        **common,
+                        "thread_id": "skipped-run",
+                        "scenario_id": "rp14",
+                        "status": "skipped_external_execution_disabled",
+                        "elapsed_seconds": None,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with EvaluationStore(root / "evaluation.sqlite3") as store:
+                result = TraceImporter(store).import_paths([root], experiment_id="experiment-1")
+                summary = build_evaluation_summary(store, experiment_id="experiment-1")
+
+                self.assertEqual(len(result.imported), 2)
+                self.assertEqual(summary.total_runs, 2)
+                self.assertEqual(summary.attempted_runs, 1)
+                self.assertEqual(summary.skipped_runs, 1)
+                self.assertEqual(summary.trace_backed_runs, 0)
+                self.assertEqual(summary.technical_completion_rate, 0.0)
+                failed = store.query("SELECT * FROM runs WHERE run_id = 'failed-run'")[0]
+                self.assertEqual(failed["runtime_status"], "runtime_failure")
+                self.assertEqual(failed["termination_reason"], "runtime_failure")
+                self.assertEqual(failed["trace_available"], 0)
+
     # A replan is a recovery attempt, not a guaranteed one - measure how often it
     # actually reaches completion instead of asserting recovery as the default outcome.
     def test_replan_recovery_rate_measures_completion_after_replan(self) -> None:

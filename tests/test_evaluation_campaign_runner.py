@@ -6,7 +6,6 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
 
 from scripts import run_evaluation_campaign as campaign
 
@@ -88,8 +87,8 @@ class EvaluationCampaignRunnerTests(unittest.TestCase):
             {"rp14_test_mailbox_update", "rp15_multitool_stakeholder_update"},
         )
 
-    # The batch runner exports one canonical trace per invoked run and preserves a HITL pause.
-    def test_execute_campaign_records_trace_and_human_review_pause(self) -> None:
+    # The batch runner launches the long-lived CLI and records every planned run.
+    def test_execute_campaign_uses_cli_command_and_records_every_run(self) -> None:
         planned_runs = campaign.plan_campaign_runs(
             manifest=self.manifest,
             campaign_id="realistic_test_v1",
@@ -97,73 +96,52 @@ class EvaluationCampaignRunnerTests(unittest.TestCase):
             output_root=self.output_root,
             allow_external_execution=False,
         )
-        flow_calls: list[str] = []
+        commands: list[list[str]] = []
 
-        # Return a small canonical-shaped trace without contacting a live provider.
-        def fake_flow_runner(
-            *,
-            raw_task_text: str,
-            context_hint: str | None,
-            policy_profile: str | None,
-            thread_id: str,
-        ) -> dict[str, object]:
-            del raw_task_text, context_hint, policy_profile
-            flow_calls.append(thread_id)
-            current_state = (
-                "waiting_human_review"
-                if "rp16_database_read_only_report" in thread_id
-                else "completed"
-            )
-            return {
-                "thread_id": thread_id,
-                "final_result": {
-                    "task_state": SimpleNamespace(
-                        current_state=current_state,
-                        termination_reason=None,
-                    )
-                },
-            }
-
-        # Write a trace placeholder because the serializer itself belongs to Layer 4 tests.
-        def fake_trace_writer(
-            trace: dict[str, object],
-            *,
-            output_path: str | Path,
-        ) -> Path:
-            resolved_path = Path(output_path)
-            resolved_path.write_text(
-                json.dumps({"thread_id": trace["thread_id"]}),
+        def fake_command_runner(
+            command: list[str], *, cwd: Path
+        ) -> subprocess.CompletedProcess[object]:
+            self.assertEqual(cwd, REPO_ROOT)
+            commands.append(command)
+            trace_path = Path(command[command.index("--trace-file") + 1])
+            thread_id = command[command.index("--thread-id") + 1]
+            trace_path.write_text(
+                json.dumps(
+                    {
+                        "trace_version": "layer2_trace.v6",
+                        "runtime": {
+                            "thread_id": thread_id,
+                            "current_state": "completed",
+                            "termination_reason": None,
+                        },
+                    }
+                ),
                 encoding="utf-8",
             )
-            return resolved_path
+            return subprocess.CompletedProcess(command, 0)
 
         results = campaign.execute_campaign(
             manifest=self.manifest,
             planned_runs=planned_runs,
             allow_external_execution=False,
             fail_fast=False,
-            flow_runner=fake_flow_runner,
-            trace_writer=fake_trace_writer,
+            command_runner=fake_command_runner,
         )
 
         self.assertEqual(len(results), 16)
-        self.assertEqual(len(flow_calls), 14)
+        self.assertEqual(len(commands), 14)
         self.assertEqual(
             [result.status for result in results].count("skipped_external_execution_disabled"),
             2,
         )
-        self.assertEqual(
-            [result.status for result in results].count("waiting_human_review"),
-            1,
-        )
+        self.assertTrue(all("--trace-file" in command for command in commands))
         campaign_root = self.output_root / "realistic_test_v1"
         summary = json.loads(
             (campaign_root / "campaign_summary.json").read_text(encoding="utf-8")
         )
 
         self.assertFalse(summary["in_progress"])
-        self.assertEqual(summary["status_counts"]["finished"], 13)
-        self.assertEqual(summary["status_counts"]["waiting_human_review"], 1)
+        self.assertEqual(summary["status_counts"]["finished"], 14)
         self.assertEqual(
             summary["status_counts"]["skipped_external_execution_disabled"],
             2,

@@ -46,6 +46,20 @@ class TraceImporter:
                 discovered.update(item.resolve() for item in path.rglob("full-trace-2.json"))
         return sorted(discovered, key=str)
 
+    # Discover campaign records whose run produced no canonical trace.
+    def discover_trace_less_run_records(self, paths: list[Path]) -> list[Path]:
+        discovered: set[Path] = set()
+        for candidate in paths:
+            path = Path(candidate)
+            if path.is_file() and path.name == RUN_RECORD_FILENAME:
+                discovered.add(path.resolve())
+            elif path.is_dir():
+                discovered.update(item.resolve() for item in path.rglob(RUN_RECORD_FILENAME))
+        return sorted(
+            (path for path in discovered if not (path.parent / "full-trace-2.json").is_file()),
+            key=str,
+        )
+
     # Import all discoverable traces while isolating individual file failures.
     def import_paths(
         self,
@@ -65,6 +79,27 @@ class TraceImporter:
         imported: list[Path] = []
         skipped: list[Path] = []
         failures: list[tuple[Path, str]] = []
+        for record_path in self.discover_trace_less_run_records(paths):
+            try:
+                raw = record_path.read_bytes()
+                digest = hashlib.sha256(raw).hexdigest()
+                record = json.loads(raw.decode("utf-8"))
+                projection = _project_trace_less_campaign_run(
+                    record,
+                    source_path=record_path,
+                    record_digest=digest,
+                    experiment_id=experiment_id,
+                    imported_at=now,
+                )
+                self.store.replace_run_projection(
+                    run=projection,
+                    governance_events=(),
+                    human_reviews=(),
+                    external_operations=(),
+                )
+                imported.append(record_path)
+            except (OSError, UnicodeError, json.JSONDecodeError, ValueError, KeyError) as exc:
+                failures.append((record_path, str(exc)))
         for path in self.discover(paths):
             try:
                 raw = path.read_bytes()
@@ -170,6 +205,8 @@ def _project_trace(
         "trace_path": str(source_path),
         "trace_digest": trace_digest,
         "trace_version": TRACE_VERSION,
+        "trace_available": 1,
+        "campaign_run_status": _optional_text(record.get("status")),
         "configuration_fingerprint": _configuration_fingerprint(payload),
         "runtime_status": str(runtime.get("current_state") or "unknown"),
         "termination_reason": _optional_text(runtime.get("termination_reason")),
@@ -195,6 +232,71 @@ def _project_trace(
         "governance_events": governance_rows,
         "human_reviews": review_rows,
         "external_operations": operations,
+    }
+
+
+# Preserve attempted, failed, skipped, and incomplete campaign runs even without a trace.
+def _project_trace_less_campaign_run(
+    record: dict[str, Any],
+    *,
+    source_path: Path,
+    record_digest: str,
+    experiment_id: str,
+    imported_at: str,
+) -> dict[str, Any]:
+    if record.get("record_version") != _RUN_RECORD_VERSION:
+        raise ValueError(f"Unsupported campaign run record: {source_path}")
+    run_id = _optional_text(record.get("thread_id"))
+    if run_id is None:
+        raise ValueError(f"Campaign run record has no thread_id: {source_path}")
+    status = str(record.get("status") or "unknown")
+    runtime_status = _optional_text(record.get("runtime_state"))
+    if runtime_status is None:
+        runtime_status = {
+            "failed": "runtime_failure",
+            "skipped_external_execution_disabled": "skipped",
+            "started": "incomplete",
+        }.get(status, status)
+    termination_reason = _optional_text(record.get("termination_reason"))
+    if termination_reason is None and status == "failed":
+        termination_reason = "runtime_failure"
+    task_text = str(record.get("task") or "")
+    return {
+        "run_id": run_id,
+        "experiment_id": experiment_id,
+        "task_case_id": str(record.get("scenario_id") or run_id),
+        "scenario_id": _optional_text(record.get("scenario_id")),
+        "scenario_family": _optional_text(record.get("family")),
+        "replica_index": _optional_index(record.get("replica_index")),
+        "campaign_id": _optional_text(record.get("campaign_id")),
+        "trace_path": str(source_path),
+        "trace_digest": f"run-record:{record_digest}",
+        "trace_version": "trace_absent",
+        "trace_available": 0,
+        "campaign_run_status": status,
+        "configuration_fingerprint": hashlib.sha256(
+            _canonical_json(
+                {
+                    "campaign_id": record.get("campaign_id"),
+                    "scenario_id": record.get("scenario_id"),
+                    "required_tools": record.get("required_tools"),
+                }
+            ).encode("utf-8")
+        ).hexdigest(),
+        "runtime_status": runtime_status,
+        "termination_reason": termination_reason,
+        "goal": task_text,
+        "sensitivity": "unknown",
+        "execution_intent": str(record.get("external_execution") or "unknown"),
+        "duration_seconds": _optional_seconds(record.get("elapsed_seconds")),
+        "actor_turn_count": 0,
+        "tool_call_count": 0,
+        "failed_tool_count": 0,
+        "replanning_count": 0,
+        "governance_pass_count": 0,
+        "human_review_count": 0,
+        "external_operation_count": 0,
+        "imported_at": imported_at,
     }
 
 

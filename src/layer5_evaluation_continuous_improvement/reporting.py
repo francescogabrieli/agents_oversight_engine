@@ -69,6 +69,15 @@ def generate_evaluation_report(
         efficiency_data["Durata run media (s)"] = summary.avg_run_duration_seconds
 
     plot_specs: dict[str, tuple[str, dict[str, int] | dict[str, float | int]]] = {
+        "campaign_coverage.svg": (
+            "Copertura del corpus sperimentale",
+            {
+                "Run pianificate registrate": summary.total_runs,
+                "Run tentate": summary.attempted_runs,
+                "Run con trace": summary.trace_backed_runs,
+                "Run saltate": summary.skipped_runs,
+            },
+        ),
         "runtime_statuses.svg": ("Stato tecnico delle run", summary.runtime_statuses),
         "task_results.svg": (
             "Correttezza delle run giudicate",
@@ -133,6 +142,9 @@ def generate_evaluation_report(
             {
                 "experiment_id": experiment_id,
                 "run_count": summary.total_runs,
+                "attempted_run_count": summary.attempted_runs,
+                "trace_backed_run_count": summary.trace_backed_runs,
+                "skipped_run_count": summary.skipped_runs,
                 "files": [path.name for path in files],
             },
             indent=2,

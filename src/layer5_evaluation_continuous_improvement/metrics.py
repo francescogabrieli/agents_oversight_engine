@@ -12,6 +12,9 @@ from .store import EvaluationStore
 @dataclass(frozen=True)
 class EvaluationSummary:
     total_runs: int
+    attempted_runs: int
+    skipped_runs: int
+    trace_backed_runs: int
     judged_runs: int
     runtime_statuses: dict[str, int]
     termination_reasons: dict[str, int]
@@ -58,6 +61,12 @@ def build_evaluation_summary(
     where = " WHERE experiment_id = ?" if experiment_id else ""
     parameters = (experiment_id,) if experiment_id else ()
     runs = store.query(f"SELECT * FROM runs{where}", parameters)
+    attempted_runs = [
+        run
+        for run in runs
+        if run.get("campaign_run_status") != "skipped_external_execution_disabled"
+    ]
+    trace_backed_runs = [run for run in runs if bool(run.get("trace_available", 1))]
     run_ids = [str(run["run_id"]) for run in runs]
     governance = store.child_rows("governance_events", run_ids)
     reviews = store.child_rows("human_reviews", run_ids)
@@ -72,7 +81,7 @@ def build_evaluation_summary(
     task_results = Counter(str(run["task_result"]) for run in runs if run["task_result"] is not None)
     review_decisions = Counter(str(review["decision"]) for review in reviews)
     external_statuses = Counter(str(operation["execution_status"]) for operation in operations)
-    completed_runs = [run for run in runs if run["runtime_status"] == "completed"]
+    completed_runs = [run for run in attempted_runs if run["runtime_status"] == "completed"]
     judged_runs = [run for run in runs if run["task_result"] is not None]
     incorrect_completed = [run for run in completed_runs if run["task_result"] == "incorrect"]
     tool_call_total = sum(int(run["tool_call_count"]) for run in runs)
@@ -96,10 +105,10 @@ def build_evaluation_summary(
                 continue
 
     # Overhead and efficiency metrics
-    actor_turns = [int(run["actor_turn_count"]) for run in runs]
-    tool_calls = [int(run["tool_call_count"]) for run in runs]
-    replannings = [int(run["replanning_count"]) for run in runs]
-    governance_passes = [int(run["governance_pass_count"]) for run in runs]
+    actor_turns = [int(run["actor_turn_count"]) for run in trace_backed_runs]
+    tool_calls = [int(run["tool_call_count"]) for run in trace_backed_runs]
+    replannings = [int(run["replanning_count"]) for run in trace_backed_runs]
+    governance_passes = [int(run["governance_pass_count"]) for run in trace_backed_runs]
     review_times = [
         float(r["review_time_seconds"])
         for r in reviews
@@ -125,16 +134,21 @@ def build_evaluation_summary(
         ),
         total_governance_events=len(governance),
         total_runs=len(runs),
+        attempted_runs=len(attempted_runs),
+        skipped_runs=len(runs) - len(attempted_runs),
+        trace_backed_runs=len(trace_backed_runs),
         judged_runs=len(judged_runs),
         runtime_statuses=dict(sorted(runtime_statuses.items())),
         termination_reasons=dict(sorted(termination_reasons.items())),
         task_results=dict(sorted(task_results.items())),
         review_decisions=dict(sorted(review_decisions.items())),
         external_statuses=dict(sorted(external_statuses.items())),
-        technical_completion_rate=_ratio(len(completed_runs), len(runs)) or 0.0,
+        technical_completion_rate=_ratio(len(completed_runs), len(attempted_runs)) or 0.0,
         correct_rate=_ratio(task_results["correct"], len(judged_runs)),
         incorrect_completion_rate=_ratio(len(incorrect_completed), len(completed_runs)),
-        human_intervention_rate=_ratio(len({review["run_id"] for review in reviews}), len(runs)) or 0.0,
+        human_intervention_rate=_ratio(
+            len({review["run_id"] for review in reviews}), len(attempted_runs)
+        ) or 0.0,
         failed_tool_rate=_ratio(failed_tool_total, tool_call_total) or 0.0,
         escalation_confusion=confusion,
         escalation_precision=_ratio(confusion["true_positive"], confusion["true_positive"] + confusion["false_positive"]),
@@ -164,17 +178,26 @@ def _family_breakdown(
 
     breakdown: dict[str, dict[str, Any]] = {}
     for family, family_runs in sorted(families.items()):
+        attempted = [
+            run
+            for run in family_runs
+            if run.get("campaign_run_status") != "skipped_external_execution_disabled"
+        ]
         judged = [run for run in family_runs if run["task_result"] is not None]
-        completed = [run for run in family_runs if run["runtime_status"] == "completed"]
+        completed = [run for run in attempted if run["runtime_status"] == "completed"]
         intervened = [run for run in family_runs if run["run_id"] in reviewed_run_ids]
         breakdown[family] = {
             "runs": len(family_runs),
-            "technical_completion_rate": _ratio(len(completed), len(family_runs)),
+            "attempted_runs": len(attempted),
+            "skipped_runs": len(family_runs) - len(attempted),
+            "technical_completion_rate": _ratio(len(completed), len(attempted)),
             "correct_rate": _ratio(
                 sum(1 for run in judged if run["task_result"] == "correct"), len(judged)
             ),
-            "human_intervention_rate": _ratio(len(intervened), len(family_runs)),
-            "avg_tool_calls": _mean([int(run["tool_call_count"]) for run in family_runs]),
+            "human_intervention_rate": _ratio(len(intervened), len(attempted)),
+            "avg_tool_calls": _mean(
+                [int(run["tool_call_count"]) for run in attempted if bool(run.get("trace_available", 1))]
+            ),
             "avg_run_duration_seconds": _mean(
                 [
                     float(run["duration_seconds"])

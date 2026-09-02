@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = "layer5_evaluation_db.v3"
+SCHEMA_VERSION = "layer5_evaluation_db.v4"
 
 
 class EvaluationStore:
@@ -59,6 +59,8 @@ class EvaluationStore:
                 trace_path TEXT NOT NULL,
                 trace_digest TEXT NOT NULL UNIQUE,
                 trace_version TEXT NOT NULL,
+                trace_available INTEGER NOT NULL DEFAULT 1 CHECK (trace_available IN (0, 1)),
+                campaign_run_status TEXT,
                 configuration_fingerprint TEXT NOT NULL,
                 runtime_status TEXT NOT NULL,
                 termination_reason TEXT,
@@ -136,6 +138,8 @@ class EvaluationStore:
             ("scenario_family", "TEXT"),
             ("replica_index", "INTEGER"),
             ("campaign_id", "TEXT"),
+            ("trace_available", "INTEGER NOT NULL DEFAULT 1"),
+            ("campaign_run_status", "TEXT"),
         ):
             if column not in run_columns:
                 self.connection.execute(f"ALTER TABLE runs ADD COLUMN {column} {definition}")

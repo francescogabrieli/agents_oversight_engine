@@ -86,7 +86,7 @@ def load_run_level_frames(
         conn = store.connection
         runs = pd.read_sql_query(
             "SELECT run_id, experiment_id, actor_turn_count, tool_call_count, "
-            "governance_pass_count, replanning_count FROM runs",
+            "governance_pass_count, replanning_count FROM runs WHERE trace_available = 1",
             conn,
         )
         reviews = pd.read_sql_query(
@@ -135,7 +135,11 @@ def plot_technical_vs_semantic_gap(summary: EvaluationSummary) -> plt.Figure:
     ax.set_yticklabels(categories)
     ax.set_xlim(0, 100)
     ax.set_xlabel("Percentage (%)")
-    ax.set_title(f"Technical Completion vs. True Semantic Correctness\n({judged_total}/{summary.total_runs} runs judged)", pad=15)
+    ax.set_title(
+        "Technical Completion vs. True Semantic Correctness\n"
+        f"({summary.attempted_runs} attempted; {judged_total}/{summary.total_runs} planned runs judged)",
+        pad=15,
+    )
 
     for i, rate in enumerate([tech_comp_rate, correct_rate]):
         ax.text(rate * 50, i, f"{rate * 100:.1f}%", va="center", ha="center", color="white", fontweight="bold", fontsize=11)

@@ -68,6 +68,15 @@ Contiene una riga per ogni esecuzione.
 
 Lo stato tecnico e il risultato del task restano distinti: una run può essere completata dal runtime ma produrre un risultato errato. Il trace v6 non espone timestamp di run: `scenario_id`, `scenario_family`, `replica_index`, `campaign_id` e `duration_seconds` vengono letti dal `run_record.json` che il runner di campagna scrive accanto al trace, non dal trace stesso. Una run importata da una directory priva di quel file (ad esempio ingerita direttamente da `artifacts/runtime/` invece che da `artifacts/evaluation/input/...`) ha questi campi a `NULL` e finisce nella famiglia "non dichiarata" del breakdown.
 
+Il runner avvia per ogni scenario la CLI completa `src/main_layer2.py`, non la funzione
+one-shot del runtime. Il processo resta proprietario del thread durante
+`waiting_human_review`, attende la decisione dalla dashboard e termina soltanto dopo la
+continuazione o l'arresto definitivo. Ogni run pianificata produce sempre un
+`run_record.json`: se il processo fallisce prima del trace, o una run viene esplicitamente
+saltata, Layer 5 importa comunque il record con `trace_available = 0`. `total_runs`
+rappresenta quindi il piano completo; i tassi operativi usano le run tentate e riportano
+separatamente run saltate e copertura dei trace.
+
 ### `governance_events`
 
 Contiene una riga per ogni governance pass.
@@ -119,7 +128,11 @@ qualità della policy.
 
 ### Confine del corpus
 
-L'importer accetta esclusivamente directory che contengono `full-trace-2.json` con versione `layer2_trace.v6`; qualunque altra directory (log di debug, `governance_exchange.md` senza trace, run interrotte prima dell'export) viene scoperta e ignorata in silenzio, non ricostruita retroattivamente. Le run di sviluppo che non appartengono a nessuna campagna versionata vivono in `artifacts/runtime/legacy/` e restano fuori dal corpus per costruzione. Per includere una run legacy nel corpus è necessario rieseguirla o produrre un artefatto v6 completo.
+L'importer accetta i `full-trace-2.json` in versione `layer2_trace.v6` e, per le
+campagne, anche i `run_record.json` privi di un trace fratello. File di debug o exchange
+privi sia di trace sia di record di campagna restano esclusi. Le run di sviluppo che non
+appartengono a una campagna versionata vivono in `artifacts/runtime/legacy/` e restano
+fuori dal corpus per costruzione.
 
 ## Metriche e risultati
 
@@ -128,7 +141,7 @@ Il Layer 5 calcola nel primo slice:
 - correct, partial e incorrect completion rate;
 - completion tecnica rispetto alla completion corretta;
 - abort e tool failure rate;
-- durata media e mediana;
+- durata media;
 - actor turn, tool call e replanning per run;
 - human intervention rate;
 - completamento tecnico e intervento umano per famiglia di task (il pool realistico copre dieci famiglie apposta perché questo confronto sia possibile, anche se alcune restano a una sola scenario e quindi a tre sole repliche);

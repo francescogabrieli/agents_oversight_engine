@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -17,9 +18,6 @@ SRC_ROOT = REPO_ROOT / "src"
 for import_root in (REPO_ROOT, SRC_ROOT):
     if str(import_root) not in sys.path:
         sys.path.insert(0, str(import_root))
-
-from main_layer2 import run_layer2_flow, write_layer2_trace_file  # noqa: E402
-
 
 DEFAULT_MANIFEST_PATH = REPO_ROOT / "configs" / "evaluation_realistic_pool_v1.json"
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "artifacts" / "evaluation" / "input" / "realistic_pool_v1"
@@ -86,21 +84,14 @@ class CampaignRunResult:
     error_type: str | None = None
 
 
-class FlowRunnerPort(Protocol):
-    # The public Layer 2 entry point used by the experiment harness.
+class CommandRunnerPort(Protocol):
+    # Execute one complete CLI-owned runtime session, including dashboard HITL resumes.
     def __call__(
         self,
+        command: list[str],
         *,
-        raw_task_text: str,
-        context_hint: str | None,
-        policy_profile: str | None,
-        thread_id: str,
-    ) -> dict[str, Any]: ...
-
-
-class TraceWriterPort(Protocol):
-    # The canonical Layer 4 serializer used for evaluation input artifacts.
-    def __call__(self, trace: dict[str, Any], *, output_path: str | Path) -> Path: ...
+        cwd: Path,
+    ) -> subprocess.CompletedProcess[Any]: ...
 
 
 # Parse the bounded command surface for a reproducible realistic-pool campaign.
@@ -353,8 +344,7 @@ def execute_campaign(
     planned_runs: tuple[PlannedRun, ...],
     allow_external_execution: bool,
     fail_fast: bool,
-    flow_runner: FlowRunnerPort = run_layer2_flow,
-    trace_writer: TraceWriterPort = write_layer2_trace_file,
+    command_runner: CommandRunnerPort = subprocess.run,
 ) -> tuple[CampaignRunResult, ...]:
     _validate_execution_permission(
         planned_runs=planned_runs,
@@ -369,8 +359,7 @@ def execute_campaign(
     for planned_run in planned_runs:
         result = _execute_planned_run(
             planned_run=planned_run,
-            flow_runner=flow_runner,
-            trace_writer=trace_writer,
+            command_runner=command_runner,
         )
         results.append(result)
         _write_json(campaign_root / "campaign_summary.json", _campaign_summary(
@@ -434,8 +423,7 @@ def _initialize_campaign_directory(
 def _execute_planned_run(
     *,
     planned_run: PlannedRun,
-    flow_runner: FlowRunnerPort,
-    trace_writer: TraceWriterPort,
+    command_runner: CommandRunnerPort,
 ) -> CampaignRunResult:
     planned_run.output_directory.mkdir(parents=True, exist_ok=False)
     started_at = _utc_now()
@@ -465,16 +453,14 @@ def _execute_planned_run(
     )
     started_clock = perf_counter()
     try:
-        trace = flow_runner(
-            raw_task_text=planned_run.scenario.task,
-            context_hint=planned_run.scenario.context,
-            policy_profile=planned_run.scenario.policy_profile,
-            thread_id=planned_run.thread_id,
+        completed = command_runner(
+            _layer2_cli_command(planned_run),
+            cwd=REPO_ROOT,
         )
-        trace_writer(
-            trace,
-            output_path=planned_run.output_directory / "full-trace-2.json",
-        )
+        if completed.returncode != 0:
+            raise RuntimeError(f"Layer 2 CLI exited with status {completed.returncode}.")
+        trace_path = planned_run.output_directory / "full-trace-2.json"
+        trace = json.loads(trace_path.read_text(encoding="utf-8"))
     except Exception as exc:  # noqa: BLE001 - campaign failures are experimental observations.
         result = CampaignRunResult(
             scenario_id=planned_run.scenario.scenario_id,
@@ -491,11 +477,9 @@ def _execute_planned_run(
         _write_run_record(planned_run=planned_run, result=result, started_at=started_at)
         return result
 
-    task_state = _task_state_from_trace(trace)
-    runtime_state = _enum_text(_read_task_state_value(task_state, "current_state"))
-    termination_reason = _enum_text(
-        _read_task_state_value(task_state, "termination_reason")
-    )
+    runtime = trace.get("runtime") if isinstance(trace.get("runtime"), dict) else {}
+    runtime_state = _enum_text(runtime.get("current_state"))
+    termination_reason = _enum_text(runtime.get("termination_reason"))
     result = CampaignRunResult(
         scenario_id=planned_run.scenario.scenario_id,
         replica_index=planned_run.replica_index,
@@ -515,21 +499,26 @@ def _execute_planned_run(
     return result
 
 
+# Build the same long-lived CLI command used for successful interactive runs such as B33.
+def _layer2_cli_command(planned_run: PlannedRun) -> list[str]:
+    command = [
+        sys.executable,
+        str(SRC_ROOT / "main_layer2.py"),
+        "--thread-id",
+        planned_run.thread_id,
+        "--task",
+        planned_run.scenario.task,
+        "--trace-file",
+        str(planned_run.output_directory / "full-trace-2.json"),
+    ]
+    if planned_run.scenario.context:
+        command.extend(("--context", planned_run.scenario.context))
+    if planned_run.scenario.policy_profile:
+        command.extend(("--policy-profile", planned_run.scenario.policy_profile))
+    return command
+
+
 # Recover the canonical task state from the public Layer 2 trace shape.
-def _task_state_from_trace(trace: dict[str, Any]) -> Any:
-    final_result = trace.get("final_result")
-    if not isinstance(final_result, dict) or "task_state" not in final_result:
-        raise ValueError("Layer 2 flow returned no canonical task_state.")
-    return final_result["task_state"]
-
-
-# Support the typed runtime dataclass while keeping fake runners small in isolated tests.
-def _read_task_state_value(task_state: Any, field: str) -> Any:
-    if isinstance(task_state, dict):
-        return task_state.get(field)
-    return getattr(task_state, field, None)
-
-
 # Normalize enum-backed runtime fields into stable JSON and console values.
 def _enum_text(value: Any) -> str | None:
     if value is None:
@@ -590,6 +579,9 @@ def _run_record_payload(
         "required_tools": list(planned_run.scenario.required_tools),
         "external_execution": planned_run.scenario.external_execution.value,
         "minimum_success_criterion": planned_run.scenario.minimum_success_criterion,
+        "task": planned_run.scenario.task,
+        "context": planned_run.scenario.context,
+        "policy_profile": planned_run.scenario.policy_profile,
     }
 
 
