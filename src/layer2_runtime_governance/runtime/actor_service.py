@@ -53,7 +53,6 @@ def actor(state: TaskState, *, actor_service: ActorPort) -> TaskState:
         state.actor_protocol_feedback = None
 
     state.actor_turn_count += 1
-    state.no_progress_turns += 1
 
     actor_task = build_actor_task(task_state=state)
     actor_result = actor_service.act(actor_task=actor_task)
@@ -172,14 +171,15 @@ def _enforce_actor_runtime_contract(
     *,
     actor_result: ActorResult,
 ) -> ActorResult:
-    if state.no_progress_turns > 3 and not _has_changed_action_basis(state):
+    if not _has_changed_action_basis(state):
         return _build_runtime_replan_result(
             state,
             actor_result=actor_result,
             summary="Technical liveness fuse requested replanning.",
             blocking_reason=(
-                "The current trajectory produced four actor turns without a concrete observation, "
-                "durable artifact, completed step, human decision, or changed semantic plan."
+                f"The current plan step's last {_STALE_ACTION_BASIS_WINDOW} capability attempts "
+                "were all settled locally (a cache hit, a duplicate, an unanchored target, or an "
+                "open circuit) without one reaching a backend."
             ),
         )
     if _repeats_identical_intermediate_output(state, actor_result=actor_result):
@@ -223,19 +223,30 @@ def _enforce_actor_runtime_contract(
     return actor_result
 
 
-# Distinct bounded capability attempts are observable trajectory changes even when all fail.
+# A settled local repeat (cache hit, duplicate, unanchored target, open circuit) never
+# reached the world, so it cannot be evidence that the actor tried anything new - a
+# different-looking query is not a changed basis if it was refused before ever leaving
+# this process. Scoping this over the whole run's history let it permanently disable
+# itself: any two distinct requests anywhere in the run (virtually guaranteed by the
+# second turn) satisfied it forever, so a step that later spun in circles could never
+# re-trigger the fuse (this is what let benchmark threads B26-B28 grind their full
+# per-step attempt budget without ever being offered a fresh strategy). The trailing
+# window makes this self-resetting instead: it goes stale exactly when the current
+# step's most recent attempts stop reaching a backend, and clears the moment one does.
+_STALE_ACTION_BASIS_WINDOW = 4
+
+
 def _has_changed_action_basis(state: TaskState) -> bool:
-    action_keys = {
-        (
-            item.request.tool_name.value,
-            item.request.query,
-            item.request.url,
-            item.request.path,
-            item.request.expression,
-        )
-        for item in state.tool_results_history
-    }
-    return len(action_keys) > 1
+    current_step = state.current_plan_step
+    if current_step is None:
+        return False
+    current_step_attempts = [
+        attempt for attempt in state.tool_attempts if attempt.plan_step_id == current_step.step_id
+    ]
+    recent = current_step_attempts[-_STALE_ACTION_BASIS_WINDOW:]
+    if len(recent) < _STALE_ACTION_BASIS_WINDOW:
+        return True
+    return any(attempt.disposition.reached_backend for attempt in recent)
 
 
 # Treat exact replay as a stuck actor protocol, not as useful multi-turn reasoning.
@@ -408,7 +419,6 @@ def _record_workspace_artifact(state: TaskState, *, artifact: StepArtifact) -> N
     state.workspace.revision += 1
     state.progress_epoch += 1
     state.state_revision += 1
-    state.no_progress_turns = 0
 
 
 # Commit a previously accepted candidate atomically; rejected candidates never enter history.

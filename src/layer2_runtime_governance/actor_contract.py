@@ -18,7 +18,11 @@ from .domain import (
     StepValidation,
     TaskState,
 )
-from layer3_tool_bus_external_capabilities.tool_contract import ToolExecutionResult, ToolObservation, ToolRequest
+from layer3_tool_bus_external_capabilities.tool_contract import (
+    ToolExecutionResult,
+    ToolObservation,
+    ToolRequest,
+)
 from layer3_tool_bus_external_capabilities.external_operations.contracts import (
     DatabaseStatementDraft,
     ExternalOperationProposal,
@@ -220,8 +224,9 @@ def build_actor_task(*, task_state: TaskState) -> ActorTask:
         evidence_request_episode_count=task_state.evidence_request_episode_count,
         evidence_request_ceiling_reached=task_state.evidence_request_ceiling_reached,
         attempted_action_keys=tuple(
-            item.action_key if hasattr(item, "action_key") else item.get("action_key", "")
+            (item.action_key if hasattr(item, "action_key") else item.get("action_key", ""))
             for item in task_state.tool_attempts
+            if (item.plan_step_id if hasattr(item, "plan_step_id") else item.get("plan_step_id")) == actor_plan_steps[current_index].step_id
         ),
         external_communication_draft=(
             task_state.external_communication.draft

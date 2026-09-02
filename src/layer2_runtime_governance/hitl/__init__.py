@@ -188,7 +188,6 @@ def human_review(state: TaskState, *, thread_id: str) -> TaskState:
     # A typed human decision is a concrete state change and resets local liveness recovery.
     runtime_state.progress_epoch += 1
     runtime_state.state_revision += 1
-    runtime_state.no_progress_turns = 0
     runtime_state.step_index += 1
     runtime_state.step_history.append(
         StepRecord(

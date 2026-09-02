@@ -96,7 +96,6 @@ def replanner(state: TaskState, *, replanner_service: ReplannerPort) -> TaskStat
     if replacement_steps:
         state.progress_epoch += 1
         state.state_revision += 1
-        state.no_progress_turns = 0
 
     _append_step_record(
         state,

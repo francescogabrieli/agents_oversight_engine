@@ -87,8 +87,6 @@ class TaskState:
     executed_steps: list[ExecutedPlanStep] = field(default_factory=list)
     final_output_text: str | None = None
     actor_turn_count: int = 0
-    # Local liveness fuse; this is technical control flow, never a policy signal.
-    no_progress_turns: int = 0
     # Progress changes only when the live problem state materially changes.
     progress_epoch: int = 0
     state_revision: int = 0

@@ -9,6 +9,10 @@ from ..prompt_projection import (
     project_prompt_plan_step,
     project_prompt_scratchpad_entry,
 )
+from layer2_runtime_governance.signal_services.evidence_service import (
+    evaluate_actor_evidence_coverage,
+    resolve_step_evidence_burden,
+)
 
 # Keep only a bounded tail of audit-safe working-memory entries in each model turn.
 ACTOR_SCRATCHPAD_ENTRY_LIMIT = 8
@@ -33,6 +37,18 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
         for entry in actor_task.scratchpad
         if entry.plan_step_id in relevant_step_ids
     ][-ACTOR_SCRATCHPAD_ENTRY_LIMIT:]
+    burden = resolve_step_evidence_burden(
+        step=actor_task.current_plan_step,
+        task_spec=actor_task.task_spec,
+    )
+    coverage = (
+        evaluate_actor_evidence_coverage(
+            burden=burden,
+            observations=actor_task.observations,
+        )
+        if burden is not None
+        else None
+    )
 
     return {
         "task_spec": {
@@ -51,7 +67,7 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
             "tool_call_count": actor_task.tool_call_count,
             "confidence_threshold": actor_task.execution_policy.confidence_threshold,
             "progress_epoch": actor_task.progress_epoch,
-            "attempted_action_keys": list(actor_task.attempted_action_keys[-12:]),
+            "attempted_action_keys": list(actor_task.attempted_action_keys),
         },
         "plan": {
             "current_step_number": actor_task.current_plan_step_index + 1,
@@ -136,6 +152,21 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
             draft=actor_task.previous_rejected_draft,
         ),
         "protocol_correction": _project_protocol_correction(actor_task=actor_task),
+        "evidence_coverage": (
+            {
+                "required_independent_sources": coverage.required_independent_sources,
+                "satisfied_origins": list(coverage.satisfied_origins),
+                "still_needed": max(
+                    0,
+                    coverage.required_independent_sources
+                    - len(coverage.satisfied_origins),
+                ),
+                "retrieved_content_satisfied": coverage.retrieved_content_satisfied,
+                "unfetched_candidate_locators": list(coverage.candidate_locators),
+            }
+            if coverage is not None
+            else None
+        ),
     }
 
 

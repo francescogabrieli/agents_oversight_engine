@@ -61,6 +61,9 @@ Rules:
   existence and the judge evaluates semantic alignment when required.
 - When the current plan step declares an evidence_burden, satisfy every declared
   source and retrieved-content requirement before completing it.
+- When evidence_coverage is present and still_needed > 0, prefer fetching one of its
+  unfetched_candidate_locators over repeating a target that already failed or issuing a
+  new search; each listed locator is expected to unlock a new independent source.
 - State material uncertainty instead of repairing missing or ambiguous information.
 - Keep each turn focused and explicit, but do not truncate analysis needed to complete
   the step correctly.

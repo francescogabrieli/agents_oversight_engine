@@ -4,12 +4,11 @@ import json
 
 from layer1_intake import TaskSpec
 from ..actor_contract import ActorTask
-from layer2_runtime_governance.domain import (
-    derive_task_evidence_floor,
-    lift_evidence_burden_to_floor,
+from layer2_runtime_governance.signal_services.evidence_service import (
+    evaluate_actor_evidence_coverage,
+    resolve_step_evidence_burden,
 )
-from layer2_runtime_governance.signal_services.evidence_service import extract_source_origin
-from layer3_tool_bus_external_capabilities.tool_contract import RetrievalKind, ToolName
+from layer3_tool_bus_external_capabilities.tool_contract import ToolName
 from layer3_tool_bus_external_capabilities.tools.models import ToolBackend, ToolGatewayConfig
 from layer3_tool_bus_external_capabilities.tools.registry import load_tool_gateway_config
 
@@ -167,41 +166,22 @@ def select_actor_runtime_tools_for_turn(
 
 def _evidence_burden_unsatisfied(actor_task: ActorTask) -> bool:
     # Keep the local action surface consistent with the Evidence coverage universe.
-    step = actor_task.current_plan_step
-    if not (
-        step.produces_factual_claims
-        or step.produces_governed_external_effect_proposal
-    ):
-        return False
-    burden = lift_evidence_burden_to_floor(
-        step.evidence_burden,
-        derive_task_evidence_floor(actor_task.task_spec),
+    burden = resolve_step_evidence_burden(
+        step=actor_task.current_plan_step,
+        task_spec=actor_task.task_spec,
     )
     if burden is None:
-        return False
-    required = burden.min_independent_sources
-    if required <= 0:
         return False
 
     # This boolean is the validated OPA result, not a duplicated Python threshold.
     if actor_task.evidence_request_ceiling_reached:
         return False
 
-    # Count the same full observation universe used by Evidence coverage.
-    origins: set[str] = set()
-    for obs in actor_task.observations:
-        if obs.retrieval_kind == RetrievalKind.SEARCH_SNIPPET or obs.locator is None:
-            continue
-        origin = extract_source_origin(obs.locator)
-        if origin and origin != "unknown_origin":
-            origins.add(origin)
-
-    if burden.require_retrieved_content and not any(
-        obs.retrieval_kind != RetrievalKind.SEARCH_SNIPPET
-        for obs in actor_task.observations
-    ):
-        return True
-    return len(origins) < required
+    coverage = evaluate_actor_evidence_coverage(
+        burden=burden,
+        observations=actor_task.observations,
+    )
+    return coverage.unsatisfied
 
 
 # Build the JSON envelope described to providers without native tool calling.

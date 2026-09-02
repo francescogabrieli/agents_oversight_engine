@@ -210,7 +210,6 @@ def observe_tool_result(state: TaskState) -> TaskState:
         state.observations.extend(observations)
         state.progress_epoch += 1
         state.state_revision += 1
-        state.no_progress_turns = 0
     if state.last_tool_result.extractability_limited or _tool_result_indicates_extractability_limit(state.last_tool_result):
         if RuntimeFlag.EXTRACTABILITY_LIMITED not in state.runtime_flags:
             state.runtime_flags.append(RuntimeFlag.EXTRACTABILITY_LIMITED)

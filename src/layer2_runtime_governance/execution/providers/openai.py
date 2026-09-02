@@ -26,7 +26,7 @@ except ImportError:  # pragma: no cover - dependency is checked during construct
 class OpenAIActor(ActorPort):
     # Execute one bounded actor turn through OpenAI native function calling.
     actor_name = "openai_layer2_actor"
-    prompt_version = "actor_v9_runtime_tool_binding"
+    prompt_version = "actor_v10_runtime_tool_binding"
 
     def __init__(
         self,

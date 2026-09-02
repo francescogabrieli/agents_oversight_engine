@@ -34,6 +34,7 @@ def project_prompt_observation(
     return {
         "observation_id": observation.observation_id,
         "locator": observation.locator,
+        "retrieval_kind": observation.retrieval_kind.value,
         "content": observation.content,
         "source_timestamp": _source_timestamp_text(
             getattr(observation, "source_timestamp", None)

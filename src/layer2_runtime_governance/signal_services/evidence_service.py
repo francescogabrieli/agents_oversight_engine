@@ -8,8 +8,10 @@ from typing import Any
 from urllib.parse import urlparse, urlsplit
 
 from layer1_intake import TaskSpec
-from layer2_runtime_governance.actor_contract import ActorResultType
+from layer2_runtime_governance.actor_contract import ActorPlanStep, ActorResultType
 from layer2_runtime_governance.domain import (
+    EvidenceBurden,
+    PlanStep,
     TaskState,
     build_evidence_selection_digest,
     build_evidence_snapshot_manifest,
@@ -168,6 +170,84 @@ def extract_source_origin(locator: str | None) -> str:
     if len(parts) == 2:
         return f"{parts[0].lower()}:{parts[1].split('/')[0].lower()}"
     return locator.lower().strip()
+
+
+@dataclass(frozen=True)
+class ActorEvidenceCoverage:
+    required_independent_sources: int
+    satisfied_origins: tuple[str, ...]
+    retrieved_content_satisfied: bool
+    unsatisfied: bool
+    candidate_locators: tuple[str, ...]
+
+
+def evaluate_actor_evidence_coverage(
+    *,
+    burden: EvidenceBurden,
+    observations: tuple[ToolObservation, ...] | list[ToolObservation],
+    max_candidate_locators: int = 5,
+) -> ActorEvidenceCoverage:
+    required = burden.min_independent_sources
+    origins: set[str] = set()
+    retrieved_content_satisfied = False
+
+    for obs in observations:
+        if obs.retrieval_kind != RetrievalKind.SEARCH_SNIPPET:
+            retrieved_content_satisfied = True
+            if obs.locator:
+                origin = extract_source_origin(obs.locator)
+                if origin and origin != "unknown_origin":
+                    origins.add(origin)
+
+    satisfied_origins = tuple(sorted(origins))
+    unsatisfied = (
+        (burden.require_retrieved_content and not retrieved_content_satisfied)
+        or len(satisfied_origins) < required
+    )
+
+    candidate_locators: list[str] = []
+    if unsatisfied:
+        seen_candidate_origins: set[str] = set()
+        for obs in observations:
+            if obs.retrieval_kind == RetrievalKind.SEARCH_SNIPPET and obs.locator:
+                origin = extract_source_origin(obs.locator)
+                if (
+                    origin
+                    and origin != "unknown_origin"
+                    and origin not in origins
+                    and origin not in seen_candidate_origins
+                ):
+                    seen_candidate_origins.add(origin)
+                    candidate_locators.append(obs.locator)
+                    if len(candidate_locators) >= max_candidate_locators:
+                        break
+
+    return ActorEvidenceCoverage(
+        required_independent_sources=required,
+        satisfied_origins=satisfied_origins,
+        retrieved_content_satisfied=retrieved_content_satisfied,
+        unsatisfied=unsatisfied,
+        candidate_locators=tuple(candidate_locators),
+    )
+
+
+def resolve_step_evidence_burden(
+    *,
+    step: PlanStep | ActorPlanStep,
+    task_spec: TaskSpec,
+) -> EvidenceBurden | None:
+    if not (
+        getattr(step, "produces_factual_claims", False)
+        or getattr(step, "produces_governed_external_effect_proposal", False)
+    ):
+        return None
+    burden = lift_evidence_burden_to_floor(
+        getattr(step, "evidence_burden", None),
+        derive_task_evidence_floor(task_spec),
+    )
+    if burden is None or burden.min_independent_sources <= 0:
+        return None
+    return burden
 
 
 # Exclude document structure labels such as "Articolo 1.1" from factual literals.
@@ -956,4 +1036,10 @@ def build_evidence_signal(
     }
 
 
-__all__ = ["build_evidence_signal", "extract_source_origin"]
+__all__ = [
+    "ActorEvidenceCoverage",
+    "build_evidence_signal",
+    "evaluate_actor_evidence_coverage",
+    "extract_source_origin",
+    "resolve_step_evidence_burden",
+]

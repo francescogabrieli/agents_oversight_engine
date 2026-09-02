@@ -173,13 +173,13 @@ class B6PositiveRunsTests(unittest.TestCase):
             self.assertTrue(trajectory_trace["replan_ceiling_reached"])
             self.assertEqual(trajectory_trace["raw_facts"]["replan_count"], 3)
 
-    # Verify a capability target the gateway only ever refuses locally still reaches a
-    # terminating decision, and that the terminating decision is OPA's
-    # step_exploration_budget_exhausted - never a replan the tool gateway invents on its
-    # own. The one replan this fixture does produce comes from the actor's own technical
-    # liveness fuse (four turns with no observable execution change), which is a genuine
-    # ActorResult(NEEDS_REPLAN) that governance evaluates like any other - not a
-    # fabricated directive bypassing OPA.
+    # Verify a target that never settles - but always reaches a real backend, on a
+    # fresh-looking request every turn - still reaches a terminating decision, and that
+    # the terminating decision is OPA's step_exploration_budget_exhausted, never a
+    # replan the tool gateway invents on its own. The actor's own liveness fuse stays
+    # silent throughout: it exists to rescue a step spinning on locally-settled repeats
+    # (see b6-trajectory-replan-ceiling-v2 for that path), not broad real exploration
+    # that simply never completes, which is this pillar's actual domain.
     def test_step_exploration_ceiling_runs_through_runtime_without_gateway_replan(self) -> None:
         with TemporaryDirectory(prefix="b6-step-exploration-ceiling-") as temp_dir:
             artifact_root = Path(temp_dir)
@@ -199,19 +199,16 @@ class B6PositiveRunsTests(unittest.TestCase):
                 ]
             )
 
-            # Exactly one replan happened, and it came from the actor's liveness fuse,
-            # not from tool_service: the gateway never installs a plan step, so the only
-            # possible source of a new plan step is the replanner responding to a real
-            # ActorResult(NEEDS_REPLAN).
-            self.assertEqual(len(task_state.replan_checkpoints), 1)
+            # No replan happened at all: every request reached the backend, so neither
+            # the liveness fuse nor the tool gateway ever had a reason to intervene - the
+            # only plan step in this run is the original one, and every attempt on it
+            # became a real backend call.
+            self.assertEqual(len(task_state.replan_checkpoints), 0)
             self.assertEqual(
                 sum(item.node_name == "replanner" for item in task_state.step_history),
-                1,
+                0,
             )
-            # The cursed target is refused locally after its first attempt on each plan
-            # step, so only one backend call happens per step: the original step and the
-            # one replacement step installed by the liveness fuse.
-            self.assertEqual(task_state.tool_call_count, 2)
+            self.assertEqual(task_state.tool_call_count, 30)
 
             paths = artifact_root / B6_STEP_EXPLORATION_CEILING_THREAD_ID
             self.assertTrue((paths / "full-trace-2.json").exists())

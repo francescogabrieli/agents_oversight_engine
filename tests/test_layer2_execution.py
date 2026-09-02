@@ -24,6 +24,9 @@ from layer2_runtime_governance.execution.action_schemas import (
     build_json_actor_output_shape,
     select_actor_runtime_tools_for_turn,
 )
+from layer2_runtime_governance.signal_services.evidence_service import (
+    evaluate_actor_evidence_coverage,
+)
 from layer2_runtime_governance.execution.errors import ActorExecutionError
 from layer2_runtime_governance.execution.response_parser import convert_json_payload_to_tool_call
 from layer3_tool_bus_external_capabilities.tool_contract import RetrievalKind, ToolObservation
@@ -327,6 +330,96 @@ class ActorActionSchemaTests(unittest.TestCase):
         self.assertIn("emit_step_completed", names)
         self.assertIn("emit_external_communication_draft", names)
 
+    # Actor evidence coverage counts distinct origins and extracts unfetched candidates from snippets.
+    def test_evaluate_actor_evidence_coverage_origins_and_candidates(self) -> None:
+        observations = (
+            ToolObservation(
+                observation_id="obs_1",
+                content="OpenAI official post",
+                locator="https://openai.com/blog/1",
+                retrieval_kind=RetrievalKind.FETCHED_DOCUMENT,
+            ),
+            ToolObservation(
+                observation_id="obs_2",
+                content="OpenAI second post",
+                locator="https://openai.com/blog/2",
+                retrieval_kind=RetrievalKind.FETCHED_DOCUMENT,
+            ),
+            ToolObservation(
+                observation_id="obs_3",
+                content="Google post",
+                locator="https://google.com/blog/news",
+                retrieval_kind=RetrievalKind.FETCHED_DOCUMENT,
+            ),
+            ToolObservation(
+                observation_id="obs_4",
+                content="Snippet 1 - duplicate origin with satisfied",
+                locator="https://openai.com/snippet",
+                retrieval_kind=RetrievalKind.SEARCH_SNIPPET,
+            ),
+            ToolObservation(
+                observation_id="obs_5",
+                content="Snippet 2 - new origin A first",
+                locator="https://newsite1.org/page1",
+                retrieval_kind=RetrievalKind.SEARCH_SNIPPET,
+            ),
+            ToolObservation(
+                observation_id="obs_6",
+                content="Snippet 3 - new origin A second (should be deduplicated)",
+                locator="https://newsite1.org/page2",
+                retrieval_kind=RetrievalKind.SEARCH_SNIPPET,
+            ),
+            ToolObservation(
+                observation_id="obs_7",
+                content="Snippet 4 - new origin B",
+                locator="https://newsite2.org/page",
+                retrieval_kind=RetrievalKind.SEARCH_SNIPPET,
+            ),
+            ToolObservation(
+                observation_id="obs_8",
+                content="Snippet 5 - new origin C",
+                locator="https://newsite3.org/page",
+                retrieval_kind=RetrievalKind.SEARCH_SNIPPET,
+            ),
+        )
+
+        # 2 satisfied origins (google.com, openai.com), min 3 required -> unsatisfied=True
+        coverage = evaluate_actor_evidence_coverage(
+            burden=EvidenceBurden(min_independent_sources=3),
+            observations=observations,
+            max_candidate_locators=5,
+        )
+        self.assertEqual(coverage.required_independent_sources, 3)
+        self.assertEqual(coverage.satisfied_origins, ("https://google.com", "https://openai.com"))
+        self.assertTrue(coverage.retrieved_content_satisfied)
+        self.assertTrue(coverage.unsatisfied)
+        self.assertEqual(
+            coverage.candidate_locators,
+            (
+                "https://newsite1.org/page1",
+                "https://newsite2.org/page",
+                "https://newsite3.org/page",
+            ),
+        )
+
+        # Truncation with max_candidate_locators=2
+        coverage_limited = evaluate_actor_evidence_coverage(
+            burden=EvidenceBurden(min_independent_sources=3),
+            observations=observations,
+            max_candidate_locators=2,
+        )
+        self.assertEqual(
+            coverage_limited.candidate_locators,
+            ("https://newsite1.org/page1", "https://newsite2.org/page"),
+        )
+
+        # Satisfied burden -> candidate_locators is empty
+        coverage_satisfied = evaluate_actor_evidence_coverage(
+            burden=EvidenceBurden(min_independent_sources=2),
+            observations=observations,
+        )
+        self.assertFalse(coverage_satisfied.unsatisfied)
+        self.assertEqual(coverage_satisfied.candidate_locators, ())
 
 if __name__ == "__main__":
     unittest.main()

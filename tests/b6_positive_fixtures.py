@@ -380,31 +380,36 @@ class B6StepExplorationCeilingActor(ActorPort):
     actor_name = "b6_step_exploration_ceiling_fixture_actor"
     prompt_version = "b6_step_exploration_ceiling_fixture_v1"
 
-    # Always retry the same target for the current step; the actor never notices it is
-    # cursed and never emits NEEDS_REPLAN itself. The tool gateway only ever refuses the
-    # target locally (never reaching a backend after the first attempt), so the plan
-    # step's attempt count climbs without bound until OPA escalates it.
+    # A distinct query every turn always reaches the backend (the gateway's own local
+    # dedup guards only refuse an exact repeat), so the actor's liveness fuse - which
+    # rescues a step spinning on locally-settled repeats via a real governed replan -
+    # never has a local-rejection streak to catch here. This is deliberate: broad, real,
+    # backend-reaching exploration that never completes is exactly what
+    # step_exploration_budget_exhausted exists to bound; a target repeatedly refused
+    # before ever reaching a backend is the liveness fuse's and the replan ceiling's
+    # domain instead (see b6-trajectory-replan-ceiling-v2).
     def act(self, *, actor_task: ActorTask) -> ActorResult:
         step_id = actor_task.current_plan_step.step_id
+        turn = actor_task.actor_turn_count
         return ActorResult(
             plan_step_id=step_id,
             result_type=ActorResultType.PROPOSE_ACTION,
-            summary=f"Retry the capability target bound to {step_id}.",
+            summary=f"Explore another candidate target bound to {step_id}.",
             capability_mode=CapabilityAccessMode.READ_ONLY,
             tool_request=ToolRequest(
                 plan_step_id=step_id,
                 tool_name=ToolName.WEB_SEARCH,
-                request_id=f"b6-step-exploration-ceiling-request-{step_id}",
-                reason="The step's only known target keeps failing at the backend.",
-                query=f"B6 step exploration ceiling target for {step_id}",
+                request_id=f"b6-step-exploration-ceiling-request-{step_id}-{turn}",
+                reason="The step's known targets keep failing at the backend.",
+                query=f"B6 step exploration ceiling target for {step_id} turn {turn}",
                 max_results=1,
                 extractive_goal="Return a distinct concrete observation for convergence testing.",
             ),
             scratchpad_entry=ScratchpadEntry(
-                turn_index=actor_task.actor_turn_count,
+                turn_index=turn,
                 plan_step_id=step_id,
                 entry_type=ScratchpadEntryType.TOOL_DECISION,
-                summary=f"The fixture retries the target bound to {step_id}.",
+                summary=f"The fixture explores a fresh-looking target bound to {step_id}.",
             ),
         )
 

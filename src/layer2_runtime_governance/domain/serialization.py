@@ -115,8 +115,6 @@ def normalize_task_state_serialization(task_state: TaskState) -> TaskState:
         normalized.progress_epoch = 0
     if not hasattr(normalized, "state_revision"):
         normalized.state_revision = 0
-    if not hasattr(normalized, "no_progress_turns"):
-        normalized.no_progress_turns = 0
     if not hasattr(normalized, "evidence_request_count"):
         normalized.evidence_request_count = 0
     # Legacy checkpoints used the whole-run counter as the active ceiling.

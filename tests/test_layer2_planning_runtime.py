@@ -602,6 +602,7 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         expected_observation = {
             "observation_id": "step_1:tool:1:source:1",
             "locator": "https://example.org/source",
+            "retrieval_kind": "capability_result",
             "content": "A concrete observation used during recovery.",
             "source_timestamp": None,
         }

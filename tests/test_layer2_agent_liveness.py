@@ -12,6 +12,8 @@ from layer2_runtime_governance.actor_contract import (
     build_actor_task,
 )
 from layer2_runtime_governance.domain import (
+    EvidenceBurden,
+    ExecutedPlanStep,
     PlanStep,
     PlanStepStatus,
     RuntimeState,
@@ -23,14 +25,16 @@ from layer2_runtime_governance.domain import (
 from layer2_runtime_governance.runtime.actor_service import _enforce_actor_runtime_contract, _record_actor_execution
 from layer2_runtime_governance.runtime.tool_service import tool_gateway
 from layer2_runtime_governance.execution.prompt_projection import build_actor_prompt_payload
+from layer2_runtime_governance.prompt_projection import project_prompt_observation
 from layer2_runtime_governance.domain.serialization import normalize_task_state_serialization
 from layer3_tool_bus_external_capabilities.external_operations.contracts import GovernanceActionFeedback
 from layer2_runtime_governance.planning import build_planner_system_prompt
-from layer2_runtime_governance.domain import ExecutedPlanStep
 from layer3_tool_bus_external_capabilities.tool_contract import (
+    RetrievalKind,
     ToolErrorCode,
     ToolExecutionResult,
     ToolName,
+    ToolObservation,
     ToolRequest,
     canonical_tool_request_identity,
 )
@@ -95,14 +99,75 @@ class Layer2AgentLivenessTests(unittest.TestCase):
         state = TaskState.from_intake(_build_research_intake_result())
         self.assertEqual(route_after_actor({"task_state": state}), "governance")
 
-    # The technical fuse turns repeated actor turns without state delta into replan.
+    # The technical fuse turns a run of locally-settled repeats on the current step into
+    # a replan: none of these ever reached a backend, so none is evidence the actor tried
+    # anything new, regardless of how differently each request was worded.
     def test_no_progress_fuse_requests_replan(self) -> None:
         state = TaskState.from_intake(_build_research_intake_result())
         state.plan_steps = [PlanStep("step_1", "Produce.", "Needed.", "Result.", PlanStepStatus.IN_PROGRESS)]
         state.current_plan_step_index = 0
-        state.no_progress_turns = 4
+        state.tool_attempts = [
+            ToolAttempt(f"web_search:{i}", "step_1", 0, ToolDisposition.REJECTED_DUPLICATE)
+            for i in range(4)
+        ]
         result = ActorResult("step_1", ActorResultType.BLOCKED, "blocked", blocking_reason="temporary")
         self.assertEqual(_enforce_actor_runtime_contract(state, actor_result=result).result_type, ActorResultType.NEEDS_REPLAN)
+
+    # Benchmark threads B26-B28 spun on the same step until they exhausted OPA's hard
+    # exploration ceiling, with this fuse never once firing to offer a fresh strategy
+    # first: any two distinct requests anywhere in the run's history (virtually
+    # guaranteed by the second turn) used to satisfy the old whole-run check forever, so
+    # a step that later spun in circles could never re-trigger it. This reproduces that
+    # exact shape - plenty of distinct, even backend-reaching, activity earlier in the
+    # run - and proves the fuse still fires once the current step itself goes stale.
+    def test_fuse_still_fires_after_unrelated_earlier_backend_activity(self) -> None:
+        state = TaskState.from_intake(_build_research_intake_result())
+        state.plan_steps = [
+            PlanStep("step_1", "Collect.", "Needed.", "Material.", PlanStepStatus.IN_PROGRESS),
+            PlanStep("step_2", "Report.", "Needed.", "Result.", PlanStepStatus.IN_PROGRESS),
+        ]
+        state.current_plan_step_index = 1
+        state.tool_attempts = [
+            ToolAttempt("web_search:a", "step_1", 0, ToolDisposition.EXECUTED_SUCCESS),
+            ToolAttempt("fetch_url_text:b", "step_1", 1, ToolDisposition.EXECUTED_SUCCESS),
+            ToolAttempt("fetch_url_text:c", "step_2", 1, ToolDisposition.REJECTED_UNANCHORED_TARGET),
+            ToolAttempt("web_search:d", "step_2", 1, ToolDisposition.REJECTED_DUPLICATE),
+            ToolAttempt("fetch_url_text:c", "step_2", 1, ToolDisposition.REJECTED_DUPLICATE),
+            ToolAttempt("web_search:e", "step_2", 1, ToolDisposition.REJECTED_DUPLICATE),
+        ]
+        result = ActorResult("step_2", ActorResultType.BLOCKED, "blocked", blocking_reason="temporary")
+        self.assertEqual(_enforce_actor_runtime_contract(state, actor_result=result).result_type, ActorResultType.NEEDS_REPLAN)
+
+    # A step making real backend progress must not be treated as stuck, even if its most
+    # recent request happens to repeat an earlier one and even if other, unrelated local
+    # rejections occurred earlier on the same step.
+    def test_fuse_does_not_fire_while_the_current_step_still_reaches_a_backend(self) -> None:
+        state = TaskState.from_intake(_build_research_intake_result())
+        state.plan_steps = [PlanStep("step_1", "Collect.", "Needed.", "Material.", PlanStepStatus.IN_PROGRESS)]
+        state.current_plan_step_index = 0
+        state.tool_attempts = [
+            ToolAttempt("fetch_url_text:a", "step_1", 0, ToolDisposition.REJECTED_UNANCHORED_TARGET),
+            ToolAttempt("web_search:b", "step_1", 0, ToolDisposition.EXECUTED_SUCCESS),
+            ToolAttempt("fetch_url_text:c", "step_1", 1, ToolDisposition.EXECUTED_SUCCESS),
+            ToolAttempt("fetch_url_text:c", "step_1", 1, ToolDisposition.CACHE_HIT),
+        ]
+        result = ActorResult("step_1", ActorResultType.PROPOSE_ACTION, "proposing", blocking_reason=None)
+        enforced = _enforce_actor_runtime_contract(state, actor_result=result)
+        self.assertIs(enforced, result)
+
+    # A brand-new step must not be judged stale before it has accumulated a full window
+    # of its own attempts to evaluate.
+    def test_fuse_does_not_fire_before_the_current_step_has_a_full_window(self) -> None:
+        state = TaskState.from_intake(_build_research_intake_result())
+        state.plan_steps = [PlanStep("step_1", "Collect.", "Needed.", "Material.", PlanStepStatus.IN_PROGRESS)]
+        state.current_plan_step_index = 0
+        state.tool_attempts = [
+            ToolAttempt("fetch_url_text:a", "step_1", 0, ToolDisposition.REJECTED_DUPLICATE),
+            ToolAttempt("fetch_url_text:b", "step_1", 0, ToolDisposition.REJECTED_DUPLICATE),
+        ]
+        result = ActorResult("step_1", ActorResultType.PROPOSE_ACTION, "proposing", blocking_reason=None)
+        enforced = _enforce_actor_runtime_contract(state, actor_result=result)
+        self.assertIs(enforced, result)
 
     # The turn-local capability surface avoids immediately repeating the observed capability.
     def test_capability_selection_hides_last_observed_capability(self) -> None:
@@ -286,7 +351,6 @@ class Layer2AgentLivenessTests(unittest.TestCase):
         del state.workspace
         del state.progress_epoch
         del state.state_revision
-        del state.no_progress_turns
         del state.tool_attempts
         del state.tool_invocations
         normalized = normalize_task_state_serialization(state)
@@ -330,6 +394,118 @@ class Layer2AgentLivenessTests(unittest.TestCase):
     def test_cli_context_defaults_to_empty(self) -> None:
         with patch("sys.argv", ["main_layer2.py"]):
             self.assertIsNone(parse_cli_args().context)
+
+    # Observation projection exposes retrieval_kind explicitly to the actor.
+    def test_project_prompt_observation_exposes_retrieval_kind(self) -> None:
+        obs = ToolObservation(
+            observation_id="obs_1",
+            content="Document text",
+            locator="https://example.com/doc",
+            retrieval_kind=RetrievalKind.FETCHED_DOCUMENT,
+        )
+        projected = project_prompt_observation(observation=obs)
+        self.assertEqual(projected["retrieval_kind"], "fetched_document")
+        self.assertEqual(projected["observation_id"], "obs_1")
+
+    # attempted_action_keys is scoped to the current plan step and is not truncated to 12.
+    def test_attempted_action_keys_scoped_to_current_step_without_truncation(self) -> None:
+        state = TaskState.from_intake(_build_research_intake_result())
+        state.plan_steps = [
+            PlanStep("step_1", "First.", "Needed.", "One.", PlanStepStatus.COMPLETED),
+            PlanStep("step_2", "Second.", "Needed.", "Two.", PlanStepStatus.IN_PROGRESS),
+        ]
+        state.current_plan_step_index = 1
+        prior_attempts = [
+            ToolAttempt(
+                action_key=f"prior_action_{i}",
+                plan_step_id="step_1",
+                progress_epoch=0,
+                disposition=ToolDisposition.EXECUTED_SUCCESS,
+            )
+            for i in range(5)
+        ]
+        current_attempts = [
+            ToolAttempt(
+                action_key=f"current_action_{i}",
+                plan_step_id="step_2",
+                progress_epoch=0,
+                disposition=ToolDisposition.EXECUTED_SUCCESS,
+            )
+            for i in range(15)
+        ]
+        state.tool_attempts = prior_attempts + current_attempts
+        actor_task = build_actor_task(task_state=state)
+        payload = build_actor_prompt_payload(actor_task=actor_task)
+        expected_keys = [f"current_action_{i}" for i in range(15)]
+        self.assertEqual(payload["runtime"]["attempted_action_keys"], expected_keys)
+        self.assertEqual(len(payload["runtime"]["attempted_action_keys"]), 15)
+
+    # Evidence coverage is projected in actor payload when burden is active and None otherwise.
+    def test_evidence_coverage_injected_into_actor_prompt_payload(self) -> None:
+        state = TaskState.from_intake(_build_research_intake_result())
+        state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Collect 3 independent sources.",
+                rationale="Needed.",
+                expected_outcome="3 sources.",
+                status=PlanStepStatus.IN_PROGRESS,
+                produces_factual_claims=True,
+                evidence_burden=EvidenceBurden(min_independent_sources=3),
+            ),
+        ]
+        state.current_plan_step_index = 0
+        state.observations = [
+            ToolObservation(
+                observation_id="obs_1",
+                content="Doc 1",
+                locator="https://site1.com/a",
+                retrieval_kind=RetrievalKind.FETCHED_DOCUMENT,
+            ),
+            ToolObservation(
+                observation_id="obs_2",
+                content="Doc 2",
+                locator="https://site2.com/b",
+                retrieval_kind=RetrievalKind.FETCHED_DOCUMENT,
+            ),
+            ToolObservation(
+                observation_id="obs_3",
+                content="Snippet 1 already satisfied origin",
+                locator="https://site1.com/c",
+                retrieval_kind=RetrievalKind.SEARCH_SNIPPET,
+            ),
+            ToolObservation(
+                observation_id="obs_4",
+                content="Snippet 2 missing domain",
+                locator="https://site3.com/d",
+                retrieval_kind=RetrievalKind.SEARCH_SNIPPET,
+            ),
+        ]
+        payload = build_actor_prompt_payload(actor_task=build_actor_task(task_state=state))
+        self.assertIsNotNone(payload["evidence_coverage"])
+        coverage = payload["evidence_coverage"]
+        self.assertEqual(coverage["required_independent_sources"], 3)
+        self.assertEqual(coverage["satisfied_origins"], ["https://site1.com", "https://site2.com"])
+        self.assertEqual(coverage["still_needed"], 1)
+        self.assertTrue(coverage["retrieved_content_satisfied"])
+        self.assertEqual(coverage["unfetched_candidate_locators"], ["https://site3.com/d"])
+
+        # Without evidence burden, evidence_coverage is None
+        state_no_burden = TaskState.from_intake(_build_research_intake_result())
+        state_no_burden.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Non-factual step.",
+                rationale="Needed.",
+                expected_outcome="Done.",
+                status=PlanStepStatus.IN_PROGRESS,
+                produces_factual_claims=False,
+                evidence_burden=None,
+            ),
+        ]
+        state_no_burden.current_plan_step_index = 0
+        payload_no_burden = build_actor_prompt_payload(actor_task=build_actor_task(task_state=state_no_burden))
+        self.assertIsNone(payload_no_burden["evidence_coverage"])
 
 
 if __name__ == "__main__":
