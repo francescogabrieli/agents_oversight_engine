@@ -46,8 +46,10 @@ flowchart TD
     I --> J["Il runtime applica la direttiva.<br/>Mai una seconda decisione in Python."]
 ```
 
-I quattro pilastri lavorano in parallelo sullo stesso turno; solo OPA li ordina in una
-direttiva unica.
+I pilastri deterministici vengono proiettati sullo stesso turno e confluiscono in OPA.
+Il Judge costituisce invece un secondo stadio: OPA lo ammette soltanto per un candidato
+esterno che abbia già superato i cancelli deterministici. Solo OPA ordina tutti i
+risultati disponibili in una direttiva unica.
 
 | Pilastro | Domanda a cui risponde | Natura | Può bloccare da solo? |
 |---|---|---|---|
@@ -82,7 +84,7 @@ flowchart TD
     A["Modalità read-only attiva<br/>E effetto mutante (create/update/delete/send/...)<br/>E l'operazione è un candidato eseguibile"] -->|sì| DENY["hard_deny = true"]
     B["Profilo database read-only<br/>MA lo statement non è una SELECT<br/>o è ambiguo"] -->|sì| DENY
     C["Destinatario in prohibited_destinations<br/>o dominio in prohibited_destination_domains<br/>o destination_class = prohibited"] -->|sì| DENY
-    DENY --> STOP["direttiva: stop<br/>(assorbente, nessun altro pilastro viene consultato)"]
+    DENY --> STOP["direttiva: stop<br/>(assorbente rispetto alla direttiva finale)"]
     A -->|no| RO{{"read_only_mode attivo<br/>o effetto = read su boundary non locale?"}}
     B -->|no| RO
     C -->|no| RO
@@ -128,8 +130,10 @@ il cancello in silenzio — una correzione fatta proprio in questa sessione di l
 `02` · deterministico · condizionale
 
 Verifica che quello che l'agente afferma poggi su osservazioni reali raccolte dai tool.
-**Non valuta se un'affermazione è vera** — quello lo fa il Judge, quando serve. Valuta se
-è *sostenuta*: c'è un'osservazione concreta dietro ogni claim?
+**Non svolge una valutazione semantica generale della verità**: valuta se un claim è
+strutturalmente *sostenuto* da osservazioni concrete. Quando esiste un candidato esterno
+ammissibile, il Judge aggiunge la valutazione semantica di quello specifico payload; i
+normali passi interni non ricevono automaticamente un giudizio LLM di verità.
 
 ### 3.1 Quando si attiva
 
@@ -215,6 +219,14 @@ un'approvazione: quando un umano approva un completamento fermato per ancoraggio
 `adjudicated_evidence_anchoring_digest` registra il digest esatto della selezione di
 evidenze approvata. Un concern sulla stessa identica selezione non si ripresenta. Un
 `replan`, che produce claim diversi, azzera la memoria.
+
+Prima che l'attore tenti un completamento, `evaluate_actor_evidence_coverage` applica
+lo stesso calcolo canonico all'intero universo osservato. Se il minimo non è ancora
+raggiunto, il runtime rimuove temporaneamente le azioni di completamento e proietta nel
+prompt `evidence_coverage`: origini già soddisfatte, numero ancora necessario e fino a
+cinque locator provenienti dagli snippet di domini mancanti. È guida esplicita, non una
+nuova decisione di governance: ricerca e fetch restano scelte dell'attore, mentre la
+copertura finale continua a essere verificata sulla selezione citata e decisa da OPA.
 
 ### 3.4 I `deficit_codes` — il vocabolario che arriva alla decisione
 
@@ -352,7 +364,7 @@ degrado, per costruzione.
 |---|---|
 | `needs_replan_signal`, `replan_reason_present`, `first_replan_request`, `observable_change_since_last_replan`, `external_action_revision_count`, `unchanged_resubmission`, `repeated_rejected_payload_digest`, `unresolvable_revision`, `replan_episode_count`, `consecutive_tool_failures`, `action_churn_count`, `external_candidate`, `current_step_tool_attempt_count`, `completion_signal` | `actor_turn_count`, `progress_epoch`, `completed_step_count`, `tool_call_count`, `successful_tool_call_count`, `failed_tool_call_count`, `synthetic_tool_result_count`, `observation_count`, `replan_count`, `consecutive_provider_protocol_failures`, `provider_recovery_active`, `provider_protocol_retry_exhausted` |
 
-### 4.2 I sei guardiani di convergenza
+### 4.2 I guardiani di convergenza
 
 ```mermaid
 flowchart TD
@@ -368,13 +380,18 @@ flowchart TD
     G5 -->|sì| R5["wait_human_review<br/>replan_request_stalled"]
     G5 -->|no| G6{{"Judge ha chiesto una revisione<br/>senza nuova base osservativa?"}}
     G6 -->|sì| R6["wait_human_review<br/>unresolvable_revision"]
-    G6 -->|no| G7{{"replan chiesto ED ammissibile?"}}
-    G7 -->|sì| OK["replan — concesso,<br/>non è una review"]
-    G7 -->|no| PASS(["nessun guardiano scattato,<br/>il turno prosegue"])
+    G6 -->|no| G7{{"digest di un candidato<br/>già rifiutato?"}}
+    G7 -->|sì| R7["wait_human_review<br/>rejected_candidate_resubmitted"]
+    G7 -->|no| G8{{"stesso candidato esterno<br/>senza cambiamento sostanziale?"}}
+    G8 -->|sì| R8["wait_human_review<br/>unchanged_candidate_resubmission"]
+    G8 -->|no| G9{{"replan chiesto ED ammissibile?"}}
+    G9 -->|sì| OK["replan — concesso,<br/>non è una review"]
+    G9 -->|no| PASS(["nessun guardiano scattato,<br/>il turno prosegue"])
 ```
 
 L'ordine qui rispecchia la precedenza reale in `main.rego`: dall'alto verso il basso, il
-primo guardiano che scatta vince.
+primo guardiano che scatta determina la direttiva. Gli otto rami di review sono seguiti
+dal ramo che ammette un replan dotato di una nuova base osservativa.
 
 > **Il guardiano 03 è nuovo** di questa sessione. Prima, nessun limite fermava
 > l'esplorazione read-only: una run è rimasta bloccata su un passo per 30+ chiamate,
@@ -386,16 +403,13 @@ primo guardiano che scatta vince.
 > sola non può vedere: un attore che *varia* le richieste invece di ripeterle.
 
 > **Il guardiano 01 aveva un buco.** `replan_episode_count ≥ max_replans_before_review`
-> scattava solo quando, nello stesso turno, `needs_replan_signal` era vero — cioè solo
-> quando l'attore stava esplicitamente chiedendo un altro replan. Ma il *protocol
-> replan* che il Tool Gateway avvia da sé (§4.5) non arriva mai a governance in quello
-> stato: installa una traiettoria sostitutiva e, al turno successivo, l'attore ha già
-> prodotto un risultato nuovo. Il contatore contava questi replan, la regola li
-> ignorava: una run poteva sostituire la propria traiettoria senza limite finché nessun
-> replan veniva mai *richiesto* dall'attore nello stesso turno in cui il tetto era già
-> raggiunto. La condizione `E l'attore chiede un altro replan` è stata rimossa: il
-> guardiano ora conta *quante traiettorie l'episodio ha già sostituito*, non chi sta
-> chiedendo la prossima.
+> scattava solo quando, nello stesso turno, `needs_replan_signal` era vero. Il guardiano
+> ora conta quante traiettorie l'episodio ha già sostituito, indipendentemente dal fatto
+> che il turno corrente contenga una nuova richiesta. Un fuse tecnico collocato al
+> confine dell'attore può convertire una sequenza di quattro tentativi recenti del passo,
+> tutti risolti localmente senza raggiungere un backend, in un `ActorResult.NEEDS_REPLAN`;
+> anche questo risultato attraversa la normale valutazione OPA. Il Tool Gateway non
+> installa mai autonomamente una nuova traiettoria.
 
 ### 4.3 Soglie — da `data.json`
 
@@ -454,24 +468,21 @@ suo budget di esplorazione (guardiano 03) continua a salire fino al tetto.
 
 Questo rifiuto è enforcement, non governance: il gateway decide se *questa* esecuzione
 può partire, non quante traiettorie sostituite sono troppe. Quella soglia resta di OPA,
-sul guardiano 01 (§4.2–§4.3). La separazione regge perché un bersaglio esaurito
-concede **al massimo un replan** prima di bloccarsi da solo: il *protocol replan* del
-gateway scatta dopo 2 ripetizioni sullo stesso passo, e a quel punto il bersaglio non è
-ancora esaurito (2 < 3); ma sul passo successivo la ripetizione riparte da un contatore
-di passo azzerato mentre il contatore di run continua a salire, quindi il secondo
-tentativo di replan sullo stesso bersaglio trova il gateway già esaurito e non genera
-un secondo replan. Un attore fissato su bersagli *diversi* può comunque accumulare più
-protocol replan — ed è esattamente lì che il guardiano 01 di OPA, ora corretto (§4.2),
-interviene: la soglia direttiva su "quanti replan sono troppi" vive in un solo posto.
+sul guardiano 01 (§4.2–§4.3). Il gateway registra ogni esito in `tool_attempts`, mantiene
+il passo in esecuzione e restituisce il controllo all'attore; **non emette direttive e
+non genera replan**. Se gli ultimi quattro tentativi del passo sono tutti esiti locali
+che non hanno raggiunto un backend, il fuse tecnico al confine dell'attore produce un
+risultato tipizzato `NEEDS_REPLAN`. Quel risultato passa comunque da OPA, che può
+ammetterlo oppure convertirlo in revisione umana secondo lo stato della traiettoria.
+Quando invece l'attore continua a raggiungere realmente backend differenti senza
+convergere, interviene il tetto OPA dei 30 tentativi sul passo.
 
 > **Bug chiuso in questa sessione.** Prima, il gateway non aveva alcun tetto di run
-> scope: un attore che deduceva un URL da un titolo (mai osservato come locator) veniva
-> rifiutato, ripeteva la richiesta, il *protocol replan* azzerava lo step — e con lo
-> step si azzerava l'unico contatore (`current_step_tool_attempt_count`) che avrebbe
-> potuto far scattare il guardiano 03. La cura ricreava il loop un piano più sopra: una
-> run ha ripetuto lo stesso URL inventato 26 volte senza che nessun guardiano potesse
-> mai vederla. Il tetto di run scope sul gateway, insieme al fix del guardiano 01
-> sopra, chiude entrambe le metà del buco.
+> scope: un attore poteva continuare a riproporre lo stesso URL inventato attraverso
+> cambi di passo o di traiettoria. Ora il conteggio per bersaglio sopravvive a questi
+> confini, mentre il fuse tecnico dell'attore intercetta quattro esiti locali consecutivi
+> sul passo e il tetto OPA limita le sostituzioni di traiettoria. Nessuno di questi
+> meccanismi concede da solo un replan al Tool Gateway.
 
 `observable_change_since_last_replan` (tabella §4.1) aveva un difetto collegato: leggeva
 la lunghezza di `tool_results_history`, che include anche gli esiti risolti localmente
@@ -595,9 +606,11 @@ policy della capability la richiede.
 
 ## 6. L'ordine di precedenza completo
 
-Tutto quello che hai letto sopra confluisce in un'unica catena, valutata dall'alto verso
-il basso in `main.rego`. Il primo ramo che si applica vince: nessun pilastro successivo
-viene nemmeno consultato.
+Tutto quello che hai letto sopra confluisce in un'unica catena di precedenza in
+`main.rego`. Il primo ramo applicabile determina la direttiva finale. Questo non implica
+che gli altri risultati spariscano: OPA esporta nel record decisionale i risultati dei
+pilastri e le alternative scartate utili all'audit, ma nessuna alternativa a priorità
+inferiore può cambiare la direttiva vincente.
 
 ```mermaid
 flowchart TD
@@ -611,7 +624,7 @@ flowchart TD
     PU -->|sì| PUX["wait_human_review<br/>required_pillar_unavailable"]
     PU -->|no| CL{{"Static: chiarimento<br/>richiesto?"}}
     CL -->|sì| CLX["ask_user_clarification"]
-    CL -->|no| TJ["Trajectory: i sei guardiani<br/>(vedi sezione 4.2)"]
+    CL -->|no| TJ["Trajectory: guardiani di convergenza<br/>(vedi sezione 4.2)"]
     TJ -->|uno scatta| TJX["replan oppure wait_human_review<br/>a seconda del guardiano"]
     TJ -->|nessuno scatta| JV{{"Judge: verdetto unsafe<br/>o uncertain?"}}
     JV -->|sì| JVX["wait_human_review"]
@@ -652,7 +665,7 @@ la applica, non la reinterpreta mai.
 | `replan` | ↩️ torna all'attore | Trajectory ha ammesso una richiesta di replan legittima (base osservativa nuova). |
 | `ask_user_clarification` | ⏸️ richiede input | L'attore stesso ha segnalato di aver bisogno di un chiarimento. |
 | `wait_human_review` | ⏸️ richiede input | Uno qualsiasi dei guardiani/gate lo richiede — la causa esatta è sempre nel `reason_codes`. |
-| `stop` | 🛑 bloccato | Static Policy ha rilevato un `hard_deny`. Assorbente: nessun altro pilastro viene consultato. |
+| `stop` | 🛑 bloccato | Static Policy ha rilevato un `hard_deny`. È assorbente rispetto alla direttiva finale; gli altri risultati possono restare disponibili come diagnostica d'audit. |
 
 > Ogni `wait_human_review` porta con sé un `reason_codes` preciso (es.
 > `step_exploration_budget_exhausted`, `capability_approval_required`, `judge_unsafe`...).
