@@ -35,6 +35,9 @@ export type DashboardGovernancePanel = DashboardPanel & {
   summary?: string | null;
   selected_reason?: string | null;
   reason_codes?: string[];
+  // Concerns OPA evaluated as also blocking but did not select as the primary reason.
+  // They stay open after this decision, so the operator has to see them.
+  rejected_alternatives?: Record<string, string> | null;
 };
 
 export type DashboardOversightPanel = DashboardPanel & {
@@ -60,6 +63,11 @@ export type DashboardEvidenceReference = {
 
 export type HumanReviewPendingRequest = {
   request_id: string;
+  actor_result_type?: string | null;
+  // What the actor itself said when the run stopped: without these, a clarification or
+  // a blocked step reaches the operator as a bare reason code with no question in it.
+  actor_summary?: string | null;
+  actor_blocking_reason?: string | null;
   review_summary?: string | null;
   reason_codes?: string[];
   resume_state?: string | null;
@@ -76,6 +84,14 @@ export type HumanReviewPendingRequest = {
     payload_digest: string;
     modifiable: boolean;
   } | null;
+};
+
+export type HumanReviewDecisionRecord = {
+  request_id: string;
+  decision_type: string;
+  note?: string | null;
+  reviewer_id?: string | null;
+  approved_operation_digest?: string | null;
 };
 
 export type ExternalCommunicationDraft = {
@@ -119,6 +135,7 @@ export type DashboardSnapshot = {
   external_execution: ExternalExecutionPanel;
   human_review?: {
     pending_request?: HumanReviewPendingRequest | null;
+    decision_history?: HumanReviewDecisionRecord[];
     allowed_decisions?: string[];
     review_summary?: string | null;
     resume_state?: string | null;

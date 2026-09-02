@@ -132,6 +132,29 @@ class ActorActionSchemaTests(unittest.TestCase):
         self.assertIn("emit_blocked", names)
         self.assertIn("emit_ask_clarification", names)
 
+    # emit_ask_clarification suspends the run until a person answers, so the boundary has
+    # to be in the schema the provider sees: a bare string field let a run stop on a
+    # placeholder reason with no question in it (benchmark thread B22).
+    def test_ask_clarification_schema_states_the_blocking_boundary(self) -> None:
+        config = load_tool_gateway_config(
+            config_path=REPO_ROOT / "configs" / "layer2_tool_gateway.json"
+        )
+        actions = {
+            str(action["name"]): action for action in build_actor_runtime_tools(config)
+        }
+
+        clarification = actions["emit_ask_clarification"]
+        properties = clarification["parameters"]["properties"]
+
+        self.assertIn("suspends the run", str(clarification["description"]))
+        self.assertIn("placeholder", str(clarification["description"]))
+        self.assertIn("question", str(properties["summary"]["description"]))
+        self.assertIn("not a valid value", str(properties["blocking_reason"]["description"]))
+        # The sibling blocking actions keep their own typed guidance rather than sharing one.
+        for name in ("emit_blocked", "emit_needs_replan"):
+            reason = actions[name]["parameters"]["properties"]["blocking_reason"]
+            self.assertTrue(str(reason["description"]).strip())
+
     # Provider payload validation must reject capabilities absent from the active catalog.
     def test_inactive_mcp_action_is_rejected_before_tool_request(self) -> None:
         config = load_tool_gateway_config(

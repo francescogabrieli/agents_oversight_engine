@@ -199,6 +199,40 @@ class Layer2TraceTests(unittest.TestCase):
         # The artifact has to stay small enough to actually read.
         self.assertLess(len(markdown), 20000)
 
+    # A clarification stop records an uncertainty entry, not a completion rationale: B22
+    # rendered as "L'agente ha chiesto un chiarimento." with the question nowhere in the
+    # artifact a reader opens to follow the run.
+    def test_governance_narrative_quotes_a_clarification_question(self) -> None:
+        state = _complete_task_state()
+        state.scratchpad.append(
+            ScratchpadEntry(
+                turn_index=2,
+                plan_step_id="step_2",
+                entry_type=ScratchpadEntryType.UNCERTAINTY,
+                summary="Devo accettare le fonti senza data esplicita?",
+            )
+        )
+        clarification = replace(
+            _governance_continue(),
+            directive=GovernanceDirective.ASK_USER_CLARIFICATION,
+            evaluated_actor_result_type=ActorResultType.ASK_CLARIFICATION,
+            evaluated_plan_step_id="step_2",
+            reason_codes=(GovernanceReasonCode.ASK_CLARIFICATION_REQUIRED,),
+            summary="The actor requested clarification.",
+        )
+        state.governance_history = [*state.governance_history, clarification]
+        state.last_governance_decision = clarification
+
+        trace = build_layer2_runtime_trace(
+            thread_id="trace-clarify",
+            intake_result=state.intake_payload,
+            task_state=state,
+        )
+        markdown = build_governance_narrative_markdown(trace)
+
+        self.assertIn("ha chiesto un chiarimento", markdown)
+        self.assertIn("Devo accettare le fonti senza data esplicita?", markdown)
+
     def test_runtime_trace_includes_core_sections_and_histories(self) -> None:
         state = _complete_task_state()
 

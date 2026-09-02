@@ -173,13 +173,19 @@ def _scratchpad_entries(trace: Layer2RuntimeTrace) -> list[dict[str, Any]]:
 
 
 # Quote the actor's own recorded rationale for a step, never a reconstruction of it.
+# A completion records its rationale, but a clarification or a blocked step records an
+# uncertainty entry instead. Reading only the former leaves the two cases where the agent
+# actually asked something as a bare "ha chiesto un chiarimento" with no question in it.
+_ACTOR_RATIONALE_ENTRY_TYPES = ("completion_rationale", "uncertainty")
+
+
 def _actor_rationale(entries: list[dict[str, Any]], step_id: str | None) -> str:
     if not step_id:
         return ""
     for entry in reversed(entries):
         if (
             entry.get("plan_step_id") == step_id
-            and entry.get("entry_type") == "completion_rationale"
+            and entry.get("entry_type") in _ACTOR_RATIONALE_ENTRY_TYPES
         ):
             return _shorten(entry.get("summary"), 400)
     return ""

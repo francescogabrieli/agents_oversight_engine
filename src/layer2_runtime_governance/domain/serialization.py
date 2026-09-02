@@ -314,6 +314,10 @@ def _normalize_review_request(
         actor_result_type=_coerce_optional_enum(
             ActorResultType, request.get("actor_result_type")
         ),
+        actor_summary=_coerce_optional_string(request.get("actor_summary")),
+        actor_blocking_reason=_coerce_optional_string(
+            request.get("actor_blocking_reason")
+        ),
         current_tool_request=_coerce_tool_request(request.get("current_tool_request")),
         governance_directive=_coerce_optional_enum(
             GovernanceDirective, request.get("governance_directive")

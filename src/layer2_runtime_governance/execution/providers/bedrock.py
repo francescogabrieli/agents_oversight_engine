@@ -21,7 +21,7 @@ from ..settings import BedrockNovaActorSettings
 class BedrockNovaActor(ActorPort):
     # Execute the actor role through the configured Bedrock Converse model; the public class name is retained.
     actor_name = "bedrock_nova_2_lite_actor"
-    prompt_version = "actor_v10_bedrock_converse_tool_calling"
+    prompt_version = "actor_v11_bedrock_converse_tool_calling"
 
     def __init__(
         self,

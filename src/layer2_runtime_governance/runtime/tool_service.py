@@ -2,7 +2,6 @@ from dataclasses import replace
 import re
 from urllib.parse import urlparse
 
-from ..actor_contract import ActorResult, ActorResultType, CapabilityAccessMode
 from ..domain import RuntimeFlag, RuntimeState, ScratchpadEntry, ScratchpadEntryType, TaskState
 from ..domain.runtime_records import ToolAttempt, ToolDisposition, ToolInvocation
 from layer3_tool_bus_external_capabilities.tool_contract import (
@@ -19,14 +18,14 @@ from .lifecycle_service import _append_step_record
 
 
 # A locally settled request never reached the world, so repeating it cannot change its
-# outcome. Counting repeats per plan step could not bound that: the protocol replan the
-# per-step ceiling triggers opens a new step and resets the very counter meant to stop
-# it, so an actor that keeps deriving the same unreachable URL loops across replans
-# while no convergence rule can observe it - a settled attempt is neither a backend
-# failure nor a duplicate invocation. This ceiling lives on run scope, which nothing in
-# the loop can reset, and it governs whether an execution is admitted at all. How many
-# replaced trajectories are too many stays a policy question, answered by Trajectory's
-# replan ceiling, so no directive threshold is duplicated here.
+# outcome. Once a target has been settled this many times in the run, the gateway names
+# the outcome final and refuses it before the backend rather than let an actor keep
+# deriving variants of an unreachable target forever - a settled attempt is neither a
+# backend failure nor a duplicate invocation, so nothing else catches it. This is
+# enforcement of whether one execution is admitted, not a directive: how many rejections
+# a run may accumulate before that itself becomes reviewable stays OPA's call alone,
+# through Trajectory's current_step_tool_attempt_count, which counts every attempt on
+# the current step including locally rejected ones.
 _MAX_SETTLED_ATTEMPTS_PER_TARGET = 3
 
 
@@ -48,24 +47,12 @@ def tool_gateway(state: TaskState, *, tool_gateway_service: ToolGatewayPort) -> 
     state.last_tool_result = result
     state.tool_results_history.append(result)
     state.current_tool_request = None
-    # Any locally settled request made no progress on the world. Escalating only a
-    # named subset let a new rejection kind loop without bound: an unanchored target
-    # is refused before the backend, so it is neither a failure nor a duplicate and
-    # no convergence rule could ever see it.
-    #
-    # Replanning is the escalation only while it can still help. Once this target is
-    # exhausted the step is deliberately kept: its exploration budget then keeps climbing
-    # until Trajectory escalates to supervision, which is the terminating condition a
-    # reset step never reaches. Each target concedes at most one replan this way, and the
-    # policy ceiling bounds how many a run may accumulate in total.
-    if (
-        not disposition.reached_backend
-        and not _target_exhausted(state, action_key)
-        and _step_repeat_count(state, action_key, request.plan_step_id) >= 2
-    ):
-        _request_protocol_replan(state, action_key=action_key)
-    else:
-        state.current_state = RuntimeState.ACTING
+    # A locally rejected request is not a directive-worthy event by itself: it feeds
+    # current_step_tool_attempt_count like any other attempt, and OPA alone decides
+    # whether accumulating attempts on this step becomes reviewable. The gateway never
+    # replans on its own - that would be a directive decision made outside OPA, and it
+    # would resume the exploration budget on a step this target never got to work.
+    state.current_state = RuntimeState.ACTING
     _append_step_record(state, node_name="tool_gateway", summary=f"Tool gateway recorded {disposition.value} for '{request.tool_name.value}'.")
     return state
 
@@ -131,20 +118,6 @@ def _is_retryable_backend_failure(result: ToolExecutionResult) -> bool:
     }
 
 
-# Count repeats of one request within the plan step that issued it.
-#
-# This was once scoped to the progress epoch, which the actor advances itself: any
-# observation bumps the epoch, so interleaving one productive search with repeated ones
-# reset the window before it could ever reach the ceiling. The counter has to live on a
-# boundary the actor cannot move, and the step is that boundary.
-def _step_repeat_count(state: TaskState, action_key: str, plan_step_id: str) -> int:
-    return sum(
-        1
-        for item in state.tool_attempts
-        if item.action_key == action_key and item.plan_step_id == plan_step_id
-    )
-
-
 # Count settled attempts on one target across the whole run, on a boundary no replan
 # and no epoch advance can reset.
 def _run_settled_attempt_count(state: TaskState, action_key: str) -> int:
@@ -157,20 +130,6 @@ def _run_settled_attempt_count(state: TaskState, action_key: str) -> int:
 
 def _target_exhausted(state: TaskState, action_key: str) -> bool:
     return _run_settled_attempt_count(state, action_key) >= _MAX_SETTLED_ATTEMPTS_PER_TARGET
-
-
-# Escalate local protocol churn to replanning without asking OPA to supervise technical loops.
-def _request_protocol_replan(state: TaskState, *, action_key: str) -> None:
-    step = state.current_plan_step
-    if step is None:
-        return
-    state.actor_result = ActorResult(
-        plan_step_id=step.step_id, result_type=ActorResultType.NEEDS_REPLAN,
-        summary="Repeated capability request made no progress.",
-        blocking_reason=f"Capability action '{action_key}' was repeated in progress epoch {state.progress_epoch} without a state delta.",
-        capability_mode=CapabilityAccessMode.NONE,
-    )
-    state.current_state = RuntimeState.REPLANNING
 
 
 # A cached success is valid only for the current execution epoch.

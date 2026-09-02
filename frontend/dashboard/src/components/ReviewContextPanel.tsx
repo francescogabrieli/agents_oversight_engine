@@ -1,7 +1,10 @@
 import { useState } from "react";
 import type { DashboardPillarDiagnostic, DashboardSnapshot } from "../types";
+import { actorResultLabel, isPlaceholderBlockingReason } from "./actorResultPresentation";
 import { humanReviewDecisionLabel } from "./humanReviewPresentation";
 import { KeyValueGrid } from "./KeyValueGrid";
+import { PillarDiagnosticCard } from "./PillarDiagnosticCard";
+import { PriorDecisionsPanel } from "./PriorDecisionsPanel";
 import { reasonCodeChipLabel, reasonCodeExplanation, reasonCodeLabel } from "./reasonCodePresentation";
 import { runtimeStateLabel } from "./runtimeStatePresentation";
 
@@ -9,47 +12,6 @@ type ReviewContextPanelProps = {
   taskGoal: string | null;
   snapshot: DashboardSnapshot;
 };
-
-const PILLAR_LABELS: Record<string, string> = {
-  evidence: "evidenze",
-  trajectory: "traiettoria",
-};
-
-const LEVEL_LABELS: Record<string, string> = {
-  unscored: "non valutato",
-  nominal: "nominale",
-  degraded: "degradato",
-  critical: "critico",
-};
-
-function pillarLabel(name: string) {
-  return PILLAR_LABELS[name] ?? name;
-}
-
-function capitalize(value: string) {
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
-function levelLabel(level: string | null | undefined) {
-  if (!level) return null;
-  return LEVEL_LABELS[level.toLowerCase()] ?? level;
-}
-
-// Convert bounded policy fact names into readable operator labels.
-function factLabel(value: string) {
-  return value
-    .split("_")
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
-}
-
-// Preserve exact diagnostic values while keeping common facts easy to scan.
-function factValue(value: unknown) {
-  if (typeof value === "boolean") return value ? "Sì" : "No";
-  if (Array.isArray(value)) return value.join(", ");
-  if (value && typeof value === "object") return JSON.stringify(value);
-  return value === null || value === undefined ? null : String(value);
-}
 
 type SourceMatch = { locator: string; excerpt: string };
 type FlaggedLiteral = { value: string; excerpt: string; sourceMatches: SourceMatch[] };
@@ -82,52 +44,14 @@ function parseFlaggedLiterals(value: unknown): FlaggedLiteral[] {
   });
 }
 
-// One plain-language sentence describing whether/why this pillar matters here.
-function pillarNarrative(diagnostic: DashboardPillarDiagnostic): string {
-  const label = pillarLabel(diagnostic.pillar_name);
-  if (!diagnostic.required) {
-    return `La verifica delle ${label} non è obbligatoria in questo caso.`;
-  }
-  const level = levelLabel(diagnostic.level);
-  const levelPart = level ? `, livello attuale ${level}` : "";
-  return `La verifica delle ${label} è obbligatoria${levelPart} ed è tra i motivi della richiesta di revisione.`;
-}
-
-// Render one active or inactive pillar without exposing the full policy payload up front.
-function PillarDiagnostic({ diagnostic }: { diagnostic: DashboardPillarDiagnostic }) {
-  const facts = Object.entries(diagnostic.facts).map(([label, value]) => ({
-    label: factLabel(label),
-    value: factValue(value),
-  }));
-
-  return (
-    <article className="review-diagnostic">
-      <div className="review-diagnostic-header">
-        <p className="review-diagnostic-title">{capitalize(pillarLabel(diagnostic.pillar_name))}</p>
-        <span className={diagnostic.required ? "badge badge-waiting" : "badge badge-neutral"}>
-          {diagnostic.required ? "obbligatoria" : "non richiesta"}
-        </span>
-      </div>
-      <p className="review-diagnostic-summary">{pillarNarrative(diagnostic)}</p>
-      {diagnostic.summary ? <p className="review-diagnostic-summary">{diagnostic.summary}</p> : null}
-      {facts.length > 0 ? (
-        <details className="technical-details">
-          <summary className="technical-details-summary">Mostra i dati osservati</summary>
-          <div className="technical-details-body">
-            <KeyValueGrid title="Dati osservati dalla policy" values={facts} />
-            {diagnostic.reason_codes.length > 0 ? (
-              <div className="review-reason-chips">
-                {diagnostic.reason_codes.map((code) => (
-                  <span className="action-chip" key={code} title={code}>
-                    {reasonCodeChipLabel(code)}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        </details>
-      ) : null}
-    </article>
+// OPA reports every concern that would have stopped the run, then selects one as the
+// deciding reason. The others do not go away: they fire again on the next pass. An
+// operator who only sees the selected reason cannot understand why approving keeps
+// bringing the run back, so the still-open concerns are named here.
+function parseOpenConcerns(value: unknown, primaryCodes: string[]): string[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  return Object.keys(value as Record<string, unknown>).filter(
+    (code) => !primaryCodes.includes(code),
   );
 }
 
@@ -146,19 +70,25 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
   const governanceSummary = governance?.summary;
   const reasonCodes = pendingRequest?.reason_codes ?? snapshot.reason_codes;
   // The primary code is what OPA actually selected as the deciding reason; everything
-  // else riding on the same decision is supporting detail, shown in the technical view.
+  // else riding on the same decision is supporting detail, shown as chips below.
   const primaryReasonCode = reasonCodes[0] ?? null;
+  const supportingReasonCodes = reasonCodes.slice(1);
   const clearExplanation = primaryReasonCode ? reasonCodeExplanation(primaryReasonCode) : null;
   const reasonHeading = primaryReasonCode ? reasonCodeLabel(primaryReasonCode) : null;
   // Fall back to the raw governance text only for a reason code with no Italian
   // mapping yet, so nothing silently disappears from the primary view.
   const selectedReason =
     clearExplanation ?? rawReason ?? "Il sistema richiede una decisione dell'operatore prima di proseguire.";
+  const openConcerns = parseOpenConcerns(governance?.rejected_alternatives, reasonCodes);
   const judgeFindings = pendingRequest?.judge_findings ?? humanReview?.judge_findings ?? [];
   const selectedEvidenceReferences = humanReview?.selected_evidence_references ?? [];
   const allowedDecisions =
     pendingRequest?.allowed_decisions ?? humanReview?.allowed_decisions ?? [];
   const currentStepObjective = snapshot.current_plan_step?.objective ?? null;
+  const actorHeading = actorResultLabel(pendingRequest?.actor_result_type);
+  const actorSummary = pendingRequest?.actor_summary ?? null;
+  const actorBlockingReason = pendingRequest?.actor_blocking_reason ?? null;
+  const hasActorVoice = Boolean(actorHeading && (actorSummary || actorBlockingReason));
   // The pillar reports each flagged value with the sentence it was written in, so the
   // reviewer judges the claim in context instead of a bare token. Rendered above the
   // technical details because it is the substance of this decision, not a diagnostic.
@@ -196,8 +126,53 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
           Il sistema si è fermato perché serve la tua decisione prima di continuare.
         </p>
 
+        {hasActorVoice ? (
+          <article className="actor-voice" aria-label="Cosa ha detto l'agente">
+            <p className="review-diagnostic-title">{actorHeading}</p>
+            {actorSummary ? <p className="actor-voice-text">{actorSummary}</p> : null}
+            {actorBlockingReason ? (
+              <p className="actor-voice-text">
+                <span className="flagged-value-role">
+                  {isPlaceholderBlockingReason(actorBlockingReason)
+                    ? "Motivo dichiarato (nessun motivo reale indicato):"
+                    : "Motivo del blocco:"}
+                </span>{" "}
+                {actorBlockingReason}
+              </p>
+            ) : null}
+          </article>
+        ) : null}
+
         {reasonHeading ? <p className="review-context-reason-label">{reasonHeading}</p> : null}
         <div className="review-context-reason">{selectedReason}</div>
+
+        {supportingReasonCodes.length > 0 ? (
+          <div className="review-reason-chips" aria-label="Rilievi collegati">
+            {supportingReasonCodes.map((code) => (
+              <span className="action-chip" key={code} title={code}>
+                {reasonCodeChipLabel(code)}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        {openConcerns.length > 0 ? (
+          <article className="open-concerns" aria-label="Altre criticità ancora aperte">
+            <p className="review-diagnostic-title">Altre criticità ancora aperte</p>
+            <p className="review-context-summary" style={{ margin: 0 }}>
+              Non sono il motivo di questa fermata, ma non sono state risolte: l'attività si
+              fermerà di nuovo su queste finché restano aperte.
+            </p>
+            <ul className="review-narrative-list">
+              {openConcerns.map((code) => (
+                <li key={code}>
+                  <strong>{reasonCodeLabel(code)}</strong>
+                  {reasonCodeExplanation(code) ? ` — ${reasonCodeExplanation(code)}` : null}
+                </li>
+              ))}
+            </ul>
+          </article>
+        ) : null}
 
         {flaggedLiterals.length > 0 ? (
           <article className="flagged-values" aria-label="Valori segnalati">
@@ -240,6 +215,11 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
           </article>
         ) : null}
 
+        <PriorDecisionsPanel
+          decisions={humanReview?.decision_history ?? []}
+          currentOperationDigest={pendingRequest?.operation_payload_digest ?? null}
+        />
+
         {judgeFindings.length > 0 ? (
           <article className="review-diagnostic" aria-label="Osservazioni del giudice automatico">
             <p className="review-diagnostic-title">Cosa ha notato la verifica automatica</p>
@@ -255,9 +235,11 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
           <article className="review-diagnostic" aria-label="Fonti selezionate">
             <p className="review-diagnostic-title">Fonti alla base della proposta</p>
             {selectedEvidenceReferences.map((reference) => (
-              <div className="review-context-summary" key={reference.observation_id}>
-                <div>{reference.content_excerpt}</div>
+              <div className="review-source" key={reference.observation_id}>
                 {reference.locator ? <div className="review-evidence-locator">{reference.locator}</div> : null}
+                {/* Retrieved pages arrive with their whole chrome (nav, footer) in the
+                    excerpt; clamping keeps the list scannable without dropping text. */}
+                <div className="review-source-excerpt">{reference.content_excerpt}</div>
               </div>
             ))}
           </article>
@@ -272,7 +254,11 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
         {diagnostics.length > 0 ? (
           <div className="review-diagnostics-grid">
             {diagnostics.map((diagnostic) => (
-              <PillarDiagnostic key={diagnostic.pillar_name} diagnostic={diagnostic} />
+              <PillarDiagnosticCard
+                key={diagnostic.pillar_name}
+                diagnostic={diagnostic}
+                decisionReasonCodes={reasonCodes}
+              />
             ))}
           </div>
         ) : null}
@@ -288,6 +274,8 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
               title="Confini della decisione"
               values={[
                 { label: "Passo attuale", value: currentStepObjective },
+                { label: "Esito dell'agente", value: pendingRequest?.actor_result_type ?? null },
+                { label: "Motivo del blocco dichiarato dall'agente", value: actorBlockingReason },
                 {
                   label: "Stato di ripresa",
                   value: runtimeStateLabel(
@@ -299,6 +287,7 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
                   value: allowedDecisions.map(humanReviewDecisionLabel).join(", ") || null,
                 },
                 { label: "Codici motivo (governance)", value: reasonCodes.join(", ") || null },
+                { label: "Criticità aperte non selezionate", value: openConcerns.join(", ") || null },
                 { label: "Motivo selezionato (audit, originale)", value: rawReason },
                 {
                   label: "Sintesi tecnica (audit)",

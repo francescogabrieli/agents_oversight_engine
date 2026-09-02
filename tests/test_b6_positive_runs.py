@@ -17,7 +17,7 @@ from layer4_state_evidence_observability.infrastructure.runtime_artifacts import
 )
 from scripts.generate_b6_positive_runs import (
     B6_EVIDENCE_OFFICIAL_THREAD_ID,
-    B6_PROTOCOL_REPLAN_OFFICIAL_THREAD_ID,
+    B6_STEP_EXPLORATION_CEILING_OFFICIAL_THREAD_ID,
     B6_TRAJECTORY_OFFICIAL_THREAD_ID,
     generate_official_b6_runs,
 )
@@ -26,19 +26,19 @@ from scripts.run_b6_live_evidence import LIVE_TASK, LIVE_THREAD_ID
 from tests.b6_positive_fixtures import (
     B6_ANCHORING_CONCERN_THREAD_ID,
     B6_EVIDENCE_THREAD_ID,
-    B6_PROTOCOL_REPLAN_THREAD_ID,
+    B6_STEP_EXPLORATION_CEILING_THREAD_ID,
     B6_TRAJECTORY_THREAD_ID,
     approve_b6_anchoring_concern_review,
     run_b6_anchoring_concern_run,
     run_b6_evidence_run,
-    run_b6_protocol_replan_run,
+    run_b6_step_exploration_ceiling_run,
     run_b6_trajectory_run,
 )
 
 
 class B6PositiveRunsTests(unittest.TestCase):
     # Keep official artifact generation on versioned ids and the injected OPA adapter.
-    @patch("scripts.generate_b6_positive_runs.run_b6_protocol_replan_run")
+    @patch("scripts.generate_b6_positive_runs.run_b6_step_exploration_ceiling_run")
     @patch("scripts.generate_b6_positive_runs.run_b6_trajectory_run")
     @patch("scripts.generate_b6_positive_runs.run_b6_evidence_run")
     @patch("scripts.generate_b6_positive_runs.build_default_policy_engine")
@@ -47,13 +47,13 @@ class B6PositiveRunsTests(unittest.TestCase):
         build_policy_engine: Mock,
         run_evidence: Mock,
         run_trajectory: Mock,
-        run_protocol_replan: Mock,
+        run_step_exploration_ceiling: Mock,
     ) -> None:
         policy_engine = object()
         build_policy_engine.return_value = policy_engine
         run_evidence.return_value = {"thread_id": B6_EVIDENCE_OFFICIAL_THREAD_ID}
         run_trajectory.return_value = {"thread_id": B6_TRAJECTORY_OFFICIAL_THREAD_ID}
-        run_protocol_replan.return_value = {"thread_id": B6_PROTOCOL_REPLAN_OFFICIAL_THREAD_ID}
+        run_step_exploration_ceiling.return_value = {"thread_id": B6_STEP_EXPLORATION_CEILING_OFFICIAL_THREAD_ID}
 
         with TemporaryDirectory(prefix="b6-official-") as temp_dir:
             artifact_root = Path(temp_dir)
@@ -64,7 +64,7 @@ class B6PositiveRunsTests(unittest.TestCase):
             {
                 B6_EVIDENCE_OFFICIAL_THREAD_ID,
                 B6_TRAJECTORY_OFFICIAL_THREAD_ID,
-                B6_PROTOCOL_REPLAN_OFFICIAL_THREAD_ID,
+                B6_STEP_EXPLORATION_CEILING_OFFICIAL_THREAD_ID,
             },
         )
         run_evidence.assert_called_once_with(
@@ -77,9 +77,9 @@ class B6PositiveRunsTests(unittest.TestCase):
             thread_id=B6_TRAJECTORY_OFFICIAL_THREAD_ID,
             policy_engine_service=policy_engine,
         )
-        run_protocol_replan.assert_called_once_with(
+        run_step_exploration_ceiling.assert_called_once_with(
             artifact_root=artifact_root,
-            thread_id=B6_PROTOCOL_REPLAN_OFFICIAL_THREAD_ID,
+            thread_id=B6_STEP_EXPLORATION_CEILING_OFFICIAL_THREAD_ID,
             policy_engine_service=policy_engine,
         )
 
@@ -173,46 +173,54 @@ class B6PositiveRunsTests(unittest.TestCase):
             self.assertTrue(trajectory_trace["replan_ceiling_reached"])
             self.assertEqual(trajectory_trace["raw_facts"]["replan_count"], 3)
 
-    # Verify the tool gateway's own protocol replan (no actor NEEDS_REPLAN signal ever
-    # produced) still reaches the same OPA-owned ceiling as the actor-requested path.
-    def test_protocol_replan_ceiling_runs_through_runtime_without_actor_signal(self) -> None:
-        with TemporaryDirectory(prefix="b6-protocol-replan-") as temp_dir:
+    # Verify a capability target the gateway only ever refuses locally still reaches a
+    # terminating decision, and that the terminating decision is OPA's
+    # step_exploration_budget_exhausted - never a replan the tool gateway invents on its
+    # own. The one replan this fixture does produce comes from the actor's own technical
+    # liveness fuse (four turns with no observable execution change), which is a genuine
+    # ActorResult(NEEDS_REPLAN) that governance evaluates like any other - not a
+    # fabricated directive bypassing OPA.
+    def test_step_exploration_ceiling_runs_through_runtime_without_gateway_replan(self) -> None:
+        with TemporaryDirectory(prefix="b6-step-exploration-ceiling-") as temp_dir:
             artifact_root = Path(temp_dir)
-            trace = run_b6_protocol_replan_run(artifact_root=artifact_root)
+            trace = run_b6_step_exploration_ceiling_run(artifact_root=artifact_root)
             task_state = trace["final_result"]["task_state"]
 
             self.assertEqual(task_state.current_state, RuntimeState.WAITING_HUMAN_REVIEW)
-            self.assertEqual(len(task_state.replan_checkpoints), 3)
-            self.assertEqual(
-                sum(item.node_name == "replanner" for item in task_state.step_history),
-                3,
-            )
-            # Only the first backend attempt of each of the three episodes ever reaches
-            # the backend; the second same-step attempt is always a local rejection.
-            self.assertEqual(task_state.tool_call_count, 3)
             self.assertEqual(task_state.governance_history[-1].directive, GovernanceDirective.WAIT_HUMAN_REVIEW)
-            self.assertIn("replan_ceiling_reached", task_state.governance_history[-1].reason_codes)
+            self.assertIn("step_exploration_budget_exhausted", task_state.governance_history[-1].reason_codes)
 
             trajectory_facts = task_state.governance_history[-1].pillar_results["trajectory"]["raw_facts"]
-            self.assertEqual(trajectory_facts["replan_episode_count"], 3)
-            # The catching pass never coincides with an actor-emitted NEEDS_REPLAN: every
-            # protocol replan is installed by tool_service itself, one governance turn
-            # before the actor's next (unrelated) proposal is what actually gets caught.
-            self.assertFalse(trajectory_facts["needs_replan_signal"])
+            self.assertEqual(trajectory_facts["current_step_tool_attempt_count"], 30)
+            self.assertFalse(trajectory_facts["completion_signal"])
             self.assertTrue(
                 task_state.governance_history[-1].pillar_results["trajectory"][
-                    "replan_ceiling_reached"
+                    "step_exploration_budget_exhausted"
                 ]
             )
 
-            paths = artifact_root / B6_PROTOCOL_REPLAN_THREAD_ID
+            # Exactly one replan happened, and it came from the actor's liveness fuse,
+            # not from tool_service: the gateway never installs a plan step, so the only
+            # possible source of a new plan step is the replanner responding to a real
+            # ActorResult(NEEDS_REPLAN).
+            self.assertEqual(len(task_state.replan_checkpoints), 1)
+            self.assertEqual(
+                sum(item.node_name == "replanner" for item in task_state.step_history),
+                1,
+            )
+            # The cursed target is refused locally after its first attempt on each plan
+            # step, so only one backend call happens per step: the original step and the
+            # one replacement step installed by the liveness fuse.
+            self.assertEqual(task_state.tool_call_count, 2)
+
+            paths = artifact_root / B6_STEP_EXPLORATION_CEILING_THREAD_ID
             self.assertTrue((paths / "full-trace-2.json").exists())
             self.assertTrue((paths / "trace_summary.md").exists())
             persisted = json.loads((paths / "full-trace-2.json").read_text(encoding="utf-8"))
             self.assertEqual(persisted["runtime"]["current_state"], "waiting_human_review")
             trajectory_trace = persisted["governance_passes"][-1]["pillar_results"]["trajectory"]
-            self.assertTrue(trajectory_trace["replan_ceiling_reached"])
-            self.assertEqual(trajectory_trace["raw_facts"]["replan_episode_count"], 3)
+            self.assertTrue(trajectory_trace["step_exploration_budget_exhausted"])
+            self.assertEqual(trajectory_trace["raw_facts"]["current_step_tool_attempt_count"], 30)
 
     # Verify a human approve_continue on an anchoring concern is remembered: resuming
     # the same thread does not re-escalate the identical, already-reviewed completion.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from layer1_intake import (
@@ -19,6 +20,7 @@ from layer2_runtime_governance.runtime.governance_service import (
 from layer2_runtime_governance.signal_services.evidence_service import (
     _build_literal_corpus_index,
     _declares_insufficiency,
+    _iso_date_renderings,
     _literal_is_anchored,
     _task_literal_corpus,
 )
@@ -456,6 +458,83 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
 
         self.assertFalse(facts["has_unanchored_literals_in_selection"])
         self.assertFalse(facts["has_unanchored_literals_in_universe"])
+
+    # A fetched page whose body did not extract still carries its publication date as a
+    # source_timestamp, and the corpus already includes that provenance. Before ISO
+    # expansion the timestamp was unreachable - the word-boundary date token pattern
+    # cannot end a match against the "T" that follows the day - so a date the agent read
+    # straight off the source was reported as invented, and benchmark thread B23 stopped
+    # five times on it.
+    def test_iso_source_timestamp_anchors_a_localized_date(self) -> None:
+        state = _build_test_task_state(
+            produces_factual_claims=True,
+            evidence_burden=EvidenceBurden(),
+        )
+        state.observations.append(
+            ToolObservation(
+                observation_id="obs-1",
+                content="The Future is for Everyone Skip to content Viewing this site in English",
+                locator="https://about.fb.com/news/2026/08/the-future-is-for-everyone/",
+                source_timestamp=datetime(2026, 8, 10, 10, 1, 23, tzinfo=timezone.utc),
+            )
+        )
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.STEP_COMPLETED,
+            summary="Report prepared",
+            output_text="Una quarta fonte candidata ha data confermata nei metadata al 10/08/2026.",
+            step_validation=StepValidation(
+                plan_step_id="step_1",
+                actor_self_confidence=0.8,
+                evidence_refs=("obs-1",),
+                rationale_summary="Report references obs-1.",
+            ),
+        )
+
+        facts = build_evidence_signal(task_state=state, thresholds_version="v1")["raw_facts"]
+
+        self.assertFalse(facts["has_unanchored_literals_in_selection"])
+        self.assertFalse(facts["has_unanchored_literals_in_universe"])
+
+    # Expanding a timestamp must anchor that date and no other one, otherwise the family
+    # stops catching the invented values it exists for.
+    def test_iso_source_timestamp_does_not_anchor_a_different_date(self) -> None:
+        state = _build_test_task_state(
+            produces_factual_claims=True,
+            evidence_burden=EvidenceBurden(),
+        )
+        state.observations.append(
+            ToolObservation(
+                observation_id="obs-1",
+                content="The article body did not extract.",
+                locator="https://source-a.org/news",
+                source_timestamp=datetime(2026, 8, 10, 10, 1, 23, tzinfo=timezone.utc),
+            )
+        )
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.STEP_COMPLETED,
+            summary="Report prepared",
+            output_text="La fonte riporta la data 11/09/2026.",
+            step_validation=StepValidation(
+                plan_step_id="step_1",
+                actor_self_confidence=0.8,
+                evidence_refs=("obs-1",),
+                rationale_summary="Report references obs-1.",
+            ),
+        )
+
+        facts = build_evidence_signal(task_state=state, thresholds_version="v1")["raw_facts"]
+
+        self.assertIn("11/09/2026", facts["unanchored_literals_in_selection"])
+
+    # Year-first order is what makes the expansion safe: an identifier that merely looks
+    # like one must not silently anchor an unrelated claim.
+    def test_iso_expansion_rejects_non_dates(self) -> None:
+        for text in ("1234-56-78", "range 2020-2026", "code 2026-13-45"):
+            with self.subTest(text=text):
+                self.assertEqual(_iso_date_renderings(text), set())
+        self.assertIn("10/08/2026", _iso_date_renderings("published 2026-08-10T10:01:23+00:00"))
 
     # A reviewer approves or rejects on the claim in context, not on a bare token, so
     # the pillar reports the sentence each flagged value was written in.

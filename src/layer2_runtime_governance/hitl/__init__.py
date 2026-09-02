@@ -98,6 +98,10 @@ def build_human_review_request(*, state: TaskState, thread_id: str) -> HumanRevi
             current_plan_step.objective if current_plan_step is not None else None
         ),
         actor_result_type=state.actor_result.result_type if state.actor_result is not None else None,
+        actor_summary=state.actor_result.summary if state.actor_result is not None else None,
+        actor_blocking_reason=(
+            state.actor_result.blocking_reason if state.actor_result is not None else None
+        ),
         current_tool_request=state.current_tool_request,
         governance_directive=(
             governance_decision.directive if governance_decision is not None else None

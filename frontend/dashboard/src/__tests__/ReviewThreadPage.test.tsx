@@ -374,4 +374,166 @@ describe("ReviewThreadPage", () => {
     expect(screen.getByText("Puoi scegliere tra: Approva, Ripianifica, Interrompi.")).toBeInTheDocument();
     expect(screen.queryByText("Testo prodotto")).not.toBeInTheDocument();
   });
+
+  // Reproduces the shape of an evidence-anchoring stop late in a run (benchmark
+  // thread B23): OPA selected the resubmission reason, while the evidence concern and
+  // the capability gate stayed open, and the operator had already decided four times.
+  it("names the concerns that stay open and the decisions already taken", () => {
+    const snapshot: DashboardSnapshot = {
+      runtime_state: "waiting_human_review",
+      resume_state: "acting",
+      has_pending_review: true,
+      is_terminal: false,
+      reason_codes: ["unchanged_candidate_resubmission"],
+      governance: {
+        directive: "wait_human_review",
+        summary: "The actor resubmitted the same external candidate.",
+        selected_reason: "The actor resubmitted the same external candidate.",
+        rejected_alternatives: {
+          capability_approval_required: "The capability approval mode requires a typed authorization.",
+          evidence_anchoring_requires_review: "Literal claims are absent from every observation.",
+        },
+      },
+      external_execution: {
+        execution_intent: "execute_after_governance",
+        retryable: false,
+        attempt_count: 0,
+        receipt_count: 0,
+      },
+      human_review: {
+        pending_request: {
+          request_id: "b23:human_review:86:step_7",
+          reason_codes: ["unchanged_candidate_resubmission"],
+          resume_state: "acting",
+          operation_payload_digest: "2b02b4e3",
+          allowed_decisions: ["modify_and_continue", "replan", "abort"],
+        },
+        decision_history: [
+          { request_id: "b23:human_review:77:step_7", decision_type: "approve_continue", approved_operation_digest: "2b02b4e3" },
+          { request_id: "b23:human_review:80:step_7", decision_type: "approve_continue", approved_operation_digest: "2b02b4e3" },
+          { request_id: "b23:human_review:83:step_7", decision_type: "modify_and_continue", approved_operation_digest: null },
+        ],
+        evidence_diagnostic: {
+          pillar_name: "evidence",
+          required: true,
+          mode: "active",
+          level: "unscored",
+          summary: "Concrete structural evidence facts collected across 5 families.",
+          reason_codes: ["unanchored_literals_in_selection"],
+          facts: {
+            retrieved_independent_sources_count: 3,
+            min_independent_sources_required: 3,
+            independent_sources_satisfied: true,
+            selected_evidence_ref_count: 4,
+            selected_evidence_refs_valid: true,
+            retrieved_content_satisfied: true,
+            evidence_request_count: 3,
+            evidence_request_ceiling_reached: false,
+            unanchored_literals_in_selection: ["10/08/2026"],
+          },
+        },
+        trajectory_diagnostic: {
+          pillar_name: "trajectory",
+          required: true,
+          mode: "active",
+          level: "observed",
+          summary: "Whole-run trajectory facts collected.",
+          reason_codes: ["unchanged_candidate_resubmission"],
+          facts: { replan_count: 0, tool_call_count: 12, failed_tool_call_count: 0, unchanged_resubmission: true },
+        },
+      },
+    };
+
+    render(<ReviewContextPanel taskGoal="Send a sourced briefing." snapshot={snapshot} />);
+
+    // The evidence concern is not the selected reason, so without this section the
+    // operator cannot tell why approving keeps bringing the run back to the same stop.
+    expect(screen.getByText("Altre criticità ancora aperte")).toBeInTheDocument();
+    expect(screen.getByText("Valori nel testo non riscontrati nelle fonti")).toBeInTheDocument();
+    expect(screen.getByText("Serve la tua autorizzazione esplicita")).toBeInTheDocument();
+
+    expect(screen.getByText(/Decisioni già prese su questa attività — 3/)).toBeInTheDocument();
+    expect(screen.getByText(/Hai già deciso 2 volte su questa identica proposta/)).toBeInTheDocument();
+
+    // The deciding pillar is named as such; the other one is reported as merely run.
+    expect(screen.getByText("causa della fermata")).toBeInTheDocument();
+    expect(screen.getByText("verificata")).toBeInTheDocument();
+
+    // Evidence substance is readable without opening the 38-row fact table.
+    expect(screen.getByText("3 su 3 richieste")).toBeInTheDocument();
+    expect(screen.getByText("1 (10/08/2026)")).toBeInTheDocument();
+    expect(screen.getByText("Richieste di più prove già fatte")).toBeInTheDocument();
+    expect(screen.getByText("12, di cui 0 fallite")).toBeInTheDocument();
+  });
+
+  // B22 stopped on a clarification and the panel showed only "Serve un chiarimento":
+  // the agent's actual question never reached the operator.
+  it("shows the agent's own question on a clarification stop", () => {
+    const snapshot: DashboardSnapshot = {
+      runtime_state: "waiting_human_review",
+      resume_state: "acting",
+      has_pending_review: true,
+      is_terminal: false,
+      reason_codes: ["ask_clarification_required"],
+      external_execution: {
+        execution_intent: "execute_after_governance",
+        retryable: false,
+        attempt_count: 0,
+        receipt_count: 0,
+      },
+      human_review: {
+        pending_request: {
+          request_id: "b22:human_review:40:replan_step_1",
+          actor_result_type: "ask_clarification",
+          actor_summary: "Devo accettare come valide anche le fonti senza data esplicita?",
+          actor_blocking_reason: "La finestra temporale non è decidibile dalle evidenze raccolte.",
+          reason_codes: ["ask_clarification_required"],
+          resume_state: "acting",
+          allowed_decisions: ["ask_clarification", "abort"],
+        },
+      },
+    };
+
+    render(<ReviewContextPanel taskGoal="Prepare a sourced briefing." snapshot={snapshot} />);
+
+    expect(screen.getByText("L'agente ha chiesto un chiarimento")).toBeInTheDocument();
+    expect(
+      screen.getByText("Devo accettare come valide anche le fonti senza data esplicita?"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Motivo del blocco:")).toBeInTheDocument();
+  });
+
+  // A run that emits ask_clarification with a placeholder reason is a real failure mode
+  // (B22 did exactly this): show it as such instead of dressing it up as a motivation.
+  it("marks a placeholder blocking reason as such", () => {
+    const snapshot: DashboardSnapshot = {
+      runtime_state: "waiting_human_review",
+      has_pending_review: true,
+      is_terminal: false,
+      reason_codes: ["ask_clarification_required"],
+      external_execution: {
+        execution_intent: "execute_after_governance",
+        retryable: false,
+        attempt_count: 0,
+        receipt_count: 0,
+      },
+      human_review: {
+        pending_request: {
+          request_id: "b22:human_review:40:replan_step_1",
+          actor_result_type: "ask_clarification",
+          actor_summary: "Nessuna richiesta necessaria: procedo a completare lo step corrente.",
+          actor_blocking_reason: "placeholder_non_bloccante",
+          reason_codes: ["ask_clarification_required"],
+          allowed_decisions: ["ask_clarification", "abort"],
+        },
+      },
+    };
+
+    render(<ReviewContextPanel taskGoal="Prepare a sourced briefing." snapshot={snapshot} />);
+
+    expect(
+      screen.getByText("Motivo dichiarato (nessun motivo reale indicato):"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Nessuna richiesta necessaria/)).toBeInTheDocument();
+  });
 });

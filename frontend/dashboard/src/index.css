@@ -588,3 +588,100 @@ body {
   .review-diagnostics-grid { grid-template-columns: 1fr; }
   .kv-grid-2col { grid-template-columns: 1fr; }
 }
+
+/* ── still-open concerns, prior decisions, pillar highlights ─ */
+.open-concerns {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--danger);
+  border-radius: 0 9px 9px 0;
+  background: var(--surface-2);
+}
+.prior-decisions {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+.prior-decisions-warning {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 2px solid var(--danger);
+  border-radius: 0 6px 6px 0;
+  background: var(--surface);
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.prior-decisions-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.prior-decisions-index { color: var(--text-muted); }
+.prior-decisions-note { color: var(--text-secondary); }
+.pillar-highlights {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+.pillar-highlight {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 8px;
+  border-left: 2px solid var(--border);
+  border-radius: 0 5px 5px 0;
+  background: var(--surface);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.pillar-highlight dt { color: var(--text-secondary); }
+.pillar-highlight dd { margin: 0; color: var(--text-primary); font-weight: 600; text-align: right; }
+.pillar-highlight-ok { border-left-color: var(--success, var(--border)); }
+.pillar-highlight-warn { border-left-color: var(--warning); }
+.pillar-highlight-warn dd { color: var(--warning); }
+.review-source {
+  display: grid;
+  gap: 3px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+.review-source:first-of-type { border-top: none; }
+.review-source .review-evidence-locator { margin-top: 0; overflow-wrap: anywhere; }
+.review-source-excerpt {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.actor-voice {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent, var(--border));
+  border-radius: 0 9px 9px 0;
+  background: var(--surface-2);
+}
+.actor-voice-text {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}

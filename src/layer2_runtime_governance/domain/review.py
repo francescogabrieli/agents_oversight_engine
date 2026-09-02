@@ -82,6 +82,11 @@ class HumanReviewRequest:
     current_tool_request: ToolRequest | None
     governance_directive: GovernanceDirective | None
     governance_summary: str | None
+    # What the actor itself said at the moment the run stopped. A reason code names the
+    # policy that fired; only these two carry the agent's own question or claim, without
+    # which a clarification or a blocked step reaches the operator as a bare label.
+    actor_summary: str | None = None
+    actor_blocking_reason: str | None = None
     static_policy_summary: str | None = None
     dynamic_policy_summary: str | None = None
     behavioral_summary: str | None = None

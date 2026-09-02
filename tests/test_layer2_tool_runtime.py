@@ -231,7 +231,10 @@ class Layer2ToolRuntimeTests(unittest.TestCase):
             ],
         )
 
-    def test_unanchored_target_repeats_escalate_to_replanning(self) -> None:
+    # A locally rejected request never reaches the backend and never makes the gateway
+    # decide anything beyond ACTING: only OPA, through Trajectory's
+    # current_step_tool_attempt_count, may ever escalate a step stuck on one target.
+    def test_unanchored_target_repeats_stay_local_without_gateway_replan(self) -> None:
         state = TaskState.from_intake(_build_research_intake_result())
         state.plan_steps = [
             PlanStep(
@@ -260,17 +263,16 @@ class Layer2ToolRuntimeTests(unittest.TestCase):
         self.assertTrue(
             all(item is ToolDisposition.REJECTED_UNANCHORED_TARGET for item in dispositions)
         )
-        # The loop is bounded: the second identical request on this step routes to
-        # replanning, before the target's run-scoped exhaustion ceiling is reached.
-        self.assertEqual(state.current_state, RuntimeState.REPLANNING)
-        self.assertEqual(state.actor_result.result_type, ActorResultType.NEEDS_REPLAN)
+        self.assertEqual(state.current_state, RuntimeState.ACTING)
+        self.assertIsNone(state.actor_result)
         # A refused request never becomes a backend call in the trajectory facts.
         self.assertEqual(state.tool_call_count, 0)
 
-    # A replan concedes one retry per target, not one per plan step it survives across.
-    # Once the run-scoped attempt ceiling is reached, the same fixation must not open a
-    # second replan - the step is held instead so its exploration budget can terminate it.
-    def test_exhausted_target_does_not_replan_again_on_a_new_step(self) -> None:
+    # The run-scoped exhaustion ceiling has to persist across a plan step boundary,
+    # whatever produced that boundary - the gateway itself never replans, so the only
+    # way a step changes underneath a fixated target is a decision made elsewhere
+    # (the actor's own liveness fuse, or OPA). Once exhausted, the target stays refused.
+    def test_exhausted_target_stays_refused_across_a_step_boundary(self) -> None:
         state = TaskState.from_intake(_build_research_intake_result())
         state.plan_steps = [
             PlanStep(
@@ -285,7 +287,10 @@ class Layer2ToolRuntimeTests(unittest.TestCase):
         invented = "https://example.org/never-observed"
         gateway = SimpleNamespace(execute=lambda **_: self.fail("backend must not be reached"))
 
-        for _ in range(2):
+        # Three settled attempts reach the run-scoped ceiling; each is still evaluated
+        # for anchoring directly, since exhaustion is measured before the attempt is
+        # recorded and the ceiling is not yet reached during any of these three.
+        for _ in range(3):
             state.current_state = RuntimeState.READY_TOOL_EXECUTION
             state.current_tool_request = ToolRequest(
                 plan_step_id="step_1",
@@ -294,9 +299,12 @@ class Layer2ToolRuntimeTests(unittest.TestCase):
                 url=invented,
             )
             tool_gateway(state, tool_gateway_service=gateway)
-        self.assertEqual(state.current_state, RuntimeState.REPLANNING)
+        self.assertEqual(state.current_state, RuntimeState.ACTING)
+        self.assertEqual(
+            state.last_tool_result.error_code, ToolErrorCode.UNANCHORED_TARGET
+        )
 
-        # The replanner would install a new step id; simulate that boundary directly.
+        # Simulate a step boundary produced elsewhere (a replan, for whatever reason).
         state.plan_steps.append(
             PlanStep(
                 step_id="replan_step_1",
@@ -307,29 +315,15 @@ class Layer2ToolRuntimeTests(unittest.TestCase):
             )
         )
         state.current_plan_step_index = 1
-        # The third attempt still checks anchoring directly: exhaustion is measured
-        # before this attempt is recorded, and only two are settled so far.
+
+        # The fourth attempt, on the new step, is refused before the anchoring check
+        # even runs: the target is exhausted at the run scope, and that state survives
+        # the step change intact.
         state.current_state = RuntimeState.READY_TOOL_EXECUTION
         state.current_tool_request = ToolRequest(
             plan_step_id="replan_step_1",
             tool_name=ToolName.FETCH_URL_TEXT,
             reason="fetch the same unobserved url again",
-            url=invented,
-        )
-        tool_gateway(state, tool_gateway_service=gateway)
-        self.assertEqual(state.current_state, RuntimeState.ACTING)
-        self.assertEqual(
-            state.last_tool_result.error_code, ToolErrorCode.UNANCHORED_TARGET
-        )
-
-        # The fourth attempt is refused before the anchoring check even runs: the
-        # target is now exhausted at the run scope, and the step is held rather than
-        # replanned again, so its exploration budget is free to keep climbing.
-        state.current_state = RuntimeState.READY_TOOL_EXECUTION
-        state.current_tool_request = ToolRequest(
-            plan_step_id="replan_step_1",
-            tool_name=ToolName.FETCH_URL_TEXT,
-            reason="fetch the same unobserved url once more",
             url=invented,
         )
         tool_gateway(state, tool_gateway_service=gateway)

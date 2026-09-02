@@ -93,6 +93,30 @@ class HitlControlPlaneTests(unittest.TestCase):
             1,
         )
 
+    # A clarification stop is unusable without the agent's own question: the reason code
+    # only names the policy that fired (B22 reached the operator as a bare label).
+    def test_review_request_carries_the_actor_question(self) -> None:
+        task_state = _build_actor_ready_state()
+        task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        task_state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.ASK_CLARIFICATION,
+            summary="Devo accettare come valide anche le fonti senza data esplicita?",
+            capability_mode=CapabilityAccessMode.NONE,
+            blocking_reason="La finestra temporale non e' decidibile dalle evidenze raccolte.",
+        )
+
+        review_request = build_human_review_request(state=task_state, thread_id="thread-clarify")
+
+        self.assertEqual(
+            review_request.actor_summary,
+            "Devo accettare come valide anche le fonti senza data esplicita?",
+        )
+        self.assertEqual(
+            review_request.actor_blocking_reason,
+            "La finestra temporale non e' decidibile dalle evidenze raccolte.",
+        )
+
     # Verify the control-plane session can still be reconstructed directly from a trace.
     def test_dashboard_session_can_be_rebuilt_from_trace(self) -> None:
         trace = {

@@ -93,6 +93,16 @@ _PROSE_DATE_PATTERNS = (
     ),
 )
 
+# A retrieved page carries its publication date as an ISO timestamp, and an observation
+# carries its own source_timestamp in the same form. Neither is prose, and neither is
+# reachable by the word-boundary date token pattern once a "T" follows the day, so the
+# whole timestamp contributed nothing to the corpus and a date the agent read straight
+# off the source came back as an invented value. Year-first order is unambiguous, unlike
+# a bare "08/10/2026", so it can be expanded without guessing a locale.
+_ISO_DATE_PATTERN = re.compile(
+    r"(?<!\d)(?P<year>\d{4})(?P<sep>[-/])(?P<month>\d{1,2})(?P=sep)(?P<day>\d{1,2})(?!\d)"
+)
+
 # A source states a share in prose ("28 percent", "3,5 per cento"); an agent renders
 # it with the symbol ("28%"). Both denote the same quantity, so the prose form has to
 # expand into the same canonical keys a "%"-suffixed token would produce.
@@ -284,27 +294,50 @@ def _task_literal_corpus(task_spec: TaskSpec) -> str:
     )
 
 
+# One calendar date, in every numeric notation a literal token can plausibly use. Both
+# corpus date readers expand into this same set, so a date anchors identically whether
+# the source spelled it in prose or as a timestamp.
+def _date_renderings(*, year: int, month: int, day: int) -> set[str]:
+    if not 1 <= month <= 12 or not 1 <= day <= 31:
+        return set()
+    return {
+        f"{year:04d}-{month:02d}-{day:02d}",
+        f"{year:04d}/{month:02d}/{day:02d}",
+        f"{day:02d}/{month:02d}/{year:04d}",
+        f"{day:02d}-{month:02d}-{year:04d}",
+        f"{day}/{month}/{year}",
+        f"{day}-{month}-{year}",
+    }
+
+
 # Expand every prose date into the numeric renderings a literal token can use, so a
 # date stated authoritatively by the task is recognized however the agent formats it.
 def _prose_date_renderings(corpus: str) -> set[str]:
     renderings: set[str] = set()
     for pattern in _PROSE_DATE_PATTERNS:
         for match in pattern.finditer(corpus):
-            month = _MONTH_NAMES[match.group("month").casefold()]
-            day = int(match.group("day"))
-            year = int(match.group("year"))
-            if not 1 <= day <= 31:
-                continue
             renderings.update(
-                {
-                    f"{year:04d}-{month:02d}-{day:02d}",
-                    f"{year:04d}/{month:02d}/{day:02d}",
-                    f"{day:02d}/{month:02d}/{year:04d}",
-                    f"{day:02d}-{month:02d}-{year:04d}",
-                    f"{day}/{month}/{year}",
-                    f"{day}-{month}-{year}",
-                }
+                _date_renderings(
+                    year=int(match.group("year")),
+                    month=_MONTH_NAMES[match.group("month").casefold()],
+                    day=int(match.group("day")),
+                )
             )
+    return renderings
+
+
+# Mirror _prose_date_renderings for year-first numeric dates and ISO timestamps, so a
+# publication date read from source provenance anchors the same claim a prose date does.
+def _iso_date_renderings(corpus: str) -> set[str]:
+    renderings: set[str] = set()
+    for match in _ISO_DATE_PATTERN.finditer(corpus):
+        renderings.update(
+            _date_renderings(
+                year=int(match.group("year")),
+                month=int(match.group("month")),
+                day=int(match.group("day")),
+            )
+        )
     return renderings
 
 
@@ -352,6 +385,7 @@ def _build_literal_corpus_index(
             for key in _literal_comparison_keys(item)
         }
         | _prose_date_renderings(corpus)
+        | _iso_date_renderings(corpus)
         | _prose_percent_renderings(corpus)
     )
     return _LiteralCorpusIndex(

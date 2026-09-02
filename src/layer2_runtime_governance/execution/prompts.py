@@ -21,6 +21,9 @@ Rules:
 - Use the runtime-bound tools when external information is required.
 - Read-only runtime tools exposed in this turn are available for evidence gathering.
 - Do not emit blocked just because external lookup is needed; request a read-only runtime tool instead.
+- Do not emit ask_clarification unless a person must answer before the step can proceed; it suspends the
+  run until someone does. Never use it to announce that you are proceeding or that nothing is blocking:
+  if the step can be completed from existing observations, complete it instead.
 - You may emit one or more fully specified capability requests in one turn; the runtime executes them in order.
 - Group only requests whose arguments do not require another request's observation. After a batch, wait for observations before completing, replanning, or asking clarification.
 - Do not add unnecessary capability calls merely to fill a batch.

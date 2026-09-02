@@ -100,15 +100,36 @@ def build_actor_runtime_tools(
         _database_statement_action(),
         _blocking_action(
             "emit_ask_clarification",
-            "Ask for clarification when missing information blocks safe progress.",
+            (
+                "Ask the human operator one concrete question when information you cannot "
+                "obtain with any available tool blocks safe progress. Emitting this always "
+                "suspends the run until a person answers. Never emit it to announce that you "
+                "are proceeding, that no clarification is needed, or as a placeholder."
+            ),
+            summary_description=(
+                "The question you are asking the operator, stated as a question."
+            ),
+            blocking_reason_description=(
+                "The specific information that is missing and why no available tool can "
+                "supply it. A placeholder, or any statement that nothing is blocking, is "
+                "not a valid value for this field."
+            ),
         ),
         _blocking_action(
             "emit_blocked",
             "Signal that the current step cannot proceed safely.",
+            summary_description="What the step was attempting when it became unworkable.",
+            blocking_reason_description=(
+                "The concrete condition that prevents the step from proceeding safely."
+            ),
         ),
         _blocking_action(
             "emit_needs_replan",
             "Signal that the current semantic trajectory requires replanning.",
+            summary_description="What the current plan was attempting.",
+            blocking_reason_description=(
+                "What changed in the trajectory that makes the current plan unworkable."
+            ),
         ),
     ]
 
@@ -358,11 +379,24 @@ def _database_statement_action() -> dict[str, object]:
 
 
 # Build one blocking/recovery action with a required blocking reason.
-def _blocking_action(name: str, description: str) -> dict[str, object]:
+# Blocking actions suspend the run - ask_clarification until a person answers - so the
+# provider needs the boundary spelled out per action. A bare {"type": "string"} lets an
+# actor emit one of these with a placeholder reason to announce that it is proceeding,
+# which stops the run on a question nobody asked.
+def _blocking_action(
+    name: str,
+    description: str,
+    *,
+    summary_description: str,
+    blocking_reason_description: str,
+) -> dict[str, object]:
     return _action(
         name,
         description,
-        {"summary": _string(), "blocking_reason": _string()},
+        {
+            "summary": {"type": "string", "description": summary_description},
+            "blocking_reason": {"type": "string", "description": blocking_reason_description},
+        },
         ("summary", "blocking_reason"),
     )
 

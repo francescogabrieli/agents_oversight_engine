@@ -46,7 +46,7 @@ from tests.layer2_runtime_fixtures import StubPolicyEngine, _build_stub_opa_deci
 
 B6_EVIDENCE_THREAD_ID = "b6-evidence-burden-insufficient"
 B6_TRAJECTORY_THREAD_ID = "b6-trajectory-replan-ceiling"
-B6_PROTOCOL_REPLAN_THREAD_ID = "b6-trajectory-protocol-replan-ceiling"
+B6_STEP_EXPLORATION_CEILING_THREAD_ID = "b6-trajectory-step-exploration-ceiling"
 B6_ANCHORING_CONCERN_THREAD_ID = "b6-evidence-anchoring-concern-adjudicated"
 
 
@@ -351,34 +351,39 @@ class B6TrajectoryToolGateway(ToolGatewayPort):
         )
 
 
-class B6ProtocolReplanPlanner:
-    planner_name = "b6_protocol_replan_fixture_planner"
-    prompt_version = "b6_protocol_replan_fixture_v1"
+class B6StepExplorationCeilingPlanner:
+    planner_name = "b6_step_exploration_ceiling_fixture_planner"
+    prompt_version = "b6_step_exploration_ceiling_fixture_v1"
 
-    # A single step whose only exit is the tool gateway's own protocol replan.
+    # A single step whose only exit is OPA's own step-exploration ceiling: the gateway
+    # only ever refuses this target locally, it never replans on its own.
     def plan(self, *, task_state: TaskState) -> PlannerDecision:
         return PlannerDecision(
             plan_steps=[
                 PlanStep(
-                    step_id="b6-protocol-replan-step-0",
+                    step_id="b6-step-exploration-ceiling-step-0",
                     objective="Reach a stable result through a capability target that never settles.",
-                    rationale="The fixture exercises the tool gateway's own protocol replan, not an actor-requested one.",
-                    expected_outcome="A converged result after bounded recovery.",
+                    rationale=(
+                        "The fixture exercises OPA's step_exploration_budget_exhausted "
+                        "convergence, not any Python-side replanning."
+                    ),
+                    expected_outcome="Escalation to human review once the exploration budget is spent.",
                 )
             ],
-            rationale="The fixture planner leaves protocol churn entirely to the tool gateway.",
+            rationale="The fixture planner leaves the exhausted target entirely to OPA to resolve.",
             planner_name=self.planner_name,
             prompt_version=self.prompt_version,
         )
 
 
-class B6ProtocolReplanActor(ActorPort):
-    actor_name = "b6_protocol_replan_fixture_actor"
-    prompt_version = "b6_protocol_replan_fixture_v1"
+class B6StepExplorationCeilingActor(ActorPort):
+    actor_name = "b6_step_exploration_ceiling_fixture_actor"
+    prompt_version = "b6_step_exploration_ceiling_fixture_v1"
 
     # Always retry the same target for the current step; the actor never notices it is
-    # cursed and never emits NEEDS_REPLAN itself - only tool_service's own protocol
-    # replan (two same-step local rejections) can ever move this fixture forward.
+    # cursed and never emits NEEDS_REPLAN itself. The tool gateway only ever refuses the
+    # target locally (never reaching a backend after the first attempt), so the plan
+    # step's attempt count climbs without bound until OPA escalates it.
     def act(self, *, actor_task: ActorTask) -> ActorResult:
         step_id = actor_task.current_plan_step.step_id
         return ActorResult(
@@ -389,9 +394,9 @@ class B6ProtocolReplanActor(ActorPort):
             tool_request=ToolRequest(
                 plan_step_id=step_id,
                 tool_name=ToolName.WEB_SEARCH,
-                request_id=f"b6-protocol-replan-request-{step_id}",
+                request_id=f"b6-step-exploration-ceiling-request-{step_id}",
                 reason="The step's only known target keeps failing at the backend.",
-                query=f"B6 protocol replan target for {step_id}",
+                query=f"B6 step exploration ceiling target for {step_id}",
                 max_results=1,
                 extractive_goal="Return a distinct concrete observation for convergence testing.",
             ),
@@ -404,8 +409,8 @@ class B6ProtocolReplanActor(ActorPort):
         )
 
 
-class B6ProtocolReplanToolGateway(ToolGatewayPort):
-    gateway_name = "b6_protocol_replan_fixture_gateway"
+class B6StepExplorationCeilingToolGateway(ToolGatewayPort):
+    gateway_name = "b6_step_exploration_ceiling_fixture_gateway"
 
     # Every backend attempt fails retryably; the fixture never returns a real observation.
     def execute(self, *, tool_request: ToolRequest) -> ToolExecutionResult:
@@ -518,6 +523,30 @@ class B6PolicyEngine(StubPolicyEngine):
             _annotate_replan_ceiling(output=output)
             return output
 
+        # Mirror trajectory.rego's step_exploration_budget_exhausted exactly: a
+        # completing turn is exempt because Evidence is the substantive check there, and
+        # the threshold mirrors max_tool_attempts_per_step_before_review in
+        # configs/opa/layer2_governance/data.json. This is the only convergence path for
+        # a target the gateway keeps refusing locally without ever replanning - nothing
+        # else in this stub ever catches it.
+        if (
+            actor["result_type"] != ActorResultType.STEP_COMPLETED.value
+            and trajectory_facts.get("current_step_tool_attempt_count", 0) >= 30
+        ):
+            output = _build_stub_opa_decision(
+                decision_input=decision_input,
+                policy_engine=self,
+                directive="wait_human_review",
+                policy_decision="require_human_review",
+                reason_code="step_exploration_budget_exhausted",
+                summary=(
+                    "The plan step exhausted its read-only exploration budget without "
+                    "reaching a completion."
+                ),
+            )
+            _annotate_step_exploration_budget_exhausted(output=output)
+            return output
+
         return super().evaluate_decision(decision_input=decision_input)
 
 
@@ -609,6 +638,21 @@ def _annotate_replan_ceiling(*, output: dict[str, Any]) -> None:
     output["pillar_results"]["trajectory"] = trajectory
 
 
+# Preserve the Trajectory threshold fact in the OPA-shaped pillar result.
+def _annotate_step_exploration_budget_exhausted(*, output: dict[str, Any]) -> None:
+    output["directive"] = "wait_human_review"
+    output["policy_decision"] = "require_human_review"
+    output["reason_codes"] = ["step_exploration_budget_exhausted"]
+    output["selected_reason"] = (
+        "The plan step exhausted its read-only exploration budget without reaching a completion."
+    )
+    output["requires_human_review"] = True
+    trajectory = dict(output["pillar_results"]["trajectory"])
+    trajectory["step_exploration_budget_exhausted"] = True
+    trajectory["reason_codes"] = ["step_exploration_budget_exhausted"]
+    output["pillar_results"]["trajectory"] = trajectory
+
+
 # Run the deterministic Evidence-positive scenario with an injectable policy boundary.
 def run_b6_evidence_run(
     *,
@@ -657,23 +701,24 @@ def run_b6_trajectory_run(
     )
 
 
-# Run the deterministic protocol-replan scenario: the tool gateway itself forces every
-# replan after two same-step local rejections, and the actor never once emits NEEDS_REPLAN.
-def run_b6_protocol_replan_run(
+# Run the deterministic step-exploration-ceiling scenario: the actor keeps retrying a
+# target the gateway only ever refuses locally, and the sole terminating condition is
+# OPA's step_exploration_budget_exhausted - never a Python-side replan.
+def run_b6_step_exploration_ceiling_run(
     *,
     artifact_root: Path,
-    thread_id: str = B6_PROTOCOL_REPLAN_THREAD_ID,
+    thread_id: str = B6_STEP_EXPLORATION_CEILING_THREAD_ID,
     policy_engine_service: PolicyEnginePort | None = None,
 ) -> dict[str, Any]:
     resolved_policy_engine = policy_engine_service or B6PolicyEngine()
     return run_layer2_flow(
         raw_task_text="Reach a stable result despite a capability target that never settles.",
-        context_hint="The deterministic B6 actor keeps retrying the same failing target; only the tool gateway replans.",
+        context_hint="The deterministic B6 actor keeps retrying the same failing target; only OPA's exploration ceiling stops it.",
         thread_id=thread_id,
         demo_intake_profile="research",
-        planner_service=B6ProtocolReplanPlanner(),
-        actor_service=B6ProtocolReplanActor(),
-        tool_gateway_service=B6ProtocolReplanToolGateway(),
+        planner_service=B6StepExplorationCeilingPlanner(),
+        actor_service=B6StepExplorationCeilingActor(),
+        tool_gateway_service=B6StepExplorationCeilingToolGateway(),
         replanner_service=B6Replanner(),
         policy_engine_service=resolved_policy_engine,
         behavioral_store_service=B6BehavioralStore(),
@@ -741,11 +786,11 @@ def approve_b6_anchoring_concern_review(
 __all__ = [
     "B6_EVIDENCE_THREAD_ID",
     "B6_TRAJECTORY_THREAD_ID",
-    "B6_PROTOCOL_REPLAN_THREAD_ID",
+    "B6_STEP_EXPLORATION_CEILING_THREAD_ID",
     "B6_ANCHORING_CONCERN_THREAD_ID",
     "run_b6_evidence_run",
     "run_b6_trajectory_run",
-    "run_b6_protocol_replan_run",
+    "run_b6_step_exploration_ceiling_run",
     "run_b6_anchoring_concern_run",
     "approve_b6_anchoring_concern_review",
 ]

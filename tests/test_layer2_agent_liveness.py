@@ -237,16 +237,20 @@ class Layer2AgentLivenessTests(unittest.TestCase):
         self.assertEqual(gateway.calls, 0)
         self.assertEqual(result.last_tool_result.error_code, ToolErrorCode.DUPLICATE_REQUEST)
 
-    # Retryable failures have a finite local retry path before semantic replanning.
-    def test_same_epoch_retryable_repetition_requests_replan(self) -> None:
+    # Retryable failures have a finite local retry path: the second same-epoch repeat is
+    # refused locally without reaching the backend, but the tool gateway never decides to
+    # replan on its own - only OPA's step_exploration_budget_exhausted can escalate a
+    # step this stuck, once its attempt ceiling is actually reached.
+    def test_same_epoch_retryable_repetition_is_refused_locally_without_gateway_replan(self) -> None:
         request = ToolRequest("step_1", ToolName.WEB_SEARCH, "Find.", query="retry")
         gateway = _Gateway(ToolExecutionResult(request, False, "timeout", error_code=ToolErrorCode.TIMEOUT))
         state = tool_gateway(self._tool_state(request), tool_gateway_service=gateway)
         state.current_state = RuntimeState.READY_TOOL_EXECUTION
         state.current_tool_request = ToolRequest("step_1", ToolName.WEB_SEARCH, "Retry.", query="retry")
         state = tool_gateway(state, tool_gateway_service=gateway)
-        self.assertEqual(state.current_state, RuntimeState.REPLANNING)
-        self.assertEqual(state.actor_result.result_type, ActorResultType.NEEDS_REPLAN)
+        self.assertEqual(state.current_state, RuntimeState.ACTING)
+        self.assertEqual(gateway.calls, 1)
+        self.assertEqual(state.last_tool_result.error_code, ToolErrorCode.DUPLICATE_REQUEST)
 
     # A durable artifact is the canonical local progress signal.
     def test_step_completion_artifact_advances_progress_epoch(self) -> None:
