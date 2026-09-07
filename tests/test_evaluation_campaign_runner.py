@@ -6,6 +6,8 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from layer5_evaluation_fixtures import trace_payload
+from layer5_evaluation_continuous_improvement import EvaluationStore, build_evaluation_summary
 
 from scripts import run_evaluation_campaign as campaign
 
@@ -19,6 +21,7 @@ class EvaluationCampaignRunnerTests(unittest.TestCase):
     def setUp(self) -> None:
         self._temporary_directory = TemporaryDirectory()
         self.output_root = Path(self._temporary_directory.name) / "evaluation-input"
+        self.database_path = Path(self._temporary_directory.name) / "evaluation.sqlite3"
         self.manifest = campaign.load_campaign_manifest(campaign.DEFAULT_MANIFEST_PATH)
 
     # Remove only the temporary campaign root owned by this test case.
@@ -105,17 +108,10 @@ class EvaluationCampaignRunnerTests(unittest.TestCase):
             commands.append(command)
             trace_path = Path(command[command.index("--trace-file") + 1])
             thread_id = command[command.index("--thread-id") + 1]
+            payload = trace_payload()
+            payload["runtime"]["thread_id"] = thread_id
             trace_path.write_text(
-                json.dumps(
-                    {
-                        "trace_version": "layer2_trace.v6",
-                        "runtime": {
-                            "thread_id": thread_id,
-                            "current_state": "completed",
-                            "termination_reason": None,
-                        },
-                    }
-                ),
+                json.dumps(payload),
                 encoding="utf-8",
             )
             return subprocess.CompletedProcess(command, 0)
@@ -126,9 +122,15 @@ class EvaluationCampaignRunnerTests(unittest.TestCase):
             allow_external_execution=False,
             fail_fast=False,
             command_runner=fake_command_runner,
+            database_path=self.database_path,
         )
 
         self.assertEqual(len(results), 16)
+        with EvaluationStore(self.database_path) as store:
+            summary_from_db = build_evaluation_summary(store)
+            self.assertEqual(summary_from_db.total_runs, 16)
+            self.assertEqual(summary_from_db.attempted_runs, 14)
+            self.assertEqual(summary_from_db.trace_backed_runs, 14)
         self.assertEqual(len(commands), 14)
         self.assertEqual(
             [result.status for result in results].count("skipped_external_execution_disabled"),
@@ -161,6 +163,63 @@ class EvaluationCampaignRunnerTests(unittest.TestCase):
             ).read_text(encoding="utf-8")
         )
         self.assertEqual(skipped_record["status"], "skipped_external_execution_disabled")
+
+    # A campaign ID is immutable: an existing target must not be silently reused or overwritten.
+    def test_fail_fast_keeps_entire_plan_in_database_before_first_command(self) -> None:
+        planned = campaign.plan_campaign_runs(
+            manifest=self.manifest, campaign_id="fail_fast", replicas=1,
+            output_root=self.output_root, allow_external_execution=False,
+        )
+
+        def fail_command(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[object]:
+            self.assertEqual(cwd, REPO_ROOT)
+            with EvaluationStore(self.database_path) as store:
+                summary = build_evaluation_summary(store)
+                self.assertEqual(summary.total_runs, 16)
+                self.assertEqual(summary.attempted_runs, 1)
+                self.assertEqual(summary.not_started_runs, 13)
+                self.assertEqual(summary.skipped_runs, 2)
+            return subprocess.CompletedProcess(command, 1)
+
+        results = campaign.execute_campaign(
+            manifest=self.manifest, planned_runs=planned, allow_external_execution=False,
+            fail_fast=True, command_runner=fail_command, database_path=self.database_path,
+        )
+        self.assertEqual(len(results), 1)
+        with EvaluationStore(self.database_path) as store:
+            summary = build_evaluation_summary(store)
+            self.assertEqual(summary.total_runs, 16)
+            self.assertEqual(summary.runtime_statuses["runtime_failure"], 1)
+            self.assertEqual(summary.not_started_runs, 13)
+            self.assertEqual(summary.technical_completion_rate, 0)
+        summary_json = json.loads((planned[0].output_directory.parent / "campaign_summary.json").read_text())
+        self.assertFalse(summary_json["in_progress"])
+        self.assertEqual(len(summary_json["runs"]), 16)
+
+    def test_keyboard_interrupt_preserves_current_and_not_started_runs(self) -> None:
+        planned = campaign.plan_campaign_runs(
+            manifest=self.manifest, campaign_id="interrupt", replicas=1,
+            output_root=self.output_root, allow_external_execution=True,
+        )
+
+        def interrupt_command(_command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[object]:
+            self.assertEqual(cwd, REPO_ROOT)
+            raise KeyboardInterrupt
+
+        with self.assertRaises(KeyboardInterrupt):
+            campaign.execute_campaign(
+                manifest=self.manifest, planned_runs=planned, allow_external_execution=True,
+                fail_fast=False, command_runner=interrupt_command, database_path=self.database_path,
+            )
+        with EvaluationStore(self.database_path) as store:
+            summary = build_evaluation_summary(store)
+            self.assertEqual(summary.total_runs, 16)
+            self.assertEqual(summary.attempted_runs, 1)
+            self.assertEqual(summary.not_started_runs, 15)
+            self.assertEqual(summary.runtime_statuses["interrupted"], 1)
+        summary_json = json.loads((planned[0].output_directory.parent / "campaign_summary.json").read_text())
+        self.assertFalse(summary_json["in_progress"])
+        self.assertEqual(summary_json["status_counts"]["interrupted"], 1)
 
     # A campaign ID is immutable: an existing target must not be silently reused or overwritten.
     def test_execute_campaign_refuses_existing_campaign_directory(self) -> None:
@@ -214,6 +273,8 @@ class EvaluationCampaignRunnerTests(unittest.TestCase):
                 "1",
                 "--output-root",
                 str(self.output_root),
+                "--database",
+                str(self.database_path),
                 "--dry-run",
             ],
             cwd=REPO_ROOT,
@@ -225,6 +286,7 @@ class EvaluationCampaignRunnerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("planned_runs=16", result.stdout)
         self.assertFalse((self.output_root / "realistic_dry_run_v1").exists())
+        self.assertFalse(self.database_path.exists())
 
 
 if __name__ == "__main__":

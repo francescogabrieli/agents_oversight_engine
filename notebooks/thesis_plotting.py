@@ -117,19 +117,22 @@ def plot_technical_vs_semantic_gap(summary: EvaluationSummary) -> plt.Figure:
 
     tech_comp_rate = summary.technical_completion_rate
     judged_total = summary.judged_runs
-    correct_rate = summary.correct_rate or 0.0
-    partial_rate = (summary.task_results.get("partial", 0) / judged_total) if judged_total else 0.0
-    incorrect_rate = (summary.task_results.get("incorrect", 0) / judged_total) if judged_total else 0.0
+    correct_rate = summary.correct_rate
 
     categories = ["Technical Completion\n(Runtime Status)", "Semantic Correctness\n(Task Ground Truth)"]
 
-    ax.barh([0], [tech_comp_rate * 100], color="#64748b", height=0.4, label="Completed (Technical)")
-    if (1.0 - tech_comp_rate) > 0:
-        ax.barh([0], [(1.0 - tech_comp_rate) * 100], left=[tech_comp_rate * 100], color="#cbd5e1", height=0.4, label="Aborted / Failed")
-
-    ax.barh([1], [correct_rate * 100], color=PALETTE["success"], height=0.4, label="Correct (Semantically Valid)")
-    ax.barh([1], [partial_rate * 100], left=[correct_rate * 100], color=PALETTE["warning"], height=0.4, label="Partial")
-    ax.barh([1], [incorrect_rate * 100], left=[(correct_rate + partial_rate) * 100], color=PALETTE["danger"], height=0.4, label="Incorrect (Semantic Failure)")
+    if tech_comp_rate is not None:
+        ax.barh([0], [tech_comp_rate * 100], color="#64748b", height=0.4, label="Completed (Technical)")
+        ax.barh([0], [(1 - tech_comp_rate) * 100], left=[tech_comp_rate * 100], color="#cbd5e1", height=0.4, label="Not completed")
+    left = 0.0
+    for rate, color, label in (
+        (correct_rate, "success", "Correct"),
+        (summary.partial_rate, "warning", "Partial"),
+        (summary.incorrect_rate, "danger", "Incorrect"),
+    ):
+        if rate is not None:
+            ax.barh([1], [rate * 100], left=[left], color=PALETTE[color], height=0.4, label=label)
+            left += rate * 100
 
     ax.set_yticks([0, 1])
     ax.set_yticklabels(categories)
@@ -142,9 +145,13 @@ def plot_technical_vs_semantic_gap(summary: EvaluationSummary) -> plt.Figure:
     )
 
     for i, rate in enumerate([tech_comp_rate, correct_rate]):
-        ax.text(rate * 50, i, f"{rate * 100:.1f}%", va="center", ha="center", color="white", fontweight="bold", fontsize=11)
+        if rate is None:
+            ax.text(50, i, "N/D — dato non disponibile", va="center", ha="center")
+        else:
+            ax.text(max(rate * 50, 3), i, f"{rate * 100:.1f}%", va="center", ha="center", fontweight="bold", fontsize=11)
 
-    ax.legend(bbox_to_anchor=(0.5, -0.2), loc="upper center", ncol=3, frameon=True)
+    if ax.get_legend_handles_labels()[0]:
+        ax.legend(bbox_to_anchor=(0.5, -0.2), loc="upper center", ncol=3, frameon=True)
     plt.tight_layout()
     return fig
 
@@ -158,18 +165,14 @@ def plot_escalation_confusion_matrix(summary: EvaluationSummary) -> plt.Figure:
     tp, fp = confusion["true_positive"], confusion["false_positive"]
     fn, tn = confusion["false_negative"], confusion["true_negative"]
     total = tp + fp + fn + tn
-    precision = summary.escalation_precision or 0.0
-    recall = summary.escalation_recall or 0.0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
-
-    matrix = np.array([[tp, fp], [fn, tn]])
+    matrix = np.array([[tp, fn], [fp, tn]])
 
     def cell(count: int) -> str:
         return f"{count} ({count / total * 100:.1f}%)" if total else f"{count} (n/a)"
 
     labels = [
-        [f"True Positive\n(Review Needed & Required)\n\n{cell(tp)}", f"False Positive\n(Unnecessary Escalation)\n\n{cell(fp)}"],
-        [f"False Negative\n(Missed Risk)\n\n{cell(fn)}", f"True Negative\n(Correct Autonomy)\n\n{cell(tn)}"],
+        [f"True Positive\n(Review Needed & Required)\n\n{cell(tp)}", f"False Negative\n(Missed Risk)\n\n{cell(fn)}"],
+        [f"False Positive\n(Unnecessary Escalation)\n\n{cell(fp)}", f"True Negative\n(Correct Autonomy)\n\n{cell(tn)}"],
     ]
 
     sns.heatmap(matrix, annot=labels, fmt="", cmap="Blues", cbar=False, ax=ax, linewidths=1.5, linecolor="white", annot_kws={"fontsize": 10})
@@ -179,7 +182,9 @@ def plot_escalation_confusion_matrix(summary: EvaluationSummary) -> plt.Figure:
     ax.set_xlabel("System Governance Decision")
     ax.set_ylabel("Ground Truth Requirement")
     ax.set_title(
-        f"Human Oversight Escalation Matrix\nPrecision: {precision:.2f} | Recall: {recall:.2f} | F1: {f1:.2f}"
+        "Human Oversight Escalation Matrix\n"
+        f"Precision: {_metric_label(summary.escalation_precision)} | "
+        f"Recall: {_metric_label(summary.escalation_recall)} | F1: {_metric_label(summary.escalation_f1)}"
         f"\nLabeled {summary.labeled_governance_events}/{summary.total_governance_events} governance events",
         pad=15,
     )
@@ -277,9 +282,9 @@ def plot_experiment_comparison(
         rows.append(
             {
                 "experiment_id": experiment_id,
-                "technical_completion_rate": (summary.technical_completion_rate or 0.0) * 100,
-                "correct_rate": (summary.correct_rate or 0.0) * 100,
-                "human_intervention_rate": (summary.human_intervention_rate or 0.0) * 100,
+                "technical_completion_rate": _percentage(summary.technical_completion_rate),
+                "correct_rate": _percentage(summary.correct_rate),
+                "human_intervention_rate": _percentage(summary.human_intervention_rate),
             }
         )
     grouped = pd.DataFrame(rows)
@@ -291,6 +296,10 @@ def plot_experiment_comparison(
     ax.bar(x - width, grouped["technical_completion_rate"], width, label="Technical Completion (%)", color=PALETTE["secondary"])
     ax.bar(x, grouped["correct_rate"], width, label="Task Accuracy (%)", color=PALETTE["success"])
     ax.bar(x + width, grouped["human_intervention_rate"], width, label="Human Intervention (%)", color=PALETTE["warning"])
+    for offset, column in ((-width, "technical_completion_rate"), (0, "correct_rate"), (width, "human_intervention_rate")):
+        for index, value in enumerate(grouped[column]):
+            if pd.isna(value):
+                ax.text(index + offset, 2, "N/D", ha="center", va="bottom", rotation=90)
 
     ax.set_ylabel("Percentage (%)")
     ax.set_title("Comparison Across Experiments", pad=15)
@@ -301,6 +310,14 @@ def plot_experiment_comparison(
 
     plt.tight_layout()
     return fig
+
+
+def _metric_label(value: float | None) -> str:
+    return "N/D" if value is None else f"{value:.2f}"
+
+
+def _percentage(value: float | None) -> float:
+    return float("nan") if value is None else value * 100
 
 
 def export_all_thesis_figures(

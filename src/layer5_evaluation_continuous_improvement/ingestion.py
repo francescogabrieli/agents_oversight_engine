@@ -41,24 +41,26 @@ class TraceImporter:
         for candidate in paths:
             path = Path(candidate)
             if path.is_file():
-                discovered.add(path.resolve())
+                if path.name == RUN_RECORD_FILENAME:
+                    path = path.parent / "full-trace-2.json"
+                if path.is_file():
+                    discovered.add(path.resolve())
             elif path.is_dir():
                 discovered.update(item.resolve() for item in path.rglob("full-trace-2.json"))
         return sorted(discovered, key=str)
 
-    # Discover campaign records whose run produced no canonical trace.
-    def discover_trace_less_run_records(self, paths: list[Path]) -> list[Path]:
+    # Discover records even when their sibling trace is unreadable.
+    def discover_run_records(self, paths: list[Path]) -> list[Path]:
         discovered: set[Path] = set()
         for candidate in paths:
             path = Path(candidate)
             if path.is_file() and path.name == RUN_RECORD_FILENAME:
                 discovered.add(path.resolve())
+            elif path.is_file() and (path.parent / RUN_RECORD_FILENAME).is_file():
+                discovered.add((path.parent / RUN_RECORD_FILENAME).resolve())
             elif path.is_dir():
                 discovered.update(item.resolve() for item in path.rglob(RUN_RECORD_FILENAME))
-        return sorted(
-            (path for path in discovered if not (path.parent / "full-trace-2.json").is_file()),
-            key=str,
-        )
+        return sorted(discovered, key=str)
 
     # Import all discoverable traces while isolating individual file failures.
     def import_paths(
@@ -79,10 +81,45 @@ class TraceImporter:
         imported: list[Path] = []
         skipped: list[Path] = []
         failures: list[tuple[Path, str]] = []
-        for record_path in self.discover_trace_less_run_records(paths):
+        valid_trace_directories: set[Path] = set()
+        for path in self.discover(paths):
+            try:
+                raw = path.read_bytes()
+                digest = hashlib.sha256(raw).hexdigest()
+                payload = json.loads(raw.decode("utf-8"))
+                _validate_trace(payload, source_path=path)
+                projection = _project_trace(
+                    payload,
+                    source_path=path,
+                    trace_digest=digest,
+                    experiment_id=experiment_id,
+                    imported_at=now,
+                    run_record=_load_run_record(path),
+                )
+                # The trace may be unchanged while the runner finishes its record.
+                # Compare projected metadata too, so duration/status do not stay stale.
+                existing = self.store.query("SELECT * FROM runs WHERE trace_digest = ?", (digest,))
+                if existing and all(
+                    existing[0].get(key) == value
+                    for key, value in projection["run"].items() if key != "imported_at"
+                ):
+                    valid_trace_directories.add(path.parent)
+                    skipped.append(path)
+                    continue
+                self.store.replace_run_projection(**projection)
+                valid_trace_directories.add(path.parent)
+                imported.append(path)
+            except (OSError, UnicodeError, json.JSONDecodeError, ValueError, KeyError) as exc:
+                failures.append((path, str(exc)))
+        for record_path in self.discover_run_records(paths):
+            if record_path.parent in valid_trace_directories:
+                continue
             try:
                 raw = record_path.read_bytes()
                 digest = hashlib.sha256(raw).hexdigest()
+                if self.store.has_trace_digest(f"run-record:{digest}"):
+                    skipped.append(record_path)
+                    continue
                 record = json.loads(raw.decode("utf-8"))
                 projection = _project_trace_less_campaign_run(
                     record,
@@ -100,27 +137,6 @@ class TraceImporter:
                 imported.append(record_path)
             except (OSError, UnicodeError, json.JSONDecodeError, ValueError, KeyError) as exc:
                 failures.append((record_path, str(exc)))
-        for path in self.discover(paths):
-            try:
-                raw = path.read_bytes()
-                digest = hashlib.sha256(raw).hexdigest()
-                if self.store.has_trace_digest(digest):
-                    skipped.append(path)
-                    continue
-                payload = json.loads(raw.decode("utf-8"))
-                _validate_trace(payload, source_path=path)
-                projection = _project_trace(
-                    payload,
-                    source_path=path,
-                    trace_digest=digest,
-                    experiment_id=experiment_id,
-                    imported_at=now,
-                    run_record=_load_run_record(path),
-                )
-                self.store.replace_run_projection(**projection)
-                imported.append(path)
-            except (OSError, UnicodeError, json.JSONDecodeError, ValueError, KeyError) as exc:
-                failures.append((path, str(exc)))
         return ImportResult(tuple(imported), tuple(skipped), tuple(failures))
 
 
@@ -244,7 +260,7 @@ def _project_trace_less_campaign_run(
     experiment_id: str,
     imported_at: str,
 ) -> dict[str, Any]:
-    if record.get("record_version") != _RUN_RECORD_VERSION:
+    if not isinstance(record, dict) or record.get("record_version") != _RUN_RECORD_VERSION:
         raise ValueError(f"Unsupported campaign run record: {source_path}")
     run_id = _optional_text(record.get("thread_id"))
     if run_id is None:

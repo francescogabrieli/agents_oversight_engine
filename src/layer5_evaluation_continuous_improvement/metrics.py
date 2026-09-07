@@ -14,6 +14,7 @@ class EvaluationSummary:
     total_runs: int
     attempted_runs: int
     skipped_runs: int
+    not_started_runs: int
     trace_backed_runs: int
     judged_runs: int
     runtime_statuses: dict[str, int]
@@ -21,14 +22,17 @@ class EvaluationSummary:
     task_results: dict[str, int]
     review_decisions: dict[str, int]
     external_statuses: dict[str, int]
-    technical_completion_rate: float
+    technical_completion_rate: float | None
     correct_rate: float | None
+    partial_rate: float | None
+    incorrect_rate: float | None
     incorrect_completion_rate: float | None
-    human_intervention_rate: float
-    failed_tool_rate: float
+    human_intervention_rate: float | None
+    failed_tool_rate: float | None
     escalation_confusion: dict[str, int]
     escalation_precision: float | None
     escalation_recall: float | None
+    escalation_f1: float | None
     reason_codes: dict[str, int]
     pillar_breakdown: dict[str, int]
     avg_actor_turns: float | None
@@ -64,7 +68,7 @@ def build_evaluation_summary(
     attempted_runs = [
         run
         for run in runs
-        if run.get("campaign_run_status") != "skipped_external_execution_disabled"
+        if _was_attempted(run)
     ]
     trace_backed_runs = [run for run in runs if bool(run.get("trace_available", 1))]
     run_ids = [str(run["run_id"]) for run in runs]
@@ -135,7 +139,8 @@ def build_evaluation_summary(
         total_governance_events=len(governance),
         total_runs=len(runs),
         attempted_runs=len(attempted_runs),
-        skipped_runs=len(runs) - len(attempted_runs),
+        skipped_runs=sum(run.get("campaign_run_status") == "skipped_external_execution_disabled" for run in runs),
+        not_started_runs=sum(run.get("campaign_run_status") == "not_started" for run in runs),
         trace_backed_runs=len(trace_backed_runs),
         judged_runs=len(judged_runs),
         runtime_statuses=dict(sorted(runtime_statuses.items())),
@@ -143,16 +148,22 @@ def build_evaluation_summary(
         task_results=dict(sorted(task_results.items())),
         review_decisions=dict(sorted(review_decisions.items())),
         external_statuses=dict(sorted(external_statuses.items())),
-        technical_completion_rate=_ratio(len(completed_runs), len(attempted_runs)) or 0.0,
+        technical_completion_rate=_ratio(len(completed_runs), len(attempted_runs)),
         correct_rate=_ratio(task_results["correct"], len(judged_runs)),
+        partial_rate=_ratio(task_results["partial"], len(judged_runs)),
+        incorrect_rate=_ratio(task_results["incorrect"], len(judged_runs)),
         incorrect_completion_rate=_ratio(len(incorrect_completed), len(completed_runs)),
         human_intervention_rate=_ratio(
             len({review["run_id"] for review in reviews}), len(attempted_runs)
-        ) or 0.0,
-        failed_tool_rate=_ratio(failed_tool_total, tool_call_total) or 0.0,
+        ),
+        failed_tool_rate=_ratio(failed_tool_total, tool_call_total),
         escalation_confusion=confusion,
         escalation_precision=_ratio(confusion["true_positive"], confusion["true_positive"] + confusion["false_positive"]),
         escalation_recall=_ratio(confusion["true_positive"], confusion["true_positive"] + confusion["false_negative"]),
+        escalation_f1=_ratio(
+            2 * confusion["true_positive"],
+            2 * confusion["true_positive"] + confusion["false_positive"] + confusion["false_negative"],
+        ),
         reason_codes=dict(sorted(reason_counter.items())),
         pillar_breakdown=dict(sorted(pillar_counter.items())),
         avg_actor_turns=_mean(actor_turns),
@@ -181,7 +192,7 @@ def _family_breakdown(
         attempted = [
             run
             for run in family_runs
-            if run.get("campaign_run_status") != "skipped_external_execution_disabled"
+            if _was_attempted(run)
         ]
         judged = [run for run in family_runs if run["task_result"] is not None]
         completed = [run for run in attempted if run["runtime_status"] == "completed"]
@@ -189,7 +200,8 @@ def _family_breakdown(
         breakdown[family] = {
             "runs": len(family_runs),
             "attempted_runs": len(attempted),
-            "skipped_runs": len(family_runs) - len(attempted),
+            "skipped_runs": sum(run.get("campaign_run_status") == "skipped_external_execution_disabled" for run in family_runs),
+            "not_started_runs": sum(run.get("campaign_run_status") == "not_started" for run in family_runs),
             "technical_completion_rate": _ratio(len(completed), len(attempted)),
             "correct_rate": _ratio(
                 sum(1 for run in judged if run["task_result"] == "correct"), len(judged)
@@ -227,6 +239,11 @@ def _escalation_confusion(events: list[dict[str, Any]]) -> dict[str, int]:
         else:
             counts["true_negative"] += 1
     return counts
+
+
+# Exclude planned-but-unstarted and explicitly skipped runs from attempt denominators.
+def _was_attempted(run: dict[str, Any]) -> bool:
+    return run.get("campaign_run_status") not in {"not_started", "skipped_external_execution_disabled"}
 
 
 # Return a safe ratio or None when the metric has no denominator.

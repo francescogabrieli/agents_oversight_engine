@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +18,12 @@ SRC_ROOT = REPO_ROOT / "src"
 for import_root in (REPO_ROOT, SRC_ROOT):
     if str(import_root) not in sys.path:
         sys.path.insert(0, str(import_root))
+
+from layer5_evaluation_continuous_improvement.ingestion import TraceImporter  # noqa: E402
+from layer5_evaluation_continuous_improvement.store import (  # noqa: E402
+    DEFAULT_DATABASE_PATH,
+    EvaluationStore,
+)
 
 DEFAULT_MANIFEST_PATH = REPO_ROOT / "configs" / "evaluation_realistic_pool_v1.json"
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "artifacts" / "evaluation" / "input" / "realistic_pool_v1"
@@ -130,6 +136,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_OUTPUT_ROOT,
         help="Root below which a new campaign directory is created.",
+    )
+    parser.add_argument(
+        "--database",
+        type=Path,
+        default=REPO_ROOT / DEFAULT_DATABASE_PATH,
+        help="SQLite evaluation database updated before and after every run.",
     )
     parser.add_argument(
         "--allow-external-execution",
@@ -344,6 +356,7 @@ def execute_campaign(
     planned_runs: tuple[PlannedRun, ...],
     allow_external_execution: bool,
     fail_fast: bool,
+    database_path: Path = REPO_ROOT / DEFAULT_DATABASE_PATH,
     command_runner: CommandRunnerPort = subprocess.run,
 ) -> tuple[CampaignRunResult, ...]:
     _validate_execution_permission(
@@ -356,21 +369,40 @@ def execute_campaign(
         allow_external_execution=allow_external_execution,
     )
     results: list[CampaignRunResult] = []
-    for planned_run in planned_runs:
-        result = _execute_planned_run(
-            planned_run=planned_run,
-            command_runner=command_runner,
-        )
-        results.append(result)
-        _write_json(campaign_root / "campaign_summary.json", _campaign_summary(
-            manifest=manifest,
-            planned_runs=planned_runs,
-            results=tuple(results),
-            allow_external_execution=allow_external_execution,
-            in_progress=len(results) < len(planned_runs),
-        ))
-        if fail_fast and result.status == "failed":
-            break
+    with EvaluationStore(database_path) as store:
+        def sync_database() -> None:
+            imported = TraceImporter(store).import_paths(
+                [campaign_root], experiment_id=planned_runs[0].campaign_id,
+            )
+            if imported.failures:
+                raise RuntimeError(f"Evaluation import failed: {imported.failures}")
+
+        sync_database()
+        try:
+            for planned_run in planned_runs:
+                result = _execute_planned_run(
+                    planned_run=planned_run,
+                    command_runner=command_runner,
+                    on_started=sync_database,
+                )
+                results.append(result)
+                sync_database()
+                _write_json(campaign_root / "campaign_summary.json", _campaign_summary(
+                    manifest=manifest,
+                    planned_runs=planned_runs,
+                    allow_external_execution=allow_external_execution,
+                    in_progress=True,
+                ))
+                if fail_fast and result.status == "failed":
+                    break
+        finally:
+            _write_json(campaign_root / "campaign_summary.json", _campaign_summary(
+                manifest=manifest,
+                planned_runs=planned_runs,
+                allow_external_execution=allow_external_execution,
+                in_progress=False,
+            ))
+            sync_database()
     return tuple(results)
 
 
@@ -408,11 +440,20 @@ def _initialize_campaign_directory(
             f"Refusing to reuse existing campaign directory: {campaign_root}"
         )
     campaign_root.mkdir(parents=True, exist_ok=False)
+    for planned_run in planned_runs:
+        planned_run.output_directory.mkdir()
+        status = (
+            "skipped_external_execution_disabled"
+            if planned_run.action == PlannedRunAction.SKIP_EXTERNAL_EXECUTION
+            else "not_started"
+        )
+        _write_json(planned_run.output_directory / "run_record.json", _run_record_payload(
+            planned_run=planned_run, status=status, started_at=None, completed_at=None,
+        ))
     (campaign_root / "campaign_manifest.json").write_bytes(manifest.source_path.read_bytes())
     _write_json(campaign_root / "campaign_summary.json", _campaign_summary(
         manifest=manifest,
         planned_runs=planned_runs,
-        results=(),
         allow_external_execution=allow_external_execution,
         in_progress=True,
     ))
@@ -424,8 +465,8 @@ def _execute_planned_run(
     *,
     planned_run: PlannedRun,
     command_runner: CommandRunnerPort,
+    on_started: Callable[[], None],
 ) -> CampaignRunResult:
-    planned_run.output_directory.mkdir(parents=True, exist_ok=False)
     started_at = _utc_now()
     if planned_run.action == PlannedRunAction.SKIP_EXTERNAL_EXECUTION:
         result = CampaignRunResult(
@@ -452,6 +493,7 @@ def _execute_planned_run(
         ),
     )
     started_clock = perf_counter()
+    on_started()
     try:
         completed = command_runner(
             _layer2_cli_command(planned_run),
@@ -461,13 +503,13 @@ def _execute_planned_run(
             raise RuntimeError(f"Layer 2 CLI exited with status {completed.returncode}.")
         trace_path = planned_run.output_directory / "full-trace-2.json"
         trace = json.loads(trace_path.read_text(encoding="utf-8"))
-    except Exception as exc:  # noqa: BLE001 - campaign failures are experimental observations.
+    except (Exception, KeyboardInterrupt) as exc:  # campaign failures are experimental observations.
         result = CampaignRunResult(
             scenario_id=planned_run.scenario.scenario_id,
             replica_index=planned_run.replica_index,
             thread_id=planned_run.thread_id,
             action=planned_run.action,
-            status="failed",
+            status="interrupted" if isinstance(exc, KeyboardInterrupt) else "failed",
             runtime_state=None,
             termination_reason=None,
             elapsed_seconds=round(perf_counter() - started_clock, 3),
@@ -475,6 +517,8 @@ def _execute_planned_run(
             error_type=type(exc).__name__,
         )
         _write_run_record(planned_run=planned_run, result=result, started_at=started_at)
+        if isinstance(exc, KeyboardInterrupt):
+            raise
         return result
 
     runtime = trace.get("runtime") if isinstance(trace.get("runtime"), dict) else {}
@@ -518,7 +562,6 @@ def _layer2_cli_command(planned_run: PlannedRun) -> list[str]:
     return command
 
 
-# Recover the canonical task state from the public Layer 2 trace shape.
 # Normalize enum-backed runtime fields into stable JSON and console values.
 def _enum_text(value: Any) -> str | None:
     if value is None:
@@ -554,7 +597,7 @@ def _run_record_payload(
     *,
     planned_run: PlannedRun,
     status: str,
-    started_at: str,
+    started_at: str | None,
     completed_at: str | None,
     runtime_state: str | None = None,
     termination_reason: str | None = None,
@@ -590,10 +633,17 @@ def _campaign_summary(
     *,
     manifest: CampaignManifest,
     planned_runs: tuple[PlannedRun, ...],
-    results: tuple[CampaignRunResult, ...],
     allow_external_execution: bool,
     in_progress: bool,
 ) -> dict[str, Any]:
+    records = [
+        json.loads((run.output_directory / "run_record.json").read_text(encoding="utf-8"))
+        for run in planned_runs
+    ]
+    status_counts: dict[str, int] = {}
+    for record in records:
+        status = record["status"]
+        status_counts[status] = status_counts.get(status, 0) + 1
     return {
         "record_version": "evaluation_campaign_summary.v1",
         "pool_id": manifest.pool_id,
@@ -601,24 +651,13 @@ def _campaign_summary(
         "manifest_sha256": manifest.digest,
         "allow_external_execution": allow_external_execution,
         "planned_run_count": len(planned_runs),
-        "completed_run_count": len(results),
+        "completed_run_count": sum(
+            record["status"] not in {"not_started", "started", "waiting_human_review"}
+            for record in records
+        ),
         "in_progress": in_progress,
-        "status_counts": _status_counts(results),
-        "runs": [
-            {
-                "scenario_id": result.scenario_id,
-                "replica_index": result.replica_index,
-                "thread_id": result.thread_id,
-                "action": result.action.value,
-                "status": result.status,
-                "runtime_state": result.runtime_state,
-                "termination_reason": result.termination_reason,
-                "elapsed_seconds": result.elapsed_seconds,
-                "output_directory": str(result.output_directory),
-                "error_type": result.error_type,
-            }
-            for result in results
-        ],
+        "status_counts": dict(sorted(status_counts.items())),
+        "runs": records,
     }
 
 
@@ -632,10 +671,12 @@ def _status_counts(results: tuple[CampaignRunResult, ...]) -> dict[str, int]:
 
 # Emit UTF-8 JSON in one place so campaign records use a consistent audit-safe format.
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.write_text(
+    temporary_path = path.with_suffix(path.suffix + ".tmp")
+    temporary_path.write_text(
         json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    temporary_path.replace(path)
 
 
 # Produce ISO timestamps in UTC for campaign records without relying on local terminal time.
@@ -690,6 +731,7 @@ def main() -> int:
         planned_runs=planned_runs,
         allow_external_execution=args.allow_external_execution,
         fail_fast=args.fail_fast,
+        database_path=args.database,
     )
     return _print_result_summary(results)
 

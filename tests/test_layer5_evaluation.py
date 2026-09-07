@@ -4,6 +4,7 @@ import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from layer5_evaluation_fixtures import trace_payload as _trace_payload, write_trace as _write_trace, write_run_record
 
 from layer5_evaluation_continuous_improvement import (
     EvaluationStore,
@@ -14,6 +15,65 @@ from layer5_evaluation_continuous_improvement import (
 
 
 class Layer5EvaluationTests(unittest.TestCase):
+    def test_corrupt_trace_keeps_failed_run_and_reports_import_error(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            record = write_run_record(root, status="failed")
+            trace = record.parent / "full-trace-2.json"
+            trace.write_text("{truncated", encoding="utf-8")
+            with EvaluationStore(root / "evaluation.sqlite3") as store:
+                result = TraceImporter(store).import_paths([root], experiment_id="campaign-1")
+                self.assertEqual(len(result.failures), 1)
+                self.assertEqual(result.imported, (record.resolve(),))
+                summary = build_evaluation_summary(store)
+                self.assertEqual(summary.total_runs, 1)
+                self.assertEqual(summary.runtime_statuses, {"runtime_failure": 1})
+
+    def test_record_only_is_idempotent_and_later_trace_replaces_placeholder(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            record = write_run_record(root)
+            with EvaluationStore(root / "evaluation.sqlite3") as store:
+                importer = TraceImporter(store)
+                importer.import_paths([record], experiment_id="campaign-1")
+                repeated = importer.import_paths([record], experiment_id="campaign-1")
+                self.assertEqual(repeated.skipped, (record.resolve(),))
+                summary = build_evaluation_summary(store)
+                self.assertEqual(summary.not_started_runs, 1)
+                self.assertEqual(summary.attempted_runs, 0)
+                self.assertIsNone(summary.technical_completion_rate)
+                self.assertIsNone(summary.family_breakdown["research"]["technical_completion_rate"])
+                trace = record.parent / "full-trace-2.json"
+                trace.write_text(json.dumps(_trace_payload()), encoding="utf-8")
+                write_run_record(root, status="finished", elapsed_seconds=12.5)
+                importer.import_paths([record], experiment_id="campaign-1")
+                self.assertEqual(len(store.query("SELECT * FROM runs")), 1)
+                summary = build_evaluation_summary(store)
+                self.assertEqual(summary.trace_backed_runs, 1)
+                self.assertEqual(summary.not_started_runs, 0)
+                self.assertEqual(summary.technical_completion_rate, 1)
+                store.set_task_result(run_id="run-1", result="correct", method="human")
+                write_run_record(root, status="finished", elapsed_seconds=20.0)
+                importer.import_paths([record], experiment_id="campaign-1")
+                updated = store.query("SELECT * FROM runs")[0]
+                self.assertEqual(updated["duration_seconds"], 20.0)
+                self.assertEqual(updated["task_result"], "correct")
+
+    def test_empty_denominators_remain_unavailable_in_json_and_svg(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            with EvaluationStore(root / "evaluation.sqlite3") as store:
+                summary = build_evaluation_summary(store)
+                self.assertIsNone(summary.technical_completion_rate)
+                self.assertIsNone(summary.human_intervention_rate)
+                self.assertIsNone(summary.failed_tool_rate)
+                self.assertIsNone(summary.correct_rate)
+                self.assertIsNone(summary.escalation_f1)
+                generate_evaluation_report(store, output_dir=root / "report")
+                exported = json.loads((root / "report" / "summary.json").read_text())
+                self.assertIsNone(exported["technical_completion_rate"])
+                self.assertIn("N/D", (root / "report" / "efficiency_averages.svg").read_text())
+
     # Import the canonical facts once even when the same trace is discovered twice.
     def test_trace_ingestion_is_idempotent(self) -> None:
         with TemporaryDirectory() as directory:
@@ -350,93 +410,6 @@ class Layer5EvaluationTests(unittest.TestCase):
             with EvaluationStore(root / "evaluation.sqlite3") as store:
                 self.assertEqual(TraceImporter(store).discover([root]), [])
 
-# Write one compact v6 trace covering every Layer 5 table.
-def _write_trace(root: Path) -> Path:
-    trace_dir = root / "run-1"
-    trace_dir.mkdir()
-    path = trace_dir / "full-trace-2.json"
-    path.write_text(json.dumps(_trace_payload()), encoding="utf-8")
-    return path
-
-
-# Build the minimal canonical trace fields consumed by Layer 5.
-def _trace_payload() -> dict[str, object]:
-    return {
-        "trace_version": "layer2_trace.v6",
-        "runtime": {
-            "thread_id": "run-1",
-            "current_state": "completed",
-            "termination_reason": None,
-            "actor_turn_count": 3,
-            "step_history": [{"node_name": "replanner"}],
-        },
-        "intake": {
-            "goal": "Send a governed result.",
-            "context": "Deterministic test.",
-            "constraints": ["Require review."],
-            "success_criteria": ["Operation executed."],
-            "sensitivity": "high",
-            "execution_intent": "execute_after_governance",
-            "policy_profile_name": "default",
-            "confidence_threshold": 0.7,
-            "read_only_mode": False,
-        },
-        "planner_name": "test-planner",
-        "planner_prompt_version": "planner-v1",
-        "actor": {
-            "actor_name": "test-actor",
-            "actor_prompt_version": "actor-v1",
-            "external_operation": None,
-        },
-        "tool_calls": [
-            {"tool_name": "web_search", "success": True},
-            {"tool_name": "fetch_url_text", "success": False},
-        ],
-        "governance_passes": [
-            {
-                "pass_index": 1,
-                "directive": "wait_human_review",
-                "policy_decision": "require_human_review",
-                "reason_codes": ["judge_uncertain"],
-                "requires_human_review": True,
-                "policy_bundle_version": "policy-v1",
-                "policy_config_version": "config-v1",
-            },
-            {
-                "pass_index": 2,
-                "directive": "continue",
-                "policy_decision": "allow",
-                "reason_codes": ["local_output_allowed"],
-                "requires_human_review": False,
-                "policy_bundle_version": "policy-v1",
-                "policy_config_version": "config-v1",
-            },
-        ],
-        "human_review": {
-            "decision_history": [
-                {
-                    "request_id": "review-1",
-                    "decision_type": "modify_and_continue",
-                    "reviewer_id": "reviewer-1",
-                    "note": "Corrected target.",
-                    "external_operation_edit": {"target": "safe-target"},
-                    "approved_operation_digest": "a" * 64,
-                }
-            ]
-        },
-        "external_execution": {
-            "receipt_history": [
-                {
-                    "operation_id": "operation-1",
-                    "capability_id": "smtp_email",
-                    "payload_digest": "a" * 64,
-                    "status": "executed",
-                    "started_at": "2026-08-05T10:00:00+00:00",
-                    "completed_at": "2026-08-05T10:00:02+00:00",
-                }
-            ]
-        },
-    }
 
 
 if __name__ == "__main__":

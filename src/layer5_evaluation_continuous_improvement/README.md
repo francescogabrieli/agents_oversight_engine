@@ -18,14 +18,20 @@ Il package pubblico è `layer5_evaluation_continuous_improvement`. I principali 
 
 Non importa modelli del runtime live e usa soltanto la libreria standard Python.
 
-Esempio operativo:
+Il runner `scripts/run_evaluation_campaign.py` aggiorna automaticamente il database
+`artifacts/evaluation/layer5_evaluation.sqlite3` (personalizzabile con `--database`),
+usando il `campaign_id` come identificativo dell'esperimento. Registra l'intero piano
+prima di lanciare il primo comando e sincronizza il database prima e dopo ogni run.
+`--dry-run` non crea né artifact né database.
+
+Esempio operativo (con `src` nel percorso Python; dalla root è utilizzabile anche
+`python -m src.layer5_evaluation_continuous_improvement.main`):
 
 ```text
-python -m layer5_evaluation_continuous_improvement.main --database artifacts/evaluation/layer5.sqlite3 ingest artifacts/runtime --experiment-id baseline
-python -m layer5_evaluation_continuous_improvement.main --database artifacts/evaluation/layer5.sqlite3 assess-run RUN_ID correct --method human
-python -m layer5_evaluation_continuous_improvement.main --database artifacts/evaluation/layer5.sqlite3 assess-governance EVENT_ID yes
-python -m layer5_evaluation_continuous_improvement.main --database artifacts/evaluation/layer5.sqlite3 assess-operation ROW_ID yes
-python -m layer5_evaluation_continuous_improvement.main --database artifacts/evaluation/layer5.sqlite3 report --output artifacts/evaluation/baseline-report --experiment-id baseline
+python -m layer5_evaluation_continuous_improvement.main assess-run RUN_ID correct --method human
+python -m layer5_evaluation_continuous_improvement.main assess-governance EVENT_ID yes
+python -m layer5_evaluation_continuous_improvement.main assess-operation ROW_ID yes
+python -m layer5_evaluation_continuous_improvement.main report --output artifacts/evaluation/baseline-report --experiment-id CAMPAIGN_ID
 ```
 
 ## Flusso generale
@@ -75,7 +81,16 @@ continuazione o l'arresto definitivo. Ogni run pianificata produce sempre un
 `run_record.json`: se il processo fallisce prima del trace, o una run viene esplicitamente
 saltata, Layer 5 importa comunque il record con `trace_available = 0`. `total_runs`
 rappresenta quindi il piano completo; i tassi operativi usano le run tentate e riportano
-separatamente run saltate e copertura dei trace.
+separatamente run saltate, non iniziate e copertura dei trace.
+
+Le run successive a un `--fail-fast` o a un'interruzione restano `not_started`:
+`total_runs = attempted_runs + skipped_runs + not_started_runs`. Un Ctrl+C durante
+il comando registra `interrupted`. Una terminazione forzata che impedisce il cleanup
+lascia il record già salvato come `started` (stato tecnico incompleto), senza perdere
+il resto del piano. Per recuperare la proiezione si può eseguire `ingest` sulla sola
+directory `artifacts/evaluation/input/realistic_pool_v1/CAMPAIGN_ID`, con
+`--experiment-id CAMPAIGN_ID`. Un trace danneggiato viene segnalato come errore, ma
+il record della run viene comunque conservato; non viene inventata una trace valida.
 
 ### `governance_events`
 
@@ -129,10 +144,11 @@ qualità della policy.
 ### Confine del corpus
 
 L'importer accetta i `full-trace-2.json` in versione `layer2_trace.v6` e, per le
-campagne, anche i `run_record.json` privi di un trace fratello. File di debug o exchange
+campagne, anche i `run_record.json` privi di un trace fratello valido. File di debug o exchange
 privi sia di trace sia di record di campagna restano esclusi. Le run di sviluppo che non
-appartengono a una campagna versionata vivono in `artifacts/runtime/legacy/` e restano
-fuori dal corpus per costruzione.
+appartengono a una campagna versionata non vanno importate nel corpus. L'archivio
+pre-evaluation è in `artifacts/runtime_pre_evaluation/`; il runner importa soltanto
+la propria directory di campagna, non l'intero albero runtime.
 
 ## Metriche e risultati
 
@@ -154,6 +170,11 @@ Il Layer 5 calcola nel primo slice:
 - confronto tra esperimenti e configurazioni.
 
 Le metriche vengono calcolate dai dati elementari tramite query e funzioni dedicate, senza salvare inizialmente aggregati ridondanti nel database.
+
+Un denominatore vuoto produce `None`/`null`, visualizzato come `N/D`, non uno zero.
+Uno zero misurato resta invece zero. Precision, recall e F1 sono calcolati dal modulo
+canonico delle metriche. Nella confusion matrix le righe indicano la necessità della
+review e le colonne la richiesta effettiva: la prima riga è `TP, FN`, la seconda `FP, TN`.
 
 ## Plotting e reporting
 

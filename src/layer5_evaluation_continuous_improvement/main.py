@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .ingestion import TraceImporter
 from .reporting import generate_evaluation_report
-from .store import EvaluationStore
+from .store import DEFAULT_DATABASE_PATH, EvaluationStore
 
 
 # Build the standalone Layer 5 command-line interface.
@@ -15,7 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--database",
         type=Path,
-        default=Path("artifacts/evaluation/layer5_evaluation.sqlite3"),
+        default=DEFAULT_DATABASE_PATH,
     )
     commands = parser.add_subparsers(dest="command", required=True)
 

@@ -57,18 +57,18 @@ def generate_evaluation_report(
     _write_csv(reason_csv, reason_code_rows)
     files.append(reason_csv)
 
-    efficiency_data: dict[str, float | int] = {
-        "Turni Actor medi": summary.avg_actor_turns if summary.avg_actor_turns is not None else 0.0,
-        "Tool call medie": summary.avg_tool_calls if summary.avg_tool_calls is not None else 0.0,
-        "Replanning medi": summary.avg_replanning_count if summary.avg_replanning_count is not None else 0.0,
-        "Pass di governance medi": summary.avg_governance_passes if summary.avg_governance_passes is not None else 0.0,
+    efficiency_data: dict[str, float | int | None] = {
+        "Turni Actor medi": summary.avg_actor_turns,
+        "Tool call medie": summary.avg_tool_calls,
+        "Replanning medi": summary.avg_replanning_count,
+        "Pass di governance medi": summary.avg_governance_passes,
     }
     if summary.avg_review_time_seconds is not None:
         efficiency_data["Tempo review medio (s)"] = summary.avg_review_time_seconds
     if summary.avg_run_duration_seconds is not None:
         efficiency_data["Durata run media (s)"] = summary.avg_run_duration_seconds
 
-    plot_specs: dict[str, tuple[str, dict[str, int] | dict[str, float | int]]] = {
+    plot_specs: dict[str, tuple[str, dict[str, int] | dict[str, float | int | None]]] = {
         "campaign_coverage.svg": (
             "Copertura del corpus sperimentale",
             {
@@ -76,6 +76,7 @@ def generate_evaluation_report(
                 "Run tentate": summary.attempted_runs,
                 "Run con trace": summary.trace_backed_runs,
                 "Run saltate": summary.skipped_runs,
+                "Run non eseguite": summary.not_started_runs,
             },
         ),
         "runtime_statuses.svg": ("Stato tecnico delle run", summary.runtime_statuses),
@@ -106,14 +107,14 @@ def generate_evaluation_report(
         "family_completion.svg": (
             "Completamento tecnico per famiglia di task",
             {
-                family: values["technical_completion_rate"] or 0.0
+                family: values["technical_completion_rate"]
                 for family, values in summary.family_breakdown.items()
             },
         ),
         "family_intervention.svg": (
             "Tasso di intervento umano per famiglia di task",
             {
-                family: values["human_intervention_rate"] or 0.0
+                family: values["human_intervention_rate"]
                 for family, values in summary.family_breakdown.items()
             },
         ),
@@ -145,6 +146,7 @@ def generate_evaluation_report(
                 "attempted_run_count": summary.attempted_runs,
                 "trace_backed_run_count": summary.trace_backed_runs,
                 "skipped_run_count": summary.skipped_runs,
+                "not_started_run_count": summary.not_started_runs,
                 "files": [path.name for path in files],
             },
             indent=2,
@@ -178,23 +180,23 @@ def _replan_recovery_breakdown(summary) -> dict[str, int]:
 
 
 # Render a dependency-free SVG bar chart suitable for thesis export.
-def _bar_chart_svg(title: str, values: dict[str, int] | dict[str, float | int]) -> str:
-    items = list(values.items()) or [("nessun dato", 0)]
+def _bar_chart_svg(title: str, values: dict[str, int] | dict[str, float | int | None]) -> str:
+    items = list(values.items()) or [("nessun dato", None)]
     width = 900
     left = 270
     top = 90
     row_height = 58
     chart_width = 540
-    maximum = max((float(value) for _, value in items), default=0.0) or 1.0
+    maximum = max((float(value) for _, value in items if value is not None), default=0.0) or 1.0
     height = top + len(items) * row_height + 50
     elements = [
         f'<text x="40" y="45" font-size="26" font-family="sans-serif">{html.escape(title)}</text>'
     ]
     for index, (label, val) in enumerate(items):
         y = top + index * row_height
-        val_float = float(val)
+        val_float = float(val) if val is not None else 0.0
         bar_width = int(chart_width * val_float / maximum) if maximum > 0 else 0
-        display_val = f"{val:.2f}" if isinstance(val, float) else str(val)
+        display_val = "N/D" if val is None else (f"{val:.2f}" if isinstance(val, float) else str(val))
         elements.extend(
             [
                 f'<text x="{left - 15}" y="{y + 25}" text-anchor="end" font-size="18" font-family="sans-serif">{html.escape(label)}</text>',
@@ -214,8 +216,8 @@ def _bar_chart_svg(title: str, values: dict[str, int] | dict[str, float | int]) 
 def _confusion_matrix_svg(values: dict[str, int], *, labeled: int, total: int) -> str:
     cells = [
         ("Review richiesta / necessaria", values["true_positive"], 260, 155, "#86efac"),
-        ("Review richiesta / evitabile", values["false_positive"], 520, 155, "#fde68a"),
-        ("Review mancata", values["false_negative"], 260, 305, "#fca5a5"),
+        ("Review mancata", values["false_negative"], 520, 155, "#fca5a5"),
+        ("Review richiesta / evitabile", values["false_positive"], 260, 305, "#fde68a"),
         ("Continuazione corretta", values["true_negative"], 520, 305, "#bfdbfe"),
     ]
     coverage = (
@@ -231,6 +233,10 @@ def _confusion_matrix_svg(values: dict[str, int], *, labeled: int, total: int) -
         '<text x="40" y="45" font-size="26" font-family="sans-serif">Confusion matrix delle escalation</text>',
         f'<text x="40" y="72" font-size="15" fill="#475569" font-family="sans-serif">{html.escape(coverage)}</text>',
         '<text x="520" y="112" text-anchor="middle" font-size="18" font-family="sans-serif">Decisione del sistema</text>',
+        '<text x="380" y="142" text-anchor="middle" font-family="sans-serif">Review richiesta</text>',
+        '<text x="640" y="142" text-anchor="middle" font-family="sans-serif">Continuazione</text>',
+        '<text x="240" y="220" text-anchor="end" font-family="sans-serif">Review necessaria</text>',
+        '<text x="240" y="370" text-anchor="end" font-family="sans-serif">Review non necessaria</text>',
     ]
     for label, value, x, y, color in cells:
         elements.extend(

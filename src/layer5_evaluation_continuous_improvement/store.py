@@ -7,6 +7,7 @@ from typing import Any
 
 
 SCHEMA_VERSION = "layer5_evaluation_db.v4"
+DEFAULT_DATABASE_PATH = Path("artifacts/evaluation/layer5_evaluation.sqlite3")
 
 
 class EvaluationStore:

@@ -24,12 +24,12 @@ figure della tesi, non per il runtime o i test:
 
 ## Flusso Operativo Completo (Layer 2 → Layer 4 → Layer 5 → Tesi)
 
-1. **Esecuzione delle Run**: Il runtime live di Layer 2 genera i trace canonici `layer2_trace.v6` in `artifacts/runtime/<thread_id>/full-trace-2.json`.
-2. **Ingestione in SQLite**:
+1. **Esecuzione delle Run**: Il runner `scripts/run_evaluation_campaign.py` lancia la CLI live e raccoglie trace e record in `artifacts/evaluation/input/realistic_pool_v1/<campaign_id>/<thread_id>/`. Registra in SQLite anche le run fallite, saltate e non iniziate.
+2. **Ingestione in SQLite**: Automatica prima e dopo ogni run, nel database `artifacts/evaluation/layer5_evaluation.sqlite3`. Solo per recupero o reimportazione offline della campagna:
    ```bash
-   python -m layer5_evaluation_continuous_improvement.main --database artifacts/evaluation/layer5_evaluation.sqlite3 ingest artifacts/runtime --experiment-id baseline_experiment
+   python -m src.layer5_evaluation_continuous_improvement.main ingest artifacts/evaluation/input/realistic_pool_v1/CAMPAIGN_ID --experiment-id CAMPAIGN_ID
    ```
-3. **(Opzionale) Assegnazione Ground Truth**:
+3. **Assegnazione Ground Truth**: Necessaria per misurare correttezza semantica e qualità delle escalation. Senza annotazioni le metriche non disponibili sono `N/D`, non zero. Annotare anche eventi senza review per valutare le escalation mancate.
    ```bash
    python -m layer5_evaluation_continuous_improvement.main --database artifacts/evaluation/layer5_evaluation.sqlite3 assess-run <RUN_ID> correct --method human
    python -m layer5_evaluation_continuous_improvement.main --database artifacts/evaluation/layer5_evaluation.sqlite3 assess-governance <EVENT_ID> yes
