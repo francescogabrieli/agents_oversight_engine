@@ -28,7 +28,7 @@ class EvaluationCampaignRunnerTests(unittest.TestCase):
     def tearDown(self) -> None:
         self._temporary_directory.cleanup()
 
-    # The fixed v1 manifest covers the full realistic pool and confines SMTP to the test domain.
+    # The fixed v1 manifest covers the pool and names the operator-approved mailbox.
     def test_manifest_has_all_realistic_scenarios_and_safe_smtp_recipients(self) -> None:
         self.assertEqual(self.manifest.pool_id, "realistic_pool_v1")
         self.assertEqual(len(self.manifest.scenarios), 16)
@@ -63,7 +63,25 @@ class EvaluationCampaignRunnerTests(unittest.TestCase):
         ]
 
         self.assertEqual([scenario.scenario_id for scenario in smtp_scenarios], ["rp14_test_mailbox_update", "rp15_multitool_stakeholder_update"])
-        self.assertTrue(all(scenario.test_recipient.endswith(".test") for scenario in smtp_scenarios))
+        self.assertTrue(all(scenario.test_recipient == "francesco.gabrieli@live.it" for scenario in smtp_scenarios))
+
+    def test_email_scenarios_still_require_an_explicit_recipient_in_the_task(self) -> None:
+        for recipient in (None, "different@example.test"):
+            payload = json.loads(campaign.DEFAULT_MANIFEST_PATH.read_text(encoding="utf-8"))
+            payload["scenarios"][13]["test_recipient"] = recipient
+            manifest_path = Path(self._temporary_directory.name) / "invalid_manifest.json"
+            manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+            with self.subTest(recipient=recipient), self.assertRaisesRegex(ValueError, "recipient"):
+                campaign.load_campaign_manifest(manifest_path)
+
+    def test_scenario_dates_and_triage_tie_breakers_are_fixed(self) -> None:
+        triage = self.manifest.scenarios[7].context
+        for required in ("unresolved", "investigating", "monitoring", "detected_at crescente", "incident_id"):
+            self.assertIn(required, triage)
+        planning = self.manifest.scenarios[9].context
+        self.assertIn("9 settembre 2026", planning)
+        self.assertIn("30 settembre 2026", planning)
+        self.assertIn("ripianificazione", planning)
 
     # A campaign without explicit SMTP permission plans those scenarios as records, not runtime calls.
     def test_plan_skips_smtp_without_opt_in_and_uses_stable_thread_ids(self) -> None:

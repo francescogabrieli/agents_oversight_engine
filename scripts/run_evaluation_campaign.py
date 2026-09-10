@@ -147,7 +147,7 @@ def parse_args() -> argparse.Namespace:
         "--allow-external-execution",
         action="store_true",
         help=(
-            "Allow the two SMTP sandbox scenarios. Without this flag they are "
+            "Allow the two SMTP scenarios, including real delivery to the manifest recipient. Without this flag they are "
             "recorded as skipped and never started."
         ),
     )
@@ -279,9 +279,9 @@ def _validate_scenario_collection(scenarios: tuple[EvaluationScenario, ...]) -> 
         raise ValueError("Realistic campaign scenarios must be the ordered rp01 through rp16 set.")
     for scenario in scenarios:
         if scenario.external_execution == ExternalExecutionKind.EMAIL_SEND:
-            if scenario.test_recipient is None or not scenario.test_recipient.endswith(".test"):
+            if scenario.test_recipient is None:
                 raise ValueError(
-                    f"SMTP scenario '{scenario.scenario_id}' must use a .test recipient."
+                    f"SMTP scenario '{scenario.scenario_id}' must declare its evaluation recipient."
                 )
             if scenario.test_recipient not in scenario.task:
                 raise ValueError(

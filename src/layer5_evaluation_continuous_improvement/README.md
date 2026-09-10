@@ -127,6 +127,9 @@ Permette di distinguere operazioni corrette, errori intercettati prima dell'esec
 
 ## Valutazione della correttezza
 
+Per il realistic pool, fissare e usare la [rubric per scenario](../../docs/evaluation/realistic_pool_v1_rubric.md)
+prima della campagna. Distingue risultato del task, intervento umano e correttezza della governance.
+
 `completed` non implica `correct`. Il risultato del task può essere determinato tramite:
 
 - test automatico;
