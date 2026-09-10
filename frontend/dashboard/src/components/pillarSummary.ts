@@ -55,7 +55,7 @@ function evidenceHighlights(facts: Facts): PillarHighlight[] {
       rows,
       "Fonti indipendenti",
       `${retrieved} su ${required} richieste`,
-      sourcesOk === false ? "warn" : "ok",
+      sourcesOk === null ? "neutral" : sourcesOk ? "ok" : "warn",
     );
   }
 
@@ -65,8 +65,8 @@ function evidenceHighlights(facts: Facts): PillarHighlight[] {
     push(
       rows,
       "Prove citate dall'agente",
-      refsValid === false ? `${refCount}, ma non tutte valide` : `${refCount}, tutte valide`,
-      refsValid === false ? "warn" : "ok",
+      refsValid === null ? `${refCount}, validità non riportata` : refsValid ? `${refCount}, tutte valide` : `${refCount}, ma non tutte valide`,
+      refsValid === null ? "neutral" : refsValid ? "ok" : "warn",
     );
   }
 
@@ -75,7 +75,7 @@ function evidenceHighlights(facts: Facts): PillarHighlight[] {
     push(
       rows,
       "Contenuto davvero recuperato",
-      contentOk ? "Sì, testo integrale" : "No, solo titoli o snippet",
+      contentOk ? "Sì, contenuto recuperato (non necessariamente integrale)" : "Requisito di contenuto recuperato non soddisfatto",
       contentOk ? "ok" : "warn",
     );
   }

@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { fetchReviewInbox } from "../api";
 import { communicationPhaseLabel, executionIntentLabel, executionStatusLabel } from "../components/executionPresentation";
 import { humanReviewDecisionLabel } from "../components/humanReviewPresentation";
+import { DecisionDeliveryStatus } from "../components/DecisionDeliveryStatus";
 import { reasonCodeExplanation } from "../components/reasonCodePresentation";
 import {
   RuntimeStateIcon,
@@ -68,11 +69,10 @@ function InboxRow({ item, interactive = true }: { item: ReviewInboxEntry; intera
         })()}
         {item.allowed_decisions.length > 0 ? (
           <div className="inbox-row-actions">
-            {item.allowed_decisions.map((d) => (
-              <span key={d} className="action-chip">{humanReviewDecisionLabel(d)}</span>
-            ))}
+            <span>Apri la revisione per scegliere: {item.allowed_decisions.map(humanReviewDecisionLabel).join(" · ")}</span>
           </div>
         ) : null}
+        {!interactive ? <DecisionDeliveryStatus status={item.delivery_status} ownerAvailable={item.owner_available} /> : null}
       </div>
     </>
   );
@@ -87,7 +87,7 @@ function InboxRow({ item, interactive = true }: { item: ReviewInboxEntry; intera
 }
 
 export function ReviewInboxPage() {
-  const { data, error, loading } = usePolledResource(fetchReviewInbox, []);
+  const { data, error, loading, updatedAt } = usePolledResource(fetchReviewInbox, []);
   const items = data?.items ?? [];
   const completedItems = data?.completed_items ?? [];
   const location = useLocation();
@@ -122,6 +122,7 @@ export function ReviewInboxPage() {
       </div>
 
       {error ? <div className="alert alert-error">{error}</div> : null}
+      <p className="connection-status" role="status">{error ? "Connessione interrotta: la coda potrebbe non essere aggiornata." : updatedAt ? `Ultimo aggiornamento della coda: ${new Date(updatedAt).toLocaleTimeString()}.` : "Caricamento della coda…"}</p>
 
       <div className="card">
         <div className="card-header">
@@ -152,10 +153,10 @@ export function ReviewInboxPage() {
         <div className="card completed-reviews-card">
           <div className="card-header">
             <div>
-              <h2 className="card-title">Completate</h2>
-              <p className="card-caption">Decisioni inviate negli ultimi due minuti.</p>
+              <h2 className="card-title">Decisioni inviate</h2>
+              <p className="card-caption">Invii degli ultimi due minuti, non run completate. Verifica sotto lo stato di consegna.</p>
             </div>
-            <span className="badge badge-completed">{completedItems.length} risolte</span>
+            <span className="badge badge-info">{completedItems.length} inviate</span>
           </div>
           <div className="card-body">
             <div className="inbox-list">

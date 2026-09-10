@@ -44,7 +44,7 @@ export function externalExecutionNarrative(
   status: string | null | undefined,
 ) {
   if (intent === "proposal_only") {
-    return "Questa è solo una bozza approvata: nessuna azione esterna reale è stata eseguita.";
+    return "L'intento del task è produrre una proposta, non eseguire un'azione esterna.";
   }
   if (status === "executed") {
     return "L'operazione esterna è stata eseguita dopo l'approvazione della governance.";
@@ -54,6 +54,9 @@ export function externalExecutionNarrative(
   }
   if (status === "failed") {
     return "L'operazione esterna è stata tentata ma non è andata a buon fine.";
+  }
+  if (status === "indeterminate") {
+    return "L'operazione potrebbe essere già stata eseguita, ma manca una conferma affidabile. Verifica l'esito presso il sistema destinatario; non ripetere l'azione per supposizione.";
   }
   return "L'operazione esterna non è ancora stata eseguita.";
 }

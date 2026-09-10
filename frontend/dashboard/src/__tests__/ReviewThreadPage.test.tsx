@@ -174,12 +174,14 @@ describe("ReviewThreadPage", () => {
       "Modifica",
       "Richiedi più evidenze",
       "Ripianifica",
-      "Chiedi un chiarimento",
+      "Segnala chiarimento necessario",
       "Interrompi",
     ]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
-    await user.click(screen.getByRole("button", { name: "Invia decisione" }));
+    expect(screen.getByRole("button", { name: "Invia decisione" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Approva" }));
+    await user.click(screen.getByRole("button", { name: "Invia decisione: Approva" }));
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/reviews/thread-1/resume",

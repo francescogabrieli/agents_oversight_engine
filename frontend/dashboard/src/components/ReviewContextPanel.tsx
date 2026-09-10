@@ -7,6 +7,7 @@ import { PillarDiagnosticCard } from "./PillarDiagnosticCard";
 import { PriorDecisionsPanel } from "./PriorDecisionsPanel";
 import { reasonCodeChipLabel, reasonCodeExplanation, reasonCodeLabel } from "./reasonCodePresentation";
 import { runtimeStateLabel } from "./runtimeStatePresentation";
+import { SourceReference } from "./SourceReference";
 
 type ReviewContextPanelProps = {
   taskGoal: string | null;
@@ -160,8 +161,8 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
           <article className="open-concerns" aria-label="Altre criticità ancora aperte">
             <p className="review-diagnostic-title">Altre criticità ancora aperte</p>
             <p className="review-context-summary" style={{ margin: 0 }}>
-              Non sono il motivo di questa fermata, ma non sono state risolte: l'attività si
-              fermerà di nuovo su queste finché restano aperte.
+              Sono ulteriori rilievi registrati dalla governance. Potrebbero richiedere
+              un nuovo intervento se restano applicabili dopo la tua decisione.
             </p>
             <ul className="review-narrative-list">
               {openConcerns.map((code) => (
@@ -200,7 +201,7 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
                         </span>{" "}
                         {match.excerpt}
                         {match.locator ? (
-                          <span className="review-evidence-locator">{match.locator}</span>
+                          <SourceReference locator={match.locator} />
                         ) : null}
                       </p>
                     ))
@@ -236,10 +237,13 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
             <p className="review-diagnostic-title">Fonti alla base della proposta</p>
             {selectedEvidenceReferences.map((reference) => (
               <div className="review-source" key={reference.observation_id}>
-                {reference.locator ? <div className="review-evidence-locator">{reference.locator}</div> : null}
-                {/* Retrieved pages arrive with their whole chrome (nav, footer) in the
-                    excerpt; clamping keeps the list scannable without dropping text. */}
-                <div className="review-source-excerpt">{reference.content_excerpt}</div>
+                {reference.locator ? <SourceReference locator={reference.locator} /> : null}
+                {/* The backend supplies a bounded excerpt, not the complete source. */}
+                <details className="technical-details">
+                  <summary>Leggi l'estratto disponibile (non il documento completo)</summary>
+                  <div className="review-source-excerpt">{reference.content_excerpt}</div>
+                  {reference.source_timestamp ? <p>Data registrata della fonte: {reference.source_timestamp}</p> : null}
+                </details>
               </div>
             ))}
           </article>

@@ -62,7 +62,7 @@ function pillarNarrative(diagnostic: DashboardPillarDiagnostic, isDeciding: bool
   if (isDeciding) {
     return `La verifica delle ${label}${levelPart} è il motivo per cui l'attività si è fermata.`;
   }
-  return `La verifica delle ${label}${levelPart} è stata eseguita e non è la causa di questa fermata.`;
+  return `Dati della verifica delle ${label}${levelPart}. Il motivo selezionato dalla governance è indicato nel riepilogo della richiesta.`;
 }
 
 type PillarDiagnosticCardProps = {

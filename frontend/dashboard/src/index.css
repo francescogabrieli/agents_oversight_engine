@@ -11,7 +11,7 @@
   --border-soft:    rgba(15, 23, 42, 0.06);
   --text-primary:   #0d1117;
   --text-secondary: #4b5563;
-  --text-muted:     #9ca3af;
+  --text-muted:     #647084;
 
   /* indigo accent — replaces the blue */
   --accent:         #4f46e5;
@@ -661,13 +661,39 @@ body {
 .review-source:first-of-type { border-top: none; }
 .review-source .review-evidence-locator { margin-top: 0; overflow-wrap: anywhere; }
 .review-source-excerpt {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   color: var(--text-secondary);
   font-size: 12px;
   line-height: 1.5;
+}
+
+/* Keep the decision reachable without placing approval over unread content. */
+.review-action-nav {
+  position: sticky; top: 52px; z-index: 20;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 10px; padding: 10px 14px; background: var(--surface);
+  border: 1px solid var(--accent-border); border-radius: 8px;
+}
+#review-decision { scroll-margin-top: 135px; }
+.proposal-scroll { max-height: 360px; overflow: auto; padding: 12px; border: 1px solid var(--border); border-radius: 6px; }
+.connection-status, .delivery-status { font-size: 13px; color: var(--text-secondary); margin: 0; }
+.delivery-status p { margin: 4px 0; }
+.delivery-warning { color: var(--danger); }
+.review-evidence-locator { display: block; font-size: 13px; }
+a.review-evidence-locator { color: var(--accent); text-decoration: underline; }
+.btn-decision { min-height: 44px; font-size: 14px; }
+.btn-decision:disabled { opacity: .55; cursor: not-allowed; }
+.btn { font-size: 14px; min-height: 44px; }
+.card-caption, .review-context-summary, .review-diagnostic-summary, .form-label,
+.form-input, .form-textarea, .technical-details-summary { font-size: 13px; }
+.inbox-row-left { flex-wrap: wrap; }
+.inbox-row-title { white-space: normal; font-size: 14px; }
+.inbox-row-meta { flex-wrap: wrap; min-width: 0; }
+.inbox-row-id { white-space: normal; overflow-wrap: anywhere; }
+.action-submit-row { flex-wrap: wrap; }
+button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
+  outline: 3px solid var(--accent); outline-offset: 3px;
 }
 .actor-voice {
   display: grid;

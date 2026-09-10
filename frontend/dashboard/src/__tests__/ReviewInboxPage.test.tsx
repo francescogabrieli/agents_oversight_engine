@@ -82,7 +82,8 @@ describe("ReviewInboxPage", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("Completate")).toBeInTheDocument();
+    expect(await screen.findByText("Decisioni inviate")).toBeInTheDocument();
+    expect(screen.getByText(/Decisione registrata, in attesa/)).toBeInTheDocument();
     expect(screen.getByText("Resume the governed task.")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Resume the governed task/i })).not.toBeInTheDocument();
   });

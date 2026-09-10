@@ -1,13 +1,13 @@
-import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { fetchReviewDetail, resumeReviewThread } from "../api";
 import { DecisionForm } from "../components/DecisionForm";
+import { ProposalPanel } from "../components/ProposalPanel";
+import { DecisionDeliveryStatus } from "../components/DecisionDeliveryStatus";
 import { executionIntentLabel, executionStatusLabel, externalExecutionNarrative } from "../components/executionPresentation";
 import { KeyValueGrid } from "../components/KeyValueGrid";
 import { ReviewContextPanel } from "../components/ReviewContextPanel";
 import { runtimeStateBadgeClass, runtimeStateLabel } from "../components/runtimeStatePresentation";
 import { usePolledResource } from "../hooks";
-import type { ReviewDetailResponse } from "../types";
 
 function valueToString(value: unknown) {
   if (value === null || value === undefined) return null;
@@ -20,16 +20,9 @@ export function ReviewThreadPage() {
   const navigate = useNavigate();
   const decodedThreadId = decodeURIComponent(threadId);
   const resource = usePolledResource(() => fetchReviewDetail(decodedThreadId), [decodedThreadId]);
-  const [detailOverride, setDetailOverride] = useState<ReviewDetailResponse | null>(null);
-
-  useEffect(() => {
-    setDetailOverride(resource.data);
-  }, [resource.data]);
-
-  const detail = detailOverride ?? resource.data;
+  const detail = resource.data;
   const snapshot = detail?.dashboard_snapshot;
   const pendingRequest = snapshot?.human_review?.pending_request;
-  const draftBody = pendingRequest?.external_communication_draft?.body ?? null;
   const taskGoal = valueToString(detail?.runtime_summary?.task_goal);
   const governance = snapshot?.governance as Record<string, unknown> | null | undefined;
   const oversight = snapshot?.oversight as Record<string, unknown> | null | undefined;
@@ -64,34 +57,28 @@ export function ReviewThreadPage() {
       </section>
 
       {resource.error ? <div className="alert alert-error">{resource.error}</div> : null}
+      <p className="connection-status" role="status">
+        {resource.error ? "Connessione interrotta: sono mostrati gli ultimi dati ricevuti." : resource.updatedAt ? `Dashboard aggiornata alle ${new Date(resource.updatedAt).toLocaleTimeString()}. Questo non attesta che il runtime sia attivo.` : "Connessione alla dashboard in corso…"}
+      </p>
       {resource.loading && !detail ? <div className="skeleton" style={{ height: 120 }} /> : null}
+      {detail?.decision_submission ? <DecisionDeliveryStatus status={detail.decision_submission.delivery_status} ownerAvailable={detail.decision_submission.owner_available} /> : null}
 
       {detail && snapshot ? (
         <>
+          {pendingRequest ? <nav className="review-action-nav" aria-label="Navigazione della revisione">
+            <span>Richiesta in attesa della tua decisione</span>
+            <a className="btn btn-primary" href="#review-decision">Vai alla decisione ↓</a>
+          </nav> : null}
           {pendingRequest ? (
             <ReviewContextPanel taskGoal={taskGoal} snapshot={snapshot} />
           ) : null}
 
-          {draftBody ? (
-            <section className="card card-info">
-              <div className="card-header">
-                <div>
-                  <h2 className="card-title">Testo prodotto</h2>
-                  <p className="card-caption">Questo è il testo che verrà inviato se approvi.</p>
-                </div>
-                <span className="badge badge-info">
-                  {pendingRequest?.external_communication_draft?.channel ?? "bozza"}
-                </span>
-              </div>
-              <div className="card-body">
-                <pre className="produced-text">{draftBody}</pre>
-              </div>
-            </section>
-          ) : null}
+          {pendingRequest ? <ProposalPanel request={pendingRequest} /> : null}
 
           {pendingRequest ? (
             <DecisionForm
               detail={detail}
+              disabled={Boolean(resource.error)}
               onSubmit={async (payload) => {
                 const nextDetail = await resumeReviewThread(decodedThreadId, payload);
                 navigate("/", {

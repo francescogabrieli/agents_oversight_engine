@@ -14,8 +14,7 @@ export function App() {
         <span className="topbar-label">Layer 2 Runtime</span>
         <div className="topbar-spacer" />
         <span className="topbar-pill">
-          <span className="topbar-pill-dot" />
-          attivo
+          interfaccia di revisione
         </span>
       </header>
       <main className="page-content">

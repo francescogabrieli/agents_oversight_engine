@@ -4,18 +4,18 @@ const DECISION_LABELS: Record<string, string> = {
   modify_and_continue: "Modifica",
   request_more_evidence: "Richiedi più evidenze",
   replan: "Ripianifica",
-  ask_clarification: "Chiedi un chiarimento",
+  ask_clarification: "Segnala chiarimento necessario",
   abort: "Interrompi",
 };
 
 const DECISION_EXPLANATIONS: Record<string, string> = {
   approve_continue: "L'attività prosegue così come proposta.",
   approve_continue_read_only:
-    "L'attività prosegue, ma senza eseguire l'azione esterna: nessun effetto reale viene prodotto.",
-  modify_and_continue: "Puoi correggere il testo o i dati proposti prima che l'attività prosegua.",
-  request_more_evidence: "L'attività si ferma finché non vengono raccolte prove aggiuntive.",
+    "Richiedi la prosecuzione nel vincolo di sola lettura. Non autorizzi una proposta mutante invariata; il runtime verifica la compatibilità.",
+  modify_and_continue: "La proposta modificata torna alla governance: la modifica non equivale all'autorizzazione di invio o esecuzione.",
+  request_more_evidence: "L'agente riprende la raccolta delle evidenze. Spiega nella nota quali informazioni mancano.",
   replan: "L'attività torna alla fase di pianificazione per scegliere un percorso diverso.",
-  ask_clarification: "L'attività si ferma in attesa di una tua indicazione scritta.",
+  ask_clarification: "Registra quale chiarimento serve e mantiene il caso sospeso. Non risponde all'agente e non autorizza operazioni esterne.",
   abort: "L'attività viene interrotta definitivamente.",
 };
 
