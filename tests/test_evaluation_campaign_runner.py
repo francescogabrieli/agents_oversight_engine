@@ -108,6 +108,26 @@ class EvaluationCampaignRunnerTests(unittest.TestCase):
             {"rp14_test_mailbox_update", "rp15_multitool_stakeholder_update"},
         )
 
+    # Four separate batches cover the pool once without renumbering or overlapping scenarios.
+    def test_scenario_batches_cover_pool_and_reject_invalid_ranges(self) -> None:
+        selected = []
+        for start in (1, 5, 9, 13):
+            runs = campaign.plan_campaign_runs(
+                manifest=self.manifest, campaign_id=f"batch_{start}", replicas=1,
+                output_root=self.output_root, allow_external_execution=True,
+                scenario_start=start, scenario_end=start + 3,
+            )
+            self.assertEqual(len(runs), 4)
+            selected.extend(run.scenario.scenario_id for run in runs)
+        self.assertEqual(selected, [item.scenario_id for item in self.manifest.scenarios])
+        for start, end in ((0, 4), (5, 4), (13, 17)):
+            with self.subTest(start=start, end=end), self.assertRaisesRegex(ValueError, "Scenario range"):
+                campaign.plan_campaign_runs(
+                    manifest=self.manifest, campaign_id="invalid", replicas=1,
+                    output_root=self.output_root, allow_external_execution=True,
+                    scenario_start=start, scenario_end=end,
+                )
+
     # The batch runner launches the long-lived CLI and records every planned run.
     def test_execute_campaign_uses_cli_command_and_records_every_run(self) -> None:
         planned_runs = campaign.plan_campaign_runs(

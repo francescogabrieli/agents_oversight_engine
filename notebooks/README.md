@@ -24,6 +24,14 @@ figure della tesi, non per il runtime o i test:
 
 ## Flusso Operativo Completo (Layer 2 → Layer 4 → Layer 5 → Tesi)
 
+Per sessioni da quattro task, il runner accetta `--scenario-start 1 --scenario-end 4`
+(estremi inclusi), poi `5–8`, `9–12`, `13–16`. Ogni sessione usa un `--campaign-id`
+distinto, ad esempio `realistic_eval_20260910_v1_b01` fino a `_b04`, e `--replicas 1`.
+Il manifest completo resta conservato; vengono preregistrate soltanto le run selezionate.
+Tutti i blocchi confluiscono nello stesso database. Per aggregarli nel report omettere
+`--experiment-id` usando un database dedicato a questo giro: i blocchi sono sessioni
+operative, non condizioni sperimentali differenti. Un ID già esistente non viene ripreso.
+
 1. **Esecuzione delle Run**: Il runner `scripts/run_evaluation_campaign.py` lancia la CLI live e raccoglie trace e record in `artifacts/evaluation/input/realistic_pool_v1/<campaign_id>/<thread_id>/`. Registra in SQLite anche le run fallite, saltate e non iniziate.
 2. **Ingestione in SQLite**: Automatica prima e dopo ogni run, nel database `artifacts/evaluation/layer5_evaluation.sqlite3`. Solo per recupero o reimportazione offline della campagna:
    ```bash

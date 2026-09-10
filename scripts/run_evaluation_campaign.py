@@ -161,6 +161,10 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Stop the campaign after the first runtime failure; failures remain recorded.",
     )
+    parser.add_argument("--scenario-start", type=int, default=1,
+                        help="First scenario number, inclusive (default: 1).")
+    parser.add_argument("--scenario-end", type=int, default=None,
+                        help="Last scenario number, inclusive (default: all remaining scenarios).")
     return parser.parse_args()
 
 
@@ -301,13 +305,19 @@ def plan_campaign_runs(
     replicas: int,
     output_root: Path,
     allow_external_execution: bool,
+    scenario_start: int = 1,
+    scenario_end: int | None = None,
 ) -> tuple[PlannedRun, ...]:
     _validate_campaign_id(campaign_id)
     if replicas < 1:
         raise ValueError("replicas must be at least 1")
+    # Select only after validating the complete canonical manifest; retain original IDs.
+    end = len(manifest.scenarios) if scenario_end is None else scenario_end
+    if not 1 <= scenario_start <= end <= len(manifest.scenarios):
+        raise ValueError("Scenario range must satisfy 1 <= start <= end <= pool size.")
     campaign_root = _campaign_root(output_root=output_root, campaign_id=campaign_id)
     planned_runs: list[PlannedRun] = []
-    for scenario in manifest.scenarios:
+    for scenario in manifest.scenarios[scenario_start - 1:end]:
         action = (
             PlannedRunAction.EXECUTE
             if allow_external_execution
@@ -720,6 +730,8 @@ def main() -> int:
         manifest=manifest,
         campaign_id=args.campaign_id,
         replicas=args.replicas,
+        scenario_start=args.scenario_start,
+        scenario_end=args.scenario_end,
         output_root=args.output_root,
         allow_external_execution=args.allow_external_execution,
     )
