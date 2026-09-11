@@ -8,6 +8,7 @@ import { PriorDecisionsPanel } from "./PriorDecisionsPanel";
 import { reasonCodeChipLabel, reasonCodeExplanation, reasonCodeLabel } from "./reasonCodePresentation";
 import { runtimeStateLabel } from "./runtimeStatePresentation";
 import { SourceReference } from "./SourceReference";
+import { LiteralExcerpt } from "./LiteralExcerpt";
 
 type ReviewContextPanelProps = {
   taskGoal: string | null;
@@ -181,35 +182,47 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
               Valori segnalati — {flaggedLiterals.length}
             </p>
             <p className="review-context-summary" style={{ margin: 0 }}>
-              Il controllo automatico non ha riconosciuto questi valori nelle fonti. Per
-              ciascuno vedi cosa ha scritto l'agente e cosa dicono davvero le fonti.
+              Verifica la frase completa: il valore deve riferirsi allo stesso soggetto,
+              alla stessa unità e allo stesso periodo. La segnalazione non dimostra un errore.
             </p>
             <ul className="flagged-values-list">
               {flaggedLiterals.map((item) => (
                 <li className="flagged-value-item" key={item.value}>
-                  <code className="flagged-value-token">{item.value}</code>
-                  {item.excerpt ? (
-                    <p className="flagged-value-excerpt">
-                      <span className="flagged-value-role">Scritto dall'agente:</span> {item.excerpt}
-                    </p>
-                  ) : null}
+                  <h3 className="literal-review-title">Valore da verificare: <code className="flagged-value-token">{item.value}</code></h3>
+                  <div className="literal-comparison">
+                  <section className="literal-comparison-panel" aria-label={`Testo dell'agente per ${item.value}`}>
+                    <h4>1. Cosa ha scritto l'agente</h4>
+                    <blockquote className="flagged-value-excerpt">
+                      {item.excerpt ? <LiteralExcerpt text={item.excerpt} value={item.value} /> : "Contesto della frase non disponibile nella richiesta."}
+                    </blockquote>
+                    <p className="literal-review-help">Estratto registrato: eventuali «…» indicano testo omesso.</p>
+                  </section>
+                  <section className="literal-comparison-panel" aria-label={`Passaggi da verificare per ${item.value}`}>
+                  <h4>2. Confronta con la fonte</h4>
+                  <p className="literal-review-help">I passaggi proposti dal confronto automatico possono essere poco pertinenti. Non sono una conferma dell'affermazione.</p>
                   {item.sourceMatches.length > 0 ? (
                     item.sourceMatches.map((match, index) => (
-                      <p className="flagged-value-excerpt" key={`${item.value}-${index}`}>
-                        <span className="flagged-value-role flagged-value-role-source">
-                          Nella fonte:
-                        </span>{" "}
-                        {match.excerpt}
+                      <div className="literal-source-match" key={`${item.value}-${index}`}>
+                        <p className="flagged-value-role">Passaggio da esaminare {index + 1}</p>
+                        <blockquote className="flagged-value-excerpt"><LiteralExcerpt text={match.excerpt} value={item.value} /></blockquote>
+                        {!match.excerpt.includes(item.value) ? <p className="literal-review-help">Il valore «{item.value}» non compare in questa forma nell'estratto. Verifica eventuali notazioni diverse o apri il documento.</p> : null}
                         {match.locator ? (
-                          <SourceReference locator={match.locator} />
-                        ) : null}
-                      </p>
+                          <div className="literal-source-link"><span>Apri la fonte di questo passaggio:</span><SourceReference locator={match.locator} /></div>
+                        ) : <p className="literal-review-help">Link del passaggio non disponibile.</p>}
+                      </div>
                     ))
                   ) : (
                     <p className="flagged-value-excerpt flagged-value-nomatch">
-                      Nessun riscontro di questo valore in nessuna fonte selezionata.
+                      Nessun passaggio di confronto disponibile nel testo recuperato. Questo non prova che il valore sia assente dal documento originale.
                     </p>
                   )}
+                  </section>
+                  </div>
+                  <div className="literal-verification-guide">
+                    <strong>Come verificarlo</strong>
+                    <p>Se l'estratto non basta, apri la fonte e cerca «{item.value}» con Ctrl+F (anche con una notazione diversa). Leggi il paragrafo e controlla soggetto, soglia, unità e periodo. Puoi consultare anche le fonti selezionate elencate sotto.</p>
+                    <p>Se confermi l'affermazione, indica nella nota fonte e passaggio verificati. Se resta incerta, non considerare il solo numero trovato una conferma.</p>
+                  </div>
                 </li>
               ))}
             </ul>

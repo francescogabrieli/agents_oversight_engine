@@ -298,10 +298,8 @@ describe("ReviewThreadPage", () => {
 
     render(<ReviewContextPanel taskGoal="Prepare a sourced briefing." snapshot={snapshot} />);
 
-    expect(screen.getByText("82,5%")).toBeInTheDocument();
-    expect(
-      screen.getByText(/Il rollout ha ridotto i costi del 82,5% nel trimestre\./),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Valore da verificare: 82,5%" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Testo dell'agente per 82,5%" })).toHaveTextContent("Il rollout ha ridotto i costi del 82,5% nel trimestre.");
     // The source passage is what makes the value adjudicable: the agent wrote "82,5%",
     // the source wrote "82.5 percent" - the same quantity the matcher did not recognize.
     expect(
@@ -309,8 +307,10 @@ describe("ReviewThreadPage", () => {
     ).toBeInTheDocument();
     // A value found in no source is the decisive opposite signal, stated explicitly.
     expect(
-      screen.getByText(/Nessun riscontro di questo valore in nessuna fonte/),
+      screen.getByText(/Nessun passaggio di confronto disponibile/),
     ).toBeInTheDocument();
+    expect(screen.queryByText("Nella fonte:")).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Non sono una conferma/)).toHaveLength(2);
     expect(screen.getByText(/Valori segnalati/)).toBeInTheDocument();
   });
 

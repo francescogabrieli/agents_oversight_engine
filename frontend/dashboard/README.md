@@ -18,6 +18,10 @@ the authority for allowed actions, candidate digests, approval and continuation.
 - Recently submitted decisions remain non-interactive for the existing two-minute
   acknowledgement window. The runtime terminal remains the execution monitor.
 - Sources expose the available bounded excerpt, not an invented complete document.
+  Flagged values show the actor excerpt beside candidate source passages, with exact-text
+  highlighting only. Matches are explicitly unverified and instructions explain checking
+  subject, threshold, unit and period in the linked source. No numerical or semantic
+  equivalence is inferred by the frontend (`LiteralExcerpt` owns exact highlighting).
   Only HTTP(S) locators become external links; controlled identifiers remain text.
 
 ## Extension and verification
