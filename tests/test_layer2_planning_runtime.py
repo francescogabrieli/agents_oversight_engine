@@ -249,7 +249,7 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         decision = replanner.replan(task_state=task_state)
 
         self.assertEqual(decision.replanner_name, "openai_layer2_replanner")
-        self.assertEqual(decision.prompt_version, "replanner_v5")
+        self.assertEqual(decision.prompt_version, "replanner_v6")
         self.assertEqual(len(decision.replacement_steps), 2)
         self.assertEqual(decision.replacement_steps[0].step_id, "replan_step_1")
         self.assertEqual(decision.replacement_steps[0].status, PlanStepStatus.PENDING)
@@ -804,7 +804,7 @@ class Layer2PlanningRuntimeTests(unittest.TestCase):
         )
 
         self.assertEqual(fake_client.responses.call_count, 2)
-        self.assertEqual(decision.prompt_version, "planner_v6")
+        self.assertEqual(decision.prompt_version, "planner_v7")
         self.assertTrue(
             decision.plan_steps[-1].produces_governed_external_effect_proposal
         )

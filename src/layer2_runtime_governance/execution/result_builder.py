@@ -309,10 +309,10 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
             "summary",
             "database_profile_id",
             "statement",
-            "parameters",
             "completion_rationale",
         )
-        if not isinstance(arguments["parameters"], dict):
+        parameters_payload = arguments.get("parameters")
+        if not isinstance(parameters_payload, dict):
             raise ActorExecutionError("Database parameters must be a JSON object.")
         completion_arguments = _ensure_completion_arguments(
             arguments={
@@ -326,7 +326,7 @@ def convert_tool_call_to_actor_result(*, actor_task: ActorTask, tool_call) -> Ac
             )
         parameters = tuple(
             DatabaseOperationParameter(name=str(name), value=value)
-            for name, value in arguments["parameters"].items()
+            for name, value in parameters_payload.items()
         )
         statement_draft = DatabaseStatementDraft(
             database_profile_id=str(arguments["database_profile_id"]).strip(),

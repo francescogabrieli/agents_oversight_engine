@@ -140,6 +140,11 @@ Rules:
 - A procedural result derived only from the user-supplied task contract can remain
   non-factual; for example, restating a supplied reference date or calculating its
   requested interval does not require external evidence.
+- Constructing a SQL statement solely from a task-supplied profile, schema, filters,
+  and aggregation rules is procedural, not a factual claim. Do not give that work an
+  evidence burden. For an execute-after-governance database task, construct the exact
+  statement in the terminal governed-external-effect step instead of splitting query
+  preparation from the execution proposal.
 - Preserve the `remaining_evidence_obligation` supplied in the runtime context. The
   replacement trajectory must contain factual work when it is required and must not
   reduce its source-count or retrieved-content dimensions.
@@ -277,7 +282,7 @@ def build_replanner_user_prompt(
 
 class OpenAIReplanner(ReplannerPort):
     replanner_name = "openai_layer2_replanner"
-    prompt_version = "replanner_v5"
+    prompt_version = "replanner_v6"
 
     def __init__(self, settings: OpenAIReplannerSettings | None = None) -> None:
         # Validate replanner prerequisites once at construction time.
@@ -390,7 +395,7 @@ class OpenAIReplanner(ReplannerPort):
 class LocalConservativeReplanner(ReplannerPort):
     # This fallback remains useful for tests and offline demos.
     replanner_name = "local_conservative_replanner"
-    prompt_version = "replanner_v5"
+    prompt_version = "replanner_v6"
 
     # Produce a compact recovery step from the actor blocking reason.
     def replan(self, *, task_state: TaskState) -> ReplanDecision:

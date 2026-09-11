@@ -327,6 +327,7 @@ class Layer2OversightRawFactsTests(unittest.TestCase):
                 "consecutive_tool_failures",
                 "action_churn_count",
                 "current_step_tool_attempt_count",
+                "step_exploration_budget_override_approved",
                 "observation_count",
                 "replan_count",
                 "replan_episode_count",

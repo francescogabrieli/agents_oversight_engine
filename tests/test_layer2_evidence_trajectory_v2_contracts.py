@@ -426,6 +426,73 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
         self.assertEqual(facts["unanchored_literals_in_universe"], [])
         self.assertNotIn("unanchored_literals_in_selection", facts["deficit_codes"])
 
+    # Regression for realistic-pool RP16 v7: a planner may conservatively mark the
+    # terminal SQL step factual, but a valid SELECT is the acquisition mechanism and
+    # cannot require its future rows as evidence before governance executes it.
+    def test_database_select_candidate_does_not_require_pre_execution_sources(self) -> None:
+        state = _build_test_task_state(
+            produces_factual_claims=True,
+            produces_external_effect_proposal=True,
+            evidence_burden=EvidenceBurden(min_independent_sources=1),
+        )
+        proposal = normalize_sql_operation(
+            operation_id="rp16-v7-select",
+            plan_step_id="step_1",
+            capability_id="database.statement.execute",
+            sql=(
+                "SELECT severity, COUNT(*) AS incident_count FROM incidents "
+                "WHERE status IN ('unresolved', 'investigating', 'monitoring') "
+                "GROUP BY severity ORDER BY severity"
+            ),
+            database_target="evaluation_reporting_read_only",
+            database_profile_id="evaluation_reporting_read_only",
+            is_read_only_profile=True,
+        )
+        state.external_operation_proposal = proposal
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.STEP_COMPLETED,
+            summary="Submit the single governed SELECT.",
+            output_text="The SELECT is ready for governed execution.",
+            step_validation=StepValidation(
+                plan_step_id="step_1",
+                actor_self_confidence=0.95,
+                evidence_refs=(),
+                rationale_summary="The query uses only task-supplied schema and filters.",
+            ),
+            external_operation_proposal=proposal,
+        )
+        evidence_snapshot_digest = digest_json(
+            build_evidence_snapshot_manifest(task_state=state)
+        )
+        state.pending_completion_candidate = StepCompletionCandidate(
+            candidate_id="step_1:candidate:1",
+            step_id="step_1",
+            summary=state.actor_result.summary,
+            output_text=state.actor_result.output_text or "",
+            external_operation_id=proposal.operation_id,
+            external_operation_digest=proposal.payload_digest,
+            evidence_snapshot_digest=evidence_snapshot_digest,
+            evidence_selection_digest=build_evidence_selection_digest(
+                selected_refs=(),
+                evidence_snapshot_digest=evidence_snapshot_digest,
+                external_operation_digest=proposal.payload_digest,
+            ),
+        )
+
+        facts = build_evidence_signal(
+            task_state=state,
+            thresholds_version="v1",
+        )["raw_facts"]
+
+        self.assertTrue(facts["declared_produces_factual_claims"])
+        self.assertTrue(facts["database_read_acquisition_candidate"])
+        self.assertFalse(facts["produces_factual_claims"])
+        self.assertFalse(facts["coverage_evaluated"])
+        self.assertTrue(facts["burden_satisfied"])
+        self.assertNotIn("insufficient_independent_sources", facts["deficit_codes"])
+        self.assertNotIn("retrieved_content_missing", facts["deficit_codes"])
+
     # A source states a share in prose ("28 percent"); an agent renders the same
     # quantity with the symbol ("28%"). Both denote the same value and must anchor to
     # each other, exactly as differently-punctuated numbers already do.
@@ -724,6 +791,7 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
             result_type=ActorResultType.STEP_COMPLETED,
             summary="Prepared a localized result.",
             output_text=(
+                "### A.1.2 — Destinatari\n"
                 "Articolo 1.1: prezzo $5,30. "
                 "Riferimento effed34f-8ea6-4035-9199-be576344cbef:document."
             ),
@@ -742,6 +810,32 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
 
         self.assertFalse(facts["has_unanchored_literals_in_selection"])
         self.assertFalse(facts["has_unanchored_literals_in_universe"])
+
+    # Appendix and Markdown heading labels are document structure, not factual claims.
+    def test_literal_extraction_ignores_prefixed_outline_headings(self) -> None:
+        state = _build_test_task_state(
+            produces_factual_claims=True,
+            evidence_burden=EvidenceBurden(),
+        )
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.STEP_COMPLETED,
+            summary="Prepared a structured briefing.",
+            output_text="## A.1.2 — Destinatari\nNessun valore fattuale è dichiarato.",
+            step_validation=StepValidation(
+                plan_step_id="step_1",
+                actor_self_confidence=0.9,
+                evidence_refs=(),
+                rationale_summary="Only a structural heading is present.",
+            ),
+        )
+
+        facts = build_evidence_signal(
+            task_state=state,
+            thresholds_version="v1",
+        )["raw_facts"]
+
+        self.assertNotIn("1.2", facts["unanchored_literals_in_universe"])
 
     # URL-significant punctuation is preserved and cannot match a different locator.
     def test_literal_url_with_significant_terminal_punctuation_is_unanchored(self) -> None:
@@ -778,6 +872,41 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
 
         self.assertIn(claimed_url, facts["unanchored_locators_in_selection"])
         self.assertIn(claimed_url, facts["unanchored_locators_in_universe"])
+
+    # Markdown delimiters and sentence commas after a locator do not name another source.
+    def test_literal_url_with_terminal_markdown_delimiters_is_anchored(self) -> None:
+        observed_url = "https://source-a.org/official-announcement"
+        state = _build_test_task_state(
+            produces_factual_claims=True,
+            evidence_burden=EvidenceBurden(),
+        )
+        state.observations.append(
+            ToolObservation(
+                observation_id="obs-url",
+                content="The official announcement describes the release.",
+                locator=observed_url,
+            )
+        )
+        state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.STEP_COMPLETED,
+            summary="Prepared one linked factual result.",
+            output_text=f"Official announcement: `{observed_url}`,`",
+            step_validation=StepValidation(
+                plan_step_id="step_1",
+                actor_self_confidence=0.9,
+                evidence_refs=("obs-url",),
+                rationale_summary="The selected locator is the cited source.",
+            ),
+        )
+
+        facts = build_evidence_signal(
+            task_state=state,
+            thresholds_version="v1",
+        )["raw_facts"]
+
+        self.assertFalse(facts["has_unanchored_locators_in_selection"])
+        self.assertFalse(facts["has_unanchored_locators_in_universe"])
 
     # URL prefixes are not evidence for a different, longer observed locator.
     def test_literal_url_prefix_is_not_anchored_by_longer_locator(self) -> None:
@@ -884,11 +1013,13 @@ class EvidenceTrajectoryV2ContractsTests(unittest.TestCase):
         state.evidence_request_count = 2
         state.evidence_request_episode_count = 1
         state.evidence_request_episode_id = "step_1"
+        state.step_exploration_budget_approved_step_ids.append("step_1")
 
         normalized = normalize_task_state_serialization(state)
         self.assertEqual(normalized.evidence_request_count, 2)
         self.assertEqual(normalized.evidence_request_episode_count, 1)
         self.assertEqual(normalized.evidence_request_episode_id, "step_1")
+        self.assertEqual(normalized.step_exploration_budget_approved_step_ids, ["step_1"])
         self.assertTrue(normalized.plan_steps[0].produces_factual_claims)
         self.assertEqual(normalized.plan_steps[0].evidence_burden.min_independent_sources, 2)
 

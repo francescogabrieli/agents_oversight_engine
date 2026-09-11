@@ -123,6 +123,11 @@ Rules:
 - A procedural result derived only from the user-supplied task contract can remain
   non-factual; for example, restating a supplied reference date or calculating its
   requested interval does not require external evidence.
+- Constructing a SQL statement solely from a task-supplied profile, schema, filters,
+  and aggregation rules is procedural, not a factual claim. Do not give that work an
+  evidence burden. For an execute-after-governance database task, construct the exact
+  statement in the terminal governed-external-effect step instead of splitting query
+  preparation from the execution proposal.
 - Stay at the semantic planning level.
 - Do not emit executable tool calls.
 - Do not mention concrete tool names, URLs, function names, query strings, API inputs, shell commands, or payloads.
@@ -205,7 +210,7 @@ def build_planner_user_prompt(
 
 class OpenAIPlanner(PlannerPort):
     planner_name = "openai_layer2_planner"
-    prompt_version = "planner_v6"
+    prompt_version = "planner_v7"
 
     def __init__(self, settings: OpenAIPlannerSettings | None = None) -> None:
         # Validate planner prerequisites once at construction time.

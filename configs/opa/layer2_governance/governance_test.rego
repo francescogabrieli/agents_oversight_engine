@@ -92,6 +92,7 @@ test_trajectory_fact_usage_manifest_is_explicit if {
 		"action_churn_count",
 		"external_candidate",
 		"current_step_tool_attempt_count",
+		"step_exploration_budget_override_approved",
 		"completion_signal",
 	]
 	result.fact_usage.observational_only_facts == [
@@ -257,6 +258,16 @@ test_step_exploration_budget_does_not_block_a_completion if {
 	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"trajectory": trajectory})})
 	result := decision with input as candidate
 	result.directive == "continue"
+}
+
+# A continue approval releases only the current step's exploration ceiling; OPA keeps
+# the count visible but must not immediately reopen the identical reviewed boundary.
+test_step_exploration_budget_approval_releases_the_reviewed_step if {
+	trajectory := object.union(facts_trajectory, {"raw_facts": object.union(facts_trajectory.raw_facts, {"current_step_tool_attempt_count": 40, "completion_signal": false, "step_exploration_budget_override_approved": true})})
+	candidate := object.union(base_input, {"pillars": object.union(base_input.pillars, {"trajectory": trajectory})})
+	result := decision with input as candidate
+	result.directive == "continue"
+	result.pillar_results.trajectory.step_exploration_budget_exhausted == false
 }
 
 test_explicit_insufficiency_satisfies_the_declared_burden if {

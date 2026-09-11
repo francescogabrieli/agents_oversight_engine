@@ -95,6 +95,11 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
         if current_step is not None
         else 0
     )
+    step_exploration_budget_override_approved = bool(
+        current_step is not None
+        and current_step.step_id
+        in getattr(task_state, "step_exploration_budget_approved_step_ids", ())
+    )
     unresolvable_revision = _judge_revision_has_no_new_observational_basis(
         task_state=task_state,
     )
@@ -110,6 +115,9 @@ def build_trajectory_signal(*, task_state: TaskState, policy_input: PolicyEvalua
         "consecutive_tool_failures": consecutive_tool_failures,
         "action_churn_count": action_churn_count,
         "current_step_tool_attempt_count": current_step_tool_attempts,
+        "step_exploration_budget_override_approved": (
+            step_exploration_budget_override_approved
+        ),
         "observation_count": len(task_state.observations),
         "replan_count": replan_count,
         "replan_episode_count": replan_episode_count,

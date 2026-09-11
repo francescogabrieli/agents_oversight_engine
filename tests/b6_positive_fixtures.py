@@ -537,6 +537,10 @@ class B6PolicyEngine(StubPolicyEngine):
         if (
             actor["result_type"] != ActorResultType.STEP_COMPLETED.value
             and trajectory_facts.get("current_step_tool_attempt_count", 0) >= 30
+            and not trajectory_facts.get(
+                "step_exploration_budget_override_approved",
+                False,
+            )
         ):
             output = _build_stub_opa_decision(
                 decision_input=decision_input,

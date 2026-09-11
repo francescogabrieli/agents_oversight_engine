@@ -78,6 +78,12 @@ class GatewayMCPTests(unittest.TestCase):
         self.assertIn("local_test", config.mcp_servers)
         self.assertIn("echo", config.mcp_servers["local_test"].allowed_tools)
 
+    # Public PDFs need a bounded but realistic byte budget before text extraction.
+    def test_default_public_fetch_budget_accommodates_standard_pdfs(self) -> None:
+        config = load_tool_gateway_config()
+
+        self.assertEqual(config.tools[ToolName.FETCH_URL_TEXT].max_bytes, 5_000_000)
+
     def test_mcp_echo_tool_executes_through_gateway(self) -> None:
         gateway = _build_mcp_test_gateway()
 
@@ -246,6 +252,44 @@ class GatewayMCPTests(unittest.TestCase):
             RetrievalKind.FETCHED_DOCUMENT,
         )
         self.assertIn("Hello source", result.content or "")
+
+    # A complete PDF is extracted as PDF text rather than decoded as binary UTF-8.
+    def test_fetch_url_extracts_complete_pdf_text(self) -> None:
+        gateway = OpenAIToolGateway()
+        response = FakeHTTPResponse(
+            body=b"%PDF-1.7 mocked complete document",
+            content_type="application/pdf",
+        )
+        extracted_text = (
+            "Readable PDF source content with enough words to become meaningful "
+            "evidence for the runtime."
+        )
+
+        with patch(
+            "layer3_tool_bus_external_capabilities.tools.security.is_blocked_host",
+            return_value=False,
+        ), patch(
+            "layer3_tool_bus_external_capabilities.tools.adapters.http_fetch.urlopen",
+            return_value=response,
+        ), patch(
+            "layer3_tool_bus_external_capabilities.tools.adapters.http_fetch.extract_pdf_text",
+            return_value=extracted_text,
+        ):
+            result = gateway.execute(
+                tool_request=ToolRequest(
+                    plan_step_id="step_1",
+                    tool_name=ToolName.FETCH_URL_TEXT,
+                    reason="Fetch one complete PDF source.",
+                    url="https://example.org/source.pdf",
+                )
+            )
+
+        self.assertTrue(result.success)
+        self.assertIn("Readable PDF source", result.content or "")
+        self.assertEqual(
+            result.observations[0].retrieval_kind,
+            RetrievalKind.FETCHED_DOCUMENT,
+        )
 
     # Browser, consent, and bot interstitials are retryable extraction failures.
     def test_fetch_url_detects_client_challenge_marker(self) -> None:

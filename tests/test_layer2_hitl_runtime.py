@@ -69,6 +69,7 @@ from layer2_runtime_governance.hitl import (
 )
 from layer2_runtime_governance.runtime.actor_service import _record_actor_execution
 from layer2_runtime_governance.runtime.governance_service import governance
+from layer3_tool_bus_external_capabilities.tool_contract import ToolName
 from layer4_state_evidence_observability.infrastructure.checkpointing import (
     build_default_checkpointer,
 )
@@ -204,6 +205,96 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
         self.assertEqual(after_review["raw_facts"]["replan_count"], 3)
         self.assertEqual(after_review["raw_facts"]["replan_episode_count"], 0)
         self.assertFalse(after_review["raw_facts"]["needs_replan_signal"])
+
+    # An operator may acknowledge the exploration ceiling once for this exact step;
+    # the persisted acknowledgement must not suppress supervision of a later step.
+    def test_step_exploration_approval_is_persisted_and_step_scoped(self) -> None:
+        task_state = TaskState.from_intake(_build_research_intake_result())
+        task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        task_state.human_review_resume_state = RuntimeState.ACTING
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Continue bounded exploration.",
+                rationale="The operator is reviewing the first ceiling.",
+                expected_outcome="A final source or a valid stop.",
+                status=PlanStepStatus.IN_PROGRESS,
+            ),
+            PlanStep(
+                step_id="step_2",
+                objective="A separate later step.",
+                rationale="Its ceiling has not been reviewed.",
+                expected_outcome="Independent progress.",
+                status=PlanStepStatus.PENDING,
+            ),
+        ]
+        task_state.current_plan_step_index = 0
+        task_state.last_governance_decision = GovernanceDecision(
+            directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
+            policy_decision=PolicyDecision.REQUIRE_HUMAN_REVIEW,
+            reason_codes=(GovernanceReasonCode.STEP_EXPLORATION_BUDGET_EXHAUSTED,),
+            summary="The current step exhausted its exploration budget.",
+            constrains_capability_use=False,
+            evaluated_actor_result_type=ActorResultType.PROPOSE_ACTION,
+            evaluated_tool_name=ToolName.WEB_SEARCH,
+            policy_engine_name="opa",
+            policy_bundle_version="layer2_governance_v5",
+            policy_directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
+            oversight_recommended_directive=GovernanceDirective.WAIT_HUMAN_REVIEW,
+            requires_human_review=True,
+        )
+
+        pending_request = build_human_review_request(
+            state=task_state,
+            thread_id="step-exploration-release",
+        )
+        self.assertEqual(
+            pending_request.allowed_decisions,
+            (
+                HumanReviewDecisionType.APPROVE_CONTINUE,
+                HumanReviewDecisionType.REPLAN,
+                HumanReviewDecisionType.ABORT,
+            ),
+        )
+        task_state.pending_human_review_request = pending_request
+        with patch(
+            "layer2_runtime_governance.hitl.interrupt",
+            return_value={
+                "request_id": pending_request.request_id,
+                "decision_type": "approve_continue",
+            },
+        ):
+            resumed_state = human_review(
+                task_state,
+                thread_id="step-exploration-release",
+            )
+
+        self.assertEqual(resumed_state.current_state, RuntimeState.ACTING)
+        self.assertEqual(
+            resumed_state.step_exploration_budget_approved_step_ids,
+            ["step_1"],
+        )
+        resumed_state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.PROPOSE_ACTION,
+            summary="Continue after the approved exploration boundary.",
+            capability_mode=CapabilityAccessMode.READ_ONLY,
+            external_impact=False,
+        )
+        current_facts = build_trajectory_signal(
+            task_state=resumed_state,
+            policy_input=build_policy_evaluation_input(task_state=resumed_state),
+            thresholds_version="test",
+        )["raw_facts"]
+        self.assertTrue(current_facts["step_exploration_budget_override_approved"])
+
+        resumed_state.current_plan_step_index = 1
+        next_step_facts = build_trajectory_signal(
+            task_state=resumed_state,
+            policy_input=build_policy_evaluation_input(task_state=resumed_state),
+            thresholds_version="test",
+        )["raw_facts"]
+        self.assertFalse(next_step_facts["step_exploration_budget_override_approved"])
 
     # Evidence review opens a new remediation episode and never blindly approves the gap.
     def test_evidence_ceiling_review_exposes_recovery_choices_without_continue(self) -> None:

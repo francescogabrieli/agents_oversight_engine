@@ -106,6 +106,12 @@ class HttpFetchAdapter:
                 if publication_timestamp is not None
                 else None
             )
+        elif content_type == "application/pdf":
+            # PDFs are binary containers: decoding their bytes as UTF-8 produces
+            # gibberish and makes an otherwise complete fetched source unusable.
+            extracted_text = self._pdf_extractor(raw_body)
+            publication_timestamp = None
+            source_timestamp = None
         else:
             extracted_text = decoded_body
             publication_timestamp = None

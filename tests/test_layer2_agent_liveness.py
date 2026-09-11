@@ -490,7 +490,8 @@ class Layer2AgentLivenessTests(unittest.TestCase):
         self.assertTrue(coverage["retrieved_content_satisfied"])
         self.assertEqual(coverage["unfetched_candidate_locators"], ["https://site3.com/d"])
 
-        # Without evidence burden, evidence_coverage is None
+        # A raw burden attached to a non-factual external step is inactive everywhere
+        # in the actor payload, so it cannot trigger a spurious evidence-search loop.
         state_no_burden = TaskState.from_intake(_build_research_intake_result())
         state_no_burden.plan_steps = [
             PlanStep(
@@ -500,12 +501,16 @@ class Layer2AgentLivenessTests(unittest.TestCase):
                 expected_outcome="Done.",
                 status=PlanStepStatus.IN_PROGRESS,
                 produces_factual_claims=False,
-                evidence_burden=None,
+                evidence_burden=EvidenceBurden(min_independent_sources=1),
+                produces_governed_external_effect_proposal=True,
             ),
         ]
         state_no_burden.current_plan_step_index = 0
         payload_no_burden = build_actor_prompt_payload(actor_task=build_actor_task(task_state=state_no_burden))
         self.assertIsNone(payload_no_burden["evidence_coverage"])
+        self.assertIsNone(
+            payload_no_burden["plan"]["current_plan_step"]["evidence_burden"]
+        )
 
 
 if __name__ == "__main__":

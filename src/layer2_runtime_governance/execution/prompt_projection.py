@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..actor_contract import ActorTask
-from ..domain import ExternalCommunicationDraft
+from ..domain import ExternalCommunicationDraft, project_evidence_burden
 from ..prompt_projection import (
     project_prompt_observation,
     project_prompt_plan_step,
@@ -49,6 +49,13 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
         if burden is not None
         else None
     )
+    current_plan_step = project_prompt_plan_step(
+        step=actor_task.current_plan_step,
+    )
+    # The planner contract may retain a declared burden on a non-factual step for
+    # checkpoint compatibility. Show the actor only the canonically resolved burden,
+    # matching the completion gate and governance signal rather than the raw field.
+    current_plan_step["evidence_burden"] = project_evidence_burden(burden)
 
     return {
         "task_spec": {
@@ -71,9 +78,7 @@ def build_actor_prompt_payload(*, actor_task: ActorTask) -> dict[str, Any]:
         },
         "plan": {
             "current_step_number": actor_task.current_plan_step_index + 1,
-            "current_plan_step": project_prompt_plan_step(
-                step=actor_task.current_plan_step,
-            ),
+            "current_plan_step": current_plan_step,
             "other_steps": [
                 project_prompt_plan_step(step=step)
                 for index, step in enumerate(actor_task.plan_steps)

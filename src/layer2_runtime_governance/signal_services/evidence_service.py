@@ -23,6 +23,8 @@ from layer2_runtime_governance.domain import (
 from layer2_runtime_governance.domain.step_recovery import resolve_evidence_episode_id
 from layer3_tool_bus_external_capabilities.external_operations import (
     CommunicationOperationPayload,
+    DatabaseOperationPayload,
+    SQLStatementClass,
 )
 from layer3_tool_bus_external_capabilities.tool_contract import (
     RetrievalKind,
@@ -53,7 +55,9 @@ _STRUCTURAL_NUMBER_PREFIX = re.compile(
     re.IGNORECASE,
 )
 _STRUCTURAL_NUMBER_LINE_START = re.compile(
-    r"^\s*\d+(?:\.\d+)*[.)]\s"
+    # Markdown headings commonly use an appendix prefix ("A.1.2") before the
+    # numeric outline. Those labels identify document structure, not claims.
+    r"^\s*(?:#{1,6}\s*)?(?:(?:[A-Za-z]\.)?\d+(?:\.\d+)+[.)]?|\d+[.)])(?=\s|[-—:])"
 )
 # prefix: currency symbol; suffix: percent sign or ISO currency code.
 _NUMERIC_LITERAL = re.compile(
@@ -235,11 +239,18 @@ def resolve_step_evidence_burden(
     *,
     step: PlanStep | ActorPlanStep,
     task_spec: TaskSpec,
+    produces_factual_claims: bool | None = None,
 ) -> EvidenceBurden | None:
-    if not (
-        getattr(step, "produces_factual_claims", False)
-        or getattr(step, "produces_governed_external_effect_proposal", False)
-    ):
+    # Source-count and retrieved-content burdens justify factual claims. A governed
+    # operation still activates structural evidence checks, but the operation marker
+    # alone must not require its own future result as pre-existing evidence (for
+    # example, a read-only SELECT whose purpose is to acquire the requested rows).
+    factual_claims_active = (
+        bool(getattr(step, "produces_factual_claims", False))
+        if produces_factual_claims is None
+        else produces_factual_claims
+    )
+    if not factual_claims_active:
         return None
     burden = lift_evidence_burden_to_floor(
         getattr(step, "evidence_burden", None),
@@ -254,11 +265,12 @@ def resolve_step_evidence_burden(
 def _is_structural_number(*, text: str, start: int) -> bool:
     prefix = text[max(0, start - 32):start]
     line_start = text.rfind("\n", 0, start) + 1
-    line_prefix = text[line_start:start]
+    line_end = text.find("\n", start)
+    line = text[line_start:] if line_end < 0 else text[line_start:line_end]
     # Prefer a false negative when a number begins a list or section heading.
     return (
         _STRUCTURAL_NUMBER_PREFIX.search(prefix) is not None
-        or _STRUCTURAL_NUMBER_LINE_START.match(line_prefix) is not None
+        or _STRUCTURAL_NUMBER_LINE_START.match(line) is not None
     )
 
 
@@ -478,10 +490,17 @@ def _build_literal_corpus_index(
     )
 
 
+# Remove only Markdown/prose delimiters that cannot reasonably identify a distinct
+# source. Keep URL-significant characters (notably !, ?, &, and =) intact.
+def _strip_literal_url_delimiters(token: str) -> str:
+    return token.rstrip("`.,;:")
+
+
 # Admit prose punctuation only when its stripped URL is an exact observed locator.
 def _literal_is_anchored(token: str, index: _LiteralCorpusIndex) -> bool:
     if token.casefold().startswith(("http://", "https://")):
-        canonical_token = canonical_web_locator(token)
+        normalized_token = _strip_literal_url_delimiters(token)
+        canonical_token = canonical_web_locator(normalized_token)
         if canonical_token in index.locators or canonical_token in index.corpus_urls:
             return True
         parsed_token = urlsplit(canonical_token)
@@ -503,8 +522,7 @@ def _literal_is_anchored(token: str, index: _LiteralCorpusIndex) -> bool:
             for observed in index.parsed_urls
         ):
             return True
-        stripped = token.rstrip(".,")
-        return stripped != token and canonical_web_locator(stripped) in index.locators
+        return normalized_token != token and canonical_token in index.locators
     return token in index.corpus_text or bool(
         _literal_comparison_keys(token) & index.literal_keys
     )
@@ -661,6 +679,23 @@ def _get_target_text(task_state: TaskState) -> str:
     return " ".join(parts)
 
 
+# Recognize the exact typed operation that acquires database facts rather than
+# asserting them. Parser validity and statement cardinality keep this exemption
+# narrower than the static read-only policy, which still independently authorizes it.
+def _is_database_read_acquisition_candidate(*, task_state: TaskState) -> bool:
+    proposal = task_state.external_operation_proposal
+    if proposal is None or not proposal.execution_candidate:
+        return False
+    payload = proposal.payload
+    return bool(
+        isinstance(payload, DatabaseOperationPayload)
+        and payload.parse_valid
+        and not payload.ambiguous
+        and payload.statement_count == 1
+        and payload.statement_class == SQLStatementClass.SELECT
+    )
+
+
 # Carry an observed publication timestamp into the literal corpus as source provenance.
 def _source_timestamp_text(value: object) -> str | None:
     return value.isoformat() if isinstance(value, datetime) else None
@@ -701,8 +736,20 @@ def build_evidence_signal(
     }
     selected = [evidence_by_id[item] for item in selected_refs if item in evidence_by_id]
     current_step = task_state.current_plan_step
-    produces_factual_claims = bool(
+    declared_produces_factual_claims = bool(
         current_step and getattr(current_step, "produces_factual_claims", False)
+    )
+    database_read_acquisition_candidate = _is_database_read_acquisition_candidate(
+        task_state=task_state,
+    )
+    # A valid single SELECT asks the governed database for facts; the statement itself
+    # does not assert the rows it has not retrieved yet. Keep the planner declaration
+    # auditable, but do not turn this typed acquisition candidate into a circular
+    # pre-execution source requirement. Communication and all other factual payloads
+    # retain the planner-declared evidence obligation.
+    produces_factual_claims = (
+        declared_produces_factual_claims
+        and not database_read_acquisition_candidate
     )
     produces_external_effect_proposal = bool(
         current_step
@@ -788,10 +835,10 @@ def build_evidence_signal(
     declared_evidence_burden = (
         getattr(current_step, "evidence_burden", None) if current_step else None
     )
-    task_evidence_floor = derive_task_evidence_floor(task_state.task_spec)
-    evidence_burden = lift_evidence_burden_to_floor(
-        declared_evidence_burden,
-        task_evidence_floor if evidence_families_active else None,
+    evidence_burden = resolve_step_evidence_burden(
+        step=current_step,
+        task_spec=task_state.task_spec,
+        produces_factual_claims=produces_factual_claims,
     )
     factual_step_missing_evidence_burden = (
         produces_factual_claims and declared_evidence_burden is None
@@ -987,6 +1034,8 @@ def build_evidence_signal(
         "evidence_request_episode_id": current_evidence_episode_id,
         # Famiglia 2 facts
         "produces_factual_claims": produces_factual_claims,
+        "declared_produces_factual_claims": declared_produces_factual_claims,
+        "database_read_acquisition_candidate": database_read_acquisition_candidate,
         "produces_governed_external_effect_proposal": produces_external_effect_proposal,
         "evidence_families_active": evidence_families_active,
         "evidence_burden_derived_from_task": (

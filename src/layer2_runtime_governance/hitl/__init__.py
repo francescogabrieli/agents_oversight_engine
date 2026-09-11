@@ -230,6 +230,10 @@ def _apply_human_review_decision(
                 "An Evidence ceiling cannot be bypassed by an unbound continue approval."
             )
         _record_anchoring_adjudication(state=state, pending_request=pending_request)
+        _record_step_exploration_budget_approval(
+            state=state,
+            pending_request=pending_request,
+        )
         if _is_non_authorizing_boundary_release(
             decision=human_review_decision,
             pending_request=pending_request,
@@ -701,6 +705,12 @@ def _resolve_allowed_human_review_decisions(
             HumanReviewDecisionType.REPLAN,
             HumanReviewDecisionType.ABORT,
         )
+    if "step_exploration_budget_exhausted" in reason_codes:
+        return (
+            HumanReviewDecisionType.APPROVE_CONTINUE,
+            HumanReviewDecisionType.REPLAN,
+            HumanReviewDecisionType.ABORT,
+        )
     if "consecutive_tool_failures" in reason_codes:
         return (
             HumanReviewDecisionType.APPROVE_CONTINUE,
@@ -828,6 +838,23 @@ def _record_anchoring_adjudication(
         state.adjudicated_evidence_anchoring_digest = candidate.evidence_selection_digest
 
 
+# Bind a continued exploration approval to the exact semantic step that exhausted its
+# budget. A later step must still be independently supervised.
+def _record_step_exploration_budget_approval(
+    *,
+    state: TaskState,
+    pending_request: HumanReviewRequest,
+) -> None:
+    if "step_exploration_budget_exhausted" not in _review_reason_codes(
+        state=state,
+        request=pending_request,
+    ):
+        return
+    step_id = pending_request.current_plan_step_id
+    if step_id and step_id not in state.step_exploration_budget_approved_step_ids:
+        state.step_exploration_budget_approved_step_ids.append(step_id)
+
+
 # Recognize an exact approval that closes only its reviewed trajectory episode.
 def _is_non_authorizing_boundary_release(
     *,
@@ -841,6 +868,7 @@ def _is_non_authorizing_boundary_release(
             {
                 "replan_ceiling_reached",
                 "consecutive_tool_failures",
+                "step_exploration_budget_exhausted",
                 "evidence_anchoring_requires_review",
             }
             & set(pending_request.reason_codes)

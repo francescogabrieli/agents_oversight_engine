@@ -152,12 +152,42 @@ def select_actor_runtime_tools_for_turn(
         if action_name is not None:
             filtered = [tool for tool in filtered if tool.get("name") != action_name]
 
+    # A SQL proposal is an execution candidate, not an intermediate query-writing
+    # artifact. Expose it only on the exact semantic step the planner marked as the
+    # governed external-effect proposal.
+    if actor_task is not None and not (
+        actor_task.current_plan_step.produces_governed_external_effect_proposal
+    ):
+        filtered = [
+            tool for tool in filtered if tool.get("name") != "emit_database_statement"
+        ]
+
+    # Once the planner marks the exact external-proposal step and no evidence burden
+    # remains active, research capabilities are outside that step's contract. Keeping
+    # them available let the actor search indefinitely for generic SQL documentation
+    # instead of emitting the already-constructible governed database proposal.
+    if (
+        actor_task is not None
+        and actor_task.current_plan_step.produces_governed_external_effect_proposal
+        and resolve_step_evidence_burden(
+            step=actor_task.current_plan_step,
+            task_spec=actor_task.task_spec,
+        )
+        is None
+    ):
+        capability_action_names = {
+            action_name
+            for action_name, _description, _properties, _required in _CAPABILITY_ACTIONS.values()
+        }
+        filtered = [
+            tool for tool in filtered if tool.get("name") not in capability_action_names
+        ]
+
     # Evidence burden gate: this is a bounded actor-surface guard; OPA remains final authority.
     if actor_task is not None and _evidence_burden_unsatisfied(actor_task):
         completion_actions = frozenset({
             "emit_step_completed",
             "emit_external_communication_draft",
-            "emit_database_statement",
         })
         filtered = [tool for tool in filtered if tool.get("name") not in completion_actions]
 

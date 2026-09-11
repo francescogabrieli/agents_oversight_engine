@@ -19,6 +19,7 @@ policy_fact_names := [
 	"action_churn_count",
 	"external_candidate",
 	"current_step_tool_attempt_count",
+	"step_exploration_budget_override_approved",
 	"completion_signal",
 ]
 
@@ -56,6 +57,7 @@ consecutive_tool_failures := object.get(facts, "consecutive_tool_failures", 0)
 action_churn_count := object.get(facts, "action_churn_count", 0)
 external_candidate := object.get(facts, "external_candidate", false)
 current_step_tool_attempt_count := object.get(facts, "current_step_tool_attempt_count", 0)
+step_exploration_budget_override_approved := object.get(facts, "step_exploration_budget_override_approved", false)
 completion_signal := object.get(facts, "completion_signal", false)
 
 max_action_revisions_before_review := object.get(data.policy_config.thresholds, "max_action_revisions_before_review", 3)
@@ -124,6 +126,7 @@ default step_exploration_budget_exhausted := false
 step_exploration_budget_exhausted if {
 	current_step_tool_attempt_count >= max_tool_attempts_per_step_before_review
 	not completion_signal
+	not step_exploration_budget_override_approved
 }
 
 require_trajectory := object.get(object.get(input, "pillar_requirements", {}), "require_trajectory", false) == true

@@ -322,6 +322,54 @@ class ExternalOperationNormalizerTests(unittest.TestCase):
             DestinationClass.EXTERNAL,
         )
 
+    # SQL statements accept the object-shaped parameters declared by the actor schema,
+    # including the empty object required by a statement with no bound values.
+    def test_typed_actor_database_statement_accepts_empty_parameters_object(self) -> None:
+        state = TaskState.from_intake(_build_external_communication_intake_result())
+        state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Execute one governed read-only database statement.",
+                rationale="The task supplies the registered profile and schema.",
+                expected_outcome="A typed SELECT proposal.",
+                status=PlanStepStatus.IN_PROGRESS,
+            )
+        ]
+        state.current_plan_step_index = 0
+        actor_task = build_actor_task(task_state=state)
+
+        result = convert_tool_call_to_actor_result(
+            actor_task=actor_task,
+            tool_call=SimpleNamespace(
+                name="emit_database_statement",
+                arguments=json.dumps(
+                    {
+                        "summary": "Prepared the unresolved incident count query.",
+                        "database_profile_id": "evaluation_reporting_read_only",
+                        "statement": (
+                            "SELECT severity, COUNT(*) AS unresolved_count "
+                            "FROM incidents WHERE status IN "
+                            "('unresolved', 'investigating', 'monitoring') "
+                            "GROUP BY severity"
+                        ),
+                        "parameters": {},
+                        "completion_rationale": "The statement is read-only and bounded.",
+                        "actor_self_confidence": 0.95,
+                        "evidence_refs": [],
+                        "residual_uncertainty": "",
+                    }
+                ),
+            ),
+        )
+
+        self.assertIsNotNone(result.database_statement_draft)
+        self.assertEqual(result.database_statement_draft.parameters, ())
+        self.assertIsNotNone(result.external_operation_proposal)
+        self.assertEqual(
+            result.external_operation_proposal.capability_id,
+            "database.statement.execute",
+        )
+
     # The governed payload must preserve the exact body even when its preview is bounded.
     def test_long_email_body_is_not_truncated_in_canonical_proposal_or_judge_prompt(self) -> None:
         body = f"{'A' * 12000}\nFULL-BODY-TAIL"

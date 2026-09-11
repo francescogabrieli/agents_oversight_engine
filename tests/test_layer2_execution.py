@@ -187,6 +187,7 @@ class ActorActionSchemaTests(unittest.TestCase):
         observations: tuple[ToolObservation, ...] = (),
         evidence_request_episode_count: int = 0,
         evidence_request_ceiling_reached: bool = False,
+        produces_external_effect_proposal: bool = False,
     ) -> ActorTask:
         task_spec = TaskSpec(
             goal="Test goal",
@@ -203,6 +204,9 @@ class ActorActionSchemaTests(unittest.TestCase):
             status=PlanStepStatus.IN_PROGRESS,
             produces_factual_claims=evidence_burden is not None,
             evidence_burden=evidence_burden,
+            produces_governed_external_effect_proposal=(
+                produces_external_effect_proposal
+            ),
         )
         return ActorTask(
             task_spec=task_spec,
@@ -244,6 +248,37 @@ class ActorActionSchemaTests(unittest.TestCase):
         self.assertNotIn("emit_database_statement", names)
         self.assertIn("request_web_search", names)
         self.assertIn("request_fetch_url_text", names)
+
+    # Database execution proposals are available only on the exact planner-marked step.
+    def test_database_statement_is_available_only_on_external_proposal_step(self) -> None:
+        task = self._build_test_actor_task(produces_external_effect_proposal=True)
+
+        actions = select_actor_runtime_tools_for_turn(
+            build_actor_runtime_tools(),
+            task_spec=task.task_spec,
+            actor_task=task,
+        )
+
+        self.assertIn("emit_database_statement", {item["name"] for item in actions})
+
+    # A terminal external proposal with no active evidence burden must not wander back
+    # into generic research instead of emitting its governed operation candidate.
+    def test_external_proposal_step_without_burden_suppresses_capabilities(self) -> None:
+        task = self._build_test_actor_task(
+            produces_external_effect_proposal=True,
+        )
+
+        actions = select_actor_runtime_tools_for_turn(
+            build_actor_runtime_tools(),
+            task_spec=task.task_spec,
+            actor_task=task,
+        )
+        names = {str(item["name"]) for item in actions}
+
+        self.assertFalse(any(name.startswith("request_") for name in names))
+        self.assertIn("emit_database_statement", names)
+        self.assertIn("emit_external_communication_draft", names)
+        self.assertIn("emit_needs_replan", names)
 
     # When enough independent sources with retrieved content are present, completion is enabled.
     def test_evidence_burden_gate_allows_completion_when_satisfied(self) -> None:
