@@ -79,6 +79,9 @@ class Layer2TraceTests(unittest.TestCase):
     # A trace emitted directly by observability must satisfy the complete v6 schema.
     def test_real_runtime_trace_validates_against_v6_schema(self) -> None:
         state = _complete_task_state()
+        state.actor_model_id = "eu.anthropic.claude-sonnet-4-6"
+        state.actor_thinking_mode = "adaptive"
+        state.actor_thinking_effort = "high"
         payload = layer2_trace_to_dict(
             build_layer2_runtime_trace(
                 thread_id="schema-valid-v5",
@@ -110,6 +113,8 @@ class Layer2TraceTests(unittest.TestCase):
             )
         )
         legacy = deepcopy(payload)
+        for key in ("actor_model_id", "actor_thinking_mode", "actor_thinking_effort"):
+            legacy["actor"].pop(key, None)
         for observation in legacy["observations"]:
             observation.pop("retrieval_kind", None)
         for call in legacy["tool_calls"]:

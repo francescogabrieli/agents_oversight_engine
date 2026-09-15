@@ -501,6 +501,15 @@
         "actor_name": {
           "$ref": "#/$defs/nullableString"
         },
+        "actor_model_id": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "actor_thinking_mode": {
+          "enum": ["off", "adaptive", null]
+        },
+        "actor_thinking_effort": {
+          "enum": ["low", "medium", "high", "max", null]
+        },
         "actor_prompt_version": {
           "$ref": "#/$defs/nullableString"
         },

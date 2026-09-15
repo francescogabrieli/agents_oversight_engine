@@ -156,6 +156,9 @@ def _build_actor_turn(*, actor_result: ActorResult | None, task_state: TaskState
     return TraceActorTurn(
         actor_name=task_state.actor_name,
         actor_prompt_version=task_state.actor_prompt_version,
+        actor_model_id=task_state.actor_model_id,
+        actor_thinking_mode=task_state.actor_thinking_mode,
+        actor_thinking_effort=task_state.actor_thinking_effort,
         result_type=actor_result.result_type.value if actor_result is not None else None,
         plan_step_id=actor_result.plan_step_id if actor_result is not None else None,
         summary=actor_result.summary if actor_result is not None else None,

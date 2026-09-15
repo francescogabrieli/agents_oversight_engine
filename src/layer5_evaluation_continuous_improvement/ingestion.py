@@ -471,6 +471,10 @@ def _configuration_fingerprint(payload: dict[str, Any]) -> str:
             {str(item.get("policy_config_version")) for item in governance if item.get("policy_config_version")}
         ),
     }
+    # Missing historical metadata stays unknown and preserves the historical fingerprint.
+    for key in ("actor_model_id", "actor_thinking_mode", "actor_thinking_effort"):
+        if actor.get(key) is not None:
+            configuration[key] = actor[key]
     return hashlib.sha256(_canonical_json(configuration).encode("utf-8")).hexdigest()
 
 

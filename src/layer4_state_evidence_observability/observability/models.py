@@ -78,6 +78,9 @@ class TraceActorTurn:
     actor_self_confidence: float | None
     selected_evidence_refs: tuple[str, ...]
     external_operation: dict[str, Any] | None
+    actor_model_id: str | None = None
+    actor_thinking_mode: str | None = None
+    actor_thinking_effort: str | None = None
 
 
 # Read-only observability component extracted from the trace facade.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 from llm_retry import llm_retry
@@ -22,6 +23,18 @@ except ImportError:  # pragma: no cover - handled at runtime if dependency is mi
 _DEFAULT_BEDROCK_MODEL_ID = "eu.amazon.nova-2-lite-v1:0"
 
 
+class BedrockThinkingMode(StrEnum):
+    OFF = "off"
+    ADAPTIVE = "adaptive"
+
+
+class BedrockThinkingEffort(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    MAX = "max"
+
+
 class BedrockRuntimeError(RuntimeError):
     # Preserve a normalized HTTP status so shared retry handling can stay provider-agnostic.
     def __init__(self, message: str, *, status_code: int | None = None) -> None:
@@ -40,6 +53,15 @@ class BedrockRuntimeSettings:
     session_token: str | None = None
     read_timeout_seconds: float = 3600.0
     connect_timeout_seconds: float = 10.0
+    thinking: BedrockThinkingMode = BedrockThinkingMode.OFF
+    thinking_effort: BedrockThinkingEffort = BedrockThinkingEffort.HIGH
+
+    # Validate direct construction as well as environment configuration before I/O.
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "thinking", BedrockThinkingMode(self.thinking))
+        object.__setattr__(self, "thinking_effort", BedrockThinkingEffort(self.thinking_effort))
+        if self.thinking == BedrockThinkingMode.ADAPTIVE and self.model_id.split(".")[-1] != "claude-sonnet-4-6":
+            raise ValueError("Adaptive thinking is currently supported here only for Claude Sonnet 4.6.")
 
     @classmethod
     # Build typed Bedrock settings from the supported local configuration sources.
@@ -54,6 +76,8 @@ class BedrockRuntimeSettings:
         # Read values from process variables first, then the local ignored env files.
         env_file_values = _load_env_file_values()
         return cls(
+            thinking=os.getenv("LAYER2_ACTOR_BEDROCK_THINKING", env_file_values.get("LAYER2_ACTOR_BEDROCK_THINKING", "off")),
+            thinking_effort=os.getenv("LAYER2_ACTOR_BEDROCK_THINKING_EFFORT", env_file_values.get("LAYER2_ACTOR_BEDROCK_THINKING_EFFORT", "high")),
             model_id=os.getenv(model_env_var, env_file_values.get(model_env_var, default_model_id)),
             region_name=os.getenv(
                 "AWS_REGION",
@@ -125,6 +149,13 @@ class BedrockChatClient:
         user_prompt: str,
         tools: list[dict[str, object]],
     ) -> dict[str, Any]:
+        adaptive = self._settings.thinking == BedrockThinkingMode.ADAPTIVE
+        request_options = {}
+        if adaptive:
+            request_options["additionalModelRequestFields"] = {
+                "thinking": {"type": "adaptive"},
+                "output_config": {"effort": self._settings.thinking_effort.value},
+            }
         try:
             response_payload = self._client.converse(
                 modelId=self._settings.model_id,
@@ -137,8 +168,9 @@ class BedrockChatClient:
                 ],
                 toolConfig={
                     "tools": _to_bedrock_tools(tools),
-                    "toolChoice": {"any": {}},
+                    "toolChoice": {"auto" if adaptive else "any": {}},
                 },
+                **request_options,
             )
         except ClientError as exc:
             raise _normalize_client_error(exc) from exc

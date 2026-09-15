@@ -46,6 +46,19 @@ def actor(state: TaskState, *, actor_service: ActorPort) -> TaskState:
         )
         return state
 
+    # Bind known adapter configuration before provider I/O; reject mixed-configuration resumes.
+    for field_name, adapter_name in (
+        ("actor_model_id", "model_id"),
+        ("actor_thinking_mode", "thinking_mode"),
+        ("actor_thinking_effort", "thinking_effort"),
+    ):
+        configured = getattr(actor_service, adapter_name, None)
+        previous = getattr(state, field_name, None)
+        if previous is not None and previous != configured:
+            raise ValueError("Actor configuration changed within a thread; start a fresh thread.")
+        setattr(state, field_name, configured)
+    state.actor_name = actor_service.actor_name
+    state.actor_prompt_version = actor_service.prompt_version
     current_step_id = state.current_plan_step.step_id
     if state.actor_protocol_retry_step_id != current_step_id:
         state.actor_protocol_retry_count = 0
@@ -115,8 +128,6 @@ def actor(state: TaskState, *, actor_service: ActorPort) -> TaskState:
         state.consecutive_provider_protocol_failures += 1
     else:
         state.consecutive_provider_protocol_failures = 0
-    state.actor_name = actor_service.actor_name
-    state.actor_prompt_version = actor_service.prompt_version
     if actor_result.result_type == ActorResultType.PROPOSE_ACTION:
         requests = actor_result.tool_requests or ((actor_result.tool_request,) if actor_result.tool_request else ())
         if not requests:

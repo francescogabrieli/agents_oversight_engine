@@ -84,6 +84,9 @@ class TaskState:
     actor_result: ActorResult | None = None
     actor_name: str | None = None
     actor_prompt_version: str | None = None
+    actor_model_id: str | None = None
+    actor_thinking_mode: str | None = None
+    actor_thinking_effort: str | None = None
     executed_steps: list[ExecutedPlanStep] = field(default_factory=list)
     final_output_text: str | None = None
     actor_turn_count: int = 0

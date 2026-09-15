@@ -21,7 +21,7 @@ from ..settings import BedrockNovaActorSettings
 class BedrockNovaActor(ActorPort):
     # Execute the actor role through the configured Bedrock Converse model; the public class name is retained.
     actor_name = "bedrock_nova_2_lite_actor"
-    prompt_version = "actor_v12_bedrock_converse_tool_calling"
+    prompt_version = "actor_v13_bedrock_configurable_thinking"
 
     def __init__(
         self,
@@ -41,8 +41,25 @@ class BedrockNovaActor(ActorPort):
                 session_token=self._settings.session_token,
                 read_timeout_seconds=self._settings.read_timeout_seconds,
                 connect_timeout_seconds=self._settings.connect_timeout_seconds,
+                thinking=self._settings.thinking,
+                thinking_effort=self._settings.thinking_effort,
             )
         )
+
+    @property
+    # Expose only experiment parameters, never AWS credentials or hidden reasoning.
+    def model_id(self) -> str:
+        return self._settings.model_id
+
+    @property
+    # Record the configured thinking mode independently from the prompt version.
+    def thinking_mode(self) -> str:
+        return str(self._settings.thinking)
+
+    @property
+    # An effort is effective only when adaptive thinking is requested.
+    def thinking_effort(self) -> str | None:
+        return str(self._settings.thinking_effort) if self._settings.thinking == "adaptive" else None
 
     # Ask Bedrock for one action and normalize it into ActorResult.
     def act(self, *, actor_task: ActorTask) -> ActorResult:

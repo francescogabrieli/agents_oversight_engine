@@ -430,6 +430,10 @@ def _legacy_persisted_type_paths() -> set[tuple[str, str]]:
         )
     }
     return {
+        # Initial thinking-enabled runs persisted provider enums instead of strings.
+        # Retain these exact paths for archived checkpoints; new actor metadata is plain text.
+        ("layer2_runtime_governance.execution.providers.bedrock_runtime", "BedrockThinkingMode"),
+        ("layer2_runtime_governance.execution.providers.bedrock_runtime", "BedrockThinkingEffort"),
         *(("layer2_runtime_governance.state", name) for name in domain_type_names),
         *(("layer2_runtime_governance.domain", name) for name in domain_type_names),
         *(("layer2_runtime_governance", name) for name in domain_type_names),

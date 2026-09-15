@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from .providers.bedrock_runtime import BedrockRuntimeSettings
+from .providers.bedrock_runtime import BedrockRuntimeSettings, BedrockThinkingMode, BedrockThinkingEffort
 from environment_config import load_env_file_values
 
 
@@ -44,6 +44,8 @@ class BedrockNovaActorSettings:
     session_token: str | None = None
     read_timeout_seconds: float = 3600.0
     connect_timeout_seconds: float = 10.0
+    thinking: BedrockThinkingMode = BedrockThinkingMode.OFF
+    thinking_effort: BedrockThinkingEffort = BedrockThinkingEffort.HIGH
 
     @classmethod
     def from_env(cls) -> "BedrockNovaActorSettings":
@@ -58,6 +60,8 @@ class BedrockNovaActorSettings:
             session_token=settings.session_token,
             read_timeout_seconds=settings.read_timeout_seconds,
             connect_timeout_seconds=settings.connect_timeout_seconds,
+            thinking=settings.thinking,
+            thinking_effort=settings.thinking_effort,
         )
 
 
