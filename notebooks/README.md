@@ -45,3 +45,6 @@ operative, non condizioni sperimentali differenti. Un ID già esistente non vien
 4. **Esplorazione e Generazione Figure**:
    - Apri ed esegui `evaluation_analysis.ipynb` con Jupyter Notebook o in VS Code / Cursor / IDE.
    - Le figure verranno salvate automaticamente in `figures/thesis/` in formato `.pdf` e `.png`.
+   - Il confronto tra esperimenti è disabilitato per default: abilitarlo con
+     `include_experiment_comparison=True` soltanto quando gli `experiment_id`
+     rappresentano condizioni sperimentali reali, non blocchi operativi o rerun correttive.

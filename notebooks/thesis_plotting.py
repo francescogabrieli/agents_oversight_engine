@@ -212,7 +212,7 @@ def plot_governance_pillars_and_reasons(summary: EvaluationSummary) -> plt.Figur
     p_df = pd.DataFrame(list(pillar_counts.items()), columns=["Pillar", "Count"]).sort_values("Count", ascending=True)
     ax1.barh(p_df["Pillar"], p_df["Count"], color=PALETTE["purple"], height=0.55)
     ax1.set_xlabel("Occurrences")
-    ax1.set_title("Oversight Triggers by Governance Pillar", pad=12)
+    ax1.set_title("Governance Events by Pillar", pad=12)
     for index, value in enumerate(p_df["Count"]):
         ax1.text(value + 0.3, index, str(value), va="center", fontweight="bold")
 
@@ -230,13 +230,18 @@ def plot_governance_pillars_and_reasons(summary: EvaluationSummary) -> plt.Figur
 def plot_overhead_and_efficiency(run_frames: dict[str, pd.DataFrame]) -> plt.Figure:
     """Figure 4: Computational & Interaction Overhead Distribution (raw per-run values)."""
     setup_thesis_style()
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(14, 4.5))
-
     runs_df = run_frames.get("runs", pd.DataFrame())
     reviews_df = run_frames.get("human_reviews", pd.DataFrame())
+    has_review_timing = (
+        not reviews_df.empty and reviews_df["review_time_seconds"].notna().any()
+    )
+    column_count = 3 if has_review_timing else 2
+    figure_width = 14 if has_review_timing else 10
+    fig, axes = plt.subplots(1, column_count, figsize=(figure_width, 4.5))
+    ax1, ax2 = axes[:2]
 
     if runs_df.empty:
-        for axis in (ax1, ax2, ax3):
+        for axis in axes:
             axis.text(0.5, 0.5, "No runs yet", ha="center", va="center")
         plt.tight_layout()
         return fig
@@ -252,13 +257,12 @@ def plot_overhead_and_efficiency(run_frames: dict[str, pd.DataFrame]) -> plt.Fig
     ax2.set_xlabel("")
     ax2.set_ylabel("Count per Run")
 
-    if not reviews_df.empty and reviews_df["review_time_seconds"].notna().any():
+    if has_review_timing:
+        ax3 = axes[2]
         sns.histplot(reviews_df["review_time_seconds"], ax=ax3, kde=True, color=PALETTE["warning"], bins=10)
         ax3.set_title("Human Review Duration")
         ax3.set_xlabel("Review Time (seconds)")
         ax3.set_ylabel("Review Count")
-    else:
-        ax3.text(0.5, 0.5, "No review timing recorded", ha="center", va="center")
 
     plt.tight_layout()
     return fig
@@ -323,10 +327,16 @@ def _percentage(value: float | None) -> float:
 def export_all_thesis_figures(
     database_path: str | Path = "artifacts/evaluation/layer5_evaluation.sqlite3",
     output_dir: str | Path = "figures/thesis",
+    *,
+    include_experiment_comparison: bool = False,
 ) -> list[Path]:
     """Generate and save all publication figures in PDF (vector for LaTeX) and PNG (high-res).
     Requires a populated evaluation database - ingest a real campaign first
-    (see notebooks/README.md); this no longer falls back to synthetic data."""
+    (see notebooks/README.md); this no longer falls back to synthetic data.
+
+    Experiment comparison is opt-in because operational campaign batches and corrective
+    reruns are not automatically valid experimental conditions.
+    """
     summary = load_evaluation_summary(database_path)
     if summary.total_runs == 0:
         raise ValueError(
@@ -345,9 +355,10 @@ def export_all_thesis_figures(
         "fig3_governance_pillars_and_reasons": plot_governance_pillars_and_reasons(summary),
         "fig4_overhead_and_efficiency": plot_overhead_and_efficiency(run_frames),
     }
-    comparison = plot_experiment_comparison(database_path)
-    if comparison is not None:
-        figures["fig5_experiment_comparison"] = comparison
+    if include_experiment_comparison:
+        comparison = plot_experiment_comparison(database_path)
+        if comparison is not None:
+            figures["fig5_experiment_comparison"] = comparison
 
     for name, fig in figures.items():
         pdf_path = out_dir / f"{name}.pdf"
