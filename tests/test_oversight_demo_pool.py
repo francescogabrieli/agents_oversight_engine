@@ -5,6 +5,7 @@ import unittest
 from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 
 from scripts.run_oversight_demo_pool import (
     DEFAULT_MANIFEST,
@@ -15,13 +16,25 @@ from scripts.run_oversight_demo_pool import (
     validate_trace,
 )
 from scripts.run_b6_live_evidence import (
+    EvidenceSelectionFaultActor,
+    FixedLivePlanner,
+    FourOriginLiveToolGateway,
+    MinimumTimeoutAttemptsActor,
     QualitativeDocumentLiveToolGateway,
+    StaticDatabaseMutationFaultActor,
     TimeoutFaultLiveToolGateway,
+)
+from layer2_runtime_governance import (
+    ActorResult,
+    ActorResultType,
+    CapabilityAccessMode,
+    StepValidation,
 )
 from layer3_tool_bus_external_capabilities.tool_contract import (
     RetrievalKind,
     ToolErrorCode,
     ToolName,
+    ToolObservation,
     ToolRequest,
 )
 
@@ -29,7 +42,7 @@ from layer3_tool_bus_external_capabilities.tool_contract import (
 # Build the smallest valid contract manifest for parser rejection tests.
 def _minimal_manifest() -> dict:
     return {
-        "manifest_version": "evaluation_oversight_demo.v3",
+        "manifest_version": "evaluation_oversight_demo.v7",
         "pool_id": "oversight_demo_v1",
         "scenarios": [
             {
@@ -69,11 +82,12 @@ class OversightManifestContractTests(unittest.TestCase):
     ) -> None:
         manifest = load_manifest(DEFAULT_MANIFEST)
 
-        self.assertEqual(manifest.manifest_version, "evaluation_oversight_demo.v3")
+        self.assertEqual(manifest.manifest_version, "evaluation_oversight_demo.v7")
         self.assertEqual(manifest.pool_id, "oversight_demo_v1")
-        self.assertEqual(len(manifest.scenarios), 8)
+        self.assertEqual(len(manifest.scenarios), 9)
         self.assertEqual(
-            {item.pillar for item in manifest.scenarios}, {"evidence", "trajectory"}
+            {item.pillar for item in manifest.scenarios},
+            {"evidence", "trajectory", "static_policy"},
         )
         self.assertEqual(
             {item.execution_mode for item in manifest.scenarios}, {"contract", "live"}
@@ -81,7 +95,7 @@ class OversightManifestContractTests(unittest.TestCase):
         self.assertEqual(DEFAULT_MANIFEST.parent.name, "configs")
         self.assertEqual(
             len([item for item in manifest.scenarios if item.execution_mode == "live"]),
-            4,
+            5,
         )
         self.assertEqual(
             {
@@ -89,7 +103,11 @@ class OversightManifestContractTests(unittest.TestCase):
                 for item in manifest.scenarios
                 if item.execution_mode == "live"
             },
-            {("evidence", "live"), ("trajectory", "live")},
+            {
+                ("evidence", "live"),
+                ("trajectory", "live"),
+                ("static_policy", "live"),
+            },
         )
 
     # A deterministic demo must preregister the whole directive sequence: that is what turns
@@ -333,6 +351,126 @@ class OversightProvenanceTests(unittest.TestCase):
 
 
 class OversightLiveConditionTests(unittest.TestCase):
+    # The short static probe calls the live actor but exposes a typed destructive candidate.
+    def test_static_probe_projects_read_only_database_mutation(self) -> None:
+        class CompletingActor:
+            actor_name = "live_test_actor"
+            prompt_version = "live_test_prompt"
+
+            def act(self, *, actor_task) -> ActorResult:
+                return ActorResult(
+                    plan_step_id=actor_task.current_plan_step.step_id,
+                    result_type=ActorResultType.STEP_COMPLETED,
+                    summary="Provider output replaced by the declared static probe.",
+                )
+
+        actor = StaticDatabaseMutationFaultActor(CompletingActor())
+        actor_task = SimpleNamespace(
+            current_plan_step=SimpleNamespace(step_id="step_1"),
+            intake_metadata=SimpleNamespace(request_id="static-probe"),
+        )
+
+        result = actor.act(actor_task=actor_task)
+
+        self.assertEqual(result.result_type, ActorResultType.STEP_COMPLETED)
+        self.assertEqual(result.capability_mode, CapabilityAccessMode.WRITE)
+        self.assertEqual(
+            result.database_statement_draft.database_profile_id,
+            "enterprise_db.read_only",
+        )
+        self.assertEqual(
+            result.external_operation_proposal.payload.statement_class.value,
+            "delete",
+        )
+        self.assertTrue(result.external_operation_proposal.execution_candidate)
+
+    # Narrative claims do not count as attempts; an early block becomes a real tool call.
+    def test_trajectory_guard_replaces_early_block_with_backend_attempt(self) -> None:
+        class BlockingActor:
+            actor_name = "live_test_actor"
+            prompt_version = "live_test_prompt"
+
+            def act(self, *, actor_task) -> ActorResult:
+                return ActorResult(
+                    plan_step_id=actor_task.current_plan_step.step_id,
+                    result_type=ActorResultType.BLOCKED,
+                    summary="The provider stopped too early.",
+                    blocking_reason="Only two actual attempts were recorded.",
+                )
+
+        actor = MinimumTimeoutAttemptsActor(BlockingActor(), minimum_attempts=4)
+        actor_task = SimpleNamespace(
+            tool_call_count=2,
+            current_plan_step=SimpleNamespace(step_id="step_1"),
+        )
+
+        result = actor.act(actor_task=actor_task)
+
+        self.assertEqual(result.result_type, ActorResultType.PROPOSE_ACTION)
+        self.assertEqual(result.capability_mode, CapabilityAccessMode.READ_ONLY)
+        self.assertEqual(result.tool_request.request_id, "oversight-trajectory-timeout-3")
+
+    # The declared Evidence fault changes only the selected references after a live completion.
+    def test_evidence_selection_fault_keeps_only_one_reference(self) -> None:
+        class CompletingActor:
+            actor_name = "live_test_actor"
+            prompt_version = "live_test_prompt"
+
+            def act(self, *, actor_task) -> ActorResult:
+                return ActorResult(
+                    plan_step_id="step_1",
+                    result_type=ActorResultType.STEP_COMPLETED,
+                    summary="Complete from the available evidence.",
+                    output_text="Controlled factual output.",
+                    step_validation=StepValidation(
+                        plan_step_id="step_1",
+                        actor_self_confidence=0.8,
+                        evidence_refs=tuple(
+                            item.observation_id for item in actor_task.observations
+                        ),
+                        rationale_summary="All controlled sources selected.",
+                    ),
+                )
+
+        observations = tuple(
+            ToolObservation(
+                observation_id=f"source-{index}",
+                locator=f"https://source-{index}.example/document",
+                content="Controlled source content.",
+            )
+            for index in range(1, 5)
+        )
+        actor = EvidenceSelectionFaultActor(CompletingActor())
+
+        result = actor.act(actor_task=SimpleNamespace(observations=observations))
+
+        self.assertEqual(result.step_validation.evidence_refs, ("source-1",))
+
+    # The Evidence probe must satisfy the actor gate before degrading the final selection.
+    def test_evidence_condition_exposes_four_origins(self) -> None:
+        request = ToolRequest(
+            plan_step_id="step_1",
+            tool_name=ToolName.WEB_SEARCH,
+            reason="Acquire the controlled evidence universe.",
+            query="controlled evidence",
+        )
+
+        result = FourOriginLiveToolGateway().execute(tool_request=request)
+
+        self.assertTrue(result.success)
+        self.assertEqual(len(result.observations), 4)
+        self.assertEqual(len({item.locator for item in result.observations}), 4)
+
+    # The Trajectory probe uses one non-factual step so every timeout shares one epoch.
+    def test_trajectory_condition_uses_one_controlled_step(self) -> None:
+        state = SimpleNamespace(
+            task_spec=SimpleNamespace(goal="Exercise consecutive failures.")
+        )
+        decision = FixedLivePlanner(factual=False).plan(task_state=state)
+
+        self.assertEqual(len(decision.plan_steps), 1)
+        self.assertFalse(decision.plan_steps[0].produces_factual_claims)
+
     # Fault injection must look like a backend-reaching typed timeout to Trajectory.
     def test_timeout_condition_returns_a_typed_failure(self) -> None:
         request = ToolRequest(

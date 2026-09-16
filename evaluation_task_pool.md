@@ -111,7 +111,7 @@ percorso locale né un linguaggio di interrogazione.
 ## `oversight_demo_v1`
 
 Il pool ufficiale è un protocollo chiuso in `configs/evaluation_oversight_demo_v1.json`
-(`evaluation_oversight_demo.v3`), eseguito da `scripts/run_oversight_demo_pool.py`. Il
+(`evaluation_oversight_demo.v7`), eseguito da `scripts/run_oversight_demo_pool.py`. Il
 runner conserva il digest SHA-256 del manifest, produce un trace canonico per scenario e
 confronta ogni run con la sua attesa preregistrata, registrando accanto alle asserzioni la
 provenienza della run: versione del bundle e delle soglie OPA, modello dell'attore, modalità

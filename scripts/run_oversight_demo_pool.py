@@ -29,6 +29,7 @@ from layer4_state_evidence_observability.infrastructure.runtime_artifacts import
 from scripts.run_b6_live_evidence import (  # noqa: E402
     run_live_evidence_anchoring_demo,
     run_live_evidence_demo,
+    run_live_static_database_deny_demo,
     run_live_trajectory_failure_demo,
     run_live_trajectory_replan_demo,
 )
@@ -41,7 +42,7 @@ from tests.b6_positive_fixtures import (  # noqa: E402
 )
 
 
-EXPECTED_MANIFEST_VERSION = "evaluation_oversight_demo.v3"
+EXPECTED_MANIFEST_VERSION = "evaluation_oversight_demo.v7"
 EXPECTED_POOL_ID = "oversight_demo_v1"
 DEFAULT_MANIFEST = REPO_ROOT / "configs" / "evaluation_oversight_demo_v1.json"
 DEFAULT_OUTPUT_ROOT = (
@@ -329,6 +330,7 @@ def _execute_scenario(
         "live_evidence_anchoring": run_live_evidence_anchoring_demo,
         "live_trajectory_failures": run_live_trajectory_failure_demo,
         "live_trajectory_replan_ceiling": run_live_trajectory_replan_demo,
+        "live_static_database_deny": run_live_static_database_deny_demo,
     }
     try:
         runner = live_runners[scenario.executor]
