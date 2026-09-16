@@ -355,8 +355,8 @@ class B6StepExplorationCeilingPlanner:
     planner_name = "b6_step_exploration_ceiling_fixture_planner"
     prompt_version = "b6_step_exploration_ceiling_fixture_v1"
 
-    # A single step whose only exit is OPA's own step-exploration ceiling: the gateway
-    # only ever refuses this target locally, it never replans on its own.
+    # A single step whose only exit is a Trajectory threshold: the gateway never settles
+    # this target and the fixture never replans on its own.
     def plan(self, *, task_state: TaskState) -> PlannerDecision:
         return PlannerDecision(
             plan_steps=[
@@ -364,10 +364,10 @@ class B6StepExplorationCeilingPlanner:
                     step_id="b6-step-exploration-ceiling-step-0",
                     objective="Reach a stable result through a capability target that never settles.",
                     rationale=(
-                        "The fixture exercises OPA's step_exploration_budget_exhausted "
-                        "convergence, not any Python-side replanning."
+                        "The fixture exercises OPA's own Trajectory convergence on an "
+                        "unsettled target, not any Python-side replanning."
                     ),
-                    expected_outcome="Escalation to human review once the exploration budget is spent.",
+                    expected_outcome="Escalation to human review once a Trajectory threshold is reached.",
                 )
             ],
             rationale="The fixture planner leaves the exhausted target entirely to OPA to resolve.",
@@ -710,9 +710,12 @@ def run_b6_trajectory_run(
     )
 
 
-# Run the deterministic step-exploration-ceiling scenario: the actor keeps retrying a
-# target the gateway only ever refuses locally, and the sole terminating condition is
-# OPA's step_exploration_budget_exhausted - never a Python-side replan.
+# Run the deterministic unsettled-target scenario: the actor keeps retrying a target whose
+# every backend attempt fails, and the run converges without any Python-side replan. Which
+# Trajectory rule catches it depends on the policy boundary: the stub below has only the
+# exploration budget, while the deployed bundle reaches its consecutive-failure threshold
+# (4) long before the per-step attempt ceiling (30), so the oversight pool preregisters
+# consecutive_tool_failures for this fixture.
 def run_b6_step_exploration_ceiling_run(
     *,
     artifact_root: Path,

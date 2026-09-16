@@ -79,6 +79,10 @@ in its reference rather than being copied back into this file.
 - Evaluation must retain failed, interrupted, skipped and not-started runs. Undefined
   rates remain null/N/D. Plots consume canonical Layer 5 metrics without recomputing
   rates or inventing sample data.
+- The official oversight demo uses `configs/evaluation_oversight_demo_v1.json` and
+  `scripts/run_oversight_demo_pool.py`. Keep live-provider tasks separate from
+  deterministic contract controls, preserve failed assertions, and never treat
+  controlled activation scenarios as natural intervention frequencies.
 
 ## Coding Standards
 
