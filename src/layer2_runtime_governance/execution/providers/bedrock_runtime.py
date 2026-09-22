@@ -26,6 +26,7 @@ _DEFAULT_BEDROCK_MODEL_ID = "eu.amazon.nova-2-lite-v1:0"
 class BedrockThinkingMode(StrEnum):
     OFF = "off"
     ADAPTIVE = "adaptive"
+    EXTENDED = "extended"
 
 
 class BedrockThinkingEffort(StrEnum):
@@ -62,6 +63,11 @@ class BedrockRuntimeSettings:
         object.__setattr__(self, "thinking_effort", BedrockThinkingEffort(self.thinking_effort))
         if self.thinking == BedrockThinkingMode.ADAPTIVE and self.model_id.split(".")[-1] != "claude-sonnet-4-6":
             raise ValueError("Adaptive thinking is currently supported here only for Claude Sonnet 4.6.")
+        if self.thinking == BedrockThinkingMode.EXTENDED:
+            if self.model_id.split(".")[-1] != "nova-2-lite-v1:0":
+                raise ValueError("Extended thinking is currently supported here only for Amazon Nova 2 Lite.")
+            if self.thinking_effort == BedrockThinkingEffort.MAX:
+                raise ValueError("Amazon Nova 2 Lite extended thinking supports low, medium, or high effort.")
 
     @classmethod
     # Build typed Bedrock settings from the supported local configuration sources.
@@ -150,11 +156,19 @@ class BedrockChatClient:
         tools: list[dict[str, object]],
     ) -> dict[str, Any]:
         adaptive = self._settings.thinking == BedrockThinkingMode.ADAPTIVE
+        extended = self._settings.thinking == BedrockThinkingMode.EXTENDED
         request_options = {}
         if adaptive:
             request_options["additionalModelRequestFields"] = {
                 "thinking": {"type": "adaptive"},
                 "output_config": {"effort": self._settings.thinking_effort.value},
+            }
+        elif extended:
+            request_options["additionalModelRequestFields"] = {
+                "reasoningConfig": {
+                    "type": "enabled",
+                    "maxReasoningEffort": self._settings.thinking_effort.value,
+                }
             }
         try:
             response_payload = self._client.converse(

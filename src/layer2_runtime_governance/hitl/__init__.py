@@ -37,6 +37,8 @@ from ..domain import (
     HumanReviewRequest,
     RuntimeFlag,
     RuntimeState,
+    ScratchpadEntry,
+    ScratchpadEntryType,
     StepRecord,
     TaskState,
     TerminationReason,
@@ -417,16 +419,32 @@ def _apply_human_review_decision(
         return
 
     if human_review_decision.decision_type == HumanReviewDecisionType.ASK_CLARIFICATION:
-        if RuntimeFlag.CLARIFICATION_REQUIRED not in state.runtime_flags:
-            state.runtime_flags.append(RuntimeFlag.CLARIFICATION_REQUIRED)
+        clarification_text = human_review_decision.clarification_text
+        if clarification_text is None:
+            raise ValueError("ask_clarification requires clarification_text.")
+        # The operator's answer is durable, audit-safe working context for the next
+        # actor turn. It is not hidden reasoning and it must not disappear at resume.
+        state.scratchpad.append(
+            ScratchpadEntry(
+                turn_index=state.actor_turn_count,
+                plan_step_id=pending_request.current_plan_step_id or "intake",
+                entry_type=ScratchpadEntryType.OBSERVATION,
+                summary=f"Human clarification: {clarification_text}",
+            )
+        )
+        state.runtime_flags = [
+            flag
+            for flag in state.runtime_flags
+            if flag != RuntimeFlag.CLARIFICATION_REQUIRED
+        ]
         set_external_communication_phase(
             state,
-            phase=ExternalCommunicationPhase.HUMAN_REVIEW_REQUIRED,
-            summary="Human review requested clarification before the external communication branch can continue.",
-            review_ready=True,
+            phase=ExternalCommunicationPhase.EVIDENCE_COLLECTION,
+            summary="Human clarification was recorded and the actor may continue.",
+            review_ready=False,
         )
         state.current_tool_request = None
-        state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        state.current_state = pending_request.resume_state
         return
 
     if human_review_decision.decision_type == HumanReviewDecisionType.ABORT:

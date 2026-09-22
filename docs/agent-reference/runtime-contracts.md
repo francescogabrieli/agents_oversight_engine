@@ -57,7 +57,7 @@ All code paths and commands below are relative to the repository root.
 - runtime planning services must preserve the planner-owned semantic steps without compaction, compression, insertion, or lexical rewriting
 - actor execution receives the full semantic plan as context but may commit completion only for the current plan step
 - actor output must remain typed and audit-safe even when backed by an LLM; intermediate output may summarize meaningful working progress without being forced into premature completion
-- the current Layer 2 actor backend defaults to Amazon Bedrock Nova 2 Lite in `eu-central-1`; deployments may override the Bedrock model or inference profile and region through configuration
+- the current Layer 2 actor backend defaults to Amazon Bedrock Nova 2 Lite in `eu-central-1`; deployments may override the Bedrock model or inference profile and region through configuration. Provider reasoning modes remain explicit: Claude Sonnet 4.6 uses `adaptive`, while Nova 2 Lite uses `extended` with low, medium, or high effort; reasoning content never enters runtime state or traces
 - planner and replanner remain OpenAI-backed for now
 - actor provider selection is controlled by `LAYER2_ACTOR_PROVIDER`, with supported values `bedrock` and `openai`; Bedrock is the default
 - malformed provider JSON that omits the runtime action envelope should be recovered only when it is clearly completion-shaped; otherwise it should stop conservatively instead of being treated as normal progress
@@ -126,6 +126,7 @@ All code paths and commands below are relative to the repository root.
 ### HITL Rules
 
 - HITL decisions are reason-scoped: unsafe/uncertain semantic review exposes modify/replan/abort; capability approval exposes approve/modify/abort; clarification and indeterminate-receipt reconciliation expose only their applicable typed actions.
+- A submitted clarification is an answer to the actor's question, not a second pause request: persist its non-empty text as an audit-safe observation for the reviewed semantic step, clear the active clarification flag, and resume the request-bound state. The runtime must never clear the pending request while leaving `current_state = waiting_human_review`, because that creates an owner wait with no dashboard-addressable request.
 - An indeterminate-receipt reconciliation review carries its own `external_execution_reconciliation_required` reason and its own summary built from the persisted receipt (connector reference, error code); it must never inherit the preceding governance reason codes, because the approval gate asks whether the effect may happen while reconciliation asks whether it already did. The reason is listed among the codes that cannot authorize external execution: reconciliation settles an outcome and never re-authorizes the connector.
 - HITL payloads must remain readable, compact, and include exact operation/digest/findings when an external proposal exists.
 - Human decisions should remain canonical and typed.

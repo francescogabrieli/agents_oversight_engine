@@ -151,10 +151,10 @@ Expected Bedrock actor runtime:
 - optional overrides:
   - `LAYER2_ACTOR_PROVIDER=bedrock`
   - `LAYER2_ACTOR_BEDROCK_MODEL_ID=eu.amazon.nova-2-lite-v1:0` (or another Bedrock Converse-compatible model/inference profile available in `AWS_REGION`)
-  - `LAYER2_ACTOR_BEDROCK_THINKING=off|adaptive` (default `off`; adaptive currently restricted to Claude Sonnet 4.6)
-  - `LAYER2_ACTOR_BEDROCK_THINKING_EFFORT=low|medium|high|max` (default `high`, effective only in adaptive mode)
+  - `LAYER2_ACTOR_BEDROCK_THINKING=off|adaptive|extended` (default `off`; `adaptive` is restricted to Claude Sonnet 4.6 and `extended` to Amazon Nova 2 Lite)
+  - `LAYER2_ACTOR_BEDROCK_THINKING_EFFORT=low|medium|high|max` (default `high`; Nova extended thinking accepts only `low|medium|high`)
   - Actor thinking metadata crosses the provider boundary as plain strings. The checkpoint serializer retains exact legacy allowlist entries for `BedrockThinkingMode` and `BedrockThinkingEffort` because the first thinking-enabled runs persisted these enums; no provider-wide allowlist is permitted.
-  - Adaptive thinking uses Converse `additionalModelRequestFields` and `toolChoice=auto`; the runtime still requires typed tool actions. Thinking blocks are discarded. Each turn is a fresh request built from canonical state, not an API conversation replay.
+  - Claude adaptive thinking uses Converse `thinking`/`output_config` fields and `toolChoice=auto`. Nova extended thinking uses `reasoningConfig` and retains `toolChoice=any`. The runtime still requires typed tool actions; reasoning blocks are discarded. Each turn is a fresh request built from canonical state, not an API conversation replay.
   - Optional v6 actor fields `actor_model_id`, `actor_thinking_mode`, and `actor_thinking_effort` preserve experiment configuration and contribute to Layer 5 fingerprints when known. Historical absence remains unknown. New thinking experiments require fresh campaign/thread IDs; see `docs/evaluation/actor_thinking.md`.
   - `AWS_REGION=eu-central-1`
   - `AWS_SESSION_TOKEN=` when temporary AWS credentials are used

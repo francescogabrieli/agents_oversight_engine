@@ -1,4 +1,4 @@
-# Claude Sonnet 4.6 thinking experiment
+# Bedrock actor thinking experiments
 
 The actor supports opt-in adaptive thinking. Set these variables in the terminal
 that launches the campaign (process variables take precedence over `.env`):
@@ -9,6 +9,21 @@ $env:LAYER2_ACTOR_BEDROCK_MODEL_ID = "eu.anthropic.claude-sonnet-4-6"
 $env:LAYER2_ACTOR_BEDROCK_THINKING = "adaptive"
 $env:LAYER2_ACTOR_BEDROCK_THINKING_EFFORT = "high"
 ```
+
+Amazon Nova 2 Lite uses the separate `extended` mode because Bedrock exposes a
+different provider request contract:
+
+```powershell
+$env:LAYER2_ACTOR_PROVIDER = "bedrock"
+$env:LAYER2_ACTOR_BEDROCK_MODEL_ID = "eu.amazon.nova-2-lite-v1:0"
+$env:LAYER2_ACTOR_BEDROCK_THINKING = "extended"
+$env:LAYER2_ACTOR_BEDROCK_THINKING_EFFORT = "high"
+```
+
+Nova maps this configuration to `reasoningConfig.type=enabled` and
+`maxReasoningEffort`; supported efforts are `low`, `medium`, and `high`. It retains
+forced Bedrock tool selection (`toolChoice=any`). Claude adaptive thinking instead
+uses `toolChoice=auto`, so that coupled difference must remain explicit in comparisons.
 
 Preview the pool with one replica per scenario without invoking providers:
 
@@ -33,7 +48,7 @@ For Sonnet 4.6 this means thinking is disabled. Adaptive requests explicitly sen
 selection from `any` to `auto`. The runtime still rejects responses without a
 typed tool action through its existing bounded protocol recovery. Declare the
 tool-selection change as a coupled experimental change in baseline comparisons.
-No temperature or output-token limit is introduced: both retain provider defaults.
+No temperature or output-token limit is introduced: all modes retain provider defaults.
 
 Each actor turn reconstructs its context from canonical task state. It does not
 replay an assistant/tool message conversation, so returned thinking/signature
@@ -52,3 +67,4 @@ the model ID field identifies the actual configured model.
 Provider references:
 - https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html
 - https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-extended-thinking.html
+- https://docs.aws.amazon.com/nova/latest/nova2-userguide/extended-thinking.html

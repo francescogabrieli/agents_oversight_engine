@@ -96,6 +96,59 @@ class Layer2HumanReviewRuntimeTests(unittest.TestCase):
             ),
         )
 
+    # A clarification is an operator answer: persist it for the actor and leave HITL.
+    def test_clarification_answer_resumes_actor_with_audit_safe_context(self) -> None:
+        task_state = TaskState.from_intake(_build_research_intake_result())
+        task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
+        task_state.human_review_resume_state = RuntimeState.ACTING
+        task_state.runtime_flags.append(RuntimeFlag.CLARIFICATION_REQUIRED)
+        task_state.plan_steps = [
+            PlanStep(
+                step_id="step_1",
+                objective="Prepare the risk register.",
+                rationale="The operator must settle the source assumption.",
+                expected_outcome="A grounded risk register.",
+                status=PlanStepStatus.BLOCKED,
+            )
+        ]
+        task_state.current_plan_step_index = 0
+        task_state.actor_result = ActorResult(
+            plan_step_id="step_1",
+            result_type=ActorResultType.ASK_CLARIFICATION,
+            summary="May the supplied context be treated as the primary source?",
+            blocking_reason="The source status must be confirmed.",
+        )
+        pending_request = build_human_review_request(
+            state=task_state,
+            thread_id="clarification-answer",
+        )
+        task_state.pending_human_review_request = pending_request
+
+        with patch(
+            "layer2_runtime_governance.hitl.interrupt",
+            return_value={
+                "request_id": pending_request.request_id,
+                "decision_type": "ask_clarification",
+                "clarification_text": "Use the supplied facts as the primary source.",
+            },
+        ):
+            resumed_state = human_review(
+                task_state,
+                thread_id="clarification-answer",
+            )
+
+        self.assertEqual(resumed_state.current_state, RuntimeState.ACTING)
+        self.assertIsNone(resumed_state.pending_human_review_request)
+        self.assertNotIn(RuntimeFlag.CLARIFICATION_REQUIRED, resumed_state.runtime_flags)
+        self.assertEqual(
+            resumed_state.scratchpad[-1].summary,
+            "Human clarification: Use the supplied facts as the primary source.",
+        )
+        self.assertEqual(
+            resumed_state.scratchpad[-1].entry_type,
+            ScratchpadEntryType.OBSERVATION,
+        )
+
     # A ceiling approval closes only the reviewed replan episode and releases normal progress.
     def test_replan_ceiling_approval_starts_a_fresh_trajectory_episode(self) -> None:
         task_state = TaskState.from_intake(_build_research_intake_result())
