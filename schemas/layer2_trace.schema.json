@@ -505,7 +505,7 @@
           "$ref": "#/$defs/nullableString"
         },
         "actor_thinking_mode": {
-          "enum": ["off", "adaptive", null]
+          "enum": ["off", "adaptive", "extended", null]
         },
         "actor_thinking_effort": {
           "enum": ["low", "medium", "high", "max", null]

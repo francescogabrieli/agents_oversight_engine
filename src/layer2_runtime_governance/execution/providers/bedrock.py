@@ -57,9 +57,13 @@ class BedrockNovaActor(ActorPort):
         return str(self._settings.thinking)
 
     @property
-    # An effort is effective only when adaptive thinking is requested.
+    # An effort is effective only when one provider reasoning mode is requested.
     def thinking_effort(self) -> str | None:
-        return str(self._settings.thinking_effort) if self._settings.thinking == "adaptive" else None
+        return (
+            str(self._settings.thinking_effort)
+            if self._settings.thinking in {"adaptive", "extended"}
+            else None
+        )
 
     # Ask Bedrock for one action and normalize it into ActorResult.
     def act(self, *, actor_task: ActorTask) -> ActorResult:
