@@ -3,9 +3,8 @@ from __future__ import annotations
 import json
 import unittest
 from copy import deepcopy
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from scripts.run_oversight_demo_pool import (
     DEFAULT_MANIFEST,
@@ -24,12 +23,22 @@ from scripts.run_b6_live_evidence import (
     StaticDatabaseMutationFaultActor,
     TimeoutFaultLiveToolGateway,
 )
+from scripts.run_oversight_judge_cases import (  # noqa: E402
+    CASES,
+    JudgeDemoActor,
+    JudgeDemoGateway,
+    JudgeDemoIntake,
+    JudgeDemoPlanner,
+    run_live_judge_case,
+)
+from layer2_runtime_governance.domain.plan import validate_external_effect_plan_contract
 from layer2_runtime_governance import (
     ActorResult,
     ActorResultType,
     CapabilityAccessMode,
     StepValidation,
 )
+from layer1_intake import ExecutionIntent
 from layer3_tool_bus_external_capabilities.tool_contract import (
     RetrievalKind,
     ToolErrorCode,
@@ -42,7 +51,7 @@ from layer3_tool_bus_external_capabilities.tool_contract import (
 # Build the smallest valid contract manifest for parser rejection tests.
 def _minimal_manifest() -> dict:
     return {
-        "manifest_version": "evaluation_oversight_demo.v7",
+        "manifest_version": "evaluation_oversight_demo.v8",
         "pool_id": "oversight_demo_v1",
         "scenarios": [
             {
@@ -68,26 +77,28 @@ def _minimal_manifest() -> dict:
     }
 
 
-# Persist one isolated manifest payload for a loader test.
-def _write_manifest(directory: Path, payload: dict) -> Path:
-    path = directory / "manifest.json"
-    path.write_text(json.dumps(payload), encoding="utf-8")
-    return path
+# Present an isolated manifest payload without depending on an OS temp directory.
+def _load_payload(payload: dict):
+    source = json.dumps(payload)
+    with patch("pathlib.Path.read_text", return_value=source), patch(
+        "pathlib.Path.read_bytes", return_value=source.encode("utf-8")
+    ):
+        return load_manifest(DEFAULT_MANIFEST)
 
 
 class OversightManifestContractTests(unittest.TestCase):
-    # The official manifest must expose four live and four contract scenarios.
+    # The official manifest includes separate controlled live Judge verdict probes.
     def test_default_manifest_is_versioned_and_covers_both_pillars_and_modes(
         self,
     ) -> None:
         manifest = load_manifest(DEFAULT_MANIFEST)
 
-        self.assertEqual(manifest.manifest_version, "evaluation_oversight_demo.v7")
+        self.assertEqual(manifest.manifest_version, "evaluation_oversight_demo.v8")
         self.assertEqual(manifest.pool_id, "oversight_demo_v1")
-        self.assertEqual(len(manifest.scenarios), 9)
+        self.assertEqual(len(manifest.scenarios), 13)
         self.assertEqual(
             {item.pillar for item in manifest.scenarios},
-            {"evidence", "trajectory", "static_policy"},
+            {"evidence", "trajectory", "static_policy", "judge"},
         )
         self.assertEqual(
             {item.execution_mode for item in manifest.scenarios}, {"contract", "live"}
@@ -95,7 +106,7 @@ class OversightManifestContractTests(unittest.TestCase):
         self.assertEqual(DEFAULT_MANIFEST.parent.name, "configs")
         self.assertEqual(
             len([item for item in manifest.scenarios if item.execution_mode == "live"]),
-            5,
+            9,
         )
         self.assertEqual(
             {
@@ -107,7 +118,16 @@ class OversightManifestContractTests(unittest.TestCase):
                 ("evidence", "live"),
                 ("trajectory", "live"),
                 ("static_policy", "live"),
+                ("judge", "live"),
             },
+        )
+        self.assertEqual(
+            {
+                item.expected.judge_verdicts[0]
+                for item in manifest.scenarios
+                if item.pillar == "judge"
+            },
+            {"safe", "unsafe", "uncertain", "needs_revision"},
         )
 
     # A deterministic demo must preregister the whole directive sequence: that is what turns
@@ -141,10 +161,8 @@ class OversightManifestContractTests(unittest.TestCase):
         payload = _minimal_manifest()
         payload["scenarios"][0]["expected"]["required_directives"] = ["replan"]
 
-        with TemporaryDirectory(prefix="oversight-manifest-") as temp_dir:
-            path = _write_manifest(Path(temp_dir), payload)
-            with self.assertRaisesRegex(ValueError, "must stay empty"):
-                load_manifest(path)
+        with self.assertRaisesRegex(ValueError, "must stay empty"):
+            _load_payload(payload)
 
     # A variable live run must still require at least one governance directive.
     def test_manifest_rejects_an_unconstrained_scenario(self) -> None:
@@ -152,24 +170,23 @@ class OversightManifestContractTests(unittest.TestCase):
         payload["scenarios"][0]["execution_mode"] = "live"
         payload["scenarios"][0]["expected"]["directive_sequence"] = None
 
-        with TemporaryDirectory(prefix="oversight-manifest-") as temp_dir:
-            path = _write_manifest(Path(temp_dir), payload)
-            with self.assertRaisesRegex(
-                ValueError, "must require at least one directive"
-            ):
-                load_manifest(path)
+        with self.assertRaisesRegex(ValueError, "must require at least one directive"):
+            _load_payload(payload)
 
     # Fail closed when an older manifest shape is supplied to the current runner.
     def test_manifest_rejects_a_superseded_version(self) -> None:
         payload = _minimal_manifest()
         payload["manifest_version"] = "evaluation_oversight_demo.v1"
 
-        with TemporaryDirectory(prefix="oversight-manifest-") as temp_dir:
-            path = _write_manifest(Path(temp_dir), payload)
-            with self.assertRaisesRegex(
-                ValueError, "Unsupported oversight manifest version"
-            ):
-                load_manifest(path)
+        with self.assertRaisesRegex(ValueError, "Unsupported oversight manifest version"):
+            _load_payload(payload)
+
+    # A Judge case cannot preregister an untyped or invented semantic verdict.
+    def test_manifest_rejects_unknown_judge_verdict(self) -> None:
+        payload = _minimal_manifest()
+        payload["scenarios"][0]["expected"]["judge_verdicts"] = [{"value": "safe"}]
+        with self.assertRaisesRegex(ValueError, "judge_verdicts must be a closed text list"):
+            _load_payload(payload)
 
     # Contract controls and live-provider tasks must be runnable independently.
     def test_mode_selection_keeps_contract_and_live_demos_separable(self) -> None:
@@ -185,6 +202,11 @@ class OversightManifestContractTests(unittest.TestCase):
         self.assertEqual({item.execution_mode for item in contract}, {"contract"})
         self.assertEqual({item.execution_mode for item in live}, {"live"})
         self.assertEqual(len(contract) + len(live), len(manifest.scenarios))
+        judge = select_scenarios(
+            manifest, mode="live", pillar="judge", scenario_start=1, scenario_end=None
+        )
+        self.assertEqual(len(judge), 4)
+        self.assertEqual({item.pillar for item in judge}, {"judge"})
 
 
 class OversightTraceValidationTests(unittest.TestCase):
@@ -302,6 +324,45 @@ class OversightTraceValidationTests(unittest.TestCase):
             "forbidden directive observed='stop'", validate_trace(trace, expected)
         )
 
+    # A Judge result is valid only after OPA admission and exact binding checks.
+    def test_judge_verdict_requires_admission_and_digest_binding(self) -> None:
+        expected = ExpectedOutcome(
+            terminal_states=("waiting_human_review",),
+            directive_sequence=None,
+            required_reason_codes=("judge_unsafe",),
+            forbidden_reason_codes=(),
+            required_directives=("wait_human_review",),
+            forbidden_directives=(),
+            judge_verdicts=("unsafe",),
+        )
+        trace = {
+            "runtime": {"current_state": "waiting_human_review"},
+            "governance_passes": [{
+                "directive": "wait_human_review",
+                "reason_codes": ["judge_unsafe"],
+                "judge_admission": {"required": True},
+                "pillar_results": {"judge": {
+                    "invoked": True,
+                    "verdict": "unsafe",
+                    "digest_matches": True,
+                    "operation_digest_matches": True,
+                    "evidence_snapshot_matches": True,
+                    "evidence_selection_matches": True,
+                    "evaluated_operation_digest": "a" * 64,
+                    "expected_operation_digest": "a" * 64,
+                    "evaluated_evidence_snapshot_digest": "b" * 64,
+                    "expected_evidence_snapshot_digest": "b" * 64,
+                    "evaluated_evidence_selection_digest": "c" * 64,
+                    "expected_evidence_selection_digest": "c" * 64,
+                }},
+            }],
+        }
+        self.assertEqual(validate_trace(trace, expected), ())
+        trace["governance_passes"][0]["pillar_results"]["judge"]["digest_matches"] = False
+        self.assertIn("Judge binding invalid: digest_matches.", validate_trace(trace, expected))
+        trace["governance_passes"][0]["judge_admission"]["required"] = False
+        self.assertIn("Judge invoked without OPA admission.", validate_trace(trace, expected))
+
 
 class OversightProvenanceTests(unittest.TestCase):
     # Provenance must bind policy, provider, thinking and prompt identity.
@@ -351,6 +412,75 @@ class OversightProvenanceTests(unittest.TestCase):
 
 
 class OversightLiveConditionTests(unittest.TestCase):
+    # Judge probes fix the payload while the configured semantic model remains live.
+    def test_judge_cases_cover_four_verdict_conditions_without_effects(self) -> None:
+        self.assertEqual(set(CASES), {"safe", "unsafe", "uncertain", "needs_revision"})
+        self.assertTrue(all(case.recipient.endswith(".invalid") for case in CASES.values()))
+        for name, case in CASES.items():
+            with self.subTest(case=name):
+                self.assertTrue(case.goal)
+                self.assertTrue(case.constraints)
+                self.assertTrue(case.body)
+        decision = JudgeDemoPlanner().plan(
+            task_state=SimpleNamespace(task_spec=SimpleNamespace(goal="Draft only."))
+        )
+        self.assertFalse(decision.plan_steps[0].produces_governed_external_effect_proposal)
+        validate_external_effect_plan_contract(
+            steps=decision.plan_steps,
+            execution_intent=ExecutionIntent.PROPOSAL_ONLY,
+        )
+        report_decision = JudgeDemoPlanner(report_required=True).plan(
+            task_state=SimpleNamespace(task_spec=SimpleNamespace(goal="Use report."))
+        )
+        self.assertTrue(report_decision.plan_steps[0].produces_factual_claims)
+        self.assertEqual(report_decision.plan_steps[0].evidence_burden.min_independent_sources, 1)
+        validate_external_effect_plan_contract(
+            steps=report_decision.plan_steps,
+            execution_intent=ExecutionIntent.PROPOSAL_ONLY,
+        )
+
+    # The uncertainty control carries an adapter-marked incomplete report.
+    def test_judge_uncertain_case_exposes_truncation_before_candidate(self) -> None:
+        actor = JudgeDemoActor(CASES["uncertain"])
+        task = SimpleNamespace(
+            current_plan_step=SimpleNamespace(step_id="oversight-judge-step-1"),
+            observations=(),
+        )
+        first = actor.act(actor_task=task)
+        self.assertEqual(first.result_type, ActorResultType.PROPOSE_ACTION)
+        result = JudgeDemoGateway().execute(tool_request=first.tool_request)
+        self.assertTrue(result.truncated)
+        self.assertEqual(len(result.observations), 1)
+        task.observations = result.observations
+        second = actor.act(actor_task=task)
+        self.assertEqual(second.result_type, ActorResultType.STEP_COMPLETED)
+        self.assertEqual(second.step_validation.evidence_refs, ("oversight-judge-report",))
+
+    # The live case wires a real Judge port to a proposal-only deterministic actor.
+    def test_judge_case_composition_keeps_external_effect_disabled(self) -> None:
+        judge = SimpleNamespace(judge_name="injected_test_judge")
+        with patch(
+            "scripts.run_oversight_judge_cases.run_layer2_flow", return_value={"ok": True}
+        ) as flow, patch(
+            "scripts.run_oversight_judge_cases.build_default_policy_engine",
+            return_value=object(),
+        ):
+            result = run_live_judge_case(
+                case_name="safe",
+                artifact_root=DEFAULT_MANIFEST.parent.parent / "artifacts" / "test_tmp",
+                thread_id="judge-wiring-test",
+                judge_service=judge,
+            )
+        self.assertEqual(result, {"ok": True})
+        kwargs = flow.call_args.kwargs
+        self.assertIs(kwargs["judge_service"], judge)
+        self.assertIsInstance(kwargs["actor_service"], JudgeDemoActor)
+        intake = JudgeDemoIntake(CASES["safe"]).execute(None)
+        self.assertEqual(
+            intake.structured_task.task_spec.execution_intent,
+            ExecutionIntent.PROPOSAL_ONLY,
+        )
+
     # The short static probe calls the live actor but exposes a typed destructive candidate.
     def test_static_probe_projects_read_only_database_mutation(self) -> None:
         class CompletingActor:

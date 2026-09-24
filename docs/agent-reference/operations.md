@@ -92,6 +92,18 @@ Recover an interrupted thread whose original runtime owner is no longer alive:
 .\.venv\Scripts\python.exe src\main_layer2.py --attach-thread <thread_id>
 ```
 
+Run only the preregistered live Semantic Judge probes OP10–OP13 after verifying the
+loaded OPA bundle. The actor is controlled for these cases; the configured Judge
+provider is live. Use a fresh campaign ID and do not count dry-runs as results:
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\verify_opa_bundle.py
+.\.venv\Scripts\python.exe .\scripts\run_oversight_demo_pool.py --campaign-id oversight_demo_judge_v8 --mode live --pillar judge
+```
+
+See [Judge demo design](../evaluation/oversight_demo_judge_extension.md). Without
+`--pillar judge`, `--mode live` selects OP05–OP13, including the existing controls.
+
 
 ## Testing
 

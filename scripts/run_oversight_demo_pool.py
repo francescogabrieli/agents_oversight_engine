@@ -20,6 +20,7 @@ for import_root in (REPO_ROOT, SRC_ROOT):
 from langgraph.checkpoint.memory import InMemorySaver  # noqa: E402
 
 from layer2_runtime_governance import build_default_policy_engine  # noqa: E402
+from layer2_runtime_governance.judge import JudgeSettings  # noqa: E402
 from layer4_state_evidence_observability.infrastructure.checkpointing import (  # noqa: E402
     build_runtime_serializer,
 )
@@ -33,6 +34,7 @@ from scripts.run_b6_live_evidence import (  # noqa: E402
     run_live_trajectory_failure_demo,
     run_live_trajectory_replan_demo,
 )
+from scripts.run_oversight_judge_cases import run_live_judge_case  # noqa: E402
 from tests.b6_positive_fixtures import (  # noqa: E402
     approve_b6_anchoring_concern_review,
     run_b6_anchoring_concern_run,
@@ -42,7 +44,7 @@ from tests.b6_positive_fixtures import (  # noqa: E402
 )
 
 
-EXPECTED_MANIFEST_VERSION = "evaluation_oversight_demo.v7"
+EXPECTED_MANIFEST_VERSION = "evaluation_oversight_demo.v8"
 EXPECTED_POOL_ID = "oversight_demo_v1"
 DEFAULT_MANIFEST = REPO_ROOT / "configs" / "evaluation_oversight_demo_v1.json"
 DEFAULT_OUTPUT_ROOT = (
@@ -64,6 +66,7 @@ class ExpectedOutcome:
     forbidden_reason_codes: tuple[str, ...]
     required_directives: tuple[str, ...]
     forbidden_directives: tuple[str, ...]
+    judge_verdicts: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -158,9 +161,10 @@ def _parse_expected_outcome(payload: Any, *, scenario_id: str) -> ExpectedOutcom
         "forbidden_directives",
     )
     expected_keys = {"directive_sequence", *list_fields}
-    if not isinstance(payload, dict) or set(payload) != expected_keys:
+    allowed_keys = expected_keys | {"judge_verdicts"}
+    if not isinstance(payload, dict) or not expected_keys <= set(payload) or set(payload) - allowed_keys:
         raise ValueError(
-            f"Scenario expected outcome must contain exactly {sorted(expected_keys)}."
+            f"Scenario expected outcome must contain {sorted(expected_keys)} and optional judge_verdicts."
         )
     for field in list_fields:
         if not isinstance(payload[field], list) or any(
@@ -200,6 +204,16 @@ def _parse_expected_outcome(payload: Any, *, scenario_id: str) -> ExpectedOutcom
         raise ValueError(
             f"Scenario {scenario_id!r} without a directive_sequence must require at least one directive."
         )
+    verdicts = payload.get("judge_verdicts")
+    if verdicts is not None and (
+        not isinstance(verdicts, list)
+        or any(
+            not isinstance(item, str)
+            or item not in {"safe", "unsafe", "uncertain", "needs_revision"}
+            for item in verdicts
+        )
+    ):
+        raise ValueError(f"Scenario {scenario_id!r} judge_verdicts must be a closed text list.")
     return ExpectedOutcome(
         terminal_states=tuple(payload["terminal_states"]),
         directive_sequence=None if sequence is None else tuple(sequence),
@@ -207,6 +221,7 @@ def _parse_expected_outcome(payload: Any, *, scenario_id: str) -> ExpectedOutcom
         forbidden_reason_codes=tuple(payload["forbidden_reason_codes"]),
         required_directives=tuple(payload["required_directives"]),
         forbidden_directives=tuple(payload["forbidden_directives"]),
+        judge_verdicts=None if verdicts is None else tuple(verdicts),
     )
 
 
@@ -247,6 +262,49 @@ def validate_trace(trace: dict[str, Any], expected: ExpectedOutcome) -> tuple[st
     for directive in expected.forbidden_directives:
         if directive in observed_sequence:
             errors.append(f"forbidden directive observed={directive!r}")
+    if expected.judge_verdicts is not None:
+        judged_passes = [
+            item for item in passes
+            if item.get("pillar_results", {}).get("judge", {}).get("invoked") is True
+        ]
+        observed_verdicts = tuple(
+            item["pillar_results"]["judge"].get("verdict") for item in judged_passes
+        )
+        if observed_verdicts != expected.judge_verdicts:
+            errors.append(
+                f"judge_verdicts expected={list(expected.judge_verdicts)} "
+                f"actual={list(observed_verdicts)}"
+            )
+        for item in judged_passes:
+            if item.get("judge_admission", {}).get("required") is not True:
+                errors.append("Judge invoked without OPA admission.")
+            judge = item["pillar_results"]["judge"]
+            for binding in (
+                "digest_matches",
+                "operation_digest_matches",
+                "evidence_snapshot_matches",
+                "evidence_selection_matches",
+            ):
+                if judge.get(binding) is not True:
+                    errors.append(f"Judge binding invalid: {binding}.")
+            for evaluated, expected_digest in (
+                ("evaluated_operation_digest", "expected_operation_digest"),
+                ("evaluated_evidence_snapshot_digest", "expected_evidence_snapshot_digest"),
+                ("evaluated_evidence_selection_digest", "expected_evidence_selection_digest"),
+            ):
+                if not judge.get(expected_digest) or judge.get(evaluated) != judge.get(expected_digest):
+                    errors.append(f"Judge digest mismatch: {evaluated}.")
+            verdict = judge.get("verdict")
+            required_response = {
+                "unsafe": ("judge_unsafe", "wait_human_review"),
+                "uncertain": ("judge_uncertain", "wait_human_review"),
+                "needs_revision": ("judge_needs_revision", "revise_action"),
+            }.get(verdict)
+            if required_response and (
+                required_response[0] not in item.get("reason_codes", ())
+                or item.get("directive") != required_response[1]
+            ):
+                errors.append(f"Judge verdict {verdict!r} did not select its OPA response.")
     return tuple(errors)
 
 
@@ -256,6 +314,11 @@ def extract_provenance(trace: dict[str, Any]) -> dict[str, Any]:
     passes = trace.get("governance_passes", [])
     actor = trace.get("actor") or {}
     last_pass = passes[-1] if passes else {}
+    judged = [
+        item.get("pillar_results", {}).get("judge", {})
+        for item in passes
+        if item.get("pillar_results", {}).get("judge", {}).get("invoked") is True
+    ]
     return {
         "trace_version": trace.get("trace_version"),
         "policy_bundle_version": last_pass.get("policy_bundle_version"),
@@ -271,6 +334,9 @@ def extract_provenance(trace: dict[str, Any]) -> dict[str, Any]:
         "actor_prompt_version": actor.get("actor_prompt_version"),
         "actor_thinking_mode": actor.get("actor_thinking_mode"),
         "actor_thinking_effort": actor.get("actor_thinking_effort"),
+        "judge_prompt_version": (
+            judged[-1].get("raw_facts", {}).get("prompt_version") if judged else None
+        ),
     }
 
 
@@ -332,6 +398,13 @@ def _execute_scenario(
         "live_trajectory_replan_ceiling": run_live_trajectory_replan_demo,
         "live_static_database_deny": run_live_static_database_deny_demo,
     }
+    if scenario.executor.startswith("live_judge_"):
+        run_live_judge_case(
+            case_name=scenario.executor.removeprefix("live_judge_"),
+            artifact_root=artifact_root,
+            thread_id=thread_id,
+        )
+        return
     try:
         runner = live_runners[scenario.executor]
     except KeyError as exc:
@@ -360,6 +433,10 @@ def _run_scenario_record(
         runtime_state = runtime.get("current_state")
         termination_reason = runtime.get("termination_reason")
         provenance = extract_provenance(trace)
+        if scenario.pillar == "judge":
+            settings = JudgeSettings.from_env()
+            provenance["judge_provider"] = settings.provider
+            provenance["judge_model_id"] = settings.model
         errors = validate_trace(trace, scenario.expected)
         status = "passed" if not errors else "failed_assertions"
     except (
@@ -439,6 +516,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--mode", choices=("all", CONTRACT_MODE, LIVE_MODE), default="all"
     )
+    parser.add_argument(
+        "--pillar", choices=("evidence", "trajectory", "static_policy", "judge")
+    )
     parser.add_argument("--scenario-start", type=int, default=1)
     parser.add_argument("--scenario-end", type=int)
     parser.add_argument(
@@ -451,15 +531,21 @@ def parse_args() -> argparse.Namespace:
 
 # Select a stable manifest slice after filtering contract or live execution mode.
 def select_scenarios(
-    manifest: DemoManifest, *, mode: str, scenario_start: int, scenario_end: int | None
+    manifest: DemoManifest,
+    *,
+    mode: str,
+    pillar: str | None = None,
+    scenario_start: int,
+    scenario_end: int | None,
 ) -> tuple[DemoScenario, ...]:
     selected = [
         item
         for item in manifest.scenarios
-        if mode == "all" or item.execution_mode == mode
+        if (mode == "all" or item.execution_mode == mode)
+        and (pillar is None or item.pillar == pillar)
     ]
     if not selected:
-        raise ValueError(f"No oversight scenario matches execution mode {mode!r}.")
+        raise ValueError(f"No oversight scenario matches mode={mode!r}, pillar={pillar!r}.")
     end = len(selected) if scenario_end is None else scenario_end
     if not 1 <= scenario_start <= end <= len(selected):
         raise ValueError("Invalid scenario range for the selected execution mode.")
@@ -473,6 +559,7 @@ def main() -> int:
     selected = select_scenarios(
         manifest,
         mode=args.mode,
+        pillar=args.pillar,
         scenario_start=args.scenario_start,
         scenario_end=args.scenario_end,
     )
