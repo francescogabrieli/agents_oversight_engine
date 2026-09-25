@@ -43,9 +43,7 @@ _THESIS_EDGES = (
     ("governance", "human_review"),
     ("human_review", "governance"),
     ("governance", "external_execution"),
-    ("external_execution", "human_review"),
     ("governance", "finalize_bootstrap"),
-    ("human_review", "finalize_bootstrap"),
     ("external_execution", "finalize_bootstrap"),
     ("finalize_bootstrap", "__end__"),
 )

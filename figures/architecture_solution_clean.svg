@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <title>Clean architecture view of the auditable human oversight engine</title>
+  <desc>Task intake flows through planning, acting, governance and OPA before reaching bounded routes. State, decisions and evidence are persisted in an accountability rail.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#425466"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#3568a8"/>
+    </marker>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; fill: #172033; }
+      .title { font-size: 31px; font-weight: 600; }
+      .subtitle { font-size: 17px; fill: #5d6a7d; }
+      .section { font-size: 16px; font-weight: 600; letter-spacing: 1px; fill: #526071; }
+      .node-title { font-size: 18px; font-weight: 600; text-anchor: middle; }
+      .node-note { font-size: 14px; fill: #5d6a7d; text-anchor: middle; }
+      .route-title { font-size: 16px; font-weight: 600; text-anchor: middle; }
+      .route-note { font-size: 13px; fill: #5d6a7d; text-anchor: middle; }
+      .panel-note { font-size: 13px; fill: #5d6a7d; text-anchor: middle; }
+      .panel { fill: #f8fafc; stroke: #b8c2cf; stroke-width: 2; }
+      .node { stroke-width: 2; rx: 14; }
+      .runtime { fill: #e8f0fe; stroke: #3568a8; }
+      .policy { fill: #f0eaff; stroke: #7653b8; }
+      .control { fill: #fff1d6; stroke: #bd771f; }
+      .evidence { fill: #e8f5ec; stroke: #39845a; }
+      .audit { fill: #f2eafd; stroke: #7653a8; }
+      .arrow { fill: none; stroke: #425466; stroke-width: 2.5; marker-end: url(#arrow); }
+      .dashed { fill: none; stroke: #718096; stroke-width: 2; stroke-dasharray: 8 7; marker-end: url(#arrow-blue); }
+      .hairline { stroke: #d3dae3; stroke-width: 1.5; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="#ffffff"/>
+  <text x="60" y="58" class="title">Auditable human oversight architecture</text>
+  <text x="60" y="88" class="subtitle">The runtime proposes and acts; governance authorizes; accountability is preserved in state, decisions and trace.</text>
+
+  <rect x="45" y="135" width="1175" height="300" rx="20" class="panel"/>
+  <text x="75" y="170" class="section">RUNTIME AND POLICY PATH</text>
+
+  <rect x="70" y="230" width="145" height="88" class="node runtime"/>
+  <text x="142" y="267" class="node-title">Task intake</text>
+  <text x="142" y="291" class="node-note">canonical task</text>
+
+  <rect x="260" y="230" width="145" height="88" class="node runtime"/>
+  <text x="332" y="267" class="node-title">Planner</text>
+  <text x="332" y="291" class="node-note">semantic plan</text>
+
+  <rect x="450" y="230" width="145" height="88" class="node runtime"/>
+  <text x="522" y="267" class="node-title">Actor</text>
+  <text x="522" y="291" class="node-note">bounded typed turn</text>
+
+  <rect x="640" y="230" width="170" height="88" class="node control"/>
+  <text x="725" y="267" class="node-title">Governance PEP</text>
+  <text x="725" y="291" class="node-note">enforces directive</text>
+
+  <rect x="855" y="230" width="170" height="88" class="node policy"/>
+  <text x="940" y="267" class="node-title">OPA / Rego PDP</text>
+  <text x="940" y="291" class="node-note">sole decision authority</text>
+
+  <rect x="1070" y="230" width="120" height="88" class="node control"/>
+  <text x="1130" y="267" class="node-title">Validated</text>
+  <text x="1130" y="291" class="node-note">directive</text>
+
+  <path d="M215 274 H252" class="arrow"/>
+  <path d="M405 274 H442" class="arrow"/>
+  <path d="M595 274 H632" class="arrow"/>
+  <path d="M810 274 H847" class="arrow"/>
+  <path d="M1025 274 H1062" class="arrow"/>
+  <rect x="1250" y="135" width="305" height="300" rx="20" class="panel"/>
+  <text x="1280" y="170" class="section">BOUNDED ROUTES</text>
+  <text x="1402" y="198" class="panel-note">one directive selects</text>
+  <text x="1402" y="216" class="panel-note">one bounded route</text>
+
+  <rect x="1280" y="220" width="110" height="72" class="node control"/>
+  <text x="1335" y="250" class="route-title">Human</text>
+  <text x="1335" y="272" class="route-note">review</text>
+
+  <rect x="1415" y="220" width="110" height="72" class="node evidence"/>
+  <text x="1470" y="250" class="route-title">Tool</text>
+  <text x="1470" y="272" class="route-note">gateway</text>
+
+  <rect x="1280" y="335" width="110" height="72" class="node control"/>
+  <text x="1335" y="365" class="route-title">External</text>
+  <text x="1335" y="387" class="route-note">execution</text>
+
+  <rect x="1415" y="335" width="110" height="72" class="node evidence"/>
+  <text x="1470" y="365" class="route-title">Finalize</text>
+  <text x="1470" y="387" class="route-note">or abort</text>
+
+  <path d="M1190 274 H1242" class="arrow"/>
+
+  <rect x="45" y="520" width="1510" height="290" rx="20" class="panel"/>
+  <text x="75" y="558" class="section">ACCOUNTABILITY RAIL</text>
+  <text x="75" y="587" class="subtitle">The same runtime state drives checkpointing, human decisions and replayable trace artifacts.</text>
+
+  <rect x="90" y="650" width="310" height="90" class="node runtime"/>
+  <text x="245" y="686" class="node-title">TaskState</text>
+  <text x="245" y="711" class="node-note">LangGraph checkpoint</text>
+
+  <rect x="470" y="650" width="310" height="90" class="node audit"/>
+  <text x="625" y="686" class="node-title">RuntimeArtifactStore</text>
+  <text x="625" y="711" class="node-note">trace, snapshot, judge bundle</text>
+
+  <rect x="850" y="650" width="310" height="90" class="node control"/>
+  <text x="1005" y="686" class="node-title">HITL decision inbox</text>
+  <text x="1005" y="711" class="node-note">request-bound human decision</text>
+
+  <rect x="1230" y="650" width="260" height="90" class="node evidence"/>
+  <text x="1360" y="686" class="node-title">Replayable artifacts</text>
+  <text x="1360" y="711" class="node-note">trace and dashboard snapshot</text>
+
+  <path d="M400 695 H462" class="arrow"/>
+  <path d="M780 695 H842" class="arrow"/>
+  <path d="M1160 695 H1222" class="arrow"/>
+  <path d="M725 435 V610 H245 V642" class="dashed"/>
+  <path d="M1130 435 V610 H1005 V642" class="dashed"/>
+
+  <line x1="75" y1="770" x2="110" y2="770" class="hairline"/>
+  <text x="120" y="776" class="route-note" text-anchor="start">solid arrows: runtime/control path</text>
+  <line x1="395" y1="770" x2="430" y2="770" stroke="#718096" stroke-width="2" stroke-dasharray="8 7"/>
+  <text x="440" y="776" class="route-note" text-anchor="start">dashed arrows: persistence or human-decision context</text>
+</svg>
