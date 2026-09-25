@@ -235,3 +235,4 @@ The current most relevant near-term evolution path is:
 5. harden the standalone HITL dashboard and richer operator workflows on top of the existing `interrupt / resume` path
 6. calibrate governed-external judge findings and revision-loop thresholds against real traces before widening the tool surface
 7. strengthen observability and Evidence Integrity & Provenance before widening the tool surface
+8. keep the canonical and thesis-oriented runtime graph exports synchronized through `scripts/export_runtime_graph.py`

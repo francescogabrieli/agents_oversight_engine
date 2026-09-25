@@ -1,0 +1,47 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	bootstrap_from_intake(bootstrap_from_intake)
+	planner(planner)
+	actor(actor)
+	governance(governance)
+	human_review(human_review)
+	external_execution(external_execution)
+	tool_gateway(tool_gateway)
+	observe_tool_result(observe_tool_result)
+	replanner(replanner)
+	finalize_bootstrap(finalize_bootstrap)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> bootstrap_from_intake;
+	actor -.-> governance;
+	bootstrap_from_intake --> planner;
+	external_execution -.-> finalize_bootstrap;
+	external_execution -.-> human_review;
+	governance -.-> actor;
+	governance -.-> external_execution;
+	governance -.-> finalize_bootstrap;
+	governance -.-> human_review;
+	governance -.-> replanner;
+	governance -.-> tool_gateway;
+	human_review -.-> actor;
+	human_review -.-> external_execution;
+	human_review -.-> finalize_bootstrap;
+	human_review -.-> governance;
+	human_review -.-> planner;
+	human_review -.-> replanner;
+	human_review -.-> tool_gateway;
+	observe_tool_result -.-> actor;
+	observe_tool_result -.-> governance;
+	observe_tool_result -.-> replanner;
+	planner --> actor;
+	replanner --> actor;
+	tool_gateway --> observe_tool_result;
+	finalize_bootstrap --> __end__;
+	external_execution -.-> external_execution;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

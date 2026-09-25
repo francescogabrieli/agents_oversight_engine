@@ -68,6 +68,20 @@ Run Layer 2 bootstrap, planner, actor, tool loop, and replanner with determinist
 .\.venv\Scripts\python.exe src\main_layer2.py --demo-intake-profile research --task "Find official sources about the Digital Markets Act and produce a short summary."
 ```
 
+Export the current Layer 2 graph without executing planner, actor, tools, or external capabilities:
+
+```bash
+.venv/bin/python scripts/export_runtime_graph.py --render
+```
+
+The command writes the exact LangGraph topology to `figures/layer2_runtime_graph.mmd`
+and `figures/layer2_runtime_graph.png`. It also writes a thesis-oriented presentation
+projection to `figures/layer2_runtime_graph_thesis.mmd` and
+`figures/layer2_runtime_graph_thesis.png`. The projection is derived from the same
+compiled graph, keeps the native vertical structure and a reduced set of actual
+conditional routes, and leaves the complete routing available in the canonical export.
+`--render` uses Mermaid CLI locally; it does not send the graph to mermaid.ink.
+
 Install the standalone HITL dashboard frontend dependencies:
 
 ```powershell
