@@ -1,0 +1,43 @@
+---
+config:
+  theme: base
+  flowchart:
+    curve: linear
+    nodeSpacing: 45
+    rankSpacing: 65
+    padding: 12
+---
+%% Compact presentation projection generated from the LangGraph drawable graph.
+%% Node ids and labels remain identical to the native LangGraph export.
+graph TD;
+    __start__([<p>__start__</p>]):::first
+    bootstrap_from_intake(bootstrap_from_intake)
+    planner(planner)
+    actor(actor)
+    governance(governance)
+    human_review(human_review)
+    external_execution(external_execution)
+    tool_gateway(tool_gateway)
+    observe_tool_result(observe_tool_result)
+    replanner(replanner)
+    finalize_bootstrap(finalize_bootstrap)
+    __end__([<p>__end__</p>]):::last
+    __start__ --> bootstrap_from_intake
+    bootstrap_from_intake --> planner
+    planner --> actor
+    actor -.-> governance
+    governance -.-> actor
+    governance -.-> tool_gateway
+    tool_gateway --> observe_tool_result
+    observe_tool_result -.-> actor
+    governance -.-> replanner
+    replanner --> actor
+    governance -.-> human_review
+    human_review -.-> governance
+    governance -.-> external_execution
+    governance -.-> finalize_bootstrap
+    external_execution -.-> finalize_bootstrap
+    finalize_bootstrap --> __end__
+    classDef default fill:#f2f0ff,line-height:1.2
+    classDef first fill-opacity:0
+    classDef last fill:#bfb6fc

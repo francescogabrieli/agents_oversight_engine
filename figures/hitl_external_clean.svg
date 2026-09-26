@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <title>Human-in-the-loop control for governed external execution</title>
+  <desc>A simplified sequence showing a digest-bound candidate, typed human review, authorized execution, receipt and reconciliation when execution is indeterminate.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#425466"/>
+    </marker>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; fill: #172033; }
+      .title { font-size: 31px; font-weight: 600; }
+      .subtitle { font-size: 17px; fill: #5d6a7d; }
+      .lane { font-size: 17px; font-weight: 600; text-anchor: middle; }
+      .step { font-size: 16px; font-weight: 600; text-anchor: middle; }
+      .branch-title { font-size: 16px; font-weight: 600; text-anchor: start; }
+      .note { font-size: 14px; fill: #5d6a7d; text-anchor: middle; }
+      .header { stroke-width: 2; rx: 14; }
+      .pep { fill: #e8f0fe; stroke: #3568a8; }
+      .human { fill: #fff1d6; stroke: #bd771f; }
+      .external { fill: #f0eaff; stroke: #7653b8; }
+      .trace { fill: #e8f5ec; stroke: #39845a; }
+      .branch { fill: #f8fafc; stroke: #b8c2cf; stroke-width: 2; }
+      .arrow { fill: none; stroke: #425466; stroke-width: 2.5; marker-end: url(#arrow); }
+      .life { stroke: #b8c2cf; stroke-width: 2; stroke-dasharray: 7 8; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="#ffffff"/>
+  <text x="60" y="58" class="title">Digest-bound external execution and human review</text>
+  <text x="60" y="88" class="subtitle">Human intervention authorizes an exact candidate; editing or uncertainty never silently authorizes execution.</text>
+
+  <rect x="85" y="135" width="260" height="70" class="header pep"/>
+  <rect x="465" y="135" width="260" height="70" class="header human"/>
+  <rect x="845" y="135" width="260" height="70" class="header external"/>
+  <rect x="1225" y="135" width="260" height="70" class="header trace"/>
+  <text x="215" y="177" class="lane">Governance PEP</text>
+  <text x="595" y="177" class="lane">Human reviewer</text>
+  <text x="975" y="177" class="lane">External executor</text>
+  <text x="1355" y="177" class="lane">Trace / artifacts</text>
+
+  <line x1="215" y1="215" x2="215" y2="610" class="life"/>
+  <line x1="595" y1="215" x2="595" y2="610" class="life"/>
+  <line x1="975" y1="215" x2="975" y2="610" class="life"/>
+  <line x1="1355" y1="215" x2="1355" y2="610" class="life"/>
+
+  <circle cx="215" cy="260" r="8" fill="#3568a8"/>
+  <path d="M225 260 H585" class="arrow"/>
+  <text x="405" y="245" class="step">1 · typed review request</text>
+  <text x="405" y="280" class="note">candidate + evidence digests</text>
+
+  <circle cx="595" cy="355" r="8" fill="#bd771f"/>
+  <path d="M585 355 H225" class="arrow"/>
+  <text x="405" y="340" class="step">2 · typed decision</text>
+  <text x="405" y="375" class="note">bound to the exact candidate</text>
+
+  <circle cx="215" cy="450" r="8" fill="#3568a8"/>
+  <path d="M225 450 H965" class="arrow"/>
+  <text x="595" y="435" class="step">3 · authorized execution</text>
+  <text x="595" y="470" class="note">digest and policy preflight</text>
+
+  <circle cx="975" cy="545" r="8" fill="#7653b8"/>
+  <path d="M985 545 H1345" class="arrow"/>
+  <text x="1165" y="530" class="step">4 · receipt</text>
+  <text x="1165" y="565" class="note">executed result becomes trace evidence</text>
+
+  <rect x="85" y="675" width="1400" height="140" rx="18" class="branch"/>
+  <text x="115" y="710" class="branch-title">If the receipt is indeterminate</text>
+  <rect x="435" y="735" width="220" height="52" class="header external"/>
+  <rect x="760" y="735" width="220" height="52" class="header human"/>
+  <rect x="1085" y="735" width="220" height="52" class="header trace"/>
+  <text x="545" y="767" class="note">indeterminate receipt</text>
+  <text x="870" y="767" class="note">reconciliation decision</text>
+  <text x="1195" y="767" class="note">reconciliation trace</text>
+  <path d="M655 761 H750" class="arrow"/>
+  <path d="M980 761 H1075" class="arrow"/>
+</svg>
