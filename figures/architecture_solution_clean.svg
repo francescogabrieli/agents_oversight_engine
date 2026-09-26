@@ -17,9 +17,10 @@
       .node-note { font-size: 14px; fill: #5d6a7d; text-anchor: middle; }
       .route-title { font-size: 16px; font-weight: 600; text-anchor: middle; }
       .route-note { font-size: 13px; fill: #5d6a7d; text-anchor: middle; }
+      .legend-note { font-size: 13px; fill: #5d6a7d; text-anchor: start; }
       .panel-note { font-size: 13px; fill: #5d6a7d; text-anchor: middle; }
       .panel { fill: #f8fafc; stroke: #b8c2cf; stroke-width: 2; }
-      .node { stroke-width: 2; rx: 14; }
+      .node { stroke-width: 2; }
       .runtime { fill: #e8f0fe; stroke: #3568a8; }
       .policy { fill: #f0eaff; stroke: #7653b8; }
       .control { fill: #fff1d6; stroke: #bd771f; }
@@ -113,11 +114,11 @@
   <path d="M400 695 H462" class="arrow"/>
   <path d="M780 695 H842" class="arrow"/>
   <path d="M1160 695 H1222" class="arrow"/>
-  <path d="M725 435 V610 H245 V642" class="dashed"/>
+  <path d="M725 435 V485 H820 V620 H245 V642" class="dashed"/>
   <path d="M1130 435 V610 H1005 V642" class="dashed"/>
 
   <line x1="75" y1="770" x2="110" y2="770" class="hairline"/>
-  <text x="120" y="776" class="route-note" text-anchor="start">solid arrows: runtime/control path</text>
+  <text x="120" y="776" class="legend-note">solid arrows: runtime/control path</text>
   <line x1="395" y1="770" x2="430" y2="770" stroke="#718096" stroke-width="2" stroke-dasharray="8 7"/>
-  <text x="440" y="776" class="route-note" text-anchor="start">dashed arrows: persistence or human-decision context</text>
+  <text x="440" y="776" class="legend-note">dashed arrows: persistence or human-decision context</text>
 </svg>

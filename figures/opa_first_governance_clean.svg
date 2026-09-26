@@ -2,11 +2,11 @@
   <title>OPA-first governance decision flow</title>
   <desc>Typed facts pass through OPA required pillar selection and final decision. Evidence and trajectory are active; risk and behavioral signals remain shadow-only.</desc>
   <defs>
-    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
-      <path d="M0,0 L10,5 L0,10 Z" fill="#425466"/>
+    <marker id="arrow" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" viewBox="0 0 12 12" refX="11" refY="6" orient="auto">
+      <path d="M1,1 L11,6 L1,11 Z" fill="#425466"/>
     </marker>
-    <marker id="arrow-dashed" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
-      <path d="M0,0 L10,5 L0,10 Z" fill="#778395"/>
+    <marker id="arrow-dashed" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" viewBox="0 0 12 12" refX="11" refY="6" orient="auto">
+      <path d="M1,1 L11,6 L1,11 Z" fill="#778395"/>
     </marker>
     <style>
       text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; fill: #172033; }
@@ -60,18 +60,18 @@
   <text x="1342" y="282" class="node-title">PEP applies</text>
   <text x="1342" y="307" class="node-note">validated directive</text>
 
-  <path d="M280 290 H332" class="arrow"/>
-  <path d="M560 290 V251 H610" class="arrow"/>
-  <path d="M560 290 V351 H610" class="arrow"/>
-  <path d="M845 251 H900 V290 H912" class="arrow"/>
-  <path d="M845 351 H875 V290 H912" class="arrow"/>
-  <path d="M1145 290 H1212" class="arrow"/>
+  <path d="M280 290 H340" class="arrow"/>
+  <path d="M560 290 H585 V251 H620" class="arrow"/>
+  <path d="M585 290 V351 H620" class="arrow"/>
+  <path d="M845 251 H875 V270 H920" class="arrow"/>
+  <path d="M845 351 H875 V310 H920" class="arrow"/>
+  <path d="M1145 290 H1220" class="arrow"/>
 
   <rect x="700" y="425" width="250" height="75" class="node judge"/>
   <text x="825" y="456" class="node-title">Semantic Judge</text>
   <text x="825" y="480" class="node-note">only when OPA admits it</text>
-  <path d="M732 387 V405 H825 V417" class="dashed"/>
-  <path d="M950 462 H1032 V345" class="dashed"/>
+  <path d="M732 387 V405 H825 V425" class="dashed"/>
+  <path d="M950 462 H1032 V335" class="dashed"/>
 
   <rect x="45" y="595" width="1510" height="280" rx="20" class="shadow-panel"/>
   <text x="75" y="632" class="section">SHADOW-ONLY CONTEXT</text>
@@ -89,6 +89,6 @@
   <text x="910" y="773" class="node-title">Shadow observations</text>
   <text x="910" y="797" class="shadow-note">not read by final directive</text>
 
-  <path d="M460 740 H570 V770 H750" class="dashed"/>
-  <path d="M460 822 H620 V790 H750" class="dashed"/>
+  <path d="M460 740 H570 V770 H760" class="dashed"/>
+  <path d="M460 822 H620 V790 H760" class="dashed"/>
 </svg>
