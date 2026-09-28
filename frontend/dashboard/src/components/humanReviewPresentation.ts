@@ -4,7 +4,7 @@ const DECISION_LABELS: Record<string, string> = {
   modify_and_continue: "Modifica",
   request_more_evidence: "Richiedi più evidenze",
   replan: "Ripianifica",
-  ask_clarification: "Segnala chiarimento necessario",
+  ask_clarification: "Rispondi al chiarimento",
   abort: "Interrompi",
 };
 
@@ -15,7 +15,7 @@ const DECISION_EXPLANATIONS: Record<string, string> = {
   modify_and_continue: "La proposta modificata torna alla governance: la modifica non equivale all'autorizzazione di invio o esecuzione.",
   request_more_evidence: "L'agente riprende la raccolta delle evidenze. Spiega nella nota quali informazioni mancano.",
   replan: "L'attività torna alla fase di pianificazione per scegliere un percorso diverso.",
-  ask_clarification: "Registra quale chiarimento serve e mantiene il caso sospeso. Non risponde all'agente e non autorizza operazioni esterne.",
+  ask_clarification: "Registra la tua risposta e riprende il passo in revisione. Non autorizza operazioni esterne.",
   abort: "L'attività viene interrotta definitivamente.",
 };
 

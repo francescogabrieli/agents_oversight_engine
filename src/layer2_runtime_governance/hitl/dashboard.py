@@ -135,6 +135,9 @@ class DashboardEvidenceReference:
     locator: str | None
     source_timestamp: str | None
     content_excerpt: str
+    content_truncated: bool | None = None
+    observation_available: bool = True
+    retrieval_kind: str | None = None
 
 
 # DashboardHumanReviewPanel captures the review payload and resume path.
@@ -157,6 +160,7 @@ class DashboardHumanReviewPanel:
     selected_evidence_references: tuple[DashboardEvidenceReference, ...]
     evidence_diagnostic: DashboardPillarDiagnostic | None
     trajectory_diagnostic: DashboardPillarDiagnostic | None
+    actor_output_text: str | None = None
 
 
 @dataclass(frozen=True)
@@ -264,6 +268,8 @@ _TRAJECTORY_REVIEW_FACTS = (
     "replan_request_stalled",
     "consecutive_tool_failures",
     "consecutive_tool_failures_review_threshold_reached",
+    "current_step_tool_attempt_count",
+    "step_exploration_budget_exhausted",
     "failed_tool_call_count",
     "successful_tool_call_count",
     "tool_call_count",
@@ -584,10 +590,22 @@ def _build_human_review_panel(*, task_state: TaskState) -> DashboardHumanReviewP
             pillar_name="trajectory",
             fact_names=_TRAJECTORY_REVIEW_FACTS,
         ),
+        # The pending completion owns the reviewed text; summaries are not its substitute.
+        actor_output_text=(
+            task_state.pending_completion_candidate.output_text
+            if task_state.pending_completion_candidate is not None
+            else task_state.actor_result.output_text
+            if task_state.actor_result is not None
+            else None
+        ) if pending_request is not None else None,
     )
 
 
 # Project selected evidence from TaskState without performing runtime or connector calls.
+_SOURCE_EXCERPT_LIMIT = 12000
+
+
+# Preserve every selected reference while bounding persisted source text for the UI.
 def _build_selected_evidence_references(
     *,
     task_state: TaskState,
@@ -604,6 +622,14 @@ def _build_selected_evidence_references(
     for observation_id in dict.fromkeys(selected_ids):
         observation = observations.get(observation_id)
         if observation is None:
+            # A broken selected reference is itself useful review evidence, never omit it.
+            references.append(DashboardEvidenceReference(
+                observation_id=observation_id,
+                locator=None,
+                source_timestamp=None,
+                content_excerpt="",
+                observation_available=False,
+            ))
             continue
         references.append(
             DashboardEvidenceReference(
@@ -614,7 +640,11 @@ def _build_selected_evidence_references(
                     if observation.source_timestamp is not None
                     else None
                 ),
-                content_excerpt=" ".join(observation.content.split())[:320],
+                # Preserve paragraphs and expose the bound; this is recorded content,
+                # not a claim to have the complete original document.
+                content_excerpt=observation.content[:_SOURCE_EXCERPT_LIMIT],
+                content_truncated=len(observation.content) > _SOURCE_EXCERPT_LIMIT,
+                retrieval_kind=observation.retrieval_kind.value,
             )
         )
     return tuple(references)

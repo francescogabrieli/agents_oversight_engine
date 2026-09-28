@@ -30,7 +30,7 @@ export function PriorDecisionsPanel({
         <p className="prior-decisions-warning">
           Hai già deciso {repeatedOnSamePayload.length}{" "}
           {repeatedOnSamePayload.length === 1 ? "volta" : "volte"} su questa identica proposta e
-          l'attività si è fermata di nuovo: approvare ancora probabilmente non la sbloccherà.
+          l'attività si è fermata di nuovo. Controlla il motivo attuale: le decisioni precedenti possono riguardare controlli diversi.
         </p>
       ) : null}
       <ol className="prior-decisions-list">

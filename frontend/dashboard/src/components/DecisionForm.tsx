@@ -131,6 +131,7 @@ function DecisionFields({ detail, onSubmit, disabled = false }: DecisionFormProp
           : "Sblocchi soltanto il controllo oggetto di questa revisione. Non equivale a un'autorizzazione di invio; possono seguire altri controlli."
     : humanReviewDecisionExplanation(decisionType);
   const cannotSubmit = disabled || submitting || !decisionType ||
+    !allowedDecisions.includes(decisionType) ||
     (isModify && !modificationAllowed) || (isClarification && !clarificationText.trim());
 
   return (
@@ -166,14 +167,14 @@ function DecisionFields({ detail, onSubmit, disabled = false }: DecisionFormProp
 
         {isClarification ? (
           <div className="form-field">
-            <label className="form-label" htmlFor="clarification">Chiarimento richiesto (obbligatorio)</label>
+            <label className="form-label" htmlFor="clarification">Risposta al chiarimento (obbligatoria)</label>
             <textarea
               className="form-textarea"
               id="clarification"
               style={{ minHeight: 96 }}
               value={clarificationText}
               onChange={(event) => setClarificationText(event.target.value)}
-              placeholder="Scrivi l'indicazione da registrare per questa richiesta..."
+              placeholder="Rispondi alla domanda dell'agente per consentire la ripresa del passo..."
             />
           </div>
         ) : null}
@@ -219,7 +220,9 @@ function DecisionFields({ detail, onSubmit, disabled = false }: DecisionFormProp
           <textarea className="form-textarea" value={note} onChange={(event) => setNote(event.target.value)}
             placeholder="Motiva la decisione o indica cosa correggere / ricercare." />
         </label>
-        {!decisionType ? <p role="status">Seleziona una decisione per abilitare l'invio.</p> : null}
+        {allowedDecisions.length === 0 ? <p role="status">Questa richiesta non espone decisioni disponibili. Attendi un aggiornamento della revisione.</p>
+          : decisionType && !allowedDecisions.includes(decisionType) ? <p role="status">L'azione selezionata non è più disponibile. Scegli una delle azioni aggiornate.</p>
+          : !decisionType ? <p role="status">Seleziona una decisione per abilitare l'invio.</p> : null}
         {disabled ? <p role="alert">Dati non aggiornati: l'invio è sospeso fino al ripristino della connessione.</p> : null}
 
         <div className="action-submit-row">

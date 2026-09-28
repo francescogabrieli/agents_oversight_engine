@@ -59,6 +59,9 @@ export type DashboardEvidenceReference = {
   locator?: string | null;
   source_timestamp?: string | null;
   content_excerpt: string;
+  content_truncated?: boolean | null;
+  observation_available?: boolean;
+  retrieval_kind?: string | null;
 };
 
 export type HumanReviewPendingRequest = {
@@ -141,6 +144,7 @@ export type DashboardSnapshot = {
     resume_state?: string | null;
     judge_findings?: string[];
     selected_evidence_references?: DashboardEvidenceReference[];
+    actor_output_text?: string | null;
     evidence_diagnostic?: DashboardPillarDiagnostic | null;
     trajectory_diagnostic?: DashboardPillarDiagnostic | null;
   } | null;

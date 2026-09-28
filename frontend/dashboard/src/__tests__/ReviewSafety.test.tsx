@@ -7,20 +7,7 @@ import { SourceReference } from "../components/SourceReference";
 import { DecisionDeliveryStatus } from "../components/DecisionDeliveryStatus";
 import { externalExecutionNarrative } from "../components/executionPresentation";
 import { pillarHighlights } from "../components/pillarSummary";
-import type { ReviewDetailResponse } from "../types";
-
-// One fixture supplies both editor and proposal-renderer tests without live services.
-// Build one modifiable request shared by the form-safety regression tests.
-function review(): ReviewDetailResponse {
-  return { thread_id: "isolated", dashboard_snapshot: {
-    runtime_state: "waiting_human_review", has_pending_review: true, is_terminal: false,
-    reason_codes: ["capability_approval_required"],
-    external_execution: {execution_intent: "execute_after_governance", retryable: false, attempt_count: 0, receipt_count: 0},
-    human_review: {pending_request: {request_id: "request-1", allowed_decisions: ["approve_continue", "modify_and_continue", "ask_clarification", "abort"],
-      external_communication_draft: {channel: "email", recipient: "review@example.test", subject: "Originale", body: "Originale", cc: ["cc@example.test"], metadata: {body_format: "plain"}},
-    }},
-  }};
-}
+import { review } from "../test/reviewFixtures";
 
 describe("Safe review editing and presentation", () => {
   it("preserves edits on equivalent polling and clears them for a new request", async () => {
@@ -66,12 +53,12 @@ describe("Safe review editing and presentation", () => {
   it("requires clarification text and blocks stale submissions", async () => {
     const detail = review(); const user = userEvent.setup();
     const {rerender} = render(<DecisionForm detail={detail} onSubmit={vi.fn()} />);
-    await user.click(screen.getByRole("button", {name: "Segnala chiarimento necessario"}));
-    expect(screen.getByRole("button", {name: "Invia decisione: Segnala chiarimento necessario"})).toBeDisabled();
-    await user.type(screen.getByLabelText(/Chiarimento richiesto/), "Escludi i risolti.");
-    expect(screen.getByRole("button", {name: "Invia decisione: Segnala chiarimento necessario"})).toBeEnabled();
+    await user.click(screen.getByRole("button", {name: "Rispondi al chiarimento"}));
+    expect(screen.getByRole("button", {name: "Invia decisione: Rispondi al chiarimento"})).toBeDisabled();
+    await user.type(screen.getByLabelText(/Risposta al chiarimento/), "Escludi i risolti.");
+    expect(screen.getByRole("button", {name: "Invia decisione: Rispondi al chiarimento"})).toBeEnabled();
     rerender(<DecisionForm detail={detail} onSubmit={vi.fn()} disabled />);
-    expect(screen.getByRole("button", {name: "Invia decisione: Segnala chiarimento necessario"})).toBeDisabled();
+    expect(screen.getByRole("button", {name: "Invia decisione: Rispondi al chiarimento"})).toBeDisabled();
   });
 
   it("shows recipient and subject before any action and exposes SQL read-only", () => {
@@ -92,6 +79,22 @@ describe("Safe review editing and presentation", () => {
     expect(screen.getByRole("link")).toHaveAttribute("rel", "noopener noreferrer");
     rerender(<SourceReference locator="javascript:alert(1)" />);
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  it("presents and edits a generic typed proposal without dropping its structured fields", async () => {
+    const detail = review();
+    const request = detail.dashboard_snapshot!.human_review!.pending_request!;
+    request.external_communication_draft = null;
+    request.external_operation_proposal = {operation_family: "generic", payload: {payload_type: "generic", target: "queue", arguments: {mode: "dry_run"}}, payload_digest: "generic-digest", modifiable: true};
+    const user = userEvent.setup();
+    const submit = vi.fn().mockResolvedValue(undefined);
+    render(<><ProposalPanel request={request} /><DecisionForm detail={detail} onSubmit={submit} /></>);
+    expect(screen.getByText("queue")).toBeVisible();
+    await user.click(screen.getByRole("button", {name: "Modifica"}));
+    await user.clear(screen.getByLabelText("Dati modificati dell'operazione"));
+    await user.paste(JSON.stringify({target: "queue", arguments: {mode: "reviewed"}}));
+    await user.click(screen.getByRole("button", {name: "Invia decisione: Modifica"}));
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({external_operation_edit: expect.objectContaining({payload: {payload_type: "generic", target: "queue", arguments: {mode: "reviewed"}}})}));
   });
 
   it("distinguishes uncertain execution, delivery and missing evidence facts", () => {

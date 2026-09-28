@@ -174,7 +174,7 @@ describe("ReviewThreadPage", () => {
       "Modifica",
       "Richiedi più evidenze",
       "Ripianifica",
-      "Segnala chiarimento necessario",
+      "Rispondi al chiarimento",
       "Interrompi",
     ]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
@@ -424,6 +424,7 @@ describe("ReviewThreadPage", () => {
           reason_codes: ["unanchored_literals_in_selection"],
           facts: {
             retrieved_independent_sources_count: 3,
+            distinct_independent_sources_count: 3,
             min_independent_sources_required: 3,
             independent_sources_satisfied: true,
             selected_evidence_ref_count: 4,

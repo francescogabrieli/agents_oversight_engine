@@ -2,6 +2,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { fetchReviewDetail, resumeReviewThread } from "../api";
 import { DecisionForm } from "../components/DecisionForm";
 import { ProposalPanel } from "../components/ProposalPanel";
+import { PriorDecisionsPanel } from "../components/PriorDecisionsPanel";
 import { DecisionDeliveryStatus } from "../components/DecisionDeliveryStatus";
 import { executionIntentLabel, executionStatusLabel, externalExecutionNarrative } from "../components/executionPresentation";
 import { KeyValueGrid } from "../components/KeyValueGrid";
@@ -18,7 +19,8 @@ function valueToString(value: unknown) {
 export function ReviewThreadPage() {
   const { threadId = "" } = useParams();
   const navigate = useNavigate();
-  const decodedThreadId = decodeURIComponent(threadId);
+  // React Router has already decoded this parameter.
+  const decodedThreadId = threadId;
   const resource = usePolledResource(() => fetchReviewDetail(decodedThreadId), [decodedThreadId]);
   const detail = resource.data;
   const snapshot = detail?.dashboard_snapshot;
@@ -27,6 +29,7 @@ export function ReviewThreadPage() {
   const governance = snapshot?.governance as Record<string, unknown> | null | undefined;
   const oversight = snapshot?.oversight as Record<string, unknown> | null | undefined;
   const externalExecution = snapshot?.external_execution;
+  const isReconciliation = pendingRequest?.reason_codes?.includes("external_execution_reconciliation_required");
 
   return (
     <div className="review-workspace">
@@ -56,11 +59,12 @@ export function ReviewThreadPage() {
         <div className="review-thread-id">{decodedThreadId}</div>
       </section>
 
-      {resource.error ? <div className="alert alert-error">{resource.error}</div> : null}
+      {resource.error ? <div className="alert alert-error" role="alert">{resource.error}</div> : null}
       <p className="connection-status" role="status">
         {resource.error ? "Connessione interrotta: sono mostrati gli ultimi dati ricevuti." : resource.updatedAt ? `Dashboard aggiornata alle ${new Date(resource.updatedAt).toLocaleTimeString()}. Questo non attesta che il runtime sia attivo.` : "Connessione alla dashboard in corso…"}
       </p>
       {resource.loading && !detail ? <div className="skeleton" style={{ height: 120 }} /> : null}
+      {detail && !snapshot ? <div className="alert alert-error" role="alert">Dettagli della revisione non disponibili. Lo snapshot non è presente; nessuna decisione può essere inviata.</div> : null}
       {detail?.decision_submission ? <DecisionDeliveryStatus status={detail.decision_submission.delivery_status} ownerAvailable={detail.decision_submission.owner_available} /> : null}
 
       {detail && snapshot ? (
@@ -70,31 +74,10 @@ export function ReviewThreadPage() {
             <a className="btn btn-primary" href="#review-decision">Vai alla decisione ↓</a>
           </nav> : null}
           {pendingRequest ? (
-            <ReviewContextPanel taskGoal={taskGoal} snapshot={snapshot} />
+            <ReviewContextPanel key={pendingRequest.request_id} taskGoal={taskGoal} snapshot={snapshot} />
           ) : null}
 
           {pendingRequest ? <ProposalPanel request={pendingRequest} /> : null}
-
-          {pendingRequest ? (
-            <DecisionForm
-              detail={detail}
-              disabled={Boolean(resource.error)}
-              onSubmit={async (payload) => {
-                const nextDetail = await resumeReviewThread(decodedThreadId, payload);
-                navigate("/", {
-                  replace: true,
-                  state: {
-                    decisionFeedback:
-                      nextDetail.operator_feedback ?? "Decisione inviata correttamente.",
-                  },
-                });
-              }}
-            />
-          ) : (
-            <section className="card">
-              <div className="card-body muted-panel">Nessuna azione di revisione in sospeso per questo thread.</div>
-            </section>
-          )}
 
           {externalExecution ? (
             <section className="card">
@@ -118,6 +101,11 @@ export function ReviewThreadPage() {
                     {externalExecution.error_code}
                   </div>
                 ) : null}
+                {isReconciliation ? <KeyValueGrid title="Esito da riconciliare" values={[
+                  { label: "Riferimento esterno", value: externalExecution.external_reference ?? "Non disponibile" },
+                  { label: "Connettore", value: externalExecution.connector_id ?? "Non disponibile" },
+                  { label: "Tentativi registrati", value: externalExecution.attempt_count },
+                ]} /> : null}
                 <details className="technical-details">
                   <summary className="technical-details-summary">Mostra i dettagli tecnici</summary>
                   <div className="technical-details-body">
@@ -141,6 +129,34 @@ export function ReviewThreadPage() {
               </div>
             </section>
           ) : null}
+
+          {pendingRequest ? (
+            <DecisionForm
+              detail={detail}
+              disabled={Boolean(resource.error)}
+              onSubmit={async (payload) => {
+                const nextDetail = await resumeReviewThread(decodedThreadId, payload);
+                navigate("/", {
+                  replace: true,
+                  state: {
+                    decisionFeedback:
+                      nextDetail.operator_feedback ?? "Decisione inviata correttamente.",
+                  },
+                });
+              }}
+            />
+          ) : (
+            <section className="card">
+              <div className="card-body muted-panel">
+                <p role="status">Nessuna azione di revisione in sospeso per questo thread.</p>
+                <p>{snapshot.is_terminal
+                  ? `Stato finale registrato: ${runtimeStateLabel(snapshot.runtime_state)}.`
+                  : "Per seguire la prosecuzione dell'attività, consulta il terminale del runtime."}</p>
+                <PriorDecisionsPanel decisions={snapshot.human_review?.decision_history ?? []} currentOperationDigest={null} />
+              </div>
+            </section>
+          )}
+
 
           <details className="technical-details">
             <summary className="technical-details-summary">Mostra tutti i dettagli tecnici</summary>
