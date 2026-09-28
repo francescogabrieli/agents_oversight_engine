@@ -9,6 +9,8 @@ import { reasonCodeChipLabel, reasonCodeExplanation, reasonCodeLabel } from "./r
 import { runtimeStateLabel } from "./runtimeStatePresentation";
 import { FlaggedEvidencePanel } from "./FlaggedEvidencePanel";
 import { EvidenceComparisonPanel } from "./EvidenceComparisonPanel";
+import { ToolAttemptTimeline } from "./ToolAttemptTimeline";
+import { PriorJudgeReviewPanel } from "./PriorJudgeReviewPanel";
 
 type ReviewContextPanelProps = {
   taskGoal: string | null;
@@ -59,6 +61,9 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
   const actorSummary = pendingRequest?.actor_summary ?? null;
   const actorBlockingReason = pendingRequest?.actor_blocking_reason ?? null;
   const hasActorVoice = Boolean(actorSummary || actorBlockingReason);
+  const policyAllowsContinuation = ["continue", "continue_read_only"].includes(
+    governance?.policy_directive ?? governance?.directive ?? "",
+  );
   const diagnostics = [
     humanReview?.evidence_diagnostic,
     humanReview?.trajectory_diagnostic,
@@ -107,6 +112,12 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
           </article>
         ) : null}
 
+        {hasActorVoice && policyAllowsContinuation && actorBlockingReason ? (
+          <p className="policy-agent-mismatch">
+            Distinzione utile: la policy permetteva di proseguire, mentre l’agente ha segnalato un blocco nel passo.
+          </p>
+        ) : null}
+
         {reasonHeading ? <p className="review-context-reason-label">{reasonHeading}</p> : null}
         <div className="review-context-reason">{selectedReason}</div>
 
@@ -148,6 +159,9 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
             </ul>
           </article>
         ) : null}
+
+        <PriorJudgeReviewPanel review={humanReview?.prior_judge_review} />
+        <ToolAttemptTimeline attempts={humanReview?.recent_tool_history ?? []} />
 
         <EvidenceComparisonPanel
           output={humanReview?.actor_output_text}

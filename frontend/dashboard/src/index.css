@@ -741,6 +741,15 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-v
 .review-source-excerpt, .produced-text { tab-size: 2; }
 .literal-comparison-panel { background: var(--surface); }
 .literal-comparison-panel h4 { font-weight: 600; }
+.recent-tool-history, .prior-judge-review { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); min-width: 0; }
+.recent-tool-history > p, .prior-judge-review > p { margin: 0; }
+.tool-history-list { display: grid; gap: 10px; margin: 0; padding-left: 22px; }
+.tool-history-entry { padding: 10px; border-radius: 6px; background: var(--surface); min-width: 0; overflow-wrap: anywhere; }
+.tool-history-entry > p { margin: 6px 0 0; line-height: 1.55; }
+.tool-history-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tool-history-reach, .tool-history-reason { color: var(--text-secondary); font-size: 13px; }
+.tool-history-error { color: var(--error, #a82929); }
+.policy-agent-mismatch { margin: 10px 0; padding: 10px 12px; border-left: 3px solid var(--warning, #b7791f); background: var(--surface-2); line-height: 1.55; }
 .action-submit-row > .btn { max-width: 100%; }
 .pillar-highlight { flex-wrap: wrap; }
 .pillar-highlight dd { overflow-wrap: anywhere; }

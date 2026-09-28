@@ -20,6 +20,9 @@ from ..domain import (
     ExternalCommunicationDraft,
     normalize_task_state_serialization,
 )
+from layer3_tool_bus_external_capabilities.tool_contract import (
+    canonical_tool_request_identity,
+)
 
 
 # DashboardFocus keeps the operator surface aligned with the runtime pause state.
@@ -140,6 +143,32 @@ class DashboardEvidenceReference:
     retrieval_kind: str | None = None
 
 
+# DashboardToolAttempt contains safe, bounded facts about a recorded tool result.
+@dataclass(frozen=True)
+class DashboardToolAttempt:
+    plan_step_id: str
+    request_id: str
+    tool_name: str
+    request_reason: str
+    summary: str
+    success: bool
+    reached_backend: bool | None
+    disposition: str | None
+    error_code: str | None
+    error_message: str | None
+    new_observation_count: int
+
+
+# DashboardPriorJudgeReview links an earlier rejection to the exact same candidate.
+@dataclass(frozen=True)
+class DashboardPriorJudgeReview:
+    verdict: str
+    severity: str
+    summary: str
+    findings: tuple[str, ...]
+    evidence_selection_match: str
+
+
 # DashboardHumanReviewPanel captures the review payload and resume path.
 @dataclass(frozen=True)
 class DashboardHumanReviewPanel:
@@ -161,6 +190,8 @@ class DashboardHumanReviewPanel:
     evidence_diagnostic: DashboardPillarDiagnostic | None
     trajectory_diagnostic: DashboardPillarDiagnostic | None
     actor_output_text: str | None = None
+    recent_tool_history: tuple[DashboardToolAttempt, ...] = ()
+    prior_judge_review: DashboardPriorJudgeReview | None = None
 
 
 @dataclass(frozen=True)
@@ -598,7 +629,92 @@ def _build_human_review_panel(*, task_state: TaskState) -> DashboardHumanReviewP
             if task_state.actor_result is not None
             else None
         ) if pending_request is not None else None,
+        recent_tool_history=_build_recent_tool_history(task_state=task_state),
+        prior_judge_review=_build_prior_judge_review(
+            task_state=task_state,
+            pending_request=pending_request,
+        ),
     )
+
+
+# Project up to eight current-step attempts without exposing request arguments.
+def _build_recent_tool_history(*, task_state: TaskState) -> tuple[DashboardToolAttempt, ...]:
+    current_step = task_state.current_plan_step
+    if current_step is None:
+        return ()
+    items: list[DashboardToolAttempt] = []
+    for attempt, result in zip(
+        task_state.tool_attempts, task_state.tool_results_history, strict=False
+    ):
+        if attempt.plan_step_id != current_step.step_id:
+            continue
+        if (
+            result.request.plan_step_id != attempt.plan_step_id
+            or canonical_tool_request_identity(result.request) != attempt.action_key
+        ):
+            continue
+        disposition = attempt.disposition if attempt.plan_step_id == result.request.plan_step_id else None
+        items.append(DashboardToolAttempt(
+            plan_step_id=result.request.plan_step_id,
+            request_id=result.request.request_id,
+            tool_name=result.request.tool_name.value,
+            request_reason=result.request.reason[:1000],
+            summary=result.summary[:2000],
+            success=result.success,
+            reached_backend=disposition.reached_backend if disposition is not None else None,
+            disposition=disposition.value if disposition is not None else None,
+            error_code=(
+                getattr(result.error_code, "value", result.error_code)
+                if result.error_code is not None
+                else None
+            ),
+            error_message=result.error_message[:2000] if result.error_message else None,
+            new_observation_count=len(result.observations),
+        ))
+    return tuple(items[-8:])
+
+
+# Match only an earlier adverse Judge result for the exact pending payload digest.
+def _build_prior_judge_review(
+    *, task_state: TaskState, pending_request: HumanReviewRequest | None
+) -> DashboardPriorJudgeReview | None:
+    if pending_request is None or not pending_request.operation_payload_digest:
+        return None
+    relevant_reasons = {
+        "rejected_candidate_resubmitted", "unchanged_candidate_resubmission",
+        "judge_unsafe", "judge_uncertain", "judge_needs_revision",
+        "action_revision_limit_reached",
+    }
+    if not relevant_reasons.intersection(pending_request.reason_codes):
+        return None
+    blocked_verdicts = {"needs_revision", "unsafe", "uncertain"}
+    for assessment in reversed(task_state.judge_history[:-1]):
+        verdict = assessment.verdict.value if assessment.verdict is not None else None
+        if (
+            assessment.invoked
+            and assessment.status.value == "active"
+            and verdict in blocked_verdicts
+            and assessment.evaluated_operation_digest == pending_request.operation_payload_digest
+        ):
+            current_selection = (
+                task_state.pending_completion_candidate.evidence_selection_digest
+                if task_state.pending_completion_candidate is not None
+                else None
+            )
+            previous_selection = assessment.evaluated_evidence_selection_digest
+            selection_match = (
+                "unknown" if not current_selection or not previous_selection
+                else "same" if current_selection == previous_selection
+                else "different"
+            )
+            return DashboardPriorJudgeReview(
+                verdict=verdict,
+                severity=assessment.severity.value,
+                summary=assessment.summary,
+                findings=tuple(finding.summary for finding in assessment.findings),
+                evidence_selection_match=selection_match,
+            )
+    return None
 
 
 # Project selected evidence from TaskState without performing runtime or connector calls.

@@ -30,6 +30,14 @@ the authority for allowed actions, candidate digests, approval and continuation.
   Only HTTP(S) locators become external links; controlled identifiers remain text.
 - `FlaggedEvidencePanel` owns the existing literal comparison and parsing. Older
   payloads containing tokens without passages show a missing-context explanation.
+- Review snapshots may include a bounded current-step tool trail with recorded
+  summaries, errors, new observations, and whether each attempt reached a backend.
+  The view omits tool arguments. A prior adverse Judge review is shown only when its
+  operation digest matches the exact pending proposal; evidence-selection differences
+  are labelled so old findings are not presented as an assessment of new evidence.
+- When actor-blocking text coexists with a continuation policy directive, the review
+  explains that these are distinct signals: policy allowed continuation while the
+  actor reported a step blocker. The dashboard does not reinterpret either signal.
 - Clarification submits the operator's answer and resumes the reviewed step. The
   reconciliation receipt appears before the decision; completed/aborted/running
   threads without a pending request expose status and decision history only.

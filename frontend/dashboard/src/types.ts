@@ -32,6 +32,8 @@ export type DashboardPanel = Record<string, unknown>;
 
 export type DashboardGovernancePanel = DashboardPanel & {
   directive?: string;
+  policy_directive?: string;
+  policy_decision?: string;
   summary?: string | null;
   selected_reason?: string | null;
   reason_codes?: string[];
@@ -62,6 +64,28 @@ export type DashboardEvidenceReference = {
   content_truncated?: boolean | null;
   observation_available?: boolean;
   retrieval_kind?: string | null;
+};
+
+export type DashboardToolAttempt = {
+  plan_step_id: string;
+  request_id: string;
+  tool_name: string;
+  request_reason: string;
+  summary: string;
+  success: boolean;
+  reached_backend?: boolean | null;
+  disposition?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  new_observation_count: number;
+};
+
+export type DashboardPriorJudgeReview = {
+  verdict: string;
+  severity: string;
+  summary: string;
+  findings: string[];
+  evidence_selection_match: "same" | "different" | "unknown";
 };
 
 export type HumanReviewPendingRequest = {
@@ -147,6 +171,8 @@ export type DashboardSnapshot = {
     actor_output_text?: string | null;
     evidence_diagnostic?: DashboardPillarDiagnostic | null;
     trajectory_diagnostic?: DashboardPillarDiagnostic | null;
+    recent_tool_history?: DashboardToolAttempt[];
+    prior_judge_review?: DashboardPriorJudgeReview | null;
   } | null;
 };
 
