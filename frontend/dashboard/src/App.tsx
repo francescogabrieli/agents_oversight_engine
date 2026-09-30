@@ -13,7 +13,7 @@ export function App() {
         <div className="topbar-divider" />
         <span className="topbar-label">Layer 2 Runtime</span>
         <div className="topbar-spacer" />
-        <span className="topbar-pill">
+        <span className="topbar-context">
           interfaccia di revisione
         </span>
       </header>

@@ -45,16 +45,6 @@ export function ReviewThreadPage() {
             <p className="page-header-eyebrow">Revisione umana</p>
             <h1 className="review-title">{taskGoal ?? "Attività in attesa di revisione"}</h1>
           </div>
-          <div className="review-header-status">
-            {snapshot ? (
-              <span className={runtimeStateBadgeClass(snapshot.runtime_state)}>
-                {runtimeStateLabel(snapshot.runtime_state)}
-              </span>
-            ) : null}
-            {snapshot?.resume_state ? (
-              <span className="badge badge-neutral">ripresa: {runtimeStateLabel(snapshot.resume_state)}</span>
-            ) : null}
-          </div>
         </div>
         <div className="review-thread-id">{decodedThreadId}</div>
       </section>

@@ -75,17 +75,8 @@ body {
 }
 .topbar-divider { width: 1px; height: 16px; background: var(--border); margin: 0 4px; }
 .topbar-label { font-size: 11px; color: var(--text-muted); }
+.topbar-context { font-size: 11px; color: var(--text-secondary); }
 .topbar-spacer { flex: 1; }
-.topbar-pill {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 3px 10px; border-radius: 999px;
-  border: 1px solid var(--border);
-  font-size: 11px; font-weight: 500; color: var(--text-secondary);
-}
-.topbar-pill-dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: var(--success);
-}
 
 .page-content {
   padding: 28px 24px 48px;
@@ -262,10 +253,6 @@ body {
 }
 .review-header-main > div { min-width: 0; }
 .review-title { margin: 0; font-size: 1.1rem; font-weight: 600; color: var(--text-primary); }
-.review-header-status {
-  display: flex; align-items: center; gap: 6px;
-  flex-wrap: wrap; justify-content: flex-end; max-width: 40%;
-}
 .review-thread-id {
   font-family: "SF Mono", "Fira Mono", monospace;
   font-size: 10px; color: var(--text-muted);
@@ -597,8 +584,6 @@ body {
 @media (max-width: 640px) {
   .page-content { padding: 16px 14px 40px; }
   .review-header-main { flex-direction: column; }
-  .review-header-status { justify-content: flex-start; }
-  .review-header-status { max-width: 100%; }
   .operator-options-grid { grid-template-columns: 1fr; }
   .review-diagnostics-grid { grid-template-columns: 1fr; }
   .kv-grid-2col { grid-template-columns: 1fr; }
@@ -722,11 +707,38 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-v
 
 /* Preserve readable evidence and long payloads at narrow widths and browser zoom. */
 .evidence-workspace { display: grid; gap: 12px; min-width: 0; }
-.evidence-comparison-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
-.evidence-column { display: grid; gap: 10px; min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+.evidence-source-overview {
+  display: grid;
+  grid-template-columns: minmax(240px, .9fr) minmax(0, 1.1fr);
+  align-items: start;
+  gap: 8px 16px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.evidence-source-overview h4 { grid-column: 1 / -1; margin: 0; font-size: 15px; font-weight: 600; }
+.evidence-source-overview > .evidence-empty { grid-column: 1 / -1; }
+.evidence-source-overview .form-field { min-width: 0; margin: 0; }
+.evidence-source-meta { display: grid; gap: 4px; min-width: 0; }
+.evidence-source-meta > * { min-width: 0; margin: 0; }
+.evidence-comparison-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+.evidence-column {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  height: clamp(420px, 64vh, 620px);
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
 .evidence-column h4 { margin: 0; font-size: 15px; font-weight: 600; }
 .evidence-column p { margin: 0; }
-.evidence-scroll { max-height: 480px; overflow: auto; min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.evidence-scroll { height: 100%; max-height: none; min-width: 0; min-height: 0; overflow: auto; padding: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
 .evidence-scroll .review-source-excerpt { margin: 0; font-size: 14px; line-height: 1.7; }
 .evidence-source-id { color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
 .evidence-empty { color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
@@ -753,10 +765,10 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-v
 .action-submit-row > .btn { max-width: 100%; }
 .pillar-highlight { flex-wrap: wrap; }
 .pillar-highlight dd { overflow-wrap: anywhere; }
-.topbar-pill { white-space: nowrap; }
 @media (max-width: 760px) {
   .evidence-comparison-grid { grid-template-columns: minmax(0, 1fr); }
-  .evidence-scroll { max-height: 320px; }
+  .evidence-source-overview { grid-template-columns: minmax(0, 1fr); }
+  .evidence-column { height: clamp(300px, 56vh, 460px); }
   .topbar { padding: 0 14px; gap: 8px; }
   .topbar-label, .topbar-divider { display: none; }
   .flagged-values { padding: 8px; }
@@ -764,7 +776,6 @@ button:focus-visible, a:focus-visible, summary:focus-visible, [tabindex]:focus-v
   .review-diagnostics-grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 420px) {
-  .topbar-pill { display: none; }
   .card-body { padding: 12px; }
   .review-action-nav { position: static; }
 }
