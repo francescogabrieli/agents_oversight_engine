@@ -668,6 +668,7 @@ body {
   border: 1px solid var(--accent-border); border-radius: 8px;
 }
 #review-decision { scroll-margin-top: 135px; }
+#communication-body { scroll-margin-top: 72px; }
 .proposal-scroll { max-height: 360px; overflow: auto; padding: 12px; border: 1px solid var(--border); border-radius: 6px; }
 .connection-status, .delivery-status { font-size: 13px; color: var(--text-secondary); margin: 0; }
 .delivery-status p { margin: 4px 0; }

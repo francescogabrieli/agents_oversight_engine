@@ -131,6 +131,14 @@ export type ExternalCommunicationDraft = {
   metadata: Record<string, unknown>;
 };
 
+// Keep the persisted communication projection typed so completed runs can show its body.
+export type DashboardExternalCommunicationPanel = {
+  phase?: string | null;
+  draft?: ExternalCommunicationDraft | null;
+  last_applied_edit?: Record<string, unknown> | null;
+  last_transition_summary?: string | null;
+};
+
 export type ExternalExecutionPanel = {
   execution_intent: "proposal_only" | "execute_after_governance";
   capability_id?: string | null;
@@ -158,7 +166,7 @@ export type DashboardSnapshot = {
   governance?: DashboardGovernancePanel | null;
   oversight?: DashboardOversightPanel | null;
   behavioral?: DashboardPanel | null;
-  external_communication?: DashboardPanel | null;
+  external_communication?: DashboardExternalCommunicationPanel | null;
   external_execution: ExternalExecutionPanel;
   human_review?: {
     pending_request?: HumanReviewPendingRequest | null;

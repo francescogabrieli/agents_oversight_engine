@@ -74,6 +74,25 @@ describe("Safe review editing and presentation", () => {
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
 
+  it("keeps a persisted email body visible after the pending review is cleared", () => {
+    render(
+      <ProposalPanel
+        persistedDraft={{
+          channel: "email",
+          recipient: "ops@example.test",
+          subject: "Recorded update",
+          body: "The complete recorded email body.",
+          metadata: { body_format: "plain" },
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("region", { name: "Comunicazione registrata" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Corpo della comunicazione")).toHaveTextContent(
+      "The complete recorded email body.",
+    );
+  });
+
   it("does not turn non-web locators into executable links", () => {
     const {rerender} = render(<SourceReference locator="https://example.test/source" />);
     expect(screen.getByRole("link")).toHaveAttribute("rel", "noopener noreferrer");

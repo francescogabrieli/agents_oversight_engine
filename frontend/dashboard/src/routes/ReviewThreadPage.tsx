@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { fetchReviewDetail, resumeReviewThread } from "../api";
 import { DecisionForm } from "../components/DecisionForm";
@@ -16,6 +17,13 @@ function valueToString(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
+// Suppress legacy sentinel strings that do not represent execution failures.
+function visibleErrorCode(value: string | null | undefined) {
+  const normalized = value?.trim();
+  if (!normalized || ["none", "null", "n/a"].includes(normalized.toLowerCase())) return null;
+  return normalized;
+}
+
 export function ReviewThreadPage() {
   const { threadId = "" } = useParams();
   const navigate = useNavigate();
@@ -25,11 +33,25 @@ export function ReviewThreadPage() {
   const detail = resource.data;
   const snapshot = detail?.dashboard_snapshot;
   const pendingRequest = snapshot?.human_review?.pending_request;
+  const persistedCommunicationDraft = snapshot?.external_communication?.draft;
   const taskGoal = valueToString(detail?.runtime_summary?.task_goal);
   const governance = snapshot?.governance as Record<string, unknown> | null | undefined;
   const oversight = snapshot?.oversight as Record<string, unknown> | null | undefined;
   const externalExecution = snapshot?.external_execution;
+  const externalExecutionError = visibleErrorCode(externalExecution?.error_code);
   const isReconciliation = pendingRequest?.reason_codes?.includes("external_execution_reconciliation_required");
+
+  // A completed run inserts the recorded message above the operator's old viewport.
+  useEffect(() => {
+    if (!pendingRequest && persistedCommunicationDraft) {
+      document.getElementById("communication-body")?.scrollIntoView?.({ block: "start" });
+    }
+  }, [
+    decodedThreadId,
+    pendingRequest?.request_id,
+    persistedCommunicationDraft?.body,
+    snapshot?.runtime_state,
+  ]);
 
   return (
     <div className="review-workspace">
@@ -67,7 +89,12 @@ export function ReviewThreadPage() {
             <ReviewContextPanel key={pendingRequest.request_id} taskGoal={taskGoal} snapshot={snapshot} />
           ) : null}
 
-          {pendingRequest ? <ProposalPanel request={pendingRequest} /> : null}
+          {pendingRequest || persistedCommunicationDraft ? (
+            <ProposalPanel
+              request={pendingRequest}
+              persistedDraft={persistedCommunicationDraft}
+            />
+          ) : null}
 
           {externalExecution ? (
             <section className="card">
@@ -86,9 +113,9 @@ export function ReviewThreadPage() {
                   )}
                   {externalExecution.summary ? ` ${externalExecution.summary}` : ""}
                 </p>
-                {externalExecution.error_code ? (
+                {externalExecutionError ? (
                   <div className="alert alert-error" style={{ marginTop: 10 }}>
-                    {externalExecution.error_code}
+                    {externalExecutionError}
                   </div>
                 ) : null}
                 {isReconciliation ? <KeyValueGrid title="Esito da riconciliare" values={[

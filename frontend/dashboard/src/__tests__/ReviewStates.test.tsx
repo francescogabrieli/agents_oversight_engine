@@ -100,6 +100,34 @@ describe("Review boundary states", () => {
     expect(screen.queryByRole("button", { name: /Invia decisione/ })).not.toBeInTheDocument();
   });
 
+  it("shows the recorded email after completion without rendering a none sentinel as an error", async () => {
+    const detail = review();
+    const snapshot = detail.dashboard_snapshot!;
+    snapshot.runtime_state = "completed";
+    snapshot.is_terminal = true;
+    snapshot.has_pending_review = false;
+    snapshot.human_review!.pending_request = null;
+    snapshot.external_communication = {
+      phase: "executed",
+      draft: {
+        channel: "email",
+        recipient: "ops@example.test",
+        subject: "Completed update",
+        body: "Visible after completion.",
+        metadata: { body_format: "plain" },
+      },
+    };
+    Object.assign(snapshot.external_execution, { status: "executed", error_code: "none" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => detail }));
+
+    render(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={["/threads/isolated"]}><App /></MemoryRouter>);
+
+    expect(await screen.findByLabelText("Corpo della comunicazione")).toHaveTextContent(
+      "Visible after completion.",
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("shows the reconciliation receipt before the decision without hiding its reference", async () => {
     const detail = review();
     detail.dashboard_snapshot!.human_review!.pending_request!.reason_codes = ["external_execution_reconciliation_required"];
