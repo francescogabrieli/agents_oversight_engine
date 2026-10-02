@@ -54,6 +54,8 @@ from layer2_runtime_governance.domain import (
 from layer2_runtime_governance.execution import (
     ActorExecutionError,
     BedrockNovaActor,
+    OpenAIActor,
+    OpenAIActorSettings,
     build_actor_system_prompt,
     build_actor_user_prompt,
     build_default_actor,
@@ -71,6 +73,19 @@ from layer3_tool_bus_external_capabilities.tool_contract import (
 )
 class Layer2ActorExecutionTests(unittest.TestCase):
     # Scenarios remain grouped by the capability whose behavior they verify.
+    # The ordinary runtime path must construct the configured OpenAI actor without network calls.
+    def test_default_actor_uses_openai_gpt_6_luna(self) -> None:
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True), patch(
+            "layer2_runtime_governance.execution.settings.load_env_file_values",
+            return_value={},
+        ), patch("layer2_runtime_governance.execution.providers.openai.OpenAI"):
+            actor = build_default_actor()
+            settings = OpenAIActorSettings.from_env()
+
+        self.assertIsInstance(actor, OpenAIActor)
+        self.assertEqual(actor.model_id, "gpt-6-luna")
+        self.assertEqual(settings.model, "gpt-6-luna")
+
     def test_default_actor_can_be_configured_to_bedrock(self) -> None:
         with patch.dict(
             os.environ,

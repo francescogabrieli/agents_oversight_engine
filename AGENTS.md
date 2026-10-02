@@ -64,6 +64,8 @@ in its reference rather than being copied back into this file.
   trajectory are active; operational risk and behavioral scoring remain shadow-only.
 - Keep a credible semantic planner and step-bounded actor. Bind tools through the
   runtime gateway. Actors and governance never call connectors or MCP directly.
+- Real Layer 2 runs default to the OpenAI actor using `gpt-6-luna` and the existing
+  `OPENAI_API_KEY`; Bedrock is not the standard execution provider.
 - HITL uses typed LangGraph interrupt/resume. Only a reason-scoped capability
   approval bound to the exact candidate/digest can authorize external execution.
   Edits invalidate approval. Reconciliation never re-authorizes an external effect.

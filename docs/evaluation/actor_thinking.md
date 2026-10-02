@@ -1,5 +1,8 @@
 # Bedrock actor thinking experiments
 
+This is a Bedrock-only historical experiment reference. Standard live executions
+use the OpenAI actor with `gpt-6-luna`; no Bedrock thinking variables are needed.
+
 The actor supports opt-in adaptive thinking. Set these variables in the terminal
 that launches the campaign (process variables take precedence over `.env`):
 

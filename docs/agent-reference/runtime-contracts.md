@@ -57,9 +57,9 @@ All code paths and commands below are relative to the repository root.
 - runtime planning services must preserve the planner-owned semantic steps without compaction, compression, insertion, or lexical rewriting
 - actor execution receives the full semantic plan as context but may commit completion only for the current plan step
 - actor output must remain typed and audit-safe even when backed by an LLM; intermediate output may summarize meaningful working progress without being forced into premature completion
-- the current Layer 2 actor backend defaults to Amazon Bedrock Nova 2 Lite in `eu-central-1`; deployments may override the Bedrock model or inference profile and region through configuration. Provider reasoning modes remain explicit: Claude Sonnet 4.6 uses `adaptive`, while Nova 2 Lite uses `extended` with low, medium, or high effort; reasoning content never enters runtime state or traces
+- real Layer 2 runs default to the OpenAI Responses API actor using `gpt-6-luna` and the existing `OPENAI_API_KEY`; `LAYER2_ACTOR_OPENAI_MODEL` remains an explicit per-run override. The Bedrock adapter remains available for historical comparison runs, with its Claude `adaptive` and Nova `extended` reasoning modes, but is not the standard live provider
 - planner and replanner remain OpenAI-backed for now
-- actor provider selection is controlled by `LAYER2_ACTOR_PROVIDER`, with supported values `bedrock` and `openai`; Bedrock is the default
+- actor provider selection is controlled by `LAYER2_ACTOR_PROVIDER`, with supported values `openai` and `bedrock`; OpenAI is the default
 - malformed provider JSON that omits the runtime action envelope should be recovered only when it is clearly completion-shaped; otherwise it should stop conservatively instead of being treated as normal progress
 - provider failures that return no usable runtime action and no actor output are runtime recovery events; they should route to replanning/retry rather than opening a human-review gate with an empty draft
 - actor execution may produce local outputs, request later capability use, ask clarification, or signal replan
