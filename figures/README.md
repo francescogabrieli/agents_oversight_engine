@@ -14,6 +14,7 @@ Mermaid operative restano nei documenti originali.
 | `hitl_external_clean.png` | Proposta esterna, autorizzazione HITL, esecuzione e riconciliazione | Figura del controllo delle azioni esterne |
 | `hitl_async_resume_sequence.png` | Sequenza asincrona tra runtime CLI, checkpoint, snapshot, dashboard, revisore e inbox | Figura del confine `interrupt / resume` e dell'ownership della run |
 | `evidence_trace_clean.png` | Tool read-only, osservazione concreta, stato, governance e trace | Figura dell'auditabilità |
+| `candidate_binding_clean.png` | Binding tra proposta, snapshot e selezione delle evidenze; invalidazione al cambio di versione | Figura dell'identità del candidato valutato |
 
 ## Figure opzionali o da appendice
 
@@ -29,3 +30,10 @@ CLI owner riprende il checkpoint canonico.
 
 Le figure sperimentali già presenti nelle sottocartelle `figures/thesis/` sono da
 collocare nel capitolo di valutazione, non nel capitolo 3.
+
+`candidate_binding_clean.svg` è il sorgente modificabile della nuova figura.
+Le frecce rappresentano il binding all'identità condivisa, non l'ordine di
+invocazione dei controlli. Assessment e approvazioni storiche restano auditabili,
+ma non sono trasferibili alla nuova versione. La PNG in `images/` è una copia
+identica fornita per il percorso alternativo richiesto; il sorgente canonico
+resta in `figures/`.
