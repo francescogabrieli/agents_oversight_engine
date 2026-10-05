@@ -32,6 +32,8 @@ export type DashboardPanel = Record<string, unknown>;
 
 export type DashboardGovernancePanel = DashboardPanel & {
   directive?: string;
+  policy_directive?: string;
+  policy_decision?: string;
   summary?: string | null;
   selected_reason?: string | null;
   reason_codes?: string[];
@@ -59,6 +61,31 @@ export type DashboardEvidenceReference = {
   locator?: string | null;
   source_timestamp?: string | null;
   content_excerpt: string;
+  content_truncated?: boolean | null;
+  observation_available?: boolean;
+  retrieval_kind?: string | null;
+};
+
+export type DashboardToolAttempt = {
+  plan_step_id: string;
+  request_id: string;
+  tool_name: string;
+  request_reason: string;
+  summary: string;
+  success: boolean;
+  reached_backend?: boolean | null;
+  disposition?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  new_observation_count: number;
+};
+
+export type DashboardPriorJudgeReview = {
+  verdict: string;
+  severity: string;
+  summary: string;
+  findings: string[];
+  evidence_selection_match: "same" | "different" | "unknown";
 };
 
 export type HumanReviewPendingRequest = {
@@ -104,6 +131,14 @@ export type ExternalCommunicationDraft = {
   metadata: Record<string, unknown>;
 };
 
+// Keep the persisted communication projection typed so completed runs can show its body.
+export type DashboardExternalCommunicationPanel = {
+  phase?: string | null;
+  draft?: ExternalCommunicationDraft | null;
+  last_applied_edit?: Record<string, unknown> | null;
+  last_transition_summary?: string | null;
+};
+
 export type ExternalExecutionPanel = {
   execution_intent: "proposal_only" | "execute_after_governance";
   capability_id?: string | null;
@@ -131,7 +166,7 @@ export type DashboardSnapshot = {
   governance?: DashboardGovernancePanel | null;
   oversight?: DashboardOversightPanel | null;
   behavioral?: DashboardPanel | null;
-  external_communication?: DashboardPanel | null;
+  external_communication?: DashboardExternalCommunicationPanel | null;
   external_execution: ExternalExecutionPanel;
   human_review?: {
     pending_request?: HumanReviewPendingRequest | null;
@@ -141,8 +176,11 @@ export type DashboardSnapshot = {
     resume_state?: string | null;
     judge_findings?: string[];
     selected_evidence_references?: DashboardEvidenceReference[];
+    actor_output_text?: string | null;
     evidence_diagnostic?: DashboardPillarDiagnostic | null;
     trajectory_diagnostic?: DashboardPillarDiagnostic | null;
+    recent_tool_history?: DashboardToolAttempt[];
+    prior_judge_review?: DashboardPriorJudgeReview | null;
   } | null;
 };
 

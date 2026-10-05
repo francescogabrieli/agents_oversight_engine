@@ -256,10 +256,12 @@ policy non viene confuso con la variabilità del modello corrente:
   --campaign-id oversight_demo_contract_v3_final `
   --mode contract
 
-cmd /c "set LAYER2_ACTOR_PROVIDER=bedrock&& set LAYER2_ACTOR_BEDROCK_MODEL_ID=eu.amazon.nova-2-lite-v1:0&& set LAYER2_ACTOR_BEDROCK_THINKING=off&& .\.venv\Scripts\python.exe .\scripts\run_oversight_demo_pool.py --campaign-id oversight_demo_nova2lite_eu_v4 --mode live"
+.\.venv\Scripts\python.exe .\scripts\run_oversight_demo_pool.py --campaign-id oversight_demo_openai_gpt6luna_v1 --mode live
 ```
 
-I cinque live demo richiedono le credenziali dei provider configurati (il pool live ufficiale è eseguito con `eu.amazon.nova-2-lite-v1:0` su Bedrock con thinking disattivato). `op05` attraversa
+I cinque live demo richiedono `OPENAI_API_KEY` (il pool live corrente usa l'actor
+OpenAI con `gpt-6-luna`). La campagna precedente `oversight_demo_nova2lite_eu_v4`
+resta un risultato storico Bedrock. `op05` attraversa
 retrieval reale e ne controlla soltanto la proiezione di provenienza; `op06` usa un documento
 controllato; `op07` e `op08` usano fault injection tipizzata al Tool Gateway per rendere
 ripetibile la condizione di trajectory senza sostituire planner, actor o replanner; `op09` sottopone

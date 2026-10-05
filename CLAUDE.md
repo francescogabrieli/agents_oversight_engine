@@ -31,10 +31,11 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt          # + tests/schema validation (jsonschema, ruff, vulture)
 ```
 
-Secrets/config load from `.env` or `src/.env`: `OPENAI_API_KEY`, `AWS_ACCESS_KEY_ID`,
-`AWS_SECRET_ACCESS_KEY` (Bedrock actor), optional `LAYER2_ACTOR_PROVIDER`
-(`bedrock`|`openai`, default `bedrock`), `LAYER2_ACTOR_BEDROCK_MODEL_ID`, `AWS_REGION`
-(default `eu-central-1`), `AWS_SESSION_TOKEN`.
+Secrets/config load from `.env` or `src/.env`: `OPENAI_API_KEY` is used by the
+default Layer 2 actor (`LAYER2_ACTOR_PROVIDER=openai`, model
+`LAYER2_ACTOR_OPENAI_MODEL=gpt-6-luna`). AWS credentials and
+`LAYER2_ACTOR_BEDROCK_*` settings apply only to explicitly selected historical
+Bedrock comparison runs.
 
 ## Common Commands
 

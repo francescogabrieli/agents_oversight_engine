@@ -172,7 +172,8 @@ Main files:
 - `graph.py`
 - `planning/`
 - `execution/factory.py`
-- `execution/providers/bedrock.py`
+- `execution/providers/openai.py` (default actor for real runs)
+- `execution/providers/bedrock.py` (historical comparison adapter)
 - `replanning.py` (compatibility facade)
 - `actor_contract.py`
 - `src/layer3_tool_bus_external_capabilities/tool_contract.py`
@@ -181,7 +182,7 @@ Main files:
 - `src/layer4_state_evidence_observability/behavioral/`
 - `judge/`
 - `src/layer4_state_evidence_observability/oversight/`
-- `execution/providers/bedrock_runtime.py`
+- `execution/providers/bedrock_runtime.py` (historical comparison adapter)
 - `src/layer4_state_evidence_observability/infrastructure/runtime_artifacts.py`
 - `runtime_warnings.py`
 
@@ -205,7 +206,7 @@ Current design:
 - `domain/plan.py` carries only semantic `PlanStep` fields: identifier, objective, rationale, expected outcome, and runtime-owned status
 - `runtime/` owns lifecycle, planner, actor, governance, tool observation, replanning services, and thin LangGraph node adapters; the retired `nodes.py` facade must not be restored
 - `planning/` defines the planner port, prompt builders, the default OpenAI-backed planner, and replanning adapters
-- `execution/factory.py` builds the configured actor; concrete Bedrock/OpenAI adapters, prompts, action schemas, response parsing, and result construction live under `execution/`
+- `execution/factory.py` builds the configured actor; real runs default to the OpenAI Responses API adapter with `gpt-6-luna` and the existing `OPENAI_API_KEY`. Bedrock/OpenAI adapters, prompts, action schemas, response parsing, and result construction live under `execution/`
 - `actor_contract.py` passes observed concrete evidence and the semantic current step; it never passes a universal evidence rank or claim ceiling
 - `evaluate_actor_evidence_coverage` in `signal_services/evidence_service.py` is the shared canonical owner for evidence coverage evaluation, powering both the action schema completion gate (`_evidence_burden_unsatisfied`) and the actor prompt payload (`evidence_coverage`), which exposes satisfied origins, still-needed counts, and unfetched candidate locators from search snippets to avoid redundant fetches
 - Evidence evaluation treats a typed, parser-valid single `SELECT` database proposal as an acquisition operation rather than a claim about rows not retrieved yet; the planner-declared factual marker remains exported separately for audit, while static SQL policy, digest binding, HITL authorization, and post-execution accountability remain unchanged
@@ -225,7 +226,7 @@ Current design:
 - `src/layer4_state_evidence_observability/oversight/` preserves persisted oversight assessment contracts; evidence and trajectory are active, while `operational_risk` exports shadow consequence facts and is not applicable outside governed external operations
 - `src/layer3_tool_bus_external_capabilities/external_operations/` owns immutable typed proposals, execution intent projection, SQL AST and communication/generic normalizers, a dedicated capability registry, durable idempotency records, the external executor port, and the capability-bound MCP adapter
 - `src/layer3_tool_bus_external_capabilities/external_capability_mcp/` owns the productive typed MCP tools for SMTP email and profile-bound database statements; both are disabled by default and credentials remain infrastructure configuration
-- `execution/providers/bedrock.py` defines the Amazon Bedrock actor adapter, while `execution/providers/bedrock_runtime.py` owns the Converse client and settings for the approved Nova 2 Lite EU inference profile, including provider-specific Claude `adaptive` and Nova `extended` reasoning envelopes
+- `execution/providers/openai.py` defines the default Layer 2 actor adapter and exposes its configured model ID for trace provenance. The Bedrock Converse adapter and its provider-specific reasoning envelopes remain available for historical comparison runs, but are not the standard live path.
 - `runtime/governance_service.py` applies the OPA-first governance result and persists static, dynamic, behavioral, and judge records before routing
 - `src/layer4_state_evidence_observability/infrastructure/runtime_artifacts.py` configures the local official LangGraph SQLite saver plus the per-thread runtime artifact store; `src/layer4_state_evidence_observability/infrastructure/checkpointing.py` can select the official PostgreSQL saver for deployed environments
 - `src/layer4_state_evidence_observability/observability/` defines the typed, JSON-exportable Layer 4 trace projections for Layer 2 runs, builders, and compact views used for debugging, thesis evidence, HITL payloads, and future evaluation; `trace_summary.py` produces a human-readable Markdown summary written alongside the full JSON trace as `trace_summary.md`; `governance_narrative.py` produces `governance_narrative.md`, a turn-by-turn account of what the actor and governance said to each other, built from the exported trace (so it can also be rendered for already-archived runs) rather than from the live log stream - it collapses routine passes into one line, quotes the actor's own recorded rationale, names the exact flagged values and the operator's decision, and never replaces `governance_exchange.md`, which stays the complete authoritative audit stream; the retired `trace.py` facade must not be restored
@@ -238,6 +239,9 @@ Current design:
 - the dashboard removes a submitted request from active approvals immediately, exposes it as a non-interactive completed-review item for 2 minutes, and then removes that transient acknowledgement; canonical run completion remains distinct from review completion
 - `frontend/dashboard` contains the standalone React + TypeScript + Tailwind + daisyUI dashboard frontend that is built into static assets and served by `main_layer2_dashboard.py`
 - Dashboard review forms preserve local edits across equivalent polls, reset for a changed request/candidate, and require explicit decision selection. Proposal details are displayed before approval; email edits preserve the remaining typed draft fields. A sticky navigation link keeps decisions reachable, source links permit only HTTP(S), and bounded excerpts are labelled as partial. Submission delivery is distinct from run completion; the UI never claims the runtime is alive from a static badge. These are presentation safeguards, not an alternative authorization policy.
+- `hitl/dashboard.py` projects the pending candidate's complete `actor_output_text` (falling back to the current actor output only without a candidate). Selected observations preserve paragraphs within a 12,000-character limit and carry optional `content_truncated`, `observation_available`, and `retrieval_kind` metadata. Missing selected IDs remain visible instead of disappearing. These are additive dashboard DTO fields, not changes to `layer2_trace.v6`. `EvidenceComparisonPanel` owns the source selector and comparison; `FlaggedEvidencePanel` owns recorded literal passages and explicit missing-context fallbacks. Historical snapshots are not rewritten or reconstructed; an available governed draft is labelled as a proposal when used in the comparison. Reconciliation receipts precede decision controls, and clarification labels describe recording an answer and resuming the reviewed step.
+- `pillarSummary.ts` distinguishes actor-selected independent origins from the retrieval universe and whole-run replan totals from episode counts. The dashboard projects current-step tool attempts and OPA's exhaustion flag without re-deriving thresholds; absent token lists never negate a reported anchoring concern.
+- The HITL dashboard may project up to eight persisted tool results for the current plan step, paired with their corresponding attempts and omitting request arguments. It may show a prior adverse Judge assessment only for an exact operation-payload digest match, with evidence-selection comparability stated separately. Actor-reported blocking and a continuation policy directive remain distinct displayed signals; the dashboard does not infer a new runtime decision from either.
 - `configs/opa/layer2_governance/data.json` is the sole source for static organizational constraints and bounded external-action revision limits consumed by OPA
 - `runtime_warnings.py` centralizes warning suppression needed before importing selected LangGraph/LangChain dependencies
 - `graph.py` contains the current LangGraph wiring for the planner/actor/governance/tool/replanner/human-review/external-execution loop:

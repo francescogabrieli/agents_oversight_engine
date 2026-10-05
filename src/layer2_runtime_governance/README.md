@@ -31,7 +31,8 @@ Domain modules must remain independent from LangGraph, provider SDKs, HTTP, subp
 - `execution/`: actor prompts, provider-neutral action schemas, response normalization,
   result construction, settings, the actor factory, and provider adapters. The Bedrock
   actor adapter lives in `execution/providers/bedrock.py`; its Converse client and
-  settings live in `execution/providers/bedrock_runtime.py`.
+  settings live in `execution/providers/bedrock_runtime.py`. Real runs default to the
+  OpenAI Responses API adapter in `execution/providers/openai.py` with `gpt-6-luna`.
 - `domain/evidence.py`: observation lineage plus digest-bound evidence snapshot and
   selection projections used at governance boundaries.
 - `layer3_tool_bus_external_capabilities/tool_contract.py`: canonical read-only tool

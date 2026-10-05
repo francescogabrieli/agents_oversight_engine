@@ -43,9 +43,55 @@ from tests.dashboard_test_factories import (
     build_dashboard_governance_decision,
     build_dashboard_oversight_assessment,
 )
+from tests.layer2_runtime_fixtures import _build_actor_ready_state_for_judge
+from layer2_runtime_governance.domain.runtime_records import StepCompletionCandidate
 
 
 class Layer2HitlDashboardTests(unittest.TestCase):
+    # Preserve the reviewed candidate and every selected reference, including broken IDs.
+    def test_evidence_review_keeps_paragraphs_long_content_and_missing_references(self) -> None:
+        state = _build_actor_ready_state_for_judge()
+        state.pending_human_review_request = _human_review_request()
+        content = "Source heading\n\n" + "Evidence beyond the old preview. " * 30
+        state.observations[0] = replace(state.observations[0], content=content)
+        state.pending_completion_candidate = StepCompletionCandidate(
+            candidate_id="candidate-review",
+            step_id="step_1",
+            summary="Short summary",
+            output_text="Exact reviewed text\n\nSecond paragraph.",
+            evidence_refs=("evidence-1", "missing-reference", "evidence-1"),
+        )
+
+        panel = build_governance_hitl_dashboard_snapshot(state).human_review
+
+        self.assertEqual(panel.actor_output_text, state.pending_completion_candidate.output_text)
+        self.assertNotEqual(panel.actor_output_text, state.actor_result.output_text)
+        self.assertEqual(len(panel.selected_evidence_references), 2)
+        source, missing = panel.selected_evidence_references
+        self.assertEqual(source.content_excerpt, content)
+        self.assertFalse(source.content_truncated)
+        self.assertTrue(source.observation_available)
+        self.assertEqual(source.retrieval_kind, "capability_result")
+        self.assertEqual(missing.observation_id, "missing-reference")
+        self.assertFalse(missing.observation_available)
+        self.assertEqual(missing.content_excerpt, "")
+
+    # A bounded projection must tell the operator it omits persisted source content.
+    def test_evidence_preview_reports_truncation_and_actor_output_fallback(self) -> None:
+        state = _build_actor_ready_state_for_judge()
+        state.pending_human_review_request = _human_review_request()
+        state.observations[0] = replace(state.observations[0], content="x" * 12001)
+
+        panel = build_governance_hitl_dashboard_snapshot(state).human_review
+        self.assertEqual(panel.actor_output_text, state.actor_result.output_text)
+        self.assertEqual(len(panel.selected_evidence_references[0].content_excerpt), 12000)
+        self.assertTrue(panel.selected_evidence_references[0].content_truncated)
+        self.assertEqual(len(state.observations[0].content), 12001)
+
+        state.last_human_review_request = state.pending_human_review_request
+        state.pending_human_review_request = None
+        self.assertIsNone(build_governance_hitl_dashboard_snapshot(state).human_review.actor_output_text)
+
     def test_dashboard_snapshot_exposes_active_review_payload(self) -> None:
         task_state = TaskState.from_intake(_intake_result())
         task_state.current_state = RuntimeState.WAITING_HUMAN_REVIEW
@@ -119,6 +165,8 @@ class Layer2HitlDashboardTests(unittest.TestCase):
                         "replan_count": 3,
                         "max_replans_before_review": 3,
                         "consecutive_tool_failures": 3,
+                        "current_step_tool_attempt_count": 30,
+                        "step_exploration_budget_exhausted": True,
                         "secret_internal_debug": "must not reach the compact panel",
                     },
                 },
@@ -143,6 +191,8 @@ class Layer2HitlDashboardTests(unittest.TestCase):
                 "max_replans_before_review": 3,
                 "replan_ceiling_reached": True,
                 "consecutive_tool_failures": 3,
+                "current_step_tool_attempt_count": 30,
+                "step_exploration_budget_exhausted": True,
             },
         )
         payload = governance_hitl_dashboard_snapshot_to_dict(snapshot)

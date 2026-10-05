@@ -48,15 +48,20 @@ function evidenceHighlights(facts: Facts): PillarHighlight[] {
   const rows: PillarHighlight[] = [];
 
   const retrieved = num(facts, "retrieved_independent_sources_count");
+  const selected = num(facts, "distinct_independent_sources_count");
   const required = num(facts, "min_independent_sources_required");
   const sourcesOk = flag(facts, "independent_sources_satisfied");
-  if (retrieved !== null && required !== null) {
+  // Coverage applies to cited origins; the retrieval universe is a separate diagnostic.
+  if (selected !== null && required !== null) {
     push(
       rows,
-      "Fonti indipendenti",
-      `${retrieved} su ${required} richieste`,
+      "Fonti indipendenti citate",
+      `${selected} su ${required} richieste`,
       sourcesOk === null ? "neutral" : sourcesOk ? "ok" : "warn",
     );
+  }
+  if (retrieved !== null) {
+    push(rows, "Fonti indipendenti recuperate complessivamente", `${retrieved} (anche non citate)`, "neutral");
   }
 
   const refCount = num(facts, "selected_evidence_ref_count");
@@ -83,12 +88,13 @@ function evidenceHighlights(facts: Facts): PillarHighlight[] {
   const literals = tokens(facts, "unanchored_literals_in_selection");
   const universeLiterals = tokens(facts, "unanchored_literals_in_universe");
   const flagged = literals.length > 0 ? literals : universeLiterals;
-  if (flagged.length > 0 || flag(facts, "has_unanchored_literals_in_selection") !== null) {
+  const hasUnanchored = flag(facts, "has_unanchored_literals_in_selection");
+  if (flagged.length > 0 || hasUnanchored !== null) {
     push(
       rows,
       "Valori non riscontrati nelle fonti",
-      flagged.length > 0 ? `${flagged.length} (${flagged.join(", ")})` : "nessuno",
-      flagged.length > 0 ? "warn" : "ok",
+      flagged.length > 0 ? `${flagged.length} (${flagged.join(", ")})` : hasUnanchored ? "Presenti; valori non riportati" : "nessuno",
+      flagged.length > 0 || hasUnanchored ? "warn" : "ok",
     );
   }
 
@@ -145,15 +151,26 @@ function trajectoryHighlights(facts: Facts): PillarHighlight[] {
   const rows: PillarHighlight[] = [];
 
   const replans = num(facts, "replan_count");
+  const episodeReplans = num(facts, "replan_episode_count");
   const maxReplans = num(facts, "max_replans_before_review");
   const replanCeiling = flag(facts, "replan_ceiling_reached");
   if (replans !== null) {
     push(
       rows,
-      "Ripianificazioni",
-      maxReplans !== null ? `${replans} su ${maxReplans} consentite` : `${replans}`,
-      replanCeiling ? "warn" : "ok",
+      "Ripianificazioni complessive",
+      `${replans}`,
+      "neutral",
     );
+  }
+  if (episodeReplans !== null) {
+    push(rows, "Ripianificazioni dall'ultima revisione",
+      maxReplans !== null ? `${episodeReplans} su ${maxReplans} consentite` : `${episodeReplans}`,
+      replanCeiling === null ? "neutral" : replanCeiling ? "warn" : "ok");
+  }
+  const attempts = num(facts, "current_step_tool_attempt_count");
+  if (attempts !== null) {
+    const exhausted = flag(facts, "step_exploration_budget_exhausted");
+    push(rows, "Tentativi di strumenti nel passo", exhausted ? `${attempts} — limite raggiunto` : `${attempts}`, exhausted ? "warn" : "neutral");
   }
 
   const calls = num(facts, "tool_call_count");

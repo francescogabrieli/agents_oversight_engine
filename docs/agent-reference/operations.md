@@ -154,8 +154,9 @@ The project currently uses:
 - `requirements-production.txt` for runtime dependencies and `requirements-dev.txt` for test/development-only dependencies such as `jsonschema`
 - OpenAI API for the real Layer 1 parser
 - OpenAI API for the default Layer 2 planner
-- Amazon Bedrock for the current Layer 2 actor backend through `eu.amazon.nova-2-lite-v1:0` in `eu-central-1`
+- OpenAI Responses API for the default Layer 2 actor backend using `gpt-6-luna`
 - OpenAI API for the default Layer 2 replanner
+- OpenAI API for the default Layer 2 semantic judge
 - OpenAI API for the `web_search` path in the default Layer 2 tool gateway
 - Python standard library HTTP/HTML extraction for the `fetch_url_text` path in the default Layer 2 tool gateway
 - LangGraph for Layer 2 runtime orchestration
@@ -169,18 +170,16 @@ Environment variables may be loaded from:
 Expected secret:
 
 - `OPENAI_API_KEY`
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
 
-Expected Bedrock actor runtime:
+Expected Layer 2 actor configuration:
 
-- optional overrides:
-  - `LAYER2_ACTOR_PROVIDER=bedrock`
-  - `LAYER2_ACTOR_BEDROCK_MODEL_ID=eu.amazon.nova-2-lite-v1:0` (or another Bedrock Converse-compatible model/inference profile available in `AWS_REGION`)
-  - `LAYER2_ACTOR_BEDROCK_THINKING=off|adaptive|extended` (default `off`; `adaptive` is restricted to Claude Sonnet 4.6 and `extended` to Amazon Nova 2 Lite)
-  - `LAYER2_ACTOR_BEDROCK_THINKING_EFFORT=low|medium|high|max` (default `high`; Nova extended thinking accepts only `low|medium|high`)
-  - Actor thinking metadata crosses the provider boundary as plain strings. The checkpoint serializer retains exact legacy allowlist entries for `BedrockThinkingMode` and `BedrockThinkingEffort` because the first thinking-enabled runs persisted these enums; no provider-wide allowlist is permitted.
-  - Claude adaptive thinking uses Converse `thinking`/`output_config` fields and `toolChoice=auto`. Nova extended thinking uses `reasoningConfig` and retains `toolChoice=any`. The runtime still requires typed tool actions; reasoning blocks are discarded. Each turn is a fresh request built from canonical state, not an API conversation replay.
-  - Optional v6 actor fields `actor_model_id`, `actor_thinking_mode`, and `actor_thinking_effort` preserve experiment configuration and contribute to Layer 5 fingerprints when known. Historical absence remains unknown. New thinking experiments require fresh campaign/thread IDs; see `docs/evaluation/actor_thinking.md`.
-  - `AWS_REGION=eu-central-1`
-  - `AWS_SESSION_TOKEN=` when temporary AWS credentials are used
+- `LAYER2_ACTOR_PROVIDER=openai` (default)
+- `LAYER2_ACTOR_OPENAI_MODEL=gpt-6-luna` (default)
+- `LAYER2_ACTOR_OPENAI_TIMEOUT_SECONDS=30` (default)
+- The actor reads `OPENAI_API_KEY` from the process environment or the existing `.env` / `src/.env` file.
+
+AWS credentials and `LAYER2_ACTOR_BEDROCK_*` settings are only needed when explicitly
+selecting the historical Bedrock comparison adapter. Optional v6 actor fields
+`actor_model_id`, `actor_thinking_mode`, and `actor_thinking_effort` preserve known
+experiment configuration; missing historical values remain unknown. See
+`docs/evaluation/actor_thinking.md` for that Bedrock-only experiment reference.

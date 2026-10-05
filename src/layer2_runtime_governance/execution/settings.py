@@ -10,7 +10,7 @@ from environment_config import load_env_file_values
 @dataclass(frozen=True)
 class OpenAIActorSettings:
     # OpenAI provider settings remain independent from actor response parsing.
-    model: str = "gpt-5.4-nano"
+    model: str = "gpt-6-luna"
     api_key: str | None = None
     timeout_seconds: float = 30.0
 
@@ -21,7 +21,7 @@ class OpenAIActorSettings:
         return cls(
             model=os.getenv(
                 "LAYER2_ACTOR_OPENAI_MODEL",
-                env_file_values.get("LAYER2_ACTOR_OPENAI_MODEL", "gpt-5.4-nano"),
+                env_file_values.get("LAYER2_ACTOR_OPENAI_MODEL", "gpt-6-luna"),
             ),
             api_key=os.getenv("OPENAI_API_KEY", env_file_values.get("OPENAI_API_KEY")),
             timeout_seconds=float(
@@ -70,7 +70,7 @@ def resolve_actor_provider() -> str:
     env_file_values = load_env_file_values()
     return os.getenv(
         "LAYER2_ACTOR_PROVIDER",
-        env_file_values.get("LAYER2_ACTOR_PROVIDER", "bedrock"),
+        env_file_values.get("LAYER2_ACTOR_PROVIDER", "openai"),
     ).strip().lower()
 
 

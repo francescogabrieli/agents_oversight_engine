@@ -1,6 +1,6 @@
 const EXECUTION_INTENT_LABELS: Record<string, string> = {
   proposal_only: "Solo bozza, nessuna esecuzione reale",
-  execute_after_governance: "Eseguita se approvata dalla governance",
+  execute_after_governance: "Esecuzione prevista dopo i controlli",
 };
 
 const EXECUTION_STATUS_LABELS: Record<string, string> = {

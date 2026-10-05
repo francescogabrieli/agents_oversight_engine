@@ -64,11 +64,16 @@ in its reference rather than being copied back into this file.
   trajectory are active; operational risk and behavioral scoring remain shadow-only.
 - Keep a credible semantic planner and step-bounded actor. Bind tools through the
   runtime gateway. Actors and governance never call connectors or MCP directly.
+- Real Layer 2 runs default to the OpenAI actor using `gpt-6-luna` and the existing
+  `OPENAI_API_KEY`; Bedrock is not the standard execution provider.
 - HITL uses typed LangGraph interrupt/resume. Only a reason-scoped capability
   approval bound to the exact candidate/digest can authorize external execution.
   Edits invalidate approval. Reconciliation never re-authorizes an external effect.
 - The CLI owns runtime execution/resume. The dashboard validates and enqueues human
   decisions; its inbox and artifact snapshots cannot reconstruct runtime state.
+- Dashboard reviews must distinguish recorded agent text, governed proposals,
+  source excerpts, missing observations, and unknown historical completeness.
+  Presentation must never invent evidence or imply that a partial excerpt is a full source.
 - Preserve auditable evidence, immutable decisions, digest bindings and durable
   checkpoints. Do not expose hidden chain-of-thought as audit evidence.
 - Preserve the closed `layer2_trace.v6` contract. Post-release additions stay optional;

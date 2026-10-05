@@ -7,44 +7,15 @@ import { PillarDiagnosticCard } from "./PillarDiagnosticCard";
 import { PriorDecisionsPanel } from "./PriorDecisionsPanel";
 import { reasonCodeChipLabel, reasonCodeExplanation, reasonCodeLabel } from "./reasonCodePresentation";
 import { runtimeStateLabel } from "./runtimeStatePresentation";
-import { SourceReference } from "./SourceReference";
-import { LiteralExcerpt } from "./LiteralExcerpt";
+import { FlaggedEvidencePanel } from "./FlaggedEvidencePanel";
+import { EvidenceComparisonPanel } from "./EvidenceComparisonPanel";
+import { ToolAttemptTimeline } from "./ToolAttemptTimeline";
+import { PriorJudgeReviewPanel } from "./PriorJudgeReviewPanel";
 
 type ReviewContextPanelProps = {
   taskGoal: string | null;
   snapshot: DashboardSnapshot;
 };
-
-type SourceMatch = { locator: string; excerpt: string };
-type FlaggedLiteral = { value: string; excerpt: string; sourceMatches: SourceMatch[] };
-
-// The excerpt list crosses the wire as untyped JSON facts; accept only well-formed
-// entries so a malformed payload degrades to "no context" rather than breaking the page.
-function parseSourceMatches(value: unknown): SourceMatch[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry) => {
-    if (!entry || typeof entry !== "object") return [];
-    const { locator, excerpt } = entry as Record<string, unknown>;
-    if (typeof excerpt !== "string" || excerpt.length === 0) return [];
-    return [{ locator: typeof locator === "string" ? locator : "", excerpt }];
-  });
-}
-
-function parseFlaggedLiterals(value: unknown): FlaggedLiteral[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry) => {
-    if (!entry || typeof entry !== "object") return [];
-    const { value: token, excerpt, source_matches } = entry as Record<string, unknown>;
-    if (typeof token !== "string" || token.length === 0) return [];
-    return [
-      {
-        value: token,
-        excerpt: typeof excerpt === "string" ? excerpt : "",
-        sourceMatches: parseSourceMatches(source_matches),
-      },
-    ];
-  });
-}
 
 // OPA reports every concern that would have stopped the run, then selects one as the
 // deciding reason. The others do not go away: they fire again on the next pass. An
@@ -83,19 +54,15 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
     clearExplanation ?? rawReason ?? "Il sistema richiede una decisione dell'operatore prima di proseguire.";
   const openConcerns = parseOpenConcerns(governance?.rejected_alternatives, reasonCodes);
   const judgeFindings = pendingRequest?.judge_findings ?? humanReview?.judge_findings ?? [];
-  const selectedEvidenceReferences = humanReview?.selected_evidence_references ?? [];
   const allowedDecisions =
     pendingRequest?.allowed_decisions ?? humanReview?.allowed_decisions ?? [];
   const currentStepObjective = snapshot.current_plan_step?.objective ?? null;
   const actorHeading = actorResultLabel(pendingRequest?.actor_result_type);
   const actorSummary = pendingRequest?.actor_summary ?? null;
   const actorBlockingReason = pendingRequest?.actor_blocking_reason ?? null;
-  const hasActorVoice = Boolean(actorHeading && (actorSummary || actorBlockingReason));
-  // The pillar reports each flagged value with the sentence it was written in, so the
-  // reviewer judges the claim in context instead of a bare token. Rendered above the
-  // technical details because it is the substance of this decision, not a diagnostic.
-  const flaggedLiterals = parseFlaggedLiterals(
-    humanReview?.evidence_diagnostic?.facts?.unanchored_literal_excerpts,
+  const hasActorVoice = Boolean(actorSummary || actorBlockingReason);
+  const policyAllowsContinuation = ["continue", "continue_read_only"].includes(
+    governance?.policy_directive ?? governance?.directive ?? "",
   );
   const diagnostics = [
     humanReview?.evidence_diagnostic,
@@ -116,7 +83,7 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
             Perché serve una decisione dell'operatore
           </h2>
           <p className="card-caption">
-            Cosa sta facendo l'attività, cosa richiede la tua approvazione e perché.
+            Leggi il motivo della fermata, confronta i dati e scegli come proseguire.
           </p>
         </div>
         <span className="badge badge-waiting">decisione richiesta</span>
@@ -130,7 +97,7 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
 
         {hasActorVoice ? (
           <article className="actor-voice" aria-label="Cosa ha detto l'agente">
-            <p className="review-diagnostic-title">{actorHeading}</p>
+            <p className="review-diagnostic-title">{actorHeading ?? "Messaggio dell’agente"}</p>
             {actorSummary ? <p className="actor-voice-text">{actorSummary}</p> : null}
             {actorBlockingReason ? (
               <p className="actor-voice-text">
@@ -143,6 +110,12 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
               </p>
             ) : null}
           </article>
+        ) : null}
+
+        {hasActorVoice && policyAllowsContinuation && actorBlockingReason ? (
+          <p className="policy-agent-mismatch">
+            Distinzione utile: la policy permetteva di proseguire, mentre l’agente ha segnalato un blocco nel passo.
+          </p>
         ) : null}
 
         {reasonHeading ? <p className="review-context-reason-label">{reasonHeading}</p> : null}
@@ -176,64 +149,6 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
           </article>
         ) : null}
 
-        {flaggedLiterals.length > 0 ? (
-          <article className="flagged-values" aria-label="Valori segnalati">
-            <p className="review-diagnostic-title">
-              Valori segnalati — {flaggedLiterals.length}
-            </p>
-            <p className="review-context-summary" style={{ margin: 0 }}>
-              Verifica la frase completa: il valore deve riferirsi allo stesso soggetto,
-              alla stessa unità e allo stesso periodo. La segnalazione non dimostra un errore.
-            </p>
-            <ul className="flagged-values-list">
-              {flaggedLiterals.map((item) => (
-                <li className="flagged-value-item" key={item.value}>
-                  <h3 className="literal-review-title">Valore da verificare: <code className="flagged-value-token">{item.value}</code></h3>
-                  <div className="literal-comparison">
-                  <section className="literal-comparison-panel" aria-label={`Testo dell'agente per ${item.value}`}>
-                    <h4>1. Cosa ha scritto l'agente</h4>
-                    <blockquote className="flagged-value-excerpt">
-                      {item.excerpt ? <LiteralExcerpt text={item.excerpt} value={item.value} /> : "Contesto della frase non disponibile nella richiesta."}
-                    </blockquote>
-                    <p className="literal-review-help">Estratto registrato: eventuali «…» indicano testo omesso.</p>
-                  </section>
-                  <section className="literal-comparison-panel" aria-label={`Passaggi da verificare per ${item.value}`}>
-                  <h4>2. Confronta con la fonte</h4>
-                  <p className="literal-review-help">I passaggi proposti dal confronto automatico possono essere poco pertinenti. Non sono una conferma dell'affermazione.</p>
-                  {item.sourceMatches.length > 0 ? (
-                    item.sourceMatches.map((match, index) => (
-                      <div className="literal-source-match" key={`${item.value}-${index}`}>
-                        <p className="flagged-value-role">Passaggio da esaminare {index + 1}</p>
-                        <blockquote className="flagged-value-excerpt"><LiteralExcerpt text={match.excerpt} value={item.value} /></blockquote>
-                        {!match.excerpt.includes(item.value) ? <p className="literal-review-help">Il valore «{item.value}» non compare in questa forma nell'estratto. Verifica eventuali notazioni diverse o apri il documento.</p> : null}
-                        {match.locator ? (
-                          <div className="literal-source-link"><span>Apri la fonte di questo passaggio:</span><SourceReference locator={match.locator} /></div>
-                        ) : <p className="literal-review-help">Link del passaggio non disponibile.</p>}
-                      </div>
-                    ))
-                  ) : (
-                    <p className="flagged-value-excerpt flagged-value-nomatch">
-                      Nessun passaggio di confronto disponibile nel testo recuperato. Questo non prova che il valore sia assente dal documento originale.
-                    </p>
-                  )}
-                  </section>
-                  </div>
-                  <div className="literal-verification-guide">
-                    <strong>Come verificarlo</strong>
-                    <p>Se l'estratto non basta, apri la fonte e cerca «{item.value}» con Ctrl+F (anche con una notazione diversa). Leggi il paragrafo e controlla soggetto, soglia, unità e periodo. Puoi consultare anche le fonti selezionate elencate sotto.</p>
-                    <p>Se confermi l'affermazione, indica nella nota fonte e passaggio verificati. Se resta incerta, non considerare il solo numero trovato una conferma.</p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </article>
-        ) : null}
-
-        <PriorDecisionsPanel
-          decisions={humanReview?.decision_history ?? []}
-          currentOperationDigest={pendingRequest?.operation_payload_digest ?? null}
-        />
-
         {judgeFindings.length > 0 ? (
           <article className="review-diagnostic" aria-label="Osservazioni del giudice automatico">
             <p className="review-diagnostic-title">Cosa ha notato la verifica automatica</p>
@@ -245,22 +160,21 @@ export function ReviewContextPanel({ taskGoal, snapshot }: ReviewContextPanelPro
           </article>
         ) : null}
 
-        {selectedEvidenceReferences.length > 0 ? (
-          <article className="review-diagnostic" aria-label="Fonti selezionate">
-            <p className="review-diagnostic-title">Fonti alla base della proposta</p>
-            {selectedEvidenceReferences.map((reference) => (
-              <div className="review-source" key={reference.observation_id}>
-                {reference.locator ? <SourceReference locator={reference.locator} /> : null}
-                {/* The backend supplies a bounded excerpt, not the complete source. */}
-                <details className="technical-details">
-                  <summary>Leggi l'estratto disponibile (non il documento completo)</summary>
-                  <div className="review-source-excerpt">{reference.content_excerpt}</div>
-                  {reference.source_timestamp ? <p>Data registrata della fonte: {reference.source_timestamp}</p> : null}
-                </details>
-              </div>
-            ))}
-          </article>
-        ) : null}
+        <PriorJudgeReviewPanel review={humanReview?.prior_judge_review} />
+        <ToolAttemptTimeline attempts={humanReview?.recent_tool_history ?? []} />
+
+        <EvidenceComparisonPanel
+          output={humanReview?.actor_output_text}
+          proposalBody={pendingRequest?.external_communication_draft?.body}
+          references={humanReview?.selected_evidence_references ?? []}
+          required={humanReview?.evidence_diagnostic?.required === true}
+        />
+        <FlaggedEvidencePanel diagnostic={humanReview?.evidence_diagnostic} />
+
+        <PriorDecisionsPanel
+          decisions={humanReview?.decision_history ?? []}
+          currentOperationDigest={pendingRequest?.operation_payload_digest ?? null}
+        />
 
         {allowedDecisions.length > 0 ? (
           <p className="review-context-summary">

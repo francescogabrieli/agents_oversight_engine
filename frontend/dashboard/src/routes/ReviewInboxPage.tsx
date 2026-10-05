@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { fetchReviewInbox } from "../api";
 import { communicationPhaseLabel, executionIntentLabel, executionStatusLabel } from "../components/executionPresentation";
@@ -98,6 +98,15 @@ export function ReviewInboxPage() {
   const [decisionFeedback, setDecisionFeedback] = useState<string | null>(
     locationFeedback ?? null,
   );
+  const closeButton = useRef<HTMLButtonElement>(null);
+
+  // The acknowledgement has one control: focus it and restore focus on dismissal.
+  useEffect(() => {
+    if (!decisionFeedback) return;
+    const previous = document.activeElement;
+    closeButton.current?.focus();
+    return () => { if (previous instanceof HTMLElement) previous.focus(); };
+  }, [decisionFeedback]);
 
   const closeDecisionModal = () => {
     setDecisionFeedback(null);
@@ -117,24 +126,24 @@ export function ReviewInboxPage() {
       <div className="stat-row">
         <div className="stat-item">
           <div className="stat-label">In attesa</div>
-          <div className="stat-value">{loading ? "—" : items.length}</div>
+          <div className="stat-value">{!data ? "—" : items.length}</div>
         </div>
       </div>
 
-      {error ? <div className="alert alert-error">{error}</div> : null}
+      {error ? <div className="alert alert-error" role="alert">{error}</div> : null}
       <p className="connection-status" role="status">{error ? "Connessione interrotta: la coda potrebbe non essere aggiornata." : updatedAt ? `Ultimo aggiornamento della coda: ${new Date(updatedAt).toLocaleTimeString()}.` : "Caricamento della coda…"}</p>
 
       <div className="card">
         <div className="card-header">
           <h2 className="card-title">Coda attiva</h2>
-          <span className="badge badge-waiting">{items.length} in attesa</span>
+          <span className="badge badge-waiting">{data ? `${items.length} in attesa` : "Dati non disponibili"}</span>
         </div>
         <div className="card-body">
           {loading && items.length === 0 ? (
             <div className="skeleton" style={{ height: 72 }} />
           ) : null}
 
-          {!loading && items.length === 0 ? (
+          {!loading && !error && data && items.length === 0 ? (
             <div className="empty-state">
               <span className="empty-state-icon">✓</span>
               Nessuna attività in attesa di revisione.
@@ -175,11 +184,18 @@ export function ReviewInboxPage() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="decision-success-title"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") closeDecisionModal();
+              if (event.key === "Tab") {
+                event.preventDefault();
+                closeButton.current?.focus();
+              }
+            }}
           >
             <div className="decision-success-icon" aria-hidden="true">✓</div>
             <h2 id="decision-success-title">Decisione inviata correttamente</h2>
             <p>{decisionFeedback}</p>
-            <button className="btn btn-primary" type="button" onClick={closeDecisionModal}>
+            <button ref={closeButton} className="btn btn-primary" type="button" onClick={closeDecisionModal}>
               Chiudi
             </button>
           </section>

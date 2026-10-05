@@ -49,6 +49,11 @@ class OpenAIActor(ActorPort):
             timeout=self._settings.timeout_seconds,
         )
 
+    @property
+    # Persist the configured model ID in the runtime trace for reproducibility.
+    def model_id(self) -> str:
+        return self._settings.model
+
     # Ask the provider for one action and normalize it into ActorResult.
     def act(self, *, actor_task: ActorTask) -> ActorResult:
         runtime_tools = select_actor_runtime_tools_for_turn(

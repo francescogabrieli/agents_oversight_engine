@@ -45,14 +45,14 @@ export async function fetchReviewInbox(): Promise<ReviewInboxResponse> {
 }
 
 export async function fetchReviewDetail(threadId: string): Promise<ReviewDetailResponse> {
-  return readJson<ReviewDetailResponse>(`/api/reviews/${threadId}`);
+  return readJson<ReviewDetailResponse>(`/api/reviews/${encodeURIComponent(threadId)}`);
 }
 
 export async function resumeReviewThread(
   threadId: string,
   payload: HumanReviewDecisionPayload,
 ): Promise<ReviewDetailResponse> {
-  return readJson<ReviewDetailResponse>(`/api/reviews/${threadId}/resume`, {
+  return readJson<ReviewDetailResponse>(`/api/reviews/${encodeURIComponent(threadId)}/resume`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
