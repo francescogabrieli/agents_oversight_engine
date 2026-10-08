@@ -69,7 +69,9 @@ in its reference rather than being copied back into this file.
 - HITL uses typed LangGraph interrupt/resume. Only a reason-scoped capability
   approval bound to the exact candidate/digest can authorize external execution.
   Edits invalidate approval. Reconciliation never re-authorizes an external effect.
-- The CLI owns runtime execution/resume. The dashboard validates and enqueues human
+- The CLI owns runtime execution/resume and refreshes dashboard/summary artifacts
+  after each typed node update, independently of terminal logging. Full audit exports
+  remain stable-boundary snapshots. The dashboard validates and enqueues human
   decisions; its inbox and artifact snapshots cannot reconstruct runtime state.
 - Dashboard reviews must distinguish recorded agent text, governed proposals,
   source excerpts, missing observations, and unknown historical completeness.

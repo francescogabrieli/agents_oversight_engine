@@ -29,6 +29,10 @@ The default registry disables every external capability. Set
 - timeout and working directory;
 - the only environment variable names forwarded to the child process.
 
+When `working_directory` is omitted, the registry resolves the repository's `src`
+directory with native filesystem separators. An explicit value remains unchanged
+apart from `{repo_root}` expansion.
+
 The pool maintains one lazily initialized session per server, serializes calls on that
 session, and uses per-server creation locks so concurrent graph workers cannot race two
 processes into the same slot. Broken or timed-out sessions are removed and their process

@@ -180,6 +180,34 @@ class MCPExternalExecutorUnitTests(unittest.TestCase):
         self.assertTrue(registry.mcp_servers["communication"].enabled)
         self.assertTrue(registry.mcp_servers["database"].enabled)
 
+    # Default child processes must start in the real source directory on every OS.
+    def test_default_server_working_directory_is_native_source_path(self) -> None:
+        registry = load_external_capability_registry(
+            config_path=REPO_ROOT / "configs" / "layer2_external_capabilities.json"
+        )
+
+        for server in registry.mcp_servers.values():
+            self.assertEqual(server.working_directory, str(SRC_ROOT))
+            self.assertTrue(Path(server.working_directory).is_dir())
+
+    # Explicit working directories retain configuration-owned placeholder expansion.
+    def test_explicit_server_working_directory_is_preserved(self) -> None:
+        config_path = self.temp_dir / "custom-registry.json"
+        config_path.write_text(
+            json.dumps({
+                "mcp_servers": {
+                    "custom": {"working_directory": "{repo_root}/custom-directory"}
+                }
+            }),
+            encoding="utf-8",
+        )
+        registry = load_external_capability_registry(config_path=config_path)
+
+        self.assertEqual(
+            registry.mcp_servers["custom"].working_directory,
+            f"{REPO_ROOT}/custom-directory",
+        )
+
     # A malformed MCP body must never be promoted to executed.
     def test_malformed_response_returns_failed_receipt(self) -> None:
         registry = _enabled_registry(

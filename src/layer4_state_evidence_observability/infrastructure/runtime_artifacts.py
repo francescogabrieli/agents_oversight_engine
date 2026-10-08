@@ -113,7 +113,6 @@ class RuntimeArtifactStore:
             intake_result=intake_result,
             task_state=task_state,
         )
-        dashboard_snapshot = build_governance_hitl_dashboard_snapshot(task_state)
         judge_bundle_artifact = _persist_current_judge_evidence_bundle(
             paths=paths,
             task_state=task_state,
@@ -126,11 +125,51 @@ class RuntimeArtifactStore:
         paths.governance_narrative_path.write_text(
             build_governance_narrative_markdown(runtime_trace), encoding="utf-8"
         )
-        paths.dashboard_snapshot_path.write_text(
-            governance_hitl_dashboard_snapshot_to_json(dashboard_snapshot),
-            encoding="utf-8",
+        self._persist_dashboard_artifacts(
+            paths=paths,
+            thread_id=thread_id,
+            intake_result=intake_result,
+            task_state=task_state,
+            judge_bundle_artifact=judge_bundle_artifact,
         )
-        paths.runtime_summary_path.write_text(
+
+        return paths
+
+    # Refresh operator projections between nodes without rebuilding archival traces.
+    def persist_progress(
+        self,
+        *,
+        thread_id: str,
+        intake_result: IntakeResult,
+        task_state: TaskState,
+    ) -> None:
+        paths = self.build_paths(thread_id)
+        paths.thread_dir.mkdir(parents=True, exist_ok=True)
+        self._persist_dashboard_artifacts(
+            paths=paths,
+            thread_id=thread_id,
+            intake_result=intake_result,
+            task_state=task_state,
+            judge_bundle_artifact=None,
+        )
+
+    # Keep progress and stable-boundary projections on one canonical serializer.
+    def _persist_dashboard_artifacts(
+        self,
+        *,
+        paths: RuntimeArtifactPaths,
+        thread_id: str,
+        intake_result: IntakeResult,
+        task_state: TaskState,
+        judge_bundle_artifact: tuple[str, str] | None,
+    ) -> None:
+        dashboard_snapshot = build_governance_hitl_dashboard_snapshot(task_state)
+        self._replace_operator_projection(
+            paths.dashboard_snapshot_path,
+            governance_hitl_dashboard_snapshot_to_json(dashboard_snapshot),
+        )
+        self._replace_operator_projection(
+            paths.runtime_summary_path,
             json.dumps(
                 {
                     "artifact_version": "layer2_runtime_artifacts_v2",
@@ -196,10 +235,14 @@ class RuntimeArtifactStore:
                 indent=2,
                 ensure_ascii=False,
             ),
-            encoding="utf-8",
         )
 
-        return paths
+    # Polling readers must see complete JSON while the single runtime owner writes.
+    def _replace_operator_projection(self, path: Path, content: str) -> None:
+        temporary_path = path.with_suffix(".json.tmp")
+        temporary_path.write_text(content, encoding="utf-8")
+        temporary_path.replace(path)
+
 
     # Persist a recoverable diagnostic marker without fabricating a successful final state.
     def persist_failure(
