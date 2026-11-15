@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="740" viewBox="0 0 1600 740" role="img" aria-labelledby="title description">
+  <title id="title">Trajectory Health: progresso e stallo</title>
+  <desc id="description">Due timeline illustrative dopo un replan precedente. Una nuova osservazione ammette una richiesta motivata di replan; soli esiti locali senza nuova base osservabile conducono a review per replan_request_stalled. Le timeline sono sotto il ceiling e senza gate prioritari. La prima richiesta motivata resta ammissibile. Dettagli nella didascalia in chapter3_supporting_figures.md.</desc>
+  <defs>
+    <marker id="arrow" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" viewBox="0 0 12 12" refX="11" refY="6" orient="auto">
+      <path d="M1,1 L11,6 L1,11 Z" fill="#526071"/>
+    </marker>
+    <style>
+      text { font-family: Arial, Helvetica, sans-serif; fill: #172033; }
+      .title { font-size: 38px; font-weight: 700; }
+      .subtitle { font-size: 24px; fill: #5d6a7d; }
+      .heading { font-size: 29px; font-weight: 700; }
+      .label { font-size: 26px; text-anchor: middle; }
+      .note { font-size: 23px; fill: #5d6a7d; text-anchor: middle; }
+      .outcome { font-size: 30px; font-weight: 700; text-anchor: middle; }
+      .code { font-family: Menlo, monospace; font-size: 23px; fill: #526071; text-anchor: middle; }
+      .arrow { fill: none; stroke: #526071; stroke-width: 2.5; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect width="1600" height="740" fill="#ffffff"/>
+  <text x="60" y="68" class="title">Trajectory Health: progresso e stallo</text>
+  <text x="60" y="112" class="subtitle">Richieste successive di replan: OPA distingue una nuova base dalla ripetizione.</text>
+
+  <text x="60" y="199" class="heading">Nuova base osservabile</text>
+  <path d="M220 277 H550 M580 277 H910 M940 277 H1146" class="arrow"/>
+  <circle cx="210" cy="277" r="10" fill="#3568a8"/>
+  <circle cx="570" cy="277" r="10" fill="#39845a"/>
+  <circle cx="930" cy="277" r="10" fill="#3568a8"/>
+  <text x="210" y="333" class="label">Replan precedente</text>
+  <text x="570" y="333" class="label">Nuova osservazione</text>
+  <text x="930" y="333" class="label">Richiesta motivata</text>
+  <text x="930" y="368" class="note">di replan</text>
+  <rect x="1150" y="225" width="390" height="105" rx="15" fill="#e8f5ec" stroke="#39845a" stroke-width="2"/>
+  <text x="1345" y="270" class="outcome">Ripianificare</text>
+  <text x="1345" y="308" class="code">replan</text>
+
+  <path d="M60 424 H1540" stroke="#d5dce5" stroke-width="1.5"/>
+
+  <text x="60" y="492" class="heading">Nessuna nuova base</text>
+  <path d="M220 570 H550 M580 570 H910 M940 570 H1146" class="arrow"/>
+  <circle cx="210" cy="570" r="10" fill="#3568a8"/>
+  <circle cx="570" cy="570" r="10" fill="#bd771f"/>
+  <circle cx="930" cy="570" r="10" fill="#3568a8"/>
+  <text x="210" y="626" class="label">Replan precedente</text>
+  <text x="570" y="626" class="label">Solo esiti locali</text>
+  <text x="570" y="661" class="note">es. duplicati rifiutati</text>
+  <text x="930" y="626" class="label">Richiesta ripetuta</text>
+  <text x="930" y="661" class="note">di replan</text>
+  <rect x="1150" y="518" width="390" height="105" rx="15" fill="#fff1d6" stroke="#bd771f" stroke-width="2"/>
+  <text x="1345" y="563" class="outcome">Review umana</text>
+  <text x="1345" y="601" class="code">wait_human_review</text>
+</svg>

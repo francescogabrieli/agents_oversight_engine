@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="740" viewBox="0 0 1600 740" role="img" aria-labelledby="title description">
+  <title id="title">Minimal Safe Intervention</title>
+  <desc id="description">Sintesi dei gate e delle risposte OPA. La tabella illustra un principio progettuale, non una misura di ottimalità. Le condizioni e i limiti di ogni direttiva restano nella tabella testuale e nella didascalia in chapter3_supporting_figures.md.</desc>
+  <defs>
+    <style>
+      text { font-family: Arial, Helvetica, sans-serif; fill: #172033; }
+      .title { font-size: 38px; font-weight: 700; }
+      .subtitle { font-size: 24px; fill: #5d6a7d; }
+      .header { font-size: 21px; font-weight: 700; fill: #526071; }
+      .body { font-size: 26px; }
+      .code { font-family: Menlo, monospace; font-size: 24px; }
+      .rule { stroke: #d5dce5; stroke-width: 1.5; }
+    </style>
+  </defs>
+  <rect width="1600" height="740" fill="#ffffff"/>
+  <text x="60" y="68" class="title">Minimal Safe Intervention</text>
+  <text x="60" y="112" class="subtitle">Ogni gate ha una risposta specifica, scelta da OPA.</text>
+  <text x="60" y="195" class="header">PROBLEMA</text>
+  <text x="570" y="195" class="header">INTERVENTO</text>
+  <text x="1060" y="195" class="header">DIRETTIVA OPA</text>
+  <path d="M60 219 H1540 M60 311 H1540 M60 403 H1540 M60 495 H1540 M60 587 H1540 M60 679 H1540" class="rule"/>
+
+  <text x="60" y="275" class="body">Deficit delle evidenze</text>
+  <text x="570" y="275" class="body">Integrare l'evidenza</text>
+  <text x="1060" y="275" class="code">request_more_evidence</text>
+
+  <text x="60" y="367" class="body">Proposta da revisionare</text>
+  <text x="570" y="367" class="body">Correggere il payload</text>
+  <text x="1060" y="367" class="code">revise_action</text>
+
+  <text x="60" y="459" class="body">Richiesta di replan ammissibile</text>
+  <text x="570" y="459" class="body">Aggiornare il piano</text>
+  <text x="1060" y="459" class="code">replan</text>
+
+  <text x="60" y="551" class="body">Valore non ancorato</text>
+  <text x="570" y="551" class="body">Review umana</text>
+  <text x="1060" y="551" class="code">wait_human_review</text>
+
+  <text x="60" y="643" class="body">Hard deny statico</text>
+  <text x="570" y="643" class="body">Fermare la run</text>
+  <text x="1060" y="643" class="code">stop</text>
+</svg>
