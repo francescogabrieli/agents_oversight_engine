@@ -174,14 +174,15 @@ class HitlControlPlaneTests(unittest.TestCase):
 
         self.assertNotIn("hitl_event_callback", captured)
 
-    # Verify resume keeps the direct invoke result when the refreshed snapshot omits task_state.
-    def test_resume_layer2_flow_prefers_invoke_result_over_partial_snapshot(self) -> None:
+    # Verify resume keeps the streamed state when the refreshed snapshot omits task_state.
+    def test_resume_layer2_flow_prefers_stream_result_over_partial_snapshot(self) -> None:
         resumed_state = _waiting_review_state()
         resumed_state.current_state = RuntimeState.COMPLETED
 
         class _FakeGraph:
-            def invoke(self, _command, config=None):
-                return {"task_state": resumed_state}
+            # A partial refreshed snapshot must not discard the completed node update.
+            def stream(self, _command, *, config, stream_mode):
+                yield {"finalize_bootstrap": {"task_state": resumed_state}}
 
             def get_state(self, _config):
                 return mock.Mock(values={"thread_id": "thread-resume-only"}, interrupts=[])
@@ -197,6 +198,62 @@ class HitlControlPlaneTests(unittest.TestCase):
 
         self.assertIs(trace["final_result"]["task_state"], resumed_state)
         self.assertEqual(trace["intake_result"], resumed_state.intake_payload)
+
+    # Operator artifacts must advance before another node runs, even on abrupt interruption.
+    def test_resume_refreshes_artifacts_before_next_node_with_or_without_logs(self) -> None:
+        for show_progress in (False, True):
+            with self.subTest(show_progress=show_progress), tempfile.TemporaryDirectory() as root:
+                thread_id = "thread-live-artifacts"
+                store = RuntimeArtifactStore(root_path=Path(root))
+                state = _waiting_review_state()
+                state.pending_human_review_request = build_human_review_request(
+                    state=state, thread_id=thread_id,
+                )
+                request_id = state.pending_human_review_request.request_id
+                store.persist(
+                    thread_id=thread_id, intake_result=state.intake_payload, task_state=state,
+                )
+
+                class _InterruptedGraph:
+                    # Simulate a process interruption after resume and one later transition.
+                    def stream(self, _command, *, config, stream_mode):
+                        state.pending_human_review_request = None
+                        state.current_state = RuntimeState.ACTING
+                        yield {"human_review": {"task_state": state}}
+                        summary = store.read_runtime_summary(thread_id)
+                        self_test.assertEqual(summary["runtime_state"], "acting")
+                        self_test.assertFalse(summary["has_pending_human_review"])
+                        self_test.assertIsNone(summary["pending_request_id"])
+                        snapshot = store.read_dashboard_snapshot(thread_id)
+                        self_test.assertIsNone(snapshot["human_review"])
+                        state.current_state = RuntimeState.REPLANNING
+                        state.actor_turn_count += 1
+                        yield {"governance": {"task_state": state}}
+                        raise KeyboardInterrupt()
+
+                self_test = self
+                with (
+                    mock.patch("main_layer2.compose_layer2_runtime", return_value=_InterruptedGraph()),
+                    self.assertRaises(KeyboardInterrupt),
+                ):
+                    resume_layer2_flow(
+                        thread_id=thread_id,
+                        human_review_decision={
+                            "request_id": request_id, "decision_type": "approve_continue",
+                        },
+                        artifact_store=store,
+                        checkpointer=object(),
+                        progress_callback=mock.Mock() if show_progress else None,
+                    )
+
+                self.assertEqual(store.read_runtime_summary(thread_id)["runtime_state"], "replanning")
+                self.assertEqual(
+                    store.read_dashboard_snapshot(thread_id)["runtime_state"],
+                    "replanning",
+                )
+                # The archival trace stays at the preceding stable boundary.
+                trace = json.loads(store.build_paths(thread_id).full_trace_path.read_text())
+                self.assertEqual(trace["runtime"]["current_state"], "waiting_human_review")
 
     # Verify resume streams its command through the shared helper without changing its trace.
     def test_resume_layer2_flow_streams_command_with_resume_trace_tag(self) -> None:
@@ -270,7 +327,7 @@ class HitlControlPlaneTests(unittest.TestCase):
 
         class _FailingGraph:
             # Fail after session composition to exercise resume failure persistence.
-            def invoke(self, _command, *, config):
+            def stream(self, _command, *, config, stream_mode):
                 raise RuntimeError("synthetic resume failure")
 
             # Expose the last durable checkpoint for the diagnostic snapshot.

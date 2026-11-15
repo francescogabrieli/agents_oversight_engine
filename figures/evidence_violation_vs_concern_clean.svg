@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="680" viewBox="0 0 1600 680" role="img" aria-labelledby="title description">
+  <title id="title">Evidence Violation vs Evidence Concern</title>
+  <desc id="description">Due esempi illustrativi dei gate Evidence. Un URL mai recuperato attiva request_more_evidence entro il limite; un valore numerico non ancorato richiede wait_human_review. OPA decide la direttiva. Condizioni, precedenze e limiti sono descritti nella didascalia in chapter3_supporting_figures.md.</desc>
+  <defs>
+    <marker id="arrow" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" viewBox="0 0 12 12" refX="11" refY="6" orient="auto">
+      <path d="M1,1 L11,6 L1,11 Z" fill="#526071"/>
+    </marker>
+    <style>
+      text { font-family: Arial, Helvetica, sans-serif; fill: #172033; text-anchor: middle; }
+      .title { font-size: 38px; font-weight: 700; text-anchor: start; }
+      .subtitle { font-size: 24px; fill: #5d6a7d; text-anchor: start; }
+      .heading { font-size: 34px; font-weight: 700; }
+      .example { font-size: 30px; }
+      .note { font-size: 25px; fill: #5d6a7d; }
+      .outcome { font-size: 32px; font-weight: 700; }
+      .code { font-family: Menlo, monospace; font-size: 24px; fill: #526071; }
+      .arrow { fill: none; stroke: #526071; stroke-width: 2.5; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect width="1600" height="680" fill="#ffffff"/>
+  <text x="60" y="68" class="title">Evidence Violation vs Evidence Concern</text>
+  <text x="60" y="112" class="subtitle">Evidence produce fatti strutturali; OPA sceglie l'intervento.</text>
+  <path d="M800 172 V597" stroke="#d5dce5" stroke-width="1.5"/>
+
+  <text x="410" y="227" class="heading">Evidence Violation</text>
+  <text x="410" y="301" class="example">URL citato</text>
+  <text x="410" y="343" class="note">Fonte mai recuperata</text>
+  <path d="M410 374 V424" class="arrow"/>
+  <rect x="105" y="445" width="610" height="123" rx="15" fill="#e8f0fe" stroke="#3568a8" stroke-width="2"/>
+  <text x="410" y="494" class="outcome">Richiedere evidenza</text>
+  <text x="410" y="538" class="code">request_more_evidence</text>
+
+  <text x="1190" y="227" class="heading">Evidence Concern</text>
+  <text x="1190" y="301" class="example">«La variazione è del 12%»</text>
+  <text x="1190" y="343" class="note">Valore non ancorato</text>
+  <path d="M1190 374 V424" class="arrow"/>
+  <rect x="885" y="445" width="610" height="123" rx="15" fill="#fff1d6" stroke="#bd771f" stroke-width="2"/>
+  <text x="1190" y="494" class="outcome">Review umana</text>
+  <text x="1190" y="538" class="code">wait_human_review</text>
+</svg>

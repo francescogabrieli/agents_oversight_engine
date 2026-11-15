@@ -69,7 +69,9 @@ in its reference rather than being copied back into this file.
 - HITL uses typed LangGraph interrupt/resume. Only a reason-scoped capability
   approval bound to the exact candidate/digest can authorize external execution.
   Edits invalidate approval. Reconciliation never re-authorizes an external effect.
-- The CLI owns runtime execution/resume. The dashboard validates and enqueues human
+- The CLI owns runtime execution/resume and refreshes dashboard/summary artifacts
+  after each typed node update, independently of terminal logging. Full audit exports
+  remain stable-boundary snapshots. The dashboard validates and enqueues human
   decisions; its inbox and artifact snapshots cannot reconstruct runtime state.
 - Dashboard reviews must distinguish recorded agent text, governed proposals,
   source excerpts, missing observations, and unknown historical completeness.
@@ -88,6 +90,15 @@ in its reference rather than being copied back into this file.
   `scripts/run_oversight_demo_pool.py`. Keep live-provider tasks separate from
   deterministic contract controls, preserve failed assertions, and never treat
   controlled activation scenarios as natural intervention frequencies.
+
+## Publication hygiene
+
+Keep downloaded tool binaries, runtime artifacts, local environment files, and
+machine-specific presentation generation jobs out of version control. Curated
+thesis exports belong beside their sources under `figures/`, not in `output/`.
+Retain editorial sources, research references, evaluation definitions and audit
+contracts. See [publication review](docs/repository-publication-review.md) for
+privacy findings and the distinction between tree cleanup and Git history.
 
 ## Coding Standards
 

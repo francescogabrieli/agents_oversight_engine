@@ -200,7 +200,7 @@ def _parse_server(
         timeout_seconds=float(payload.get("timeout_seconds", 15.0)),
         environment_keys=tuple(str(item) for item in payload.get("environment_keys", [])),
         working_directory=(
-            str(payload.get("working_directory", "{repo_root}\\src")).replace(
+            str(payload.get("working_directory", repo_root / "src")).replace(
                 "{repo_root}", str(repo_root)
             )
         ),

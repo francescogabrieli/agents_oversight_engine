@@ -46,6 +46,20 @@ docs/
 
 For development, testing, and thesis work, the primary reference documents are:
 
-1. **Architecture (v3)**: [`docs/architecture/architecturev3.md`](file:///C:/Users/f.gabrieli/Desktop/tesi/docs/architecture/architecturev3.md)
-2. **Training Plan & Roadmap**: [`training_plan.md`](file:///C:/Users/f.gabrieli/Desktop/tesi/training_plan.md)
-3. **Repository Rules & Guidelines**: [`AGENTS.md`](file:///C:/Users/f.gabrieli/Desktop/tesi/AGENTS.md)
+1. **Architecture (v3)**: [`docs/architecture/architecturev3.md`](architecture/architecturev3.md)
+2. **Training Plan & Roadmap**: [`training_plan.md`](../training_plan.md)
+3. **Repository Rules & Guidelines**: [`AGENTS.md`](../AGENTS.md)
+
+## Operational and supporting references
+
+- [Implementation map](agent-reference/implementation-map.md),
+  [runtime contracts](agent-reference/runtime-contracts.md), and
+  [operations](agent-reference/operations.md): maintained repository contracts.
+- [Evaluation](evaluation/): campaign designs, rubrics and recorded conclusions.
+- [Dashboard](dashboard/): human-review interface notes.
+- [Thesis figures](../figures/README.md): selected illustrations and sources.
+- [Publication review](repository-publication-review.md): cleanup scope and privacy findings.
+
+Presentation deliverables and their editorial sources remain in `presentations/`.
+Machine-specific generation prompts, job manifests and transient generation state
+are local working material and are excluded from version control.

@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="580" viewBox="0 0 1600 580">
   <title>OPA-first governance decision flow</title>
-  <desc>Typed facts pass through OPA required pillar selection and final decision. Evidence and trajectory are active; risk and behavioral signals remain shadow-only.</desc>
+  <desc>Typed facts pass through OPA required pillar selection and final decision. The figure shows the active Evidence and Trajectory signals and the OPA-admitted Semantic Judge.</desc>
   <defs>
     <marker id="arrow" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" viewBox="0 0 12 12" refX="11" refY="6" orient="auto">
       <path d="M1,1 L11,6 L1,11 Z" fill="#425466"/>
@@ -15,21 +15,18 @@
       .section { font-size: 16px; font-weight: 600; letter-spacing: 1px; fill: #526071; }
       .node-title { font-size: 18px; font-weight: 600; text-anchor: middle; }
       .node-note { font-size: 14px; fill: #5d6a7d; text-anchor: middle; }
-      .shadow-note { font-size: 14px; fill: #687385; text-anchor: middle; }
       .panel { fill: #f8fafc; stroke: #b8c2cf; stroke-width: 2; }
-      .shadow-panel { fill: #fbfcfd; stroke: #aeb8c4; stroke-width: 2; stroke-dasharray: 9 8; }
       .node { stroke-width: 2; rx: 14; }
       .pep { fill: #fff1d6; stroke: #bd771f; }
       .policy { fill: #f0eaff; stroke: #7653b8; }
       .active { fill: #e8f0fe; stroke: #3568a8; }
       .judge { fill: #e8f5ec; stroke: #39845a; }
-      .shadow { fill: #f1f3f4; stroke: #7f8a96; }
       .arrow { fill: none; stroke: #425466; stroke-width: 2.5; marker-end: url(#arrow); }
       .dashed { fill: none; stroke: #778395; stroke-width: 2.2; stroke-dasharray: 8 7; marker-end: url(#arrow-dashed); }
     </style>
   </defs>
 
-  <rect width="1600" height="900" fill="#ffffff"/>
+  <rect width="1600" height="580" fill="#ffffff"/>
   <text x="60" y="58" class="title">OPA-first governance decision</text>
   <text x="75" y="88" class="subtitle">The PEP prepares facts; OPA/Rego selects applicable inputs and remains the sole authority for the final directive.</text>
 
@@ -73,22 +70,4 @@
   <path d="M732 387 V405 H825 V425" class="dashed"/>
   <path d="M950 462 H1032 V335" class="dashed"/>
 
-  <rect x="45" y="595" width="1510" height="280" rx="20" class="shadow-panel"/>
-  <text x="75" y="632" class="section">SHADOW-ONLY CONTEXT</text>
-  <text x="75" y="660" class="subtitle">These signals are recorded for observation and future calibration; they never select the directive.</text>
-
-  <rect x="200" y="705" width="260" height="70" class="node shadow"/>
-  <text x="330" y="735" class="node-title">Operational risk</text>
-  <text x="330" y="758" class="shadow-note">shadow-only facts</text>
-
-  <rect x="200" y="790" width="260" height="65" class="node shadow"/>
-  <text x="330" y="817" class="node-title">Behavioral model</text>
-  <text x="330" y="840" class="shadow-note">shadow-only facts</text>
-
-  <rect x="760" y="742" width="300" height="75" class="node shadow"/>
-  <text x="910" y="773" class="node-title">Shadow observations</text>
-  <text x="910" y="797" class="shadow-note">not read by final directive</text>
-
-  <path d="M460 740 H570 V770 H760" class="dashed"/>
-  <path d="M460 822 H620 V790 H760" class="dashed"/>
 </svg>

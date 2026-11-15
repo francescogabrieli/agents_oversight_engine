@@ -195,22 +195,16 @@ def run_layer2_flow(
             with session.artifact_store.capture_governance_exchange(
                 thread_id=resolved_thread_id
             ):
-                if progress_callback is None:
-                    session.runtime_graph.invoke(graph_input, config=config)
-                    final_result = _build_final_result_from_graph_snapshot(
-                        runtime_graph=session.runtime_graph,
-                        config=config,
-                    )
-                else:
-                    final_result = _stream_runtime_graph_with_progress(
-                        runtime_graph=session.runtime_graph,
-                        graph_input=graph_input,
-                        thread_id=resolved_thread_id,
-                        config=config,
-                        progress_callback=progress_callback,
-                        live_trace=live_trace,
-                        trace_tag="chunk",
-                    )
+                final_result = _stream_runtime_graph_with_progress(
+                    runtime_graph=session.runtime_graph,
+                    graph_input=graph_input,
+                    thread_id=resolved_thread_id,
+                    config=config,
+                    progress_callback=progress_callback,
+                    live_trace=live_trace,
+                    trace_tag="chunk",
+                    artifact_store=session.artifact_store,
+                )
 
             # Return both layer boundaries so callers can inspect the handoff end to end.
             trace = {
@@ -267,19 +261,16 @@ def resume_layer2_flow(
         graph_input = Command(resume=human_review_decision)
         try:
             with session.artifact_store.capture_governance_exchange(thread_id=thread_id):
-                # Stream owner-side resume updates when the calling terminal requested progress.
-                if progress_callback is None:
-                    resume_result = session.runtime_graph.invoke(graph_input, config=config)
-                else:
-                    resume_result = _stream_runtime_graph_with_progress(
-                        runtime_graph=session.runtime_graph,
-                        graph_input=graph_input,
-                        thread_id=thread_id,
-                        config=config,
-                        progress_callback=progress_callback,
-                        live_trace=live_trace,
-                        trace_tag="resume_chunk",
-                    )
+                resume_result = _stream_runtime_graph_with_progress(
+                    runtime_graph=session.runtime_graph,
+                    graph_input=graph_input,
+                    thread_id=thread_id,
+                    config=config,
+                    progress_callback=progress_callback,
+                    live_trace=live_trace,
+                    trace_tag="resume_chunk",
+                    artifact_store=session.artifact_store,
+                )
             snapshot_result = _build_final_result_from_graph_snapshot(
                 runtime_graph=session.runtime_graph,
                 config=config,
@@ -356,7 +347,7 @@ def _prune_expired_checkpoints(
         return
 
 
-# Reuse the canonical invoke output when it contains the typed runtime state.
+# Reuse the canonical execution output when it contains the typed runtime state.
 def _resolve_resume_final_result(
     *,
     resume_result: Any,
@@ -371,16 +362,17 @@ def _resolve_resume_final_result(
     return snapshot_result
 
 
-# Stream graph updates so the CLI can show progress during long LLM/tool calls.
+# Persist canonical node updates independently of optional terminal progress logs.
 def _stream_runtime_graph_with_progress(
     *,
     runtime_graph: Any,
     graph_input: dict[str, Any] | Command[Any],
     thread_id: str,
     config: dict[str, Any],
-    progress_callback: Callable[[str, dict[str, Any]], None],
+    progress_callback: Callable[[str, dict[str, Any]], None] | None,
     live_trace: bool,
     trace_tag: str,
+    artifact_store: RuntimeArtifactStore,
 ) -> dict[str, Any]:
     final_result: dict[str, Any] = {}
     for chunk in runtime_graph.stream(
@@ -392,7 +384,16 @@ def _stream_runtime_graph_with_progress(
             continue
         for node_name, update in chunk.items():
             node_update = update if isinstance(update, dict) else {}
-            progress_callback(str(node_name), node_update)
+            task_state = node_update.get("task_state")
+            if isinstance(task_state, TaskState):
+                # Resume clears the old pending request before the next provider call.
+                artifact_store.persist_progress(
+                    thread_id=thread_id,
+                    intake_result=task_state.intake_payload,
+                    task_state=task_state,
+                )
+            if progress_callback is not None:
+                progress_callback(str(node_name), node_update)
             final_result.update(node_update)
         if live_trace:
             _print_live_trace_snapshot(
@@ -405,7 +406,10 @@ def _stream_runtime_graph_with_progress(
     snapshot = runtime_graph.get_state(config)
     snapshot_values = snapshot.values if snapshot is not None else {}
     if isinstance(snapshot_values, dict):
-        final_result = dict(snapshot_values)
+        final_result = _resolve_resume_final_result(
+            resume_result=final_result,
+            snapshot_result=snapshot_values,
+        )
     if snapshot is not None and getattr(snapshot, "interrupts", None):
         final_result["__interrupt__"] = list(snapshot.interrupts)
 
@@ -440,7 +444,7 @@ def _print_live_trace_snapshot(
     print(layer2_trace_to_json(runtime_trace), file=sys.stderr, flush=True)
 
 
-# Read the post-run graph snapshot so invoke and stream paths share the same final-state contract.
+# Read the post-run checkpoint for terminal results, recovery and resume validation.
 def _build_final_result_from_graph_snapshot(
     *,
     runtime_graph: Any,
