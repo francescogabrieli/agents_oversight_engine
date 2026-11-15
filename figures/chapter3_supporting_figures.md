@@ -9,9 +9,9 @@ Il runtime e le policy non sono stati modificati.
 
 | Tavola | PNG, 300 dpi | Sorgente SVG | PDF vettoriale |
 | --- | --- | --- | --- |
-| Evidence Violation vs Evidence Concern | [PNG](evidence_violation_vs_concern_clean.png) | [SVG](evidence_violation_vs_concern_clean.svg) | [PDF](../output/pdf/evidence_violation_vs_concern_clean.pdf) |
-| Trajectory Health: progresso e stallo | [PNG](trajectory_progress_vs_stall_clean.png) | [SVG](trajectory_progress_vs_stall_clean.svg) | [PDF](../output/pdf/trajectory_progress_vs_stall_clean.pdf) |
-| Minimal Safe Intervention, tabella | [PNG](minimal_safe_intervention_clean.png) | [SVG](minimal_safe_intervention_clean.svg) | [PDF](../output/pdf/minimal_safe_intervention_clean.pdf) |
+| Evidence Violation vs Evidence Concern | [PNG](evidence_violation_vs_concern_clean.png) | [SVG](evidence_violation_vs_concern_clean.svg) | [PDF](pdf/evidence_violation_vs_concern_clean.pdf) |
+| Trajectory Health: progresso e stallo | [PNG](trajectory_progress_vs_stall_clean.png) | [SVG](trajectory_progress_vs_stall_clean.svg) | [PDF](pdf/trajectory_progress_vs_stall_clean.pdf) |
+| Minimal Safe Intervention, tabella | [PNG](minimal_safe_intervention_clean.png) | [SVG](minimal_safe_intervention_clean.svg) | [PDF](pdf/minimal_safe_intervention_clean.pdf) |
 
 La figura Evidence misura 3200 × 1360 pixel; la figura Trajectory e la tabella
 misurano 3200 × 1480 pixel. Per l'impaginazione è preferibile il PDF vettoriale, che rimane

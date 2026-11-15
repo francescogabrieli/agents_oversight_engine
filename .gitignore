@@ -44,3 +44,10 @@ frontend/dashboard/vite.config.js
 frontend/dashboard/vite.config.d.ts
 frontend/dashboard/tailwind.config.js
 frontend/dashboard/tailwind.config.d.ts
+
+# Local tools and generated working material
+.tools/
+output/
+docs/presentations/governed_json_contracts/prompts/
+docs/presentations/governed_json_contracts/slide_jobs.json
+docs/presentations/governed_json_contracts/slide_run_state.json

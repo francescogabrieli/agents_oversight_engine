@@ -43,7 +43,7 @@ resta in `figures/`.
 
 Le due nuove figure di approfondimento e la tabella Minimal Safe Intervention
 hanno sorgenti SVG modificabili accanto alle PNG a 300 dpi (3200 pixel di
-larghezza). Le esportazioni PDF vettoriali sono in `output/pdf/`, con gli stessi
+larghezza). Le esportazioni PDF vettoriali sono in `figures/pdf/`, con gli stessi
 nomi base. Etichette, didascalie suggerite, tabella copiabile e fonti di verifica
 sono raccolte in [`chapter3_supporting_figures.md`](chapter3_supporting_figures.md).
 Si tratta di esempi concettuali dei gate correnti, non di traiettorie sperimentali

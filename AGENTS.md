@@ -91,6 +91,15 @@ in its reference rather than being copied back into this file.
   deterministic contract controls, preserve failed assertions, and never treat
   controlled activation scenarios as natural intervention frequencies.
 
+## Publication hygiene
+
+Keep downloaded tool binaries, runtime artifacts, local environment files, and
+machine-specific presentation generation jobs out of version control. Curated
+thesis exports belong beside their sources under `figures/`, not in `output/`.
+Retain editorial sources, research references, evaluation definitions and audit
+contracts. See [publication review](docs/repository-publication-review.md) for
+privacy findings and the distinction between tree cleanup and Git history.
+
 ## Coding Standards
 
 ### General
